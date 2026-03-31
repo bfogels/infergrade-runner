@@ -1,0 +1,15 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.env
+.infergrade-api/
+.quantbench-api/
+build/
+dist/
+*.pyc
+runs/
+node_modules/
+.next/
+data/
+memory/reference_runs/
+~/

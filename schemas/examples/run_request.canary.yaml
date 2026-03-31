@@ -1,0 +1,14 @@
+spec_version: "0.1-draft"
+
+run:
+  model: Qwen/Qwen2.5-7B-Instruct
+  backend: llama.cpp
+  tier: canary
+
+artifacts:
+  quantized_weights:
+    uri: hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf
+    filename: qwen2.5-7b-instruct-q4_k_m.gguf
+
+runtime:
+  backend_image: infergrade-llama-cpp:local
