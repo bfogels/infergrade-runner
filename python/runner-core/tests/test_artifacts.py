@@ -76,6 +76,29 @@ class ArtifactResolutionTests(unittest.TestCase):
         self.assertEqual(resolved.sha256, compute_file_sha256(resolved.resolved_path))
         self.assertTrue(resolved.resolved_path.startswith(self.cache_dir))
 
+    @mock.patch("infergrade.artifacts.urllib_request.urlopen")
+    def test_remote_artifact_resolution_expands_user_cache_dir(self, urlopen_mock):
+        payload = b"remote-gguf"
+        response_handle = tempfile.NamedTemporaryFile(delete=False)
+        response_handle.write(payload)
+        response_handle.close()
+        urlopen_mock.return_value = open(response_handle.name, "rb")
+        home_dir = os.path.join(self.tempdir.name, "home")
+        os.makedirs(home_dir, exist_ok=True)
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+            quant_artifact_cache_dir="~/.cache/infergrade/artifacts",
+        )
+        try:
+            with mock.patch.dict(os.environ, {"HOME": home_dir}, clear=False):
+                resolved = resolve_quant_artifact(request)
+        finally:
+            os.unlink(response_handle.name)
+        self.assertTrue(resolved.resolved_path.startswith(os.path.join(home_dir, ".cache", "infergrade", "artifacts")))
+
     def test_hf_artifact_urls_expand_to_huggingface_resolve_urls(self):
         self.assertEqual(
             artifact_to_download_url(

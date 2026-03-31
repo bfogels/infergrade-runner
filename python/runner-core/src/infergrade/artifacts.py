@@ -70,7 +70,7 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
 
     resolved_artifact_uri = artifact
     download_url = artifact_to_download_url(resolved_artifact_uri, revision=request.quant_artifact_revision)
-    cache_dir = os.path.abspath(request.quant_artifact_cache_dir or default_artifact_cache_dir())
+    cache_dir = _normalized_cache_dir(request.quant_artifact_cache_dir or default_artifact_cache_dir())
     ensure_dir(cache_dir)
     filename = request.quant_artifact_filename or _infer_filename(resolved_artifact_uri)
     cache_path = _cache_path(cache_dir, resolved_artifact_uri, filename, request.quant_artifact_sha256)
@@ -132,6 +132,11 @@ def default_artifact_cache_dir() -> str:
     """Return the default on-disk cache directory for downloaded artifacts."""
     home = os.path.expanduser("~")
     return os.path.join(home, ".cache", "infergrade", "artifacts")
+
+
+def _normalized_cache_dir(path: str) -> str:
+    """Expand user-relative cache paths before resolving them to absolute paths."""
+    return os.path.abspath(os.path.expanduser(path))
 
 
 def compute_file_sha256(path: str) -> str:
