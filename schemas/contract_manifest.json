@@ -1,0 +1,24 @@
+{
+  "contract_version": "0.1.0",
+  "publisher": "infergrade-runner",
+  "ontology_source": "schemas/json/model_ontology.schema.json",
+  "schema_files": [
+    "schemas/json/manifest.schema.json",
+    "schemas/json/model_ontology.schema.json",
+    "schemas/json/result_record.schema.json",
+    "schemas/json/run_config.schema.json",
+    "schemas/json/run_request.schema.json"
+  ],
+  "example_files": [
+    "schemas/examples/model_ontology.qwen2.5-7b-instruct.gguf.json",
+    "schemas/examples/run_config.alpha_tinyllama_demo.json",
+    "schemas/examples/run_config.llama_cpp.qwen2.5-7b.json",
+    "schemas/examples/run_request.canary.yaml",
+    "schemas/examples/run_request.standard.yaml"
+  ],
+  "supporting_docs": [
+    "docs/contract_ownership.md",
+    "docs/input_output_spec_v0.1.md",
+    "docs/schema_draft.md"
+  ]
+}

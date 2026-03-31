@@ -33,6 +33,7 @@ Run the runner test suite:
 ## Key Docs
 
 - [Runner vs Hub](docs/runner_vs_hub.md)
+- [Contract Ownership](docs/contract_ownership.md)
 - [Input/Output Spec](docs/input_output_spec_v0.1.md)
 - [Schema Draft](docs/schema_draft.md)
 - [Capability Benchmarks](docs/capability_benchmarks.md)
@@ -42,3 +43,16 @@ Run the runner test suite:
 InferGrade Runner is designed to work with the hosted InferGrade Hub, but it remains the open, portable execution surface for the project.
 
 The Hub owns identity, recommendations, community evidence, publishing, and hosted run planning.
+The Runner owns the ontology, schemas, and emitted bundle contract.
+
+## Contract Export
+
+Runner publishes the InferGrade execution contract.
+
+Export a versioned contract bundle with:
+
+```bash
+python ./scripts/export_contract_bundle.py
+```
+
+That bundle is the artifact the Hub should pin to over time.
