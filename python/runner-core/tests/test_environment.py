@@ -1,4 +1,7 @@
 import sys
+import json
+import os
+import tempfile
 import unittest
 from unittest import mock
 
@@ -63,6 +66,36 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(payload["accelerator_model"], "NVIDIA RTX 4090")
         self.assertEqual(payload["memory_gb"], 64.0)
         self.assertTrue(payload["hardware_id"].startswith("hw_"))
+
+    def test_capture_environment_merges_host_override_snapshot(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            snapshot_path = os.path.join(tempdir, "host-environment.json")
+            with open(snapshot_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "accelerator_type": "gpu",
+                        "accelerator_vendor": "apple",
+                        "accelerator_model": "Apple M4 Max",
+                        "accelerator_vram_gb": 48.0,
+                        "accelerator_count": 1,
+                        "cpu_model": "Apple M4 Max",
+                        "memory_gb": 48.0,
+                        "os": "darwin-25.0.0",
+                        "machine_model": "Mac16,7",
+                    },
+                    handle,
+                )
+            with mock.patch.dict("os.environ", {"INFERGRADE_HOST_ENVIRONMENT_PATH": snapshot_path}, clear=False):
+                with mock.patch("infergrade.environment._detect_nvidia_gpu", return_value=None):
+                    with mock.patch("infergrade.environment._detect_apple_silicon_gpu", return_value=None):
+                        with mock.patch("infergrade.environment._detect_cpu_model", return_value="linux-guest"):
+                            with mock.patch("infergrade.environment._detect_memory_gb", return_value=8.0):
+                                payload = capture_environment("local_container")
+        self.assertEqual(payload["accelerator_model"], "Apple M4 Max")
+        self.assertEqual(payload["accelerator_vram_gb"], 48.0)
+        self.assertEqual(payload["cpu_model"], "Apple M4 Max")
+        self.assertEqual(payload["memory_gb"], 48.0)
+        self.assertEqual(payload["environment_class"], "local_workstation")
 
 
 if __name__ == "__main__":

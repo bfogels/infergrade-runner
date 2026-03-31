@@ -158,6 +158,19 @@ def _default_accelerator_payload() -> Dict[str, Any]:
     }
 
 
+def _load_host_environment_override() -> Optional[Dict[str, Any]]:
+    """Load an optional host-side environment snapshot passed into a containerized runner."""
+    snapshot_path = os.environ.get("INFERGRADE_HOST_ENVIRONMENT_PATH")
+    if not snapshot_path or not os.path.isfile(snapshot_path):
+        return None
+    try:
+        with open(snapshot_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _detect_cpu_model() -> str:
     """Detect the most helpful CPU label for the current platform."""
     brand = _run_command(["sysctl", "-n", "machdep.cpu.brand_string"])
@@ -200,5 +213,9 @@ def capture_environment(execution_mode: str) -> Dict[str, Any]:
     docker_version = _run_command(["docker", "--version"])
     if docker_version:
         payload["docker_version"] = docker_version
+    host_override = _load_host_environment_override()
+    if host_override:
+        payload.update(host_override)
+        payload["environment_class"] = environment_class
     payload["hardware_id"] = "hw_%s" % stable_hash(payload)
     return payload

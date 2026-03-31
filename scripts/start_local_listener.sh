@@ -7,6 +7,7 @@ RUNNER_IMAGE="${INFERGRADE_LOCAL_RUNNER_IMAGE:-infergrade-runner-core:local}"
 RUNS_DIR="${INFERGRADE_RUNS_DIR:-$ROOT_DIR/runs}"
 ARTIFACT_CACHE_DIR="${INFERGRADE_ARTIFACT_CACHE_DIR:-$HOME/.cache/infergrade/artifacts}"
 REBUILD_IMAGE="${INFERGRADE_REBUILD_LISTENER_IMAGE:-1}"
+HOST_ENVIRONMENT_PATH="$RUNS_DIR/.listener-host-environment.json"
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -57,10 +58,25 @@ fi
 PYTHONPATH="$ROOT_DIR/python/runner-core/src${PYTHONPATH:+:$PYTHONPATH}" \
   python3 -m infergrade install-images "${INSTALL_ARGS[@]}"
 
+PYTHONPATH="$ROOT_DIR/python/runner-core/src${PYTHONPATH:+:$PYTHONPATH}" \
+  python3 -m infergrade install-images >/dev/null
+
+PYTHONPATH="$ROOT_DIR/python/runner-core/src${PYTHONPATH:+:$PYTHONPATH}" \
+  python3 - "$HOST_ENVIRONMENT_PATH" <<'PY'
+import json
+import sys
+from infergrade.environment import capture_environment
+
+output_path = sys.argv[1]
+with open(output_path, "w", encoding="utf-8") as handle:
+    json.dump(capture_environment("local_container"), handle, indent=2, sort_keys=True)
+PY
+
 DOCKER_ARGS=(
   run
   --rm
   -e "INFERGRADE_HOST_ARTIFACT_CACHE_DIR=$ARTIFACT_CACHE_DIR"
+  -e "INFERGRADE_HOST_ENVIRONMENT_PATH=/app/runs/.listener-host-environment.json"
   -v /var/run/docker.sock:/var/run/docker.sock
   -v "$RUNS_DIR:/app/runs"
   -v "$ARTIFACT_CACHE_DIR:$ARTIFACT_CACHE_DIR"
