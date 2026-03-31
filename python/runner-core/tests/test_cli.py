@@ -10,6 +10,37 @@ from infergrade.cli import main
 
 
 class CliTests(unittest.TestCase):
+    def test_start_command_invokes_local_worker_loop(self):
+        output = io.StringIO()
+        with mock.patch(
+            "infergrade.cli.run_worker_loop",
+            return_value={"worker_id": "worker-test", "processed_jobs": 0, "completed_jobs": 0, "failed_jobs": 0},
+        ) as run_loop_mock:
+            with redirect_stdout(output):
+                exit_code = main(
+                    [
+                        "start",
+                        "--api-url",
+                        "http://localhost:8000",
+                        "--poll-interval-seconds",
+                        "2",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        run_loop_mock.assert_called_once_with(
+            api_url="http://localhost:8000",
+            execution_mode="local_container",
+            worker_id=None,
+            hostname=None,
+            api_token=None,
+            simulate=False,
+            poll_interval_seconds=2.0,
+            max_jobs=None,
+            emit_progress=mock.ANY,
+        )
+        self.assertIn('"worker_id": "worker-test"', output.getvalue())
+
     def test_run_job_command_invokes_single_job_execution(self):
         output = io.StringIO()
         with mock.patch(

@@ -158,6 +158,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_api_token_argument(run_job_parser)
 
+    start_parser = subparsers.add_parser("start", help="Start a long-lived local runner that listens for Hub-backed local jobs.")
+    start_parser.add_argument("--api-url", required=True)
+    start_parser.add_argument("--worker-id")
+    start_parser.add_argument("--hostname")
+    start_parser.add_argument("--poll-interval-seconds", type=float, default=10.0)
+    start_parser.add_argument("--max-jobs", type=int)
+    start_parser.add_argument("--once", action="store_true")
+    start_parser.add_argument(
+        "--simulate",
+        action="store_true",
+        help="Use simulated execution when the local runner claims jobs.",
+    )
+    _add_api_token_argument(start_parser)
+
     worker_parser = subparsers.add_parser("worker", help="Claim and execute API-backed run jobs.")
     worker_parser.add_argument("--api-url", required=True)
     worker_parser.add_argument("--execution-mode", choices=("local_container", "cloud_container"), default="local_container")
@@ -408,6 +422,32 @@ def main(argv: Optional[list] = None) -> int:
             simulate=bool(args.simulate),
             emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
         )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "start":
+        if args.once:
+            result = run_worker_once(
+                api_url=args.api_url,
+                execution_mode="local_container",
+                worker_id=args.worker_id,
+                hostname=args.hostname,
+                api_token=args.api_token,
+                simulate=bool(args.simulate),
+                emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
+            )
+        else:
+            result = run_worker_loop(
+                api_url=args.api_url,
+                execution_mode="local_container",
+                worker_id=args.worker_id,
+                hostname=args.hostname,
+                api_token=args.api_token,
+                simulate=bool(args.simulate),
+                poll_interval_seconds=args.poll_interval_seconds,
+                max_jobs=args.max_jobs,
+                emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
+            )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 

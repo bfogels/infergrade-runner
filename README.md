@@ -14,10 +14,10 @@ It is responsible for:
 The current preferred hosted flow is:
 
 1. generate a run in InferGrade Hub
-2. copy one `infergrade run-job ...` command
-3. let the Runner claim the run, run preflight checks, execute, and upload automatically
+2. start a local runner once with `infergrade start --api-url ...`
+3. queue local runs from the Hub and let the Runner claim, execute, and upload them automatically
 
-Lower-level commands like `doctor`, `run-config`, and `upload-bundle` still exist, but they are now the manual fallback path.
+Lower-level commands like `run-job`, `doctor`, `run-config`, and `upload-bundle` still exist, but they are now the manual fallback path.
 
 ## Repo Layout
 
