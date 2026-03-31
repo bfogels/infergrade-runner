@@ -21,13 +21,13 @@ def docker_available() -> bool:
 
 def run_command_with_optional_gpu_monitor(command: List[str]) -> ContainerCommandResult:
     peak_vram_mb = None
-    baseline_vram_mb = _sample_total_gpu_memory_used_mb()
+    baseline_vram_mb = sample_total_gpu_memory_used_mb()
     samples = []
     stop_event = threading.Event()
 
     def monitor() -> None:
         while not stop_event.is_set():
-            sample = _sample_total_gpu_memory_used_mb()
+            sample = sample_total_gpu_memory_used_mb()
             if sample is not None:
                 samples.append(sample)
             stop_event.wait(0.1)
@@ -55,7 +55,8 @@ def run_command_with_optional_gpu_monitor(command: List[str]) -> ContainerComman
     )
 
 
-def _sample_total_gpu_memory_used_mb() -> Optional[float]:
+def sample_total_gpu_memory_used_mb() -> Optional[float]:
+    """Return the total currently used GPU memory across visible NVIDIA devices."""
     if shutil.which("nvidia-smi") is None:
         return None
     try:
