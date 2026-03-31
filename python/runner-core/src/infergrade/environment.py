@@ -306,6 +306,7 @@ def capture_environment(execution_mode: str) -> Dict[str, Any]:
     )
     environment_class = {
         "local_container": "local_workstation",
+        "local_native": "local_workstation",
         "cloud_container": "cloud_vm",
         "manual_external": "external_environment",
     }.get(execution_mode, "unknown")

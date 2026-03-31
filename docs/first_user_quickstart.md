@@ -32,6 +32,22 @@ It targets:
 - Python 3.8+
 - roughly 3 GB free disk for the image, artifact cache, and bundle output
 
+If you are testing on Apple Silicon and want realistic local `llama.cpp` numbers, use the native path instead of the Docker execution path in this document:
+
+```bash
+brew install llama.cpp
+PYTHONPATH=python/runner-core/src python3 -m infergrade doctor \
+  --api-url http://127.0.0.1:8000 \
+  --run-config-id rcfg_tinyllama_alpha_demo \
+  --execution-mode local_native
+PYTHONPATH=python/runner-core/src python3 -m infergrade run-job \
+  --api-url http://127.0.0.1:8000 \
+  --execution-mode local_native \
+  --run-id run_replace_me
+```
+
+The containerized path below is still appropriate for Linux, cloud workers, and CPU-only validation, but it does not exercise Metal on Apple Silicon.
+
 ## 1. Get The Runtime Image
 
 Preferred hosted path:

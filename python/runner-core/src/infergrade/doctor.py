@@ -1,4 +1,5 @@
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -55,7 +56,9 @@ def _request_context(request: Optional[RunRequest], api_url: Optional[str]) -> D
         "backend": request.backend,
         "tier": request.tier,
         "execution_mode": request.execution_mode,
-        "backend_image": request.backend_image or DEFAULT_BACKEND_IMAGES.get(request.backend),
+        "backend_image": None
+        if request.execution_mode == "local_native"
+        else (request.backend_image or DEFAULT_BACKEND_IMAGES.get(request.backend)),
         "capability_images": capability_images_for_request(request),
         "quant_artifact": request.quant_artifact,
         "artifact_cache_dir": os.path.expanduser(request.quant_artifact_cache_dir or default_artifact_cache_dir()),
@@ -76,21 +79,25 @@ def _generic_environment_checks() -> List[Dict[str, Any]]:
 
 
 def _request_checks(request: RunRequest) -> List[Dict[str, Any]]:
+    environment = capture_environment(request.execution_mode)
     checks = [
         _check("backend", "ok", "Backend is supported.", {"backend": request.backend}),
         _check(
             "hardware_snapshot",
             "info",
             "Captured local hardware snapshot.",
-            capture_environment(request.execution_mode),
+            environment,
         ),
     ]
+    checks.extend(_execution_mode_guidance_checks(request, environment))
     if request.execution_mode in ("local_container", "cloud_container"):
         checks.append(_binary_check("docker", "docker_cli", "Docker CLI is available."))
         if checks[-1]["status"] == "ok":
             checks.append(_docker_daemon_check())
             checks.append(_backend_image_check(request))
             checks.extend(_capability_image_checks(request))
+    if request.execution_mode == "local_native":
+        checks.extend(_native_runtime_checks(request, environment))
     if _uses_remote_artifact(request):
         checks.append(_binary_check("curl", "curl", "curl is available for resilient artifact downloads.", severity_if_missing="warning"))
         checks.append(_cache_dir_check(request))
@@ -107,6 +114,81 @@ def _request_checks(request: RunRequest) -> List[Dict[str, Any]]:
             )
         )
     checks.append(_output_dir_check(request))
+    return checks
+
+
+def _execution_mode_guidance_checks(request: RunRequest, environment: Dict[str, Any]) -> List[Dict[str, Any]]:
+    checks: List[Dict[str, Any]] = []
+    if request.backend != "llama.cpp":
+        return checks
+    if (
+        request.execution_mode == "local_container"
+        and not request.simulate
+        and environment.get("hardware_class") == "apple_silicon"
+    ):
+        checks.append(
+            _check(
+                "apple_silicon_local_container",
+                "error",
+                "Apple Silicon local_container runs benchmark llama.cpp inside Docker's Linux VM and do not exercise Metal acceleration. Use execution_mode=local_native for realistic local benchmarking.",
+                {
+                    "hardware_class": environment.get("hardware_class"),
+                    "accelerator_api": environment.get("accelerator_api"),
+                    "suggested_execution_mode": "local_native",
+                },
+            )
+        )
+    return checks
+
+
+def _native_runtime_checks(request: RunRequest, environment: Dict[str, Any]) -> List[Dict[str, Any]]:
+    checks: List[Dict[str, Any]] = []
+    if request.backend != "llama.cpp":
+        checks.append(
+            _check(
+                "native_backend_support",
+                "warning",
+                "local_native execution currently has first-class support only for llama.cpp.",
+                {"backend": request.backend},
+            )
+        )
+        return checks
+    cli_path = shutil.which(os.environ.get("INFERGRADE_LLAMA_CPP_CLI", "llama-cli"))
+    server_path = shutil.which(os.environ.get("INFERGRADE_LLAMA_CPP_SERVER", "llama-server"))
+    checks.append(
+        _check(
+            "llama_cli_native",
+            "ok" if cli_path else "error",
+            "Native llama-cli is available." if cli_path else "Native llama-cli is required for local_native llama.cpp runs.",
+            {
+                "path": cli_path,
+                "suggested_install": "brew install llama.cpp" if platform.system().lower() == "darwin" else None,
+            },
+        )
+    )
+    checks.append(
+        _check(
+            "llama_server_native",
+            "ok" if server_path else "error",
+            "Native llama-server is available." if server_path else "Native llama-server is required for local_native llama.cpp runs.",
+            {
+                "path": server_path,
+                "suggested_install": "brew install llama.cpp" if platform.system().lower() == "darwin" else None,
+            },
+        )
+    )
+    if environment.get("hardware_class") == "apple_silicon":
+        checks.append(
+            _check(
+                "apple_silicon_native_runtime",
+                "ok",
+                "Apple Silicon native execution path can use Metal acceleration when the installed llama.cpp binaries were built with Metal support.",
+                {
+                    "hardware_class": environment.get("hardware_class"),
+                    "accelerator_api": environment.get("accelerator_api"),
+                },
+            )
+        )
     return checks
 
 

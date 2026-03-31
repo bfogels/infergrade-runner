@@ -9,6 +9,17 @@ It is responsible for:
 - capturing deployment telemetry and capability evidence
 - writing reproducible run bundles that can be uploaded to InferGrade Hub
 
+## Platform Execution Paths
+
+InferGrade aims to benchmark the best realistic execution path on each platform, not to force every machine through the same runtime wrapper.
+
+- `macOS Apple Silicon`: run `llama.cpp` natively so Metal acceleration is actually exercised
+- `Linux + NVIDIA`: prefer containerized CUDA execution
+- `Linux + AMD`: prefer containerized ROCm execution
+- `CPU-only`: containerized or native CPU execution, clearly labeled as CPU-only
+
+The most important implication is that Apple Silicon local benchmarking is a separate path. Dockerized local `llama.cpp` runs on macOS benchmark Docker Desktop's Linux VM and do not represent Metal performance.
+
 ## Canonical Hub Handoff
 
 The current preferred hosted flow is:
@@ -28,6 +39,28 @@ Lower-level commands like `run-job`, `doctor`, `run-config`, and `upload-bundle`
 - `third_party`: vendored benchmark assets used in container builds
 
 ## Quick Start
+
+### Apple Silicon Local Benchmarking
+
+If you are benchmarking locally on Apple Silicon, use the native `llama.cpp` path:
+
+```bash
+brew install llama.cpp
+python3 -m pip install -e ./python/runner-core
+infergrade doctor \
+  --model Qwen/Qwen2.5-7B-Instruct \
+  --backend llama.cpp \
+  --tier canary \
+  --execution-mode local_native \
+  --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
+infergrade start --api-url http://127.0.0.1:8000 --execution-mode local_native
+```
+
+`infergrade doctor` will now fail fast if you try to run a real Apple Silicon `llama.cpp` benchmark with `execution_mode=local_container`, because that path does not use Metal.
+
+### Containerized Local And Cloud Paths
+
+For Linux, cloud workers, and the common containerized development path:
 
 ```bash
 python3 -m pip install -e ./python/runner-core
@@ -51,7 +84,7 @@ For the common local-listener path during development, the simplest entrypoint i
 ./scripts/start_local_listener.sh --api-url http://host.docker.internal:8000
 ```
 
-For security and reproducibility, the recommended way to operate the Runner is inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. Host-Python execution remains available for development and debugging, but it is no longer the preferred production path.
+For security and reproducibility, the recommended way to operate the Runner is inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. The main exception is Apple Silicon local `llama.cpp` benchmarking, where host-native execution is the correct path because that is what enables Metal acceleration.
 
 When that listener container talks to a Hub running on your Mac host, use `http://host.docker.internal:8000` inside the container rather than `http://localhost:8000`.
 

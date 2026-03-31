@@ -166,7 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_job_parser.add_argument("--api-url", required=True)
     run_job_parser.add_argument("--run-id")
     run_job_parser.add_argument("--run-config-id")
-    run_job_parser.add_argument("--execution-mode", choices=("local_container", "cloud_container"), default="local_container")
+    run_job_parser.add_argument("--execution-mode", choices=("local_container", "local_native", "cloud_container"), default="local_container")
     run_job_parser.add_argument("--worker-id")
     run_job_parser.add_argument("--provider-id")
     run_job_parser.add_argument("--instance-type-id")
@@ -181,6 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     start_parser = subparsers.add_parser("start", help="Start a long-lived local runner that listens for Hub-backed local jobs.")
     start_parser.add_argument("--api-url", required=True)
+    start_parser.add_argument("--execution-mode", choices=("local_container", "local_native"), default="local_container")
     start_parser.add_argument("--worker-id")
     start_parser.add_argument("--hostname")
     start_parser.add_argument("--poll-interval-seconds", type=float, default=10.0)
@@ -195,7 +196,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     worker_parser = subparsers.add_parser("worker", help="Claim and execute API-backed run jobs.")
     worker_parser.add_argument("--api-url", required=True)
-    worker_parser.add_argument("--execution-mode", choices=("local_container", "cloud_container"), default="local_container")
+    worker_parser.add_argument("--execution-mode", choices=("local_container", "local_native", "cloud_container"), default="local_container")
     worker_parser.add_argument("--worker-id")
     worker_parser.add_argument("--run-id")
     worker_parser.add_argument("--run-config-id")
@@ -456,7 +457,7 @@ def main(argv: Optional[list] = None) -> int:
         if args.once:
             result = run_worker_once(
                 api_url=args.api_url,
-                execution_mode="local_container",
+                execution_mode=args.execution_mode,
                 worker_id=args.worker_id,
                 hostname=args.hostname,
                 api_token=args.api_token,
@@ -467,7 +468,7 @@ def main(argv: Optional[list] = None) -> int:
         else:
             result = run_worker_loop(
                 api_url=args.api_url,
-                execution_mode="local_container",
+                execution_mode=args.execution_mode,
                 worker_id=args.worker_id,
                 hostname=args.hostname,
                 api_token=args.api_token,

@@ -315,7 +315,6 @@ def _generate_predictions(
 ) -> List[Dict[str, Any]]:
     predictions = []
     total_cases = len(cases)
-    report_interval = max(1, total_cases // 20) if total_cases else 1
     for index, case in enumerate(cases, start=1):
         case_id = case.get("case_id") or case.get("task_id") or stable_hash(case, length=12)
         try:
@@ -344,9 +343,7 @@ def _generate_predictions(
             record["task_id"] = case["task_id"]
             record["completion"] = text
         predictions.append(record)
-        if progress_callback and (
-            index == 1 or index == total_cases or index % report_interval == 0
-        ):
+        if progress_callback:
             progress_callback(
                 {
                     "event": "case_progress",

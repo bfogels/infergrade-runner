@@ -16,7 +16,8 @@ This package contains the Python benchmark runner core for InferGrade.
 
 The runner still defaults to simulated execution, but it now has a first real backend path for `llama.cpp`:
 
-- local Docker-based execution
+- local Docker-based execution for container-friendly platforms
+- local native `llama.cpp` execution for Apple Silicon benchmarking
 - automatic resolution of local paths, `file://`, `http(s)://`, and `hf://` GGUF artifact references
 - real deployment timings parsed from `llama-cli`
 - first real capability evaluation via containerized `IFEval` and `EvalPlus` runners
@@ -24,6 +25,21 @@ The runner still defaults to simulated execution, but it now has a first real ba
 - Hub-token-aware fetch and upload flow for hosted deployments, with `INFERGRADE_HUB_TOKEN` preferred over `INFERGRADE_API_TOKEN`
 
 ## Development
+
+### Apple Silicon Native Path
+
+For realistic local benchmarks on Apple Silicon, install `llama.cpp` natively and use `execution_mode=local_native`:
+
+```bash
+brew install llama.cpp
+PYTHONPATH=python/runner-core/src python3 -m unittest discover -s python/runner-core/tests
+PYTHONPATH=python/runner-core/src python3 -m infergrade doctor --model Qwen/Qwen2.5-7B-Instruct --backend llama.cpp --tier canary --execution-mode local_native --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
+PYTHONPATH=python/runner-core/src python3 -m infergrade start --api-url http://127.0.0.1:8000 --execution-mode local_native
+```
+
+`infergrade doctor` now raises an explicit error if you try to benchmark Apple Silicon locally with `execution_mode=local_container`, because that path runs inside Docker Desktop's Linux VM and does not exercise Metal.
+
+### Containerized Path
 
 ```bash
 PYTHONPATH=python/runner-core/src python3 -m unittest discover -s python/runner-core/tests
@@ -53,6 +69,8 @@ The runner repo also includes a helper script that refreshes the listener image 
 ./scripts/start_local_listener.sh --api-url http://host.docker.internal:8000
 ```
 
+That helper is intended for the containerized path. On Apple Silicon, prefer the native `infergrade start --execution-mode local_native` flow instead.
+
 ## Recommended Flow
 
 For Hub-generated local runs, the preferred operator flow is now:
@@ -71,6 +89,8 @@ docker run --rm \
 That starts a local runner loop that listens for queued `local_container` jobs from the Hub, claims them automatically, performs preflight checks, executes the benchmark, and uploads the finished bundle.
 
 Running the runner in its own container is the recommended production path because it isolates the Python environment, makes image/runtime versions explicit, and keeps the benchmark orchestration surface closer to what will run in cloud environments.
+
+Apple Silicon is the deliberate exception: when the goal is to benchmark local `llama.cpp` performance, the native path is the production path because it is the only path that can use Metal.
 
 When the Hub is running on your host machine, `host.docker.internal` is the correct API hostname from inside the runner container. `localhost` inside that container points back to the container itself.
 

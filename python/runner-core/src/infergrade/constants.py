@@ -6,7 +6,7 @@ SUPPORTED_DEPLOYMENT_PROFILES = (
     "batch_generation_v1",
     "long_context_v1",
 )
-SUPPORTED_EXECUTION_MODES = ("local_container", "cloud_container", "manual_external")
+SUPPORTED_EXECUTION_MODES = ("local_container", "local_native", "cloud_container", "manual_external")
 SUPPORTED_CAPABILITY_MODES = ("auto", "none")
 SUPPORTED_COST_SOURCES = ("observed", "billing_import", "user_provided", "estimated", "none")
 DEFAULT_GENERATION_PRESET = "deterministic_v1"

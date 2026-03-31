@@ -2,7 +2,9 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
+import tempfile
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -46,6 +48,14 @@ class LlamaCppAdapter(BaseAdapter):
         return ["--n-gpu-layers=99"] if shutil.which("nvidia-smi") is not None else []
 
     def runtime_metadata(self, request: RunRequest) -> Dict[str, object]:
+        if request and request.execution_mode == "local_native":
+            return {
+                "container_image": None,
+                "container_runtime": None,
+                "container_command": None,
+                "native_binary": self._native_command_path(request),
+                "native_server_binary": self._native_server_path(request),
+            }
         return {
             "container_image": self._image_name(request),
             "container_runtime": "docker",
@@ -55,6 +65,17 @@ class LlamaCppAdapter(BaseAdapter):
     def resolve_version(self, simulate: bool = True, request: RunRequest = None) -> str:
         if simulate:
             return "simulated-%s" % self.backend_name.replace(".", "-")
+        if request and request.execution_mode == "local_native":
+            command = [self._native_command_path(request), "--version"]
+            completed = subprocess.run(command, capture_output=True, text=True)
+            if completed.returncode != 0:
+                message = (completed.stderr or completed.stdout or "").strip()
+                raise RuntimeError(
+                    "Failed to resolve llama.cpp version via native binary %s: %s"
+                    % (self._native_command_path(request), message or "unknown error")
+                )
+            output = (completed.stdout or completed.stderr or "").strip()
+            return output.splitlines()[0] if output else self._native_command_path(request)
         self._ensure_docker()
         install_image(self._image_name(request))
         command = ["docker", "run", "--rm", "--entrypoint", _DEFAULT_COMMAND, self._image_name(request), "--version"]
@@ -76,8 +97,8 @@ class LlamaCppAdapter(BaseAdapter):
     ) -> DeploymentExecution:
         if request.simulate:
             return super().run_deployment_profile(request, profile_id, progress_callback=progress_callback)
-        if request.execution_mode not in ("local_container", "cloud_container"):
-            raise NotImplementedError("Real llama.cpp execution currently supports local_container and cloud_container modes.")
+        if request.execution_mode not in ("local_container", "local_native", "cloud_container"):
+            raise NotImplementedError("Real llama.cpp execution currently supports local_container, local_native, and cloud_container modes.")
         model_path = self._require_local_gguf_artifact(request)
         profile_spec = self._profile_spec(profile_id, request.use_case)
         warmup_runs = 1 if request.tier == "canary" else 2
@@ -206,34 +227,46 @@ class LlamaCppAdapter(BaseAdapter):
     ) -> Dict[str, object]:
         if request.simulate:
             return super().generate_text(request, prompt, max_tokens)
-        if request.execution_mode not in ("local_container", "cloud_container"):
-            raise NotImplementedError("Real llama.cpp generation currently supports local_container and cloud_container modes.")
-        install_image(self._image_name(request))
+        if request.execution_mode not in ("local_container", "local_native", "cloud_container"):
+            raise NotImplementedError("Real llama.cpp generation currently supports local_container, local_native, and cloud_container modes.")
         model_path = self._require_local_gguf_artifact(request)
-        model_dir = os.path.dirname(model_path)
-        model_filename = os.path.basename(model_path)
-        container_model_path = "/models/%s" % model_filename
-        command = [
-            "docker",
-            "run",
-            "--rm",
-            "--entrypoint",
-            _DEFAULT_COMMAND,
-            "-v",
-            "%s:/models:ro" % model_dir,
-        ]
-        if shutil.which("nvidia-smi") is not None:
-            command.extend(["--gpus", "all"])
-        command.append(self._image_name(request))
-        command.extend(
-            self._build_llama_cli_command(
-                model_path=container_model_path,
-                prompt=prompt,
-                max_tokens=max_tokens,
-                ctx_size=max(4096, min(16384, len(prompt) * 2)),
-                request=request,
+        if request.execution_mode == "local_native":
+            command = [self._native_command_path(request)]
+            command.extend(
+                self._build_llama_cli_command(
+                    model_path=model_path,
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    ctx_size=max(4096, min(16384, len(prompt) * 2)),
+                    request=request,
+                )
             )
-        )
+        else:
+            install_image(self._image_name(request))
+            model_dir = os.path.dirname(model_path)
+            model_filename = os.path.basename(model_path)
+            container_model_path = "/models/%s" % model_filename
+            command = [
+                "docker",
+                "run",
+                "--rm",
+                "--entrypoint",
+                _DEFAULT_COMMAND,
+                "-v",
+                "%s:/models:ro" % model_dir,
+            ]
+            if shutil.which("nvidia-smi") is not None:
+                command.extend(["--gpus", "all"])
+            command.append(self._image_name(request))
+            command.extend(
+                self._build_llama_cli_command(
+                    model_path=container_model_path,
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    ctx_size=max(4096, min(16384, len(prompt) * 2)),
+                    request=request,
+                )
+            )
         completed = subprocess.run(command, capture_output=True, text=True)
         raw_log = "%s\n%s" % (completed.stdout, completed.stderr)
         if completed.returncode != 0:
@@ -250,6 +283,20 @@ class LlamaCppAdapter(BaseAdapter):
     def _ensure_docker(self) -> None:
         if not docker_available():
             raise RuntimeError("Docker is required for real llama.cpp container runs.")
+
+    def _native_command_path(self, request: RunRequest = None) -> str:
+        binary = env_value("INFERGRADE_LLAMA_CPP_CLI", "", _DEFAULT_COMMAND)
+        resolved = shutil.which(binary)
+        if not resolved:
+            raise RuntimeError("Native llama.cpp CLI binary is not available on PATH: %s" % binary)
+        return resolved
+
+    def _native_server_path(self, request: RunRequest = None) -> str:
+        binary = env_value("INFERGRADE_LLAMA_CPP_SERVER", "", _DEFAULT_SERVER_COMMAND)
+        resolved = shutil.which(binary)
+        if not resolved:
+            raise RuntimeError("Native llama.cpp server binary is not available on PATH: %s" % binary)
+        return resolved
 
     def _image_name(self, request: RunRequest = None) -> str:
         if request and request.backend_image:
@@ -277,6 +324,15 @@ class LlamaCppAdapter(BaseAdapter):
         is_warmup: bool,
         iteration: int,
     ) -> Dict[str, object]:
+        if request.execution_mode == "local_native":
+            return self._run_native_benchmark(
+                request=request,
+                model_path=model_path,
+                profile_id=profile_id,
+                profile_spec=profile_spec,
+                is_warmup=is_warmup,
+                iteration=iteration,
+            )
         self._ensure_docker()
         install_image(self._image_name(request))
         model_dir = os.path.dirname(model_path)
@@ -376,6 +432,90 @@ class LlamaCppAdapter(BaseAdapter):
         finally:
             _stop_container(container_name)
 
+    def _run_native_benchmark(
+        self,
+        request: RunRequest,
+        model_path: str,
+        profile_id: str,
+        profile_spec: Dict[str, object],
+        is_warmup: bool,
+        iteration: int,
+    ) -> Dict[str, object]:
+        server_binary = self._native_server_path(request)
+        published_port = _find_free_local_port()
+        log_handle = tempfile.NamedTemporaryFile(prefix="infergrade-llama-native-", suffix=".log", delete=False)
+        log_path = log_handle.name
+        log_handle.close()
+        command = [server_binary]
+        command.extend(
+            self._build_llama_server_command(
+                model_path=model_path,
+                ctx_size=int(profile_spec["ctx_size"]),
+                request=request,
+                host="127.0.0.1",
+                port=published_port,
+            )
+        )
+        monitor = _start_gpu_monitor()
+        started = time.perf_counter()
+        process = None
+        logs_text = ""
+        try:
+            with open(log_path, "w", encoding="utf-8") as log_file:
+                process = subprocess.Popen(
+                    command,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+            base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
+            completion = _stream_server_completion(
+                base_url=base_url,
+                prompt=str(profile_spec["prompt"]),
+                max_tokens=int(profile_spec["max_tokens"]),
+            )
+            logs_text = _read_log_file(log_path)
+            parsed = _parse_llama_timings(logs_text)
+            peak_vram_mb = _stop_gpu_monitor(monitor)
+            metrics = _metrics_from_server_completion(
+                completion=completion,
+                parsed_timings=parsed,
+                load_time_ms=load_time_ms,
+                peak_vram_mb=peak_vram_mb,
+            )
+            return {
+                "iteration": iteration,
+                "warmup": is_warmup,
+                "status": "completed",
+                "command": command,
+                "duration_seconds": round((load_time_ms + metrics["latency_ms"]) / 1000.0, 4)
+                if load_time_ms is not None and metrics.get("latency_ms") is not None
+                else round(time.perf_counter() - started, 4),
+                "peak_vram_mb": peak_vram_mb,
+                "metrics": metrics,
+                "parsed_timings": parsed,
+                "completion_summary": completion["final_payload"],
+                "log_tail": logs_text.splitlines()[-40:],
+            }
+        except Exception as exc:
+            logs_text = logs_text or _read_log_file(log_path)
+            return {
+                "iteration": iteration,
+                "warmup": is_warmup,
+                "status": "failed",
+                "command": command,
+                "duration_seconds": round(time.perf_counter() - started, 4),
+                "peak_vram_mb": _stop_gpu_monitor(monitor),
+                "error": str(exc),
+                "log_tail": logs_text.splitlines()[-40:],
+            }
+        finally:
+            _stop_process(process)
+            try:
+                os.unlink(log_path)
+            except OSError:
+                pass
+
     def _build_llama_cli_command(
         self,
         model_path: str,
@@ -413,6 +553,8 @@ class LlamaCppAdapter(BaseAdapter):
         model_path: str,
         ctx_size: int,
         request: RunRequest,
+        host: str = "0.0.0.0",
+        port: int = _DEFAULT_SERVER_PORT,
     ) -> List[str]:
         command = [
             "-m",
@@ -420,9 +562,9 @@ class LlamaCppAdapter(BaseAdapter):
             "-c",
             str(ctx_size),
             "--host",
-            "0.0.0.0",
+            host,
             "--port",
-            str(_DEFAULT_SERVER_PORT),
+            str(port),
             "--perf",
             "--no-warmup",
             "-np",
@@ -646,6 +788,27 @@ def _wait_for_server_ready(container_name: str, published_port: int, started_at:
     )
 
 
+def _wait_for_native_server_ready(process: subprocess.Popen, port: int, started_at: float, log_path: str) -> Tuple[str, float]:
+    deadline = started_at + _SERVER_READY_TIMEOUT_SECONDS
+    last_error: Optional[str] = None
+    base_url = "http://127.0.0.1:%s" % port
+    while time.perf_counter() < deadline:
+        if process.poll() is not None:
+            logs = _read_log_file(log_path)
+            raise RuntimeError("Native llama.cpp server exited before becoming ready. %s" % (logs or ""))
+        try:
+            with urllib_request.urlopen("%s/health" % base_url, timeout=1.0) as response:
+                if response.status == 200:
+                    return base_url, round((time.perf_counter() - started_at) * 1000.0, 2)
+        except Exception as exc:
+            last_error = str(exc)
+        time.sleep(0.2)
+    raise RuntimeError(
+        "Timed out waiting for native llama.cpp server readiness on port %s. %s"
+        % (port, last_error or "")
+    )
+
+
 def _server_base_url_candidates(published_port: int) -> List[str]:
     candidates = ["http://127.0.0.1:%s" % published_port]
     host_alias = env_value("INFERGRADE_DOCKER_HOST_ALIAS", "", "")
@@ -677,12 +840,39 @@ def _fetch_container_logs(container_name: str) -> str:
     return ("%s\n%s" % (completed.stdout or "", completed.stderr or "")).strip()
 
 
+def _read_log_file(path: str) -> str:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read()
+    except FileNotFoundError:
+        return ""
+
+
 def _stop_container(container_name: str) -> None:
     subprocess.run(
         ["docker", "stop", container_name],
         capture_output=True,
         text=True,
     )
+
+
+def _stop_process(process: Optional[subprocess.Popen]) -> None:
+    if process is None:
+        return
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=2.0)
+
+
+def _find_free_local_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        return int(handle.getsockname()[1])
 
 
 def _stream_server_completion(base_url: str, prompt: str, max_tokens: int) -> Dict[str, Any]:

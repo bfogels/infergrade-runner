@@ -101,6 +101,23 @@ class LlamaCppAdapterTests(unittest.TestCase):
         command = run_mock.call_args[0][0]
         self.assertEqual(command[:5], ["docker", "run", "--rm", "--entrypoint", "llama-cli"])
 
+    @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_resolve_version_uses_native_binary_for_local_native(self, run_mock, which_mock):
+        which_mock.return_value = "/opt/homebrew/bin/llama-cli"
+        run_mock.return_value = mock.Mock(returncode=0, stdout="version: native-test\n", stderr="")
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+        )
+        version = adapter.resolve_version(simulate=False, request=request)
+        self.assertEqual(version, "version: native-test")
+        self.assertEqual(run_mock.call_args[0][0], ["/opt/homebrew/bin/llama-cli", "--version"])
+
     @mock.patch("infergrade.adapters.llama_cpp.install_image")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
     def test_generate_text_returns_stdout_payload(self, run_mock, _install_image_mock):
@@ -118,6 +135,24 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertIn("def solve()", generated["text"])
         command = run_mock.call_args[0][0]
         self.assertEqual(command[:4], ["docker", "run", "--rm", "--entrypoint"])
+
+    @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_generate_text_local_native_uses_host_binary(self, run_mock, which_mock):
+        which_mock.return_value = "/opt/homebrew/bin/llama-cli"
+        run_mock.return_value = mock.Mock(returncode=0, stdout="def solve():\n    return 1\n", stderr=_FAKE_TIMING_LOG)
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+        )
+        generated = adapter.generate_text(request, "Write a function", 128)
+        self.assertEqual(generated["status"], "completed")
+        self.assertEqual(run_mock.call_args[0][0][0], "/opt/homebrew/bin/llama-cli")
 
     @mock.patch("infergrade.adapters.llama_cpp.docker_available", return_value=True)
     @mock.patch("infergrade.adapters.llama_cpp.install_image")

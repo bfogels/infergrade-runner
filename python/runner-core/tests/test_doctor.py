@@ -88,6 +88,55 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(statuses["docker_cli"], "error")
         self.assertEqual(statuses["quant_artifact"], "error")
 
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.shutil.which")
+    def test_doctor_flags_apple_silicon_container_real_run_as_cpu_fallback(self, which_mock, capture_environment_mock):
+        capture_environment_mock.return_value = {
+            "environment_class": "local_workstation",
+            "hardware_class": "apple_silicon",
+            "accelerator_api": "metal",
+            "accelerator_type": "gpu",
+            "accelerator_count": 1,
+            "hardware_id": "hw_test",
+        }
+        which_mock.side_effect = lambda name: "/usr/bin/%s" % name if name == "docker" else None
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+            execution_mode="local_container",
+            simulate=False,
+        )
+        report = run_doctor(request=request)
+        statuses = {item["id"]: item["status"] for item in report["checks"]}
+        self.assertEqual(statuses["apple_silicon_local_container"], "error")
+
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.shutil.which")
+    def test_doctor_checks_native_llama_binaries_for_local_native(self, which_mock, capture_environment_mock):
+        capture_environment_mock.return_value = {
+            "environment_class": "local_workstation",
+            "hardware_class": "apple_silicon",
+            "accelerator_api": "metal",
+            "accelerator_type": "gpu",
+            "accelerator_count": 1,
+            "hardware_id": "hw_test",
+        }
+        which_mock.side_effect = lambda name: "/opt/homebrew/bin/%s" % name if name in ("llama-cli", "llama-server") else None
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact=os.path.join(self.tempdir.name, "missing.gguf"),
+            execution_mode="local_native",
+            simulate=False,
+        )
+        report = run_doctor(request=request)
+        statuses = {item["id"]: item["status"] for item in report["checks"]}
+        self.assertEqual(statuses["llama_cli_native"], "ok")
+        self.assertEqual(statuses["llama_server_native"], "ok")
+
 
 if __name__ == "__main__":
     unittest.main()
