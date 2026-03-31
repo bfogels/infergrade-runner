@@ -10,6 +10,7 @@ from urllib import request as urllib_request
 from infergrade.artifacts import artifact_to_download_url, default_artifact_cache_dir
 from infergrade.capabilities import capability_images_for_request
 from infergrade.environment import capture_environment
+from infergrade.images import local_build_command
 from infergrade.models import RunRequest
 
 
@@ -186,11 +187,15 @@ def _backend_image_check(request: RunRequest) -> Dict[str, Any]:
         )
     completed = subprocess.run(["docker", "image", "inspect", image], capture_output=True, text=True)
     if completed.returncode != 0:
+        details = {"image": image, "stderr": (completed.stderr or "").strip()}
+        build_command = local_build_command(image)
+        if build_command:
+            details["suggested_command"] = build_command
         return _check(
             "backend_image",
             "warning",
             "Backend image is not present locally yet.",
-            {"image": image, "stderr": (completed.stderr or "").strip()},
+            details,
         )
     return _check(
         "backend_image",
@@ -206,17 +211,21 @@ def _capability_image_checks(request: RunRequest) -> List[Dict[str, Any]]:
         image = image_info["image"]
         completed = subprocess.run(["docker", "image", "inspect", image], capture_output=True, text=True)
         if completed.returncode != 0:
+            details = {
+                "benchmark_id": image_info["benchmark_id"],
+                "display_name": image_info["display_name"],
+                "image": image,
+                "stderr": (completed.stderr or "").strip(),
+            }
+            build_command = local_build_command(image)
+            if build_command:
+                details["suggested_command"] = build_command
             checks.append(
                 _check(
                     "capability_image_%s" % image_info["benchmark_id"],
                     "warning",
                     "Capability benchmark image is not present locally yet.",
-                    {
-                        "benchmark_id": image_info["benchmark_id"],
-                        "display_name": image_info["display_name"],
-                        "image": image,
-                        "stderr": (completed.stderr or "").strip(),
-                    },
+                    details,
                 )
             )
             continue

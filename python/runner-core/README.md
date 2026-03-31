@@ -27,6 +27,7 @@ The runner still defaults to simulated execution, but it now has a first real ba
 
 ```bash
 PYTHONPATH=python/runner-core/src python3 -m unittest discover -s python/runner-core/tests
+PYTHONPATH=python/runner-core/src python3 -m infergrade install-images --image infergrade-llama-cpp:local
 PYTHONPATH=python/runner-core/src python3 -m infergrade doctor --model Qwen/Qwen2.5-7B-Instruct --backend llama.cpp --tier canary --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
 PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5-7B-Instruct --backend llama.cpp --tier canary --output runs/qwen_canary --resume
 docker build -t infergrade-llama-cpp:local -f containers/llama-cpp/Dockerfile .
@@ -36,17 +37,42 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5
 PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5-7B-Instruct --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf --quant-artifact-filename Qwen2.5-7B-Instruct-Q4_K_M.gguf --backend llama.cpp --backend-image infergrade-llama-cpp:local --tier canary --output runs/hf_real_run --resume --real-run
 ```
 
+`infergrade install-images` is the preferred local setup path now. Preparing a local runtime image like `infergrade-llama-cpp:local` also prepares `infergrade-runner-core:local`, because the recommended Hub-backed flow uses the runner-core container as the long-lived local listener.
+
+The `llama.cpp` adapter and capability containers will also try to build missing `:local` images automatically when the checked-out Runner repo is available, so the common “image not found” path should degrade into a local build instead of an unhelpful Docker auth error.
+
+If `infergrade-runner-core:local` already exists but is stale, you can force a rebuild with:
+
+```bash
+PYTHONPATH=python/runner-core/src python3 -m infergrade install-images --image infergrade-runner-core:local --rebuild
+```
+
+The runner repo also includes a helper script that refreshes the listener image and starts the Dockerized local listener in one step:
+
+```bash
+./scripts/start_local_listener.sh --api-url http://host.docker.internal:8000
+```
+
 ## Recommended Flow
 
 For Hub-generated local runs, the preferred operator flow is now:
 
 ```bash
 export INFERGRADE_HUB_TOKEN="qbhr_example"
-PYTHONPATH=python/runner-core/src python3 -m infergrade start \
-  --api-url http://localhost:8000
+docker run --rm \
+  -e INFERGRADE_HUB_TOKEN="$INFERGRADE_HUB_TOKEN" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD/runs:/app/runs" \
+  -v "$HOME/.cache/infergrade/artifacts:/root/.cache/infergrade/artifacts" \
+  infergrade-runner-core:local start \
+  --api-url http://host.docker.internal:8000
 ```
 
 That starts a local runner loop that listens for queued `local_container` jobs from the Hub, claims them automatically, performs preflight checks, executes the benchmark, and uploads the finished bundle.
+
+Running the runner in its own container is the recommended production path because it isolates the Python environment, makes image/runtime versions explicit, and keeps the benchmark orchestration surface closer to what will run in cloud environments.
+
+When the Hub is running on your host machine, `host.docker.internal` is the correct API hostname from inside the runner container. `localhost` inside that container points back to the container itself.
 
 If you want to run one specific Hub job immediately without keeping a local runner alive, you can still use:
 

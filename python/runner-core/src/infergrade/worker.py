@@ -2,9 +2,11 @@
 
 import socket
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
+from infergrade import __version__
 from infergrade.doctor import run_doctor
+from infergrade.progress import load_progress
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.runner import run_infergrade
 from infergrade.transport import (
@@ -12,7 +14,10 @@ from infergrade.transport import (
     complete_run_job,
     fail_run_job,
     fetch_run_config,
+    heartbeat_runner,
     heartbeat_run_job,
+    register_runner,
+    upload_run_bundle,
     upload_bundle,
 )
 
@@ -22,13 +27,34 @@ def execute_run_job(
     run_job: Dict[str, Any],
     worker_id: str,
     api_token: str = None,
+    run_token: str = None,
     simulate: bool = False,
+    hostname: str = None,
+    provider_id: str = None,
+    instance_type_id: str = None,
     emit_progress: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """Execute one claimed run job and report lifecycle state back to the API."""
     run_id = run_job["run_id"]
+
+    def _runner_heartbeat(status: str, current_run_id: str = None, message: str = None) -> None:
+        if not api_token:
+            return
+        heartbeat_runner(
+            api_url,
+            runner_id=worker_id,
+            api_token=api_token,
+            status=status,
+            current_run_id=current_run_id,
+            hostname=hostname or socket.gethostname(),
+            provider_id=provider_id,
+            instance_type_id=instance_type_id,
+            metadata={"message": message} if message else None,
+        )
+
     try:
-        heartbeat_run_job(api_url, run_id, worker_id, stage="fetch_run_config", message="Fetching run config.", api_token=api_token)
+        _runner_heartbeat("busy", current_run_id=run_id, message="Fetching run config.")
+        heartbeat_run_job(api_url, run_id, worker_id, stage="fetch_run_config", message="Fetching run config.", api_token=api_token, run_token=run_token)
         payload = fetch_run_config(api_url, run_job["run_config_id"], api_token=api_token)
         request = request_from_run_config_document(payload, simulate=simulate)
         request.output_dir = run_job.get("output_dir")
@@ -48,6 +74,7 @@ def execute_run_job(
             message="Running local preflight checks.",
             progress_percent=5.0,
             api_token=api_token,
+            run_token=run_token,
         )
         doctor_report = run_doctor(request=request, api_url=api_url)
         if not doctor_report.get("ok"):
@@ -56,11 +83,27 @@ def execute_run_job(
         def _emit(message: str) -> None:
             if emit_progress:
                 emit_progress(message)
-            heartbeat_run_job(api_url, run_id, worker_id, message=message, api_token=api_token)
+            _runner_heartbeat("busy", current_run_id=run_id, message=message)
+            stage, detail, progress_percent = _runtime_progress_update(request.output_dir)
+            heartbeat_run_job(
+                api_url,
+                run_id,
+                worker_id,
+                stage=stage,
+                detail=detail,
+                message=message,
+                progress_percent=progress_percent,
+                api_token=api_token,
+                run_token=run_token,
+            )
 
         result = run_infergrade(request, emit_progress=_emit)
-        heartbeat_run_job(api_url, run_id, worker_id, stage="upload", message="Uploading completed bundle.", progress_percent=95.0, api_token=api_token)
-        upload = upload_bundle(result["output_dir"], api_url, api_token=api_token)
+        heartbeat_run_job(api_url, run_id, worker_id, stage="upload", message="Uploading completed bundle.", progress_percent=95.0, api_token=api_token, run_token=run_token)
+        upload = (
+            upload_run_bundle(result["output_dir"], api_url, run_id=run_id, run_token=run_token, api_token=api_token)
+            if run_token
+            else upload_bundle(result["output_dir"], api_url, api_token=api_token)
+        )
         completed = complete_run_job(
             api_url,
             run_id,
@@ -68,7 +111,9 @@ def execute_run_job(
             bundle_id=result["bundle_id"],
             upload=upload,
             api_token=api_token,
+            run_token=run_token,
         )
+        _runner_heartbeat("ready", current_run_id=None, message="Idle and ready for the next run.")
         return {
             "claimed": True,
             "completed": True,
@@ -78,7 +123,11 @@ def execute_run_job(
         }
     except Exception as exc:
         try:
-            fail_run_job(api_url, run_id, worker_id, message=str(exc), error_code="worker_execution_failed", api_token=api_token)
+            fail_run_job(api_url, run_id, worker_id, message=str(exc), error_code="worker_execution_failed", api_token=api_token, run_token=run_token)
+        except Exception:
+            pass
+        try:
+            _runner_heartbeat("ready", current_run_id=None, message="Recovered to idle after a failed run.")
         except Exception:
             pass
         if emit_progress:
@@ -101,6 +150,7 @@ def run_worker_once(
     instance_type_id: str = None,
     hostname: str = None,
     api_token: str = None,
+    run_token: str = None,
     simulate: bool = False,
     emit_progress: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
@@ -116,6 +166,7 @@ def run_worker_once(
         instance_type_id=instance_type_id,
         hostname=hostname or socket.gethostname(),
         api_token=api_token,
+        run_token=run_token,
     )
     if claimed.get("error"):
         raise RuntimeError(claimed["error"].get("message") or "Failed to claim run job.")
@@ -131,7 +182,11 @@ def run_worker_once(
         run_job=run_job,
         worker_id=resolved_worker_id,
         api_token=api_token,
+        run_token=run_token,
         simulate=simulate,
+        hostname=hostname,
+        provider_id=provider_id,
+        instance_type_id=instance_type_id,
         emit_progress=emit_progress,
     )
     result["worker_id"] = resolved_worker_id
@@ -148,6 +203,7 @@ def run_worker_loop(
     instance_type_id: str = None,
     hostname: str = None,
     api_token: str = None,
+    run_token: str = None,
     simulate: bool = False,
     poll_interval_seconds: float = 10.0,
     max_jobs: Optional[int] = None,
@@ -155,6 +211,29 @@ def run_worker_loop(
 ) -> Dict[str, Any]:
     """Continuously poll for run jobs and execute them."""
     resolved_worker_id = worker_id or _default_worker_id()
+    register_runner(
+        api_url=api_url,
+        runner_id=resolved_worker_id,
+        execution_modes=[execution_mode],
+        api_token=api_token,
+        label=resolved_worker_id,
+        runner_kind="cloud_worker" if execution_mode == "cloud_container" else "local_listener",
+        hostname=hostname or socket.gethostname(),
+        provider_id=provider_id,
+        instance_type_id=instance_type_id,
+        capabilities={"run_token_supported": True, "auto_upload": True},
+        version=__version__,
+    )
+    heartbeat_runner(
+        api_url=api_url,
+        runner_id=resolved_worker_id,
+        api_token=api_token,
+        status="ready",
+        hostname=hostname or socket.gethostname(),
+        provider_id=provider_id,
+        instance_type_id=instance_type_id,
+        metadata={"message": "Runner registered and awaiting jobs."},
+    )
     processed = 0
     completed = 0
     failed = 0
@@ -171,10 +250,21 @@ def run_worker_loop(
             instance_type_id=instance_type_id,
             hostname=hostname,
             api_token=api_token,
+            run_token=run_token,
             simulate=simulate,
             emit_progress=emit_progress,
         )
         if not result.get("claimed"):
+            heartbeat_runner(
+                api_url=api_url,
+                runner_id=resolved_worker_id,
+                api_token=api_token,
+                status="ready",
+                hostname=hostname or socket.gethostname(),
+                provider_id=provider_id,
+                instance_type_id=instance_type_id,
+                metadata={"message": "Runner is polling for more work."},
+            )
             time.sleep(max(poll_interval_seconds, 0.1))
             continue
         processed += 1
@@ -204,3 +294,46 @@ def _doctor_failure_message(report: Dict[str, Any]) -> str:
     if len(failing_checks) > 3:
         labels.append("and %d more" % (len(failing_checks) - 3))
     return "Preflight failed: %s." % "; ".join(labels)
+
+
+def _runtime_progress_update(output_dir: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[float]]:
+    """Project the local runner progress file into Hub-facing stage and percent updates."""
+    if not output_dir:
+        return None, None, None
+    payload = load_progress(output_dir)
+    if not payload:
+        return None, None, None
+    return payload.get("current_stage"), payload.get("current_detail"), _progress_percent(payload)
+
+
+def _progress_percent(payload: Dict[str, Any]) -> Optional[float]:
+    """Estimate a user-facing percent complete from the structured progress payload."""
+    stage = payload.get("current_stage")
+    if stage == "completed":
+        return 100.0
+    if stage == "finalization":
+        return 96.0
+    stage_defaults = {
+        "environment_capture": 12.0,
+        "artifact_resolution": 24.0,
+        "backend_resolution": 36.0,
+        "ontology_build": 44.0,
+        "capability": 52.0,
+    }
+    if stage in stage_defaults:
+        return stage_defaults[stage]
+    if stage != "deployment":
+        return None
+    request_context = payload.get("request_context") or {}
+    configured_profiles = list(request_context.get("deployment_profiles") or [])
+    deployment_profiles = payload.get("deployment_profiles") or {}
+    total_profiles = max(len(configured_profiles), len(deployment_profiles))
+    if total_profiles <= 0:
+        return 70.0
+    completed_profiles = len([item for item in deployment_profiles.values() if item.get("status") == "completed"])
+    running_profiles = len([item for item in deployment_profiles.values() if item.get("status") == "running"])
+    step = 35.0 / float(total_profiles)
+    progress = 55.0 + (completed_profiles * step)
+    if running_profiles:
+        progress += min(step * 0.5, 10.0)
+    return round(min(progress, 94.0), 1)

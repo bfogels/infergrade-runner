@@ -68,7 +68,7 @@ def _detect_nvidia_gpu() -> Optional[Dict[str, Any]]:
     output = _run_command(
         [
             "nvidia-smi",
-            "--query-gpu=name,memory.total",
+            "--query-gpu=name,memory.total,driver_version",
             "--format=csv,noheader,nounits",
         ]
     )
@@ -79,15 +79,24 @@ def _detect_nvidia_gpu() -> Optional[Dict[str, Any]]:
         return None
     models = []
     vrams = []
+    driver_versions = []
     for line in lines:
-        parts = [part.strip() for part in line.split(",", 1)]
-        if len(parts) != 2:
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 2:
             continue
         models.append(parts[0])
         try:
             vrams.append(float(parts[1]))
         except ValueError:
             continue
+        if len(parts) >= 3 and parts[2]:
+            driver_versions.append(parts[2])
+    cuda_output = _run_command(["nvidia-smi"])
+    cuda_version = None
+    if cuda_output:
+        match = re.search(r"CUDA Version:\s*([0-9.]+)", cuda_output)
+        if match:
+            cuda_version = match.group(1)
     if not models:
         return None
     return {
@@ -96,6 +105,10 @@ def _detect_nvidia_gpu() -> Optional[Dict[str, Any]]:
         "accelerator_model": models[0],
         "accelerator_vram_gb": round(max(vrams) / 1024.0, 2) if vrams else None,
         "accelerator_count": len(models),
+        "driver_versions": {
+            "nvidia": driver_versions[0] if driver_versions else None,
+            "cuda": cuda_version,
+        },
     }
 
 
@@ -129,6 +142,7 @@ def _detect_apple_silicon_gpu() -> Optional[Dict[str, Any]]:
         "accelerator_vram_gb": memory_gb,
         "accelerator_count": 1,
         "machine_model": hardware.get("machine_model"),
+        "chip_type": hardware.get("chip_type"),
         "gpu_cores": gpu.get("sppci_cores"),
     }
 
@@ -175,9 +189,16 @@ def capture_environment(execution_mode: str) -> Dict[str, Any]:
         "driver_versions": {},
         "container_runtime": "docker" if os.path.exists("/.dockerenv") else None,
     }
+    if gpu.get("driver_versions"):
+        payload["driver_versions"] = gpu["driver_versions"]
     if gpu.get("machine_model"):
         payload["machine_model"] = gpu["machine_model"]
+    if gpu.get("chip_type"):
+        payload["chip_type"] = gpu["chip_type"]
     if gpu.get("gpu_cores"):
         payload["gpu_cores"] = gpu["gpu_cores"]
+    docker_version = _run_command(["docker", "--version"])
+    if docker_version:
+        payload["docker_version"] = docker_version
     payload["hardware_id"] = "hw_%s" % stable_hash(payload)
     return payload

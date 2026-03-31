@@ -22,10 +22,15 @@ def _resolve_api_token(api_token: str = None) -> str:
     ).strip()
 
 
-def _request_headers(api_token: str = None, content_type: str = None) -> Dict[str, str]:
+def _resolve_run_token(run_token: str = None) -> str:
+    """Return the explicit run token or fall back to the environment."""
+    return (run_token or env_value("INFERGRADE_RUN_TOKEN") or "").strip()
+
+
+def _request_headers(api_token: str = None, run_token: str = None, content_type: str = None) -> Dict[str, str]:
     """Build request headers shared by runner-to-API calls."""
     headers: Dict[str, str] = {}
-    resolved_token = _resolve_api_token(api_token)
+    resolved_token = _resolve_run_token(run_token) or _resolve_api_token(api_token)
     if content_type:
         headers["Content-Type"] = content_type
     if resolved_token:
@@ -40,6 +45,7 @@ def _json_request(
     payload: Dict[str, Any] = None,
     params: Dict[str, Any] = None,
     api_token: str = None,
+    run_token: str = None,
     idempotency_key: str = None,
 ) -> Tuple[int, Dict[str, Any]]:
     """Send a JSON request to the InferGrade API and return status plus body."""
@@ -49,7 +55,7 @@ def _json_request(
         if query:
             url += ("&" if "?" in url else "?") + query
     body = None
-    headers = _request_headers(api_token=api_token, content_type="application/json" if payload is not None else None)
+    headers = _request_headers(api_token=api_token, run_token=run_token, content_type="application/json" if payload is not None else None)
     if idempotency_key:
         headers["Idempotency-Key"] = idempotency_key
     if payload is not None:
@@ -94,6 +100,19 @@ def upload_bundle(bundle_dir: str, api_url: str, api_token: str = None) -> Dict[
     return payload
 
 
+def upload_run_bundle(bundle_dir: str, api_url: str, run_id: str, run_token: str = None, api_token: str = None) -> Dict[str, Any]:
+    """Upload a local bundle through the run-scoped upload route."""
+    _, payload = _json_request(
+        api_url,
+        "/v1/runs/%s/bundle" % run_id,
+        method="POST",
+        payload=bundle_payload(bundle_dir),
+        api_token=api_token,
+        run_token=run_token,
+    )
+    return payload
+
+
 def fetch_run_config(api_url: str, run_config_id: str, api_token: str = None) -> Dict[str, Any]:
     """Fetch one server-issued run config document."""
     _, payload = _json_request(api_url, "/run-configs/" + run_config_id, api_token=api_token)
@@ -130,6 +149,7 @@ def claim_run_job(
     worker_id: str,
     execution_mode: str,
     api_token: str = None,
+    run_token: str = None,
     run_id: str = None,
     run_config_id: str = None,
     provider_id: str = None,
@@ -151,6 +171,7 @@ def claim_run_job(
             "hostname": hostname,
         },
         api_token=api_token,
+        run_token=run_token,
     )
     return payload
 
@@ -164,6 +185,7 @@ def heartbeat_run_job(
     message: str = None,
     progress_percent: float = None,
     api_token: str = None,
+    run_token: str = None,
 ) -> Dict[str, Any]:
     """Send a worker heartbeat for a running job."""
     _, payload = _json_request(
@@ -178,6 +200,7 @@ def heartbeat_run_job(
             "progress_percent": progress_percent,
         },
         api_token=api_token,
+        run_token=run_token,
     )
     return payload
 
@@ -189,6 +212,7 @@ def complete_run_job(
     bundle_id: str,
     upload: Dict[str, Any] = None,
     api_token: str = None,
+    run_token: str = None,
 ) -> Dict[str, Any]:
     """Mark a run job as completed."""
     _, payload = _json_request(
@@ -201,6 +225,7 @@ def complete_run_job(
             "upload": upload,
         },
         api_token=api_token,
+        run_token=run_token,
     )
     return payload
 
@@ -212,6 +237,7 @@ def fail_run_job(
     message: str,
     error_code: str = None,
     api_token: str = None,
+    run_token: str = None,
 ) -> Dict[str, Any]:
     """Mark a run job as failed."""
     _, payload = _json_request(
@@ -224,6 +250,7 @@ def fail_run_job(
             "error_code": error_code,
         },
         api_token=api_token,
+        run_token=run_token,
     )
     return payload
 
@@ -237,4 +264,67 @@ def get_run_job(api_url: str, run_id: str, api_token: str = None) -> Dict[str, A
 def list_run_jobs(api_url: str, api_token: str = None, **params: Any) -> Dict[str, Any]:
     """List run jobs from the API."""
     _, payload = _json_request(api_url, "/v1/runs", params=params, api_token=api_token)
+    return payload
+
+
+def register_runner(
+    api_url: str,
+    runner_id: str,
+    execution_modes: Any,
+    api_token: str = None,
+    label: str = None,
+    runner_kind: str = None,
+    hostname: str = None,
+    provider_id: str = None,
+    instance_type_id: str = None,
+    capabilities: Dict[str, Any] = None,
+    version: str = None,
+) -> Dict[str, Any]:
+    """Register a long-lived runner with the Hub."""
+    _, payload = _json_request(
+        api_url,
+        "/v1/runners/register",
+        method="POST",
+        payload={
+            "runner_id": runner_id,
+            "execution_modes": list(execution_modes or []),
+            "label": label,
+            "runner_kind": runner_kind,
+            "hostname": hostname,
+            "provider_id": provider_id,
+            "instance_type_id": instance_type_id,
+            "capabilities": capabilities or {},
+            "version": version,
+        },
+        api_token=api_token,
+    )
+    return payload
+
+
+def heartbeat_runner(
+    api_url: str,
+    runner_id: str,
+    api_token: str = None,
+    status: str = None,
+    current_run_id: str = None,
+    hostname: str = None,
+    provider_id: str = None,
+    instance_type_id: str = None,
+    metadata: Dict[str, Any] = None,
+) -> Dict[str, Any]:
+    """Send a runner readiness heartbeat to the Hub."""
+    _, payload = _json_request(
+        api_url,
+        "/v1/runners/%s/heartbeat" % runner_id,
+        method="POST",
+        payload={
+            "status": status,
+            "current_run_id": current_run_id,
+            "hostname": hostname,
+            "provider_id": provider_id,
+            "instance_type_id": instance_type_id,
+            "metadata": metadata or {},
+        },
+        api_token=api_token,
+    )
     return payload

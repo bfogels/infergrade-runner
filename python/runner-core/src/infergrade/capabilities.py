@@ -4,6 +4,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from infergrade.images import install_image
 from infergrade.models import CapabilityExecution, RunRequest
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, write_json
 
@@ -230,6 +231,7 @@ def _evaluate_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str) -> Di
 
 
 def _run_capability_container(image: str, benchmark_dir: str, args: List[str]) -> None:
+    install_image(image)
     command = [
         "docker",
         "run",

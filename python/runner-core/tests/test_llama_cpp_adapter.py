@@ -52,8 +52,9 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(parsed["eval_tokens_per_second"], 25.1)
 
     @mock.patch("infergrade.adapters.llama_cpp.docker_available", return_value=True)
+    @mock.patch("infergrade.adapters.llama_cpp.install_image")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
-    def test_resolve_version_uses_container_entrypoint(self, run_mock, _docker_mock):
+    def test_resolve_version_uses_container_entrypoint(self, run_mock, _install_image_mock, _docker_mock):
         run_mock.return_value = mock.Mock(returncode=0, stdout="version: 8508 (9f102a140)\n", stderr="")
         adapter = LlamaCppAdapter()
         version = adapter.resolve_version(simulate=False)
@@ -61,8 +62,9 @@ class LlamaCppAdapterTests(unittest.TestCase):
         command = run_mock.call_args[0][0]
         self.assertEqual(command[:5], ["docker", "run", "--rm", "--entrypoint", "llama-cli"])
 
+    @mock.patch("infergrade.adapters.llama_cpp.install_image")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
-    def test_generate_text_returns_stdout_payload(self, run_mock):
+    def test_generate_text_returns_stdout_payload(self, run_mock, _install_image_mock):
         run_mock.return_value = mock.Mock(returncode=0, stdout="def solve():\n    return 1\n", stderr=_FAKE_TIMING_LOG)
         adapter = LlamaCppAdapter()
         request = RunRequest(
@@ -79,8 +81,9 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(command[:4], ["docker", "run", "--rm", "--entrypoint"])
 
     @mock.patch("infergrade.adapters.llama_cpp.docker_available", return_value=True)
+    @mock.patch("infergrade.adapters.llama_cpp.install_image")
     @mock.patch("infergrade.adapters.llama_cpp.run_command_with_optional_gpu_monitor")
-    def test_real_run_returns_completed_deployment_metrics(self, run_mock, _docker_mock):
+    def test_real_run_returns_completed_deployment_metrics(self, run_mock, _install_image_mock, _docker_mock):
         run_mock.return_value = ContainerCommandResult(
             stdout="",
             stderr=_FAKE_TIMING_LOG,

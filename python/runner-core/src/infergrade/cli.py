@@ -9,6 +9,7 @@ from urllib.error import URLError
 from infergrade import __version__
 from infergrade.analysis import recommend, summarize_bundle
 from infergrade.doctor import run_doctor
+from infergrade.images import install_known_images
 from infergrade.profiles import CAPABILITY_SUITES, DEPLOYMENT_PROFILES
 from infergrade.request import request_from_cli, request_from_file
 from infergrade.run_configs import request_from_run_config_document
@@ -25,6 +26,14 @@ def _add_api_token_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--api-token",
         help="Optional Hub/API token. Falls back to INFERGRADE_HUB_TOKEN, then INFERGRADE_API_TOKEN if unset.",
+    )
+
+
+def _add_run_token_argument(parser: argparse.ArgumentParser) -> None:
+    """Add the optional run-scoped execution token flag to a parser."""
+    parser.add_argument(
+        "--run-token",
+        help="Optional short-lived run execution token. Falls back to INFERGRADE_RUN_TOKEN if unset.",
     )
 
 
@@ -103,6 +112,17 @@ def build_parser() -> argparse.ArgumentParser:
     upload_parser.add_argument("--api-url", required=True)
     _add_api_token_argument(upload_parser)
 
+    install_images_parser = subparsers.add_parser("install-images", help="Build the local InferGrade runtime and capability images.")
+    install_images_parser.add_argument(
+        "--image",
+        help="Optional specific image tag to build locally, for example infergrade-llama-cpp:local.",
+    )
+    install_images_parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Force a rebuild of local InferGrade images even if they already exist.",
+    )
+
     init_config_parser = subparsers.add_parser("init-run-config", help="Generate a starter server-style run config document.")
     init_config_parser.add_argument("--format", choices=("yaml", "json"), default="json")
     init_config_parser.add_argument("--output")
@@ -157,6 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use simulated execution for this run job instead of real execution.",
     )
     _add_api_token_argument(run_job_parser)
+    _add_run_token_argument(run_job_parser)
 
     start_parser = subparsers.add_parser("start", help="Start a long-lived local runner that listens for Hub-backed local jobs.")
     start_parser.add_argument("--api-url", required=True)
@@ -300,6 +321,11 @@ def main(argv: Optional[list] = None) -> int:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
+    if args.command == "install-images":
+        payload = install_known_images(image=args.image, rebuild=args.rebuild)
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
     if args.command == "init-run-config":
         payload = render_run_config_template(
             name=args.name,
@@ -419,6 +445,7 @@ def main(argv: Optional[list] = None) -> int:
             instance_type_id=args.instance_type_id,
             hostname=args.hostname,
             api_token=args.api_token,
+            run_token=args.run_token,
             simulate=bool(args.simulate),
             emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
         )
@@ -433,6 +460,7 @@ def main(argv: Optional[list] = None) -> int:
                 worker_id=args.worker_id,
                 hostname=args.hostname,
                 api_token=args.api_token,
+                run_token=None,
                 simulate=bool(args.simulate),
                 emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
             )
@@ -443,6 +471,7 @@ def main(argv: Optional[list] = None) -> int:
                 worker_id=args.worker_id,
                 hostname=args.hostname,
                 api_token=args.api_token,
+                run_token=None,
                 simulate=bool(args.simulate),
                 poll_interval_seconds=args.poll_interval_seconds,
                 max_jobs=args.max_jobs,
@@ -463,6 +492,7 @@ def main(argv: Optional[list] = None) -> int:
                 instance_type_id=args.instance_type_id,
                 hostname=args.hostname,
                 api_token=args.api_token,
+                run_token=None,
                 simulate=bool(args.simulate),
                 emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
             )
@@ -477,6 +507,7 @@ def main(argv: Optional[list] = None) -> int:
                 instance_type_id=args.instance_type_id,
                 hostname=args.hostname,
                 api_token=args.api_token,
+                run_token=None,
                 simulate=bool(args.simulate),
                 poll_interval_seconds=args.poll_interval_seconds,
                 max_jobs=args.max_jobs,

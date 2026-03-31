@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 
 from infergrade.adapters.base import BaseAdapter
 from infergrade.container_runtime import docker_available, run_command_with_optional_gpu_monitor
+from infergrade.images import install_image
 from infergrade.models import DeploymentExecution, RunRequest
 from infergrade.utils import env_value, stable_hash, utcnow_iso
 
@@ -43,6 +44,7 @@ class LlamaCppAdapter(BaseAdapter):
         if simulate:
             return "simulated-%s" % self.backend_name.replace(".", "-")
         self._ensure_docker()
+        install_image(self._image_name(request))
         command = ["docker", "run", "--rm", "--entrypoint", _DEFAULT_COMMAND, self._image_name(request), "--version"]
         completed = subprocess.run(command, capture_output=True, text=True)
         if completed.returncode != 0:
@@ -130,6 +132,7 @@ class LlamaCppAdapter(BaseAdapter):
             return super().generate_text(request, prompt, max_tokens)
         if request.execution_mode not in ("local_container", "cloud_container"):
             raise NotImplementedError("Real llama.cpp generation currently supports local_container and cloud_container modes.")
+        install_image(self._image_name(request))
         model_path = self._require_local_gguf_artifact(request)
         model_dir = os.path.dirname(model_path)
         model_filename = os.path.basename(model_path)
@@ -199,6 +202,7 @@ class LlamaCppAdapter(BaseAdapter):
         iteration: int,
     ) -> Dict[str, object]:
         self._ensure_docker()
+        install_image(self._image_name(request))
         model_dir = os.path.dirname(model_path)
         model_filename = os.path.basename(model_path)
         container_model_path = "/models/%s" % model_filename
