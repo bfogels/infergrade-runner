@@ -60,9 +60,10 @@ PYTHONPATH="$ROOT_DIR/python/runner-core/src${PYTHONPATH:+:$PYTHONPATH}" \
 DOCKER_ARGS=(
   run
   --rm
+  -e "INFERGRADE_HOST_ARTIFACT_CACHE_DIR=$ARTIFACT_CACHE_DIR"
   -v /var/run/docker.sock:/var/run/docker.sock
   -v "$RUNS_DIR:/app/runs"
-  -v "$ARTIFACT_CACHE_DIR:/root/.cache/infergrade/artifacts"
+  -v "$ARTIFACT_CACHE_DIR:$ARTIFACT_CACHE_DIR"
 )
 
 if [[ -n "${INFERGRADE_HUB_TOKEN:-}" ]]; then

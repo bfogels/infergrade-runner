@@ -1,5 +1,6 @@
 """Worker loop for claiming and executing InferGrade run jobs."""
 
+import os
 import socket
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -61,6 +62,10 @@ def execute_run_job(
         request.resume = True
         if run_job.get("execution_mode"):
             request.execution_mode = run_job["execution_mode"]
+        if request.execution_mode == "local_container":
+            host_artifact_cache_dir = os.environ.get("INFERGRADE_HOST_ARTIFACT_CACHE_DIR")
+            if host_artifact_cache_dir:
+                request.quant_artifact_cache_dir = host_artifact_cache_dir
         cloud = run_job.get("cloud") or {}
         if cloud.get("provider_id"):
             request.cloud_provider = cloud.get("provider_id")
