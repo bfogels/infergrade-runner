@@ -38,10 +38,20 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5
 
 ## Recommended Flow
 
-For Hub-generated configs, the preferred operator flow is now:
+For Hub-generated runs, the preferred operator flow is now:
 
 ```bash
 export INFERGRADE_HUB_TOKEN="qbhr_example"
+PYTHONPATH=python/runner-core/src python3 -m infergrade run-job \
+  --api-url http://localhost:8000 \
+  --run-id run_example
+```
+
+That one command now claims the Hub-backed run, performs preflight checks, executes the benchmark, and uploads the bundle automatically.
+
+If you need the lower-level manual path, the Runner still supports:
+
+```bash
 PYTHONPATH=python/runner-core/src python3 -m infergrade doctor --api-url http://localhost:8000 --run-config-id rcfg_example
 PYTHONPATH=python/runner-core/src python3 -m infergrade run-config --api-url http://localhost:8000 --run-config-id rcfg_example --output runs/rcfg_example --resume --real-run
 PYTHONPATH=python/runner-core/src python3 -m infergrade upload-bundle runs/rcfg_example --api-url http://localhost:8000
@@ -51,7 +61,7 @@ If you are talking to a legacy or development API that still expects a shared be
 
 Each run directory now includes `progress.json`. InferGrade will refuse to overwrite a non-empty output directory unless you explicitly opt into resuming with `--resume`.
 
-For API-owned run jobs, the runner can also act as a worker:
+For API-owned run jobs, the Runner also exposes the lower-level worker loop:
 
 ```bash
 PYTHONPATH=python/runner-core/src python3 -m infergrade worker \

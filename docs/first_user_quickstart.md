@@ -77,47 +77,38 @@ curl -X POST http://127.0.0.1:8000/run-configs \
   --data @schemas/examples/run_config.alpha_tinyllama_demo.json
 ```
 
-## 4. Preflight The Run
+## 4. Create A Local Run
 
 ```bash
 cd /path/to/infergrade
-PYTHONPATH=python/runner-core/src python3 -m infergrade doctor \
-  --api-url http://127.0.0.1:8000 \
-  --api-token "$INFERGRADE_API_TOKEN" \
-  --run-config-id rcfg_tinyllama_alpha_demo
+curl -X POST http://127.0.0.1:8000/v1/runs \
+  -H "Authorization: Bearer $INFERGRADE_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"run_config_id":"rcfg_tinyllama_alpha_demo","execution_mode":"local_container"}'
 ```
 
-## 5. Run The Benchmark
+This returns a `run_id` plus a one-command local execution handoff.
+
+## 5. Execute The Local Run
 
 ```bash
 cd /path/to/infergrade
-PYTHONPATH=python/runner-core/src python3 -m infergrade run-config \
+PYTHONPATH=python/runner-core/src python3 -m infergrade run-job \
   --api-url http://127.0.0.1:8000 \
   --api-token "$INFERGRADE_API_TOKEN" \
-  --run-config-id rcfg_tinyllama_alpha_demo \
-  --output runs/tinyllama_alpha_demo \
-  --resume \
-  --real-run
+  --run-id run_replace_me
 ```
 
 The runner will:
 
+- run preflight checks automatically
 - resolve the public GGUF into the local artifact cache
 - execute `llama.cpp` in Docker
+- upload the bundle automatically on success
 - write `manifest.json`, `summary.json`, `validation.json`, and `progress.json`
 - preserve the artifact-resolution receipt and raw telemetry artifacts
 
-## 6. Upload The Bundle
-
-```bash
-cd /path/to/infergrade
-PYTHONPATH=python/runner-core/src python3 -m infergrade upload-bundle \
-  runs/tinyllama_alpha_demo \
-  --api-url http://127.0.0.1:8000 \
-  --api-token "$INFERGRADE_API_TOKEN"
-```
-
-## 7. Confirm The Catalog Updated
+## 6. Confirm The Catalog Updated
 
 ```bash
 curl http://127.0.0.1:8000/stats/overview

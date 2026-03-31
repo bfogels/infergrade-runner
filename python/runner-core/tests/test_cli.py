@@ -1,0 +1,48 @@
+import io
+import sys
+import unittest
+from contextlib import redirect_stdout
+from unittest import mock
+
+sys.path.insert(0, "python/runner-core/src")
+
+from infergrade.cli import main
+
+
+class CliTests(unittest.TestCase):
+    def test_run_job_command_invokes_single_job_execution(self):
+        output = io.StringIO()
+        with mock.patch(
+            "infergrade.cli.run_worker_once",
+            return_value={"claimed": True, "completed": True, "run": {"run_id": "run_example"}},
+        ) as run_job_mock:
+            with redirect_stdout(output):
+                exit_code = main(
+                    [
+                        "run-job",
+                        "--api-url",
+                        "http://localhost:8000",
+                        "--run-id",
+                        "run_example",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        run_job_mock.assert_called_once_with(
+            api_url="http://localhost:8000",
+            execution_mode="local_container",
+            worker_id=None,
+            run_id="run_example",
+            run_config_id=None,
+            provider_id=None,
+            instance_type_id=None,
+            hostname=None,
+            api_token=None,
+            simulate=False,
+            emit_progress=mock.ANY,
+        )
+        self.assertIn('"run_id": "run_example"', output.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

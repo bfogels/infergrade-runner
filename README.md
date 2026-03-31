@@ -9,6 +9,16 @@ It is responsible for:
 - capturing deployment telemetry and capability evidence
 - writing reproducible run bundles that can be uploaded to InferGrade Hub
 
+## Canonical Hub Handoff
+
+The current preferred hosted flow is:
+
+1. generate a run in InferGrade Hub
+2. copy one `infergrade run-job ...` command
+3. let the Runner claim the run, run preflight checks, execute, and upload automatically
+
+Lower-level commands like `doctor`, `run-config`, and `upload-bundle` still exist, but they are now the manual fallback path.
+
 ## Repo Layout
 
 - `python/runner-core`: CLI, bundle orchestration, adapters, transport, and tests

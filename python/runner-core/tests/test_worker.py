@@ -70,27 +70,79 @@ class WorkerTests(unittest.TestCase):
         with mock.patch("infergrade.worker.claim_run_job", return_value={"run": claimed_run}) as claim_mock:
             with mock.patch("infergrade.worker.fetch_run_config", return_value=run_config):
                 with mock.patch("infergrade.worker.request_from_run_config_document", return_value=fake_request):
-                    with mock.patch(
-                        "infergrade.worker.run_infergrade",
-                        return_value={"bundle_id": "qb_bundle", "output_dir": "runs/run_example"},
-                    ):
-                        with mock.patch("infergrade.worker.upload_bundle", return_value={"stored": True}) as upload_mock:
-                            with mock.patch("infergrade.worker.complete_run_job", return_value={"run": {"run_id": "run_example", "status": "completed"}}) as complete_mock:
-                                with mock.patch("infergrade.worker.heartbeat_run_job") as heartbeat_mock:
-                                    result = run_worker_once(
-                                        api_url="http://localhost:8000",
-                                        execution_mode="local_container",
-                                        worker_id="worker-1",
-                                    )
+                    with mock.patch("infergrade.worker.run_doctor", return_value={"ok": True, "checks": []}) as doctor_mock:
+                        with mock.patch(
+                            "infergrade.worker.run_infergrade",
+                            return_value={"bundle_id": "qb_bundle", "output_dir": "runs/run_example"},
+                        ):
+                            with mock.patch("infergrade.worker.upload_bundle", return_value={"stored": True}) as upload_mock:
+                                with mock.patch("infergrade.worker.complete_run_job", return_value={"run": {"run_id": "run_example", "status": "completed"}}) as complete_mock:
+                                    with mock.patch("infergrade.worker.heartbeat_run_job") as heartbeat_mock:
+                                        result = run_worker_once(
+                                            api_url="http://localhost:8000",
+                                            execution_mode="local_container",
+                                            worker_id="worker-1",
+                                        )
 
         self.assertTrue(result["claimed"])
         self.assertTrue(result["completed"])
         claim_mock.assert_called_once()
+        doctor_mock.assert_called_once()
         upload_mock.assert_called_once()
         complete_mock.assert_called_once()
         heartbeat_mock.assert_called()
         self.assertEqual(fake_request.output_dir, "runs/run_example")
         self.assertTrue(fake_request.resume)
+
+    def test_worker_once_fails_when_preflight_fails(self):
+        claimed_run = {
+            "run_id": "run_example",
+            "run_config_id": "rcfg_example",
+            "execution_mode": "local_container",
+            "output_dir": "runs/run_example",
+            "cloud": None,
+        }
+        run_config = {
+            "run_config_id": "rcfg_example",
+            "request": {
+                "run": {
+                    "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+                    "backend": "llama.cpp",
+                    "tier": "canary",
+                }
+            },
+        }
+        fake_request = mock.Mock()
+        fake_request.execution_mode = "local_container"
+        fake_request.resume = False
+        fake_request.output_dir = None
+        fake_request.cloud_provider = None
+        fake_request.cloud_instance_type = None
+
+        with mock.patch("infergrade.worker.claim_run_job", return_value={"run": claimed_run}):
+            with mock.patch("infergrade.worker.fetch_run_config", return_value=run_config):
+                with mock.patch("infergrade.worker.request_from_run_config_document", return_value=fake_request):
+                    with mock.patch(
+                        "infergrade.worker.run_doctor",
+                        return_value={
+                            "ok": False,
+                            "checks": [
+                                {"id": "docker_daemon", "status": "error", "message": "Docker daemon is not reachable."}
+                            ],
+                        },
+                    ):
+                        with mock.patch("infergrade.worker.fail_run_job", return_value={"run": {"run_id": "run_example", "status": "failed"}}) as fail_mock:
+                            with mock.patch("infergrade.worker.heartbeat_run_job"):
+                                result = run_worker_once(
+                                    api_url="http://localhost:8000",
+                                    execution_mode="local_container",
+                                    worker_id="worker-1",
+                                )
+
+        self.assertTrue(result["claimed"])
+        self.assertFalse(result["completed"])
+        self.assertIn("Preflight failed", result["error"])
+        fail_mock.assert_called_once()
 
     def test_cloud_worker_passes_provider_filters_when_claiming(self):
         with mock.patch("infergrade.worker.claim_run_job", return_value={"run": None}) as claim_mock:

@@ -4,6 +4,7 @@ import socket
 import time
 from typing import Any, Callable, Dict, Optional
 
+from infergrade.doctor import run_doctor
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.runner import run_infergrade
 from infergrade.transport import (
@@ -39,6 +40,18 @@ def execute_run_job(
             request.cloud_provider = cloud.get("provider_id")
         if cloud.get("instance_type_id"):
             request.cloud_instance_type = cloud.get("instance_type_id")
+        heartbeat_run_job(
+            api_url,
+            run_id,
+            worker_id,
+            stage="preflight",
+            message="Running local preflight checks.",
+            progress_percent=5.0,
+            api_token=api_token,
+        )
+        doctor_report = run_doctor(request=request, api_url=api_url)
+        if not doctor_report.get("ok"):
+            raise RuntimeError(_doctor_failure_message(doctor_report))
 
         def _emit(message: str) -> None:
             if emit_progress:
@@ -180,3 +193,14 @@ def run_worker_loop(
 def _default_worker_id() -> str:
     """Build a host-scoped default worker identifier."""
     return "worker-%s" % socket.gethostname()
+
+
+def _doctor_failure_message(report: Dict[str, Any]) -> str:
+    """Condense a doctor report into a short worker-facing failure reason."""
+    failing_checks = [item for item in report.get("checks", []) if item.get("status") == "error"]
+    if not failing_checks:
+        return "Preflight failed."
+    labels = ["%s (%s)" % (item.get("id"), item.get("message")) for item in failing_checks[:3]]
+    if len(failing_checks) > 3:
+        labels.append("and %d more" % (len(failing_checks) - 3))
+    return "Preflight failed: %s." % "; ".join(labels)

@@ -142,6 +142,22 @@ def build_parser() -> argparse.ArgumentParser:
     run_config_parser.add_argument("--resume", action="store_true")
     _add_api_token_argument(run_config_parser)
 
+    run_job_parser = subparsers.add_parser("run-job", help="Claim and execute one Hub-backed run job with automatic upload.")
+    run_job_parser.add_argument("--api-url", required=True)
+    run_job_parser.add_argument("--run-id")
+    run_job_parser.add_argument("--run-config-id")
+    run_job_parser.add_argument("--execution-mode", choices=("local_container", "cloud_container"), default="local_container")
+    run_job_parser.add_argument("--worker-id")
+    run_job_parser.add_argument("--provider-id")
+    run_job_parser.add_argument("--instance-type-id")
+    run_job_parser.add_argument("--hostname")
+    run_job_parser.add_argument(
+        "--simulate",
+        action="store_true",
+        help="Use simulated execution for this run job instead of real execution.",
+    )
+    _add_api_token_argument(run_job_parser)
+
     worker_parser = subparsers.add_parser("worker", help="Claim and execute API-backed run jobs.")
     worker_parser.add_argument("--api-url", required=True)
     worker_parser.add_argument("--execution-mode", choices=("local_container", "cloud_container"), default="local_container")
@@ -375,6 +391,23 @@ def main(argv: Optional[list] = None) -> int:
             request.output_dir = args.output
         request.resume = bool(args.resume)
         result = run_infergrade(request, emit_progress=lambda message: print(message, file=sys.stderr, flush=True))
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "run-job":
+        result = run_worker_once(
+            api_url=args.api_url,
+            execution_mode=args.execution_mode,
+            worker_id=args.worker_id,
+            run_id=args.run_id,
+            run_config_id=args.run_config_id,
+            provider_id=args.provider_id,
+            instance_type_id=args.instance_type_id,
+            hostname=args.hostname,
+            api_token=args.api_token,
+            simulate=bool(args.simulate),
+            emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
+        )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
