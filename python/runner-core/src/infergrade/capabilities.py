@@ -2,7 +2,7 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from infergrade.images import install_image
 from infergrade.models import CapabilityExecution, RunRequest
@@ -14,6 +14,8 @@ DEFAULT_CAPABILITY_IMAGES = {
     "evalplus_humaneval": env_value("INFERGRADE_EVALPLUS_IMAGE", "QUANTBENCH_EVALPLUS_IMAGE", "infergrade-evalplus:local"),
     "evalplus_mbpp": env_value("INFERGRADE_EVALPLUS_IMAGE", "QUANTBENCH_EVALPLUS_IMAGE", "infergrade-evalplus:local"),
 }
+
+_LISTENER_RUNS_DIR = "/app/runs"
 
 
 @dataclass(frozen=True)
@@ -119,7 +121,11 @@ def capability_images_for_request(request: RunRequest) -> List[Dict[str, str]]:
     return images
 
 
-def execute_capability_suite(adapter, request: RunRequest) -> CapabilityExecution:
+def execute_capability_suite(
+    adapter,
+    request: RunRequest,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> CapabilityExecution:
     suite = resolve_capability_suite(request.use_case, request.tier)
     if suite is None:
         return CapabilityExecution(
@@ -151,13 +157,36 @@ def execute_capability_suite(adapter, request: RunRequest) -> CapabilityExecutio
         try:
             _prepare_benchmark_cases(spec, benchmark_dir, request.tier)
             cases = _read_jsonl(os.path.join(benchmark_dir, "cases.jsonl"))
-            predictions = _generate_predictions(adapter, request, spec, cases)
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "benchmark_started",
+                        "benchmark_id": benchmark_id,
+                        "display_name": spec.display_name,
+                        "total_cases": len(cases),
+                        "message": "Capability benchmark %s started (%d cases)." % (spec.display_name, len(cases)),
+                    }
+                )
+            predictions = _generate_predictions(adapter, request, spec, cases, progress_callback=progress_callback)
             _write_jsonl(os.path.join(benchmark_dir, "predictions.jsonl"), predictions)
             summary = _evaluate_benchmark(spec, benchmark_dir)
             summary["generation_failure_count"] = len(
                 [item for item in predictions if item.get("generation_status") != "completed"]
             )
             write_json(os.path.join(benchmark_dir, "summary.json"), summary)
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "benchmark_completed",
+                        "benchmark_id": benchmark_id,
+                        "display_name": spec.display_name,
+                        "total_cases": len(cases),
+                        "completed_cases": len(cases),
+                        "status": "completed",
+                        "primary_metric": summary.get("primary_metric", {}).get("value"),
+                        "message": "Capability benchmark %s completed." % spec.display_name,
+                    }
+                )
             benchmark_results[benchmark_id] = summary
             benchmark_artifacts[benchmark_id] = {
                 "benchmark_dir": benchmark_dir,
@@ -170,6 +199,17 @@ def execute_capability_suite(adapter, request: RunRequest) -> CapabilityExecutio
                 component_scores[benchmark_id] = round(float(primary_value), 6)
                 completed += 1
         except Exception as exc:
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "benchmark_completed",
+                        "benchmark_id": benchmark_id,
+                        "display_name": spec.display_name,
+                        "status": "failed",
+                        "message": "Capability benchmark %s failed." % spec.display_name,
+                        "error": str(exc),
+                    }
+                )
             benchmark_results[benchmark_id] = {
                 "benchmark_id": benchmark_id,
                 "display_name": spec.display_name,
@@ -232,12 +272,13 @@ def _evaluate_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str) -> Di
 
 def _run_capability_container(image: str, benchmark_dir: str, args: List[str]) -> None:
     install_image(image)
+    mount_source = _host_mount_path(os.path.abspath(benchmark_dir))
     command = [
         "docker",
         "run",
         "--rm",
         "-v",
-        "%s:/work" % os.path.abspath(benchmark_dir),
+        "%s:/work" % mount_source,
         image,
     ]
     command.extend(args)
@@ -249,9 +290,33 @@ def _run_capability_container(image: str, benchmark_dir: str, args: List[str]) -
         )
 
 
-def _generate_predictions(adapter, request: RunRequest, spec: CapabilityBenchmarkSpec, cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _host_mount_path(path: str) -> str:
+    """Translate listener-internal run paths into host paths for nested Docker binds."""
+    host_runs_dir = os.environ.get("INFERGRADE_HOST_RUNS_DIR")
+    if not host_runs_dir:
+        return path
+    listener_runs_dir = os.path.abspath(os.environ.get("INFERGRADE_LISTENER_RUNS_DIR", _LISTENER_RUNS_DIR))
+    normalized_path = os.path.abspath(path)
+    if normalized_path == listener_runs_dir:
+        return os.path.abspath(host_runs_dir)
+    prefix = listener_runs_dir + os.sep
+    if normalized_path.startswith(prefix):
+        relative_path = os.path.relpath(normalized_path, listener_runs_dir)
+        return os.path.abspath(os.path.join(host_runs_dir, relative_path))
+    return normalized_path
+
+
+def _generate_predictions(
+    adapter,
+    request: RunRequest,
+    spec: CapabilityBenchmarkSpec,
+    cases: List[Dict[str, Any]],
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> List[Dict[str, Any]]:
     predictions = []
-    for case in cases:
+    total_cases = len(cases)
+    report_interval = max(1, total_cases // 20) if total_cases else 1
+    for index, case in enumerate(cases, start=1):
         case_id = case.get("case_id") or case.get("task_id") or stable_hash(case, length=12)
         try:
             generated = adapter.generate_text(
@@ -279,6 +344,20 @@ def _generate_predictions(adapter, request: RunRequest, spec: CapabilityBenchmar
             record["task_id"] = case["task_id"]
             record["completion"] = text
         predictions.append(record)
+        if progress_callback and (
+            index == 1 or index == total_cases or index % report_interval == 0
+        ):
+            progress_callback(
+                {
+                    "event": "case_progress",
+                    "benchmark_id": spec.benchmark_id,
+                    "display_name": spec.display_name,
+                    "completed_cases": index,
+                    "total_cases": total_cases,
+                    "current_case": case_id,
+                    "message": "Capability benchmark %s %d/%d cases." % (spec.display_name, index, total_cases),
+                }
+            )
     return predictions
 
 

@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 
 from infergrade.capabilities import execute_capability_suite
 from infergrade.models import CapabilityExecution, DeploymentExecution, RunRequest
@@ -20,7 +20,12 @@ class BaseAdapter(object):
             return "simulated-%s" % self.backend_name.replace(".", "-")
         raise NotImplementedError("Real backend execution is not implemented yet.")
 
-    def run_deployment_profile(self, request: RunRequest, profile_id: str) -> DeploymentExecution:
+    def run_deployment_profile(
+        self,
+        request: RunRequest,
+        profile_id: str,
+        progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
+    ) -> DeploymentExecution:
         if not request.simulate:
             raise NotImplementedError("Real backend execution is not implemented yet.")
         return DeploymentExecution(
@@ -30,7 +35,11 @@ class BaseAdapter(object):
             artifacts={},
         )
 
-    def run_capability(self, request: RunRequest) -> CapabilityExecution:
+    def run_capability(
+        self,
+        request: RunRequest,
+        progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
+    ) -> CapabilityExecution:
         if request.capability == "none" or not request.use_case:
             return CapabilityExecution(
                 use_case=request.use_case,
@@ -48,7 +57,7 @@ class BaseAdapter(object):
         suite = resolve_capability_suite(request.use_case, request.tier)
         if not request.simulate:
             try:
-                return execute_capability_suite(self, request)
+                return execute_capability_suite(self, request, progress_callback=progress_callback)
             except Exception as exc:
                 return CapabilityExecution(
                     use_case=request.use_case,

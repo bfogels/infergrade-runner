@@ -65,7 +65,7 @@ class RunnerTests(unittest.TestCase):
             def runtime_metadata(self, request):
                 return {"container_image": "infergrade-llama-cpp:test", "container_runtime": "docker"}
 
-            def run_capability(self, request):
+            def run_capability(self, request, progress_callback=None):
                 from infergrade.models import CapabilityExecution
 
                 return CapabilityExecution(
@@ -80,7 +80,7 @@ class RunnerTests(unittest.TestCase):
                     status="skipped",
                 )
 
-            def run_deployment_profile(self, request, profile_id):
+            def run_deployment_profile(self, request, profile_id, progress_callback=None):
                 return DeploymentExecution(
                     profile_id=profile_id,
                     metrics={
@@ -175,7 +175,7 @@ class RunnerTests(unittest.TestCase):
             def runtime_metadata(self, request):
                 return {"container_image": "infergrade-llama-cpp:test", "container_runtime": "docker"}
 
-            def run_capability(self, request):
+            def run_capability(self, request, progress_callback=None):
                 from infergrade.models import CapabilityExecution
 
                 return CapabilityExecution(
@@ -190,7 +190,7 @@ class RunnerTests(unittest.TestCase):
                     status="completed",
                 )
 
-            def run_deployment_profile(self, request, profile_id):
+            def run_deployment_profile(self, request, profile_id, progress_callback=None):
                 self.calls.append(profile_id)
                 if profile_id == "long_context_v1" and self.calls.count(profile_id) == 1:
                     raise RuntimeError("simulated interruption")

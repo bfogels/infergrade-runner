@@ -177,6 +177,46 @@ class LlamaCppAdapterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             adapter.run_deployment_profile(request, "interactive_chat_v1")
 
+    @mock.patch("infergrade.adapters.llama_cpp.docker_available", return_value=True)
+    @mock.patch("infergrade.adapters.llama_cpp.install_image")
+    @mock.patch("infergrade.adapters.llama_cpp._stop_container")
+    @mock.patch("infergrade.adapters.llama_cpp._fetch_container_logs")
+    @mock.patch("infergrade.adapters.llama_cpp._stream_server_completion")
+    @mock.patch("infergrade.adapters.llama_cpp._wait_for_server_ready")
+    @mock.patch("infergrade.adapters.llama_cpp._resolve_published_port")
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_real_run_reports_iteration_progress(
+        self,
+        run_mock,
+        _resolve_port_mock,
+        wait_ready_mock,
+        stream_mock,
+        logs_mock,
+        _stop_container_mock,
+        _install_image_mock,
+        _docker_mock,
+    ):
+        run_mock.return_value = mock.Mock(returncode=0, stdout="container-123\n", stderr="")
+        _resolve_port_mock.return_value = 38080
+        wait_ready_mock.return_value = ("http://127.0.0.1:38080", 1675.42)
+        stream_mock.return_value = _FAKE_SERVER_COMPLETION
+        logs_mock.return_value = _FAKE_SERVER_LOG
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            simulate=False,
+        )
+        events = []
+        adapter.run_deployment_profile(request, "interactive_chat_v1", progress_callback=events.append)
+        event_types = [event["event"] for event in events]
+        self.assertIn("profile_started", event_types)
+        self.assertIn("iteration_started", event_types)
+        self.assertIn("iteration_completed", event_types)
+
 
 if __name__ == "__main__":
     unittest.main()

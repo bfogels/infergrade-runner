@@ -323,8 +323,28 @@ def _progress_percent(payload: Dict[str, Any]) -> Optional[float]:
         "artifact_resolution": 24.0,
         "backend_resolution": 36.0,
         "ontology_build": 44.0,
-        "capability": 52.0,
     }
+    if stage == "capability":
+        capability_benchmarks = payload.get("capability_benchmarks") or {}
+        if not capability_benchmarks:
+            return 52.0
+        total_benchmarks = max(len(capability_benchmarks), 1)
+        span = 12.0
+        progress = 48.0
+        completed_benchmarks = len(
+            [item for item in capability_benchmarks.values() if item.get("status") == "completed"]
+        )
+        progress += (span * completed_benchmarks) / float(total_benchmarks)
+        running_benchmarks = [item for item in capability_benchmarks.values() if item.get("status") == "running"]
+        if running_benchmarks:
+            running = running_benchmarks[0]
+            total_cases = running.get("total_cases") or 0
+            completed_cases = running.get("completed_cases") or 0
+            if total_cases:
+                progress += (span / float(total_benchmarks)) * min(completed_cases / float(total_cases), 0.98)
+            else:
+                progress += min(span / float(total_benchmarks) * 0.15, 2.0)
+        return round(min(progress, 60.0), 1)
     if stage in stage_defaults:
         return stage_defaults[stage]
     if stage != "deployment":
@@ -334,11 +354,17 @@ def _progress_percent(payload: Dict[str, Any]) -> Optional[float]:
     deployment_profiles = payload.get("deployment_profiles") or {}
     total_profiles = max(len(configured_profiles), len(deployment_profiles))
     if total_profiles <= 0:
-        return 70.0
+        return 72.0
     completed_profiles = len([item for item in deployment_profiles.values() if item.get("status") == "completed"])
-    running_profiles = len([item for item in deployment_profiles.values() if item.get("status") == "running"])
-    step = 35.0 / float(total_profiles)
-    progress = 55.0 + (completed_profiles * step)
+    running_profiles = [item for item in deployment_profiles.values() if item.get("status") == "running"]
+    step = 34.0 / float(total_profiles)
+    progress = 60.0 + (completed_profiles * step)
     if running_profiles:
-        progress += min(step * 0.5, 10.0)
+        running = running_profiles[0]
+        total_iterations = running.get("total_iterations") or 0
+        completed_iterations = running.get("completed_iterations") or 0
+        if total_iterations:
+            progress += step * min(completed_iterations / float(total_iterations), 0.98)
+        else:
+            progress += min(step * 0.2, 6.0)
     return round(min(progress, 94.0), 1)

@@ -12,8 +12,12 @@ from infergrade.progress import (
     initialize_progress,
     load_progress,
     mark_completed,
+    mark_capability_benchmark_completed,
+    mark_capability_benchmark_started,
     mark_failed,
     mark_profile_completed,
+    update_capability_benchmark_progress,
+    update_profile_progress,
     mark_profile_started,
     mark_stage_completed,
     mark_stage_started,
@@ -424,7 +428,54 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         mark_stage_started(output_dir, progress, current_stage)
         if request.capability != "none":
             _emit_progress(emit_progress, "Running capability suite...")
-        capability_execution = adapter.run_capability(request)
+        def _on_capability_progress(payload: Dict[str, Any]) -> None:
+            event = payload.get("event")
+            benchmark_id = payload.get("benchmark_id")
+            if event == "benchmark_started" and benchmark_id:
+                mark_capability_benchmark_started(
+                    output_dir,
+                    progress,
+                    benchmark_id=benchmark_id,
+                    display_name=str(payload.get("display_name") or benchmark_id),
+                    total_cases=payload.get("total_cases"),
+                )
+            elif event == "case_progress" and benchmark_id:
+                update_capability_benchmark_progress(
+                    output_dir,
+                    progress,
+                    benchmark_id=benchmark_id,
+                    completed_cases=payload.get("completed_cases"),
+                    total_cases=payload.get("total_cases"),
+                    current_case=payload.get("current_case"),
+                    progress_detail="%s/%s" % (
+                        payload.get("completed_cases") or 0,
+                        payload.get("total_cases") or "?",
+                    ),
+                )
+            elif event == "benchmark_completed" and benchmark_id:
+                update_capability_benchmark_progress(
+                    output_dir,
+                    progress,
+                    benchmark_id=benchmark_id,
+                    completed_cases=payload.get("completed_cases"),
+                    total_cases=payload.get("total_cases"),
+                    progress_detail="completed" if payload.get("status") == "completed" else "failed",
+                )
+                mark_capability_benchmark_completed(
+                    output_dir,
+                    progress,
+                    benchmark_id=benchmark_id,
+                    status=str(payload.get("status") or "completed"),
+                    metadata={
+                        key: payload[key]
+                        for key in ("primary_metric", "error")
+                        if payload.get(key) is not None
+                    },
+                )
+            if payload.get("message"):
+                _emit_progress(emit_progress, str(payload["message"]))
+
+        capability_execution = adapter.run_capability(request, progress_callback=_on_capability_progress)
         mark_stage_completed(output_dir, progress, current_stage, metadata={"status": capability_execution.status})
 
         deployment_artifacts: Dict[str, Any] = {}
@@ -448,7 +499,32 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             current_detail = profile_id
             mark_profile_started(output_dir, progress, profile_id)
             _emit_progress(emit_progress, "Running deployment profile %s..." % profile_id)
-            execution = adapter.run_deployment_profile(request, profile_id)
+            def _on_deployment_progress(payload: Dict[str, Any]) -> None:
+                event = payload.get("event")
+                if event in ("profile_started", "iteration_started", "iteration_completed"):
+                    update_profile_progress(
+                        output_dir,
+                        progress,
+                        profile_id=profile_id,
+                        total_iterations=payload.get("total_iterations"),
+                        completed_iterations=payload.get("completed_iterations"),
+                        warmup_runs=payload.get("warmup_runs"),
+                        measured_runs=payload.get("measured_runs"),
+                        current_iteration=payload.get("current_iteration"),
+                        current_phase=payload.get("phase"),
+                        progress_detail=(
+                            "%s %s/%s"
+                            % (
+                                payload.get("phase") or "iteration",
+                                payload.get("current_iteration") or payload.get("completed_iterations") or 0,
+                                payload.get("total_iterations") or "?",
+                            )
+                        ),
+                    )
+                if payload.get("message"):
+                    _emit_progress(emit_progress, str(payload["message"]))
+
+            execution = adapter.run_deployment_profile(request, profile_id, progress_callback=_on_deployment_progress)
             record = _build_result_record(
                 bundle_id=bundle_id,
                 request=request,

@@ -8,7 +8,13 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.capabilities import capability_images_for_request, execute_capability_suite, resolve_capability_suite
+from infergrade.capabilities import (
+    _host_mount_path,
+    _run_capability_container,
+    capability_images_for_request,
+    execute_capability_suite,
+    resolve_capability_suite,
+)
 from infergrade.models import RunRequest
 
 
@@ -104,6 +110,73 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(execution.status, "partial")
         self.assertAlmostEqual(execution.score, 0.5)
         self.assertEqual(execution.benchmark_results["evalplus_mbpp"]["status"], "failed")
+
+    def test_host_mount_path_maps_listener_runs_dir_to_host_runs_dir(self):
+        benchmark_dir = os.path.join("/app/runs", "run_example", "artifacts", "capability", "ifeval")
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "INFERGRADE_HOST_RUNS_DIR": "/Users/tester/infergrade-runner/runs",
+            },
+            clear=False,
+        ):
+            self.assertEqual(
+                _host_mount_path(benchmark_dir),
+                "/Users/tester/infergrade-runner/runs/run_example/artifacts/capability/ifeval",
+            )
+
+    def test_run_capability_container_uses_host_runs_dir_for_nested_docker_mounts(self):
+        benchmark_dir = os.path.join("/app/runs", "run_example", "artifacts", "capability", "evalplus_humaneval")
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "INFERGRADE_HOST_RUNS_DIR": "/Users/tester/infergrade-runner/runs",
+            },
+            clear=False,
+        ):
+            with mock.patch("infergrade.capabilities.install_image"):
+                with mock.patch("infergrade.capabilities.subprocess.run", return_value=mock.Mock(returncode=0, stdout="", stderr="")) as run_mock:
+                    _run_capability_container("infergrade-evalplus:local", benchmark_dir, ["prepare", "--output-dir", "/work"])
+        command = run_mock.call_args[0][0]
+        self.assertIn(
+            "/Users/tester/infergrade-runner/runs/run_example/artifacts/capability/evalplus_humaneval:/work",
+            command,
+        )
+
+    def test_execute_capability_suite_reports_benchmark_progress(self):
+        events = []
+
+        def fake_prepare(spec, benchmark_dir, tier):
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for index in range(10):
+                    handle.write(
+                        json.dumps({"case_id": "case-%d" % index, "task_id": "Task/%d" % index, "prompt": "Write code"}) + "\n"
+                    )
+
+        def fake_evaluate(spec, benchmark_dir):
+            return {
+                "benchmark_id": spec.benchmark_id,
+                "display_name": spec.display_name,
+                "status": "completed",
+                "primary_metric": {"name": spec.primary_metric_name, "value": 0.7},
+                "metrics": {spec.primary_metric_name: 0.7},
+            }
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="agentic_coding",
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                execute_capability_suite(_FakeAdapter(), request, progress_callback=events.append)
+        event_types = [event["event"] for event in events]
+        self.assertIn("benchmark_started", event_types)
+        self.assertIn("case_progress", event_types)
+        self.assertIn("benchmark_completed", event_types)
 
 
 if __name__ == "__main__":

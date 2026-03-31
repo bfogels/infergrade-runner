@@ -76,6 +76,7 @@ DOCKER_ARGS=(
   run
   --rm
   -e "INFERGRADE_HOST_ARTIFACT_CACHE_DIR=$ARTIFACT_CACHE_DIR"
+  -e "INFERGRADE_HOST_RUNS_DIR=$RUNS_DIR"
   -e "INFERGRADE_HOST_ENVIRONMENT_PATH=/app/runs/.listener-host-environment.json"
   -v /var/run/docker.sock:/var/run/docker.sock
   -v "$RUNS_DIR:/app/runs"

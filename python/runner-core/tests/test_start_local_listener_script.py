@@ -62,6 +62,13 @@ class StartLocalListenerScriptTests(unittest.TestCase):
         docker_args = self.docker_log.read_text(encoding="utf-8")
         self.assertIn("--once --simulate", docker_args)
 
+    def test_exports_host_runs_dir_for_nested_container_mounts(self):
+        result = self._run_script("--api-url", "http://example.invalid:8000")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        docker_args = self.docker_log.read_text(encoding="utf-8")
+        expected_runs_dir = str((self.script_path.parent.parent / "runs").resolve())
+        self.assertIn("INFERGRADE_HOST_RUNS_DIR=%s" % expected_runs_dir, docker_args)
+
 
 if __name__ == "__main__":
     unittest.main()

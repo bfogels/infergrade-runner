@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
@@ -68,21 +68,59 @@ class LlamaCppAdapter(BaseAdapter):
         output = (completed.stdout or completed.stderr or "").strip()
         return output.splitlines()[0] if output else self._image_name(request)
 
-    def run_deployment_profile(self, request: RunRequest, profile_id: str) -> DeploymentExecution:
+    def run_deployment_profile(
+        self,
+        request: RunRequest,
+        profile_id: str,
+        progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
+    ) -> DeploymentExecution:
         if request.simulate:
-            return super().run_deployment_profile(request, profile_id)
+            return super().run_deployment_profile(request, profile_id, progress_callback=progress_callback)
         if request.execution_mode not in ("local_container", "cloud_container"):
             raise NotImplementedError("Real llama.cpp execution currently supports local_container and cloud_container modes.")
         model_path = self._require_local_gguf_artifact(request)
         profile_spec = self._profile_spec(profile_id, request.use_case)
         warmup_runs = 1 if request.tier == "canary" else 2
         measured_runs = 1 if request.tier == "canary" else 5
+        total_iterations = warmup_runs + measured_runs
         measurements = []
         raw_runs = []
         failures = []
 
-        for iteration in range(warmup_runs + measured_runs):
+        if progress_callback:
+            progress_callback(
+                {
+                    "event": "profile_started",
+                    "profile_id": profile_id,
+                    "warmup_runs": warmup_runs,
+                    "measured_runs": measured_runs,
+                    "total_iterations": total_iterations,
+                    "message": "Deployment profile %s started." % profile_id,
+                }
+            )
+
+        for iteration in range(total_iterations):
             is_warmup = iteration < warmup_runs
+            if progress_callback:
+                phase = "warmup" if is_warmup else "measured"
+                progress_callback(
+                    {
+                        "event": "iteration_started",
+                        "profile_id": profile_id,
+                        "total_iterations": total_iterations,
+                        "completed_iterations": iteration,
+                        "current_iteration": iteration + 1,
+                        "warmup_runs": warmup_runs,
+                        "measured_runs": measured_runs,
+                        "phase": phase,
+                        "message": "Deployment profile %s %s iteration %d/%d." % (
+                            profile_id,
+                            phase,
+                            iteration + 1,
+                            total_iterations,
+                        ),
+                    }
+                )
             execution = self._run_container_benchmark(
                 request=request,
                 model_path=model_path,
@@ -94,9 +132,29 @@ class LlamaCppAdapter(BaseAdapter):
             raw_runs.append(execution)
             if execution["status"] != "completed":
                 failures.append(execution)
-                continue
-            if not is_warmup:
+            elif not is_warmup:
                 measurements.append(execution["metrics"])
+            if progress_callback:
+                phase = "warmup" if is_warmup else "measured"
+                progress_callback(
+                    {
+                        "event": "iteration_completed",
+                        "profile_id": profile_id,
+                        "total_iterations": total_iterations,
+                        "completed_iterations": iteration + 1,
+                        "current_iteration": iteration + 1,
+                        "warmup_runs": warmup_runs,
+                        "measured_runs": measured_runs,
+                        "phase": phase,
+                        "status": execution["status"],
+                        "message": "Deployment profile %s completed %s iteration %d/%d." % (
+                            profile_id,
+                            phase,
+                            iteration + 1,
+                            total_iterations,
+                        ),
+                    }
+                )
 
         if not measurements:
             last_failure = failures[-1] if failures else None

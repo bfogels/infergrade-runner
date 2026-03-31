@@ -4,7 +4,7 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.worker import run_worker_once
+from infergrade.worker import _progress_percent, run_worker_once
 
 
 class WorkerTests(unittest.TestCase):
@@ -110,7 +110,8 @@ class WorkerTests(unittest.TestCase):
             any(
                 call.kwargs.get("stage") == "deployment"
                 and call.kwargs.get("detail") == "interactive_chat_v1"
-                and call.kwargs.get("progress_percent") == 65.0
+                and call.kwargs.get("progress_percent") is not None
+                and call.kwargs.get("progress_percent") >= 60.0
                 for call in heartbeat_mock.call_args_list
             )
         )
@@ -230,6 +231,35 @@ class WorkerTests(unittest.TestCase):
 
         self.assertTrue(result["completed"])
         scoped_upload_mock.assert_called_once()
+
+    def test_progress_percent_uses_capability_case_progress(self):
+        payload = {
+            "current_stage": "capability",
+            "capability_benchmarks": {
+                "evalplus_humaneval": {
+                    "status": "running",
+                    "completed_cases": 82,
+                    "total_cases": 164,
+                }
+            },
+        }
+        self.assertGreater(_progress_percent(payload), 52.0)
+        self.assertLess(_progress_percent(payload), 60.1)
+
+    def test_progress_percent_uses_deployment_iteration_progress(self):
+        payload = {
+            "current_stage": "deployment",
+            "request_context": {"deployment_profiles": ["interactive_chat_v1"]},
+            "deployment_profiles": {
+                "interactive_chat_v1": {
+                    "status": "running",
+                    "completed_iterations": 3,
+                    "total_iterations": 7,
+                }
+            },
+        }
+        self.assertGreater(_progress_percent(payload), 60.0)
+        self.assertLess(_progress_percent(payload), 94.1)
 
 
 if __name__ == "__main__":
