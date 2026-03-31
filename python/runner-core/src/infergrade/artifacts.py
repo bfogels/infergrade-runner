@@ -1,5 +1,6 @@
 """Artifact resolution helpers for local, cached, and remote quantized files."""
 
+import json
 import hashlib
 import os
 import shutil
@@ -67,16 +68,17 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
             size_bytes=os.path.getsize(local_path),
         )
 
-    download_url = artifact_to_download_url(artifact, revision=request.quant_artifact_revision)
+    resolved_artifact_uri = artifact
+    download_url = artifact_to_download_url(resolved_artifact_uri, revision=request.quant_artifact_revision)
     cache_dir = os.path.abspath(request.quant_artifact_cache_dir or default_artifact_cache_dir())
     ensure_dir(cache_dir)
-    filename = request.quant_artifact_filename or _infer_filename(artifact)
-    cache_path = _cache_path(cache_dir, artifact, filename, request.quant_artifact_sha256)
+    filename = request.quant_artifact_filename or _infer_filename(resolved_artifact_uri)
+    cache_path = _cache_path(cache_dir, resolved_artifact_uri, filename, request.quant_artifact_sha256)
     if os.path.isfile(cache_path):
         cached_sha = compute_file_sha256(cache_path)
         _verify_expected_sha256(cache_path, cached_sha, request.quant_artifact_sha256)
         return ResolvedArtifact(
-            original_uri=artifact,
+            original_uri=resolved_artifact_uri,
             resolved_path=cache_path,
             sha256=cached_sha,
             filename=os.path.basename(cache_path),
@@ -90,7 +92,21 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
     tmp_fd, tmp_path = tempfile.mkstemp(prefix="infergrade-artifact-", suffix=".tmp", dir=cache_dir)
     os.close(tmp_fd)
     try:
-        _download_remote_artifact(download_url, tmp_path)
+        try:
+            _download_remote_artifact(download_url, tmp_path)
+        except Exception as exc:
+            if _is_huggingface_not_found(exc) and resolved_artifact_uri.startswith("hf://"):
+                canonical_artifact_uri = canonicalize_hf_artifact_reference(resolved_artifact_uri)
+                if canonical_artifact_uri != resolved_artifact_uri:
+                    resolved_artifact_uri = canonical_artifact_uri
+                    download_url = artifact_to_download_url(resolved_artifact_uri, revision=request.quant_artifact_revision)
+                    filename = request.quant_artifact_filename or _infer_filename(resolved_artifact_uri)
+                    cache_path = _cache_path(cache_dir, resolved_artifact_uri, filename, request.quant_artifact_sha256)
+                    _download_remote_artifact(download_url, tmp_path)
+                else:
+                    raise
+            else:
+                raise
         sha256 = compute_file_sha256(tmp_path)
         _verify_expected_sha256(tmp_path, sha256, request.quant_artifact_sha256)
         os.replace(tmp_path, cache_path)
@@ -100,7 +116,7 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
         raise
 
     return ResolvedArtifact(
-        original_uri=artifact,
+        original_uri=resolved_artifact_uri,
         resolved_path=cache_path,
         sha256=sha256,
         filename=os.path.basename(cache_path),
@@ -150,6 +166,19 @@ def artifact_to_download_url(uri: str, revision: Optional[str] = None) -> str:
     raise ValueError("Unsupported remote artifact reference: %s" % uri)
 
 
+def canonicalize_hf_artifact_reference(uri: str) -> str:
+    """Return an hf:// URI rewritten to the exact Hub sibling path when possible."""
+    repo_id, file_path = _parse_hf_artifact_reference(uri)
+    siblings = _fetch_huggingface_siblings(repo_id)
+    if file_path in siblings:
+        return uri
+    lookup = {path.lower(): path for path in siblings}
+    corrected = lookup.get(file_path.lower())
+    if not corrected:
+        return uri
+    return "hf://%s/%s" % (repo_id, corrected)
+
+
 def _download_remote_artifact(download_url: str, destination_path: str) -> None:
     """Download a remote artifact, falling back to curl when stdlib transport fails."""
     try:
@@ -185,6 +214,32 @@ def _download_with_curl(download_url: str, destination_path: str) -> None:
         )
 
 
+def _fetch_huggingface_siblings(repo_id: str) -> list:
+    """Fetch sibling filenames for a Hugging Face model, using curl when needed."""
+    url = "https://huggingface.co/api/models/%s" % urllib_parse.quote(repo_id, safe="/")
+    try:
+        with urllib_request.urlopen(url) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        if not _should_fallback_to_curl(exc):
+            raise
+        payload = _fetch_json_with_curl(url)
+    return [item.get("rfilename") for item in payload.get("siblings", []) if item.get("rfilename")]
+
+
+def _fetch_json_with_curl(url: str) -> Dict[str, object]:
+    """Fetch JSON via curl as a pragmatic fallback on local Python SSL issues."""
+    completed = subprocess.run(
+        ["curl", "-L", "--fail", "-H", "Accept: application/json", url],
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        message = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError("curl failed while fetching %s: %s" % (url, message or "unknown error"))
+    return json.loads(completed.stdout)
+
+
 def _cache_path(cache_dir: str, artifact: str, filename: str, expected_sha256: Optional[str]) -> str:
     """Derive a stable cache path for a remote artifact reference."""
     digest = expected_sha256 or stable_hash({"artifact": artifact, "filename": filename}, length=16)
@@ -201,6 +256,15 @@ def _infer_filename(uri: str) -> str:
     return "artifact.bin"
 
 
+def _parse_hf_artifact_reference(uri: str) -> tuple:
+    """Split an hf:// URI into repo id and file path."""
+    without_scheme = uri[len("hf://") :].strip("/")
+    parts = without_scheme.split("/")
+    if len(parts) < 3:
+        raise ValueError("hf:// artifact references must include repo and file path: %s" % uri)
+    return "/".join(parts[:2]), "/".join(parts[2:])
+
+
 def _is_local_artifact_reference(uri: str) -> bool:
     """Return whether a URI should be treated as an already-local file."""
     if uri.startswith("file://"):
@@ -213,6 +277,12 @@ def _normalize_local_path(uri: str) -> str:
     if uri.startswith("file://"):
         return urllib_parse.unquote(urllib_parse.urlparse(uri).path)
     return os.path.abspath(uri)
+
+
+def _is_huggingface_not_found(exc: Exception) -> bool:
+    """Return whether an artifact download error looks like an HF 404."""
+    message = str(exc).lower()
+    return "404" in message or "not found" in message
 
 
 def _verify_expected_sha256(path: str, actual_sha256: str, expected_sha256: Optional[str]) -> None:

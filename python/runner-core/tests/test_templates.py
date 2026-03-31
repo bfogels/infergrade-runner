@@ -13,7 +13,7 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(payload["runtime"]["backend_image"], "infergrade-llama-cpp:local")
         self.assertEqual(
             payload["artifacts"]["quantized_weights"]["uri"],
-            "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf",
+            "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         )
 
 

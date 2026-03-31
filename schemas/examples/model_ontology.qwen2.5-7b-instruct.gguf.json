@@ -17,7 +17,7 @@
   "quantization": {
     "quantization_status": "quantized",
     "quantization_format": "gguf",
-    "quantization_label": "qwen2.5-7b-instruct-q4_k_m.gguf",
+    "quantization_label": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
     "quantization_family": "k_quant",
     "quantization_scheme": "q4_k_m",
     "weight_precision_bits": 4.0
@@ -25,8 +25,8 @@
   "artifact": {
     "artifact_id": "art_qwen2-5-7b-instruct-q4-k-m-gguf_6ebea7f54d",
     "artifact_kind": "quantized_weights",
-    "artifact_uri": "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf",
-    "artifact_filename": "qwen2.5-7b-instruct-q4_k_m.gguf",
+    "artifact_uri": "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "artifact_filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
     "artifact_sha256": "6ebea7f54d1af57d",
     "artifact_resolved_by": "operator"
   },

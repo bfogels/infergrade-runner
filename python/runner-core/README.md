@@ -27,13 +27,13 @@ The runner still defaults to simulated execution, but it now has a first real ba
 
 ```bash
 PYTHONPATH=python/runner-core/src python3 -m unittest discover -s python/runner-core/tests
-PYTHONPATH=python/runner-core/src python3 -m infergrade doctor --model Qwen/Qwen2.5-7B-Instruct --backend llama.cpp --tier canary --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf
+PYTHONPATH=python/runner-core/src python3 -m infergrade doctor --model Qwen/Qwen2.5-7B-Instruct --backend llama.cpp --tier canary --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
 PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5-7B-Instruct --backend llama.cpp --tier canary --output runs/qwen_canary --resume
 docker build -t infergrade-llama-cpp:local -f containers/llama-cpp/Dockerfile .
 docker build -t infergrade-ifeval:local -f containers/capability-ifeval/Dockerfile .
 docker build -t infergrade-evalplus:local -f containers/capability-evalplus/Dockerfile .
 PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5-7B-Instruct --quant-artifact /absolute/path/to/model.gguf --backend llama.cpp --tier canary --output runs/local_real_run --resume --real-run
-PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5-7B-Instruct --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf --quant-artifact-filename qwen2.5-7b-instruct-q4_k_m.gguf --backend llama.cpp --backend-image infergrade-llama-cpp:local --tier canary --output runs/hf_real_run --resume --real-run
+PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5-7B-Instruct --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf --quant-artifact-filename Qwen2.5-7B-Instruct-Q4_K_M.gguf --backend llama.cpp --backend-image infergrade-llama-cpp:local --tier canary --output runs/hf_real_run --resume --real-run
 ```
 
 ## Recommended Flow

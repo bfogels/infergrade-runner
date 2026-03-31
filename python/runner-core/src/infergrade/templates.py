@@ -28,8 +28,8 @@ def build_run_request_template(
         if model == "Qwen/Qwen2.5-7B-Instruct":
             payload["artifacts"] = {
                 "quantized_weights": {
-                    "uri": "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf",
-                    "filename": "qwen2.5-7b-instruct-q4_k_m.gguf",
+                    "uri": "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+                    "filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
                 }
             }
     if tier != "canary":

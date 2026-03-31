@@ -40,11 +40,11 @@ class RequestResolutionTests(unittest.TestCase):
                 "backend": "llama.cpp",
                 "tier": "canary",
             },
-            "artifacts": {
-                "quantized_weights": {
-                    "uri": "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf",
+                "artifacts": {
+                    "quantized_weights": {
+                    "uri": "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
                     "sha256": "abc123",
-                    "filename": "qwen2.5-7b-instruct-q4_k_m.gguf",
+                    "filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
                     "revision": "main",
                 }
             },
@@ -56,10 +56,10 @@ class RequestResolutionTests(unittest.TestCase):
         request = request_from_dict(payload)
         self.assertEqual(
             request.quant_artifact,
-            "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf",
+            "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         )
         self.assertEqual(request.quant_artifact_sha256, "abc123")
-        self.assertEqual(request.quant_artifact_filename, "qwen2.5-7b-instruct-q4_k_m.gguf")
+        self.assertEqual(request.quant_artifact_filename, "Qwen2.5-7B-Instruct-Q4_K_M.gguf")
         self.assertEqual(request.quant_artifact_revision, "main")
         self.assertEqual(request.backend_image, "infergrade-llama-cpp:local")
         self.assertEqual(request.quant_artifact_cache_dir, "/tmp/infergrade-cache")

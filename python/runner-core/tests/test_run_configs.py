@@ -19,8 +19,8 @@ class RunConfigTests(unittest.TestCase):
                 },
                 "artifacts": {
                     "quantized_weights": {
-                        "uri": "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf",
-                        "filename": "qwen2.5-7b-instruct-q4_k_m.gguf",
+                        "uri": "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+                        "filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
                     }
                 },
                 "runtime": {
@@ -35,6 +35,6 @@ class RunConfigTests(unittest.TestCase):
         self.assertEqual(request.model, "Qwen/Qwen2.5-7B-Instruct")
         self.assertEqual(
             request.quant_artifact,
-            "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf",
+            "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         )
         self.assertEqual(request.backend_image, "infergrade-llama-cpp:local")

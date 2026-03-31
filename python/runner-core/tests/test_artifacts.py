@@ -10,6 +10,7 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.artifacts import (
     artifact_to_download_url,
+    canonicalize_hf_artifact_reference,
     compute_file_sha256,
     resolve_quant_artifact,
 )
@@ -78,10 +79,56 @@ class ArtifactResolutionTests(unittest.TestCase):
     def test_hf_artifact_urls_expand_to_huggingface_resolve_urls(self):
         self.assertEqual(
             artifact_to_download_url(
-                "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf"
+                "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf"
             ),
-            "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf",
+            "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         )
+
+    @mock.patch("infergrade.artifacts._fetch_huggingface_siblings")
+    def test_canonicalize_hf_artifact_reference_fixes_case_mismatch(self, siblings_mock):
+        siblings_mock.return_value = [
+            "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+            "Qwen2.5-7B-Instruct-Q5_K_M.gguf",
+        ]
+        corrected = canonicalize_hf_artifact_reference(
+            "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf"
+        )
+        self.assertEqual(
+            corrected,
+            "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+        )
+
+    @mock.patch("infergrade.artifacts.compute_file_sha256", return_value="abc123")
+    @mock.patch("infergrade.artifacts._fetch_huggingface_siblings")
+    @mock.patch("infergrade.artifacts._download_remote_artifact")
+    def test_remote_artifact_resolution_retries_with_canonical_hf_path_on_404(
+        self,
+        download_mock,
+        siblings_mock,
+        _sha_mock,
+    ):
+        siblings_mock.return_value = ["Qwen2.5-7B-Instruct-Q4_K_M.gguf"]
+
+        def side_effect(download_url, destination_path):
+            if "qwen2.5-7b-instruct-q4_k_m.gguf" in download_url:
+                raise RuntimeError("curl failed while downloading %s: 404" % download_url)
+            with open(destination_path, "wb") as handle:
+                handle.write(b"canonical-download")
+
+        download_mock.side_effect = side_effect
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://bartowski/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q4_k_m.gguf",
+            quant_artifact_cache_dir=self.cache_dir,
+        )
+        resolved = resolve_quant_artifact(request)
+        self.assertEqual(
+            resolved.original_uri,
+            "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+        )
+        self.assertIn("Qwen2.5-7B-Instruct-Q4_K_M.gguf", resolved.download_url)
 
     @mock.patch("infergrade.artifacts.subprocess.run")
     @mock.patch("infergrade.artifacts.shutil.which", return_value="/usr/bin/curl")
