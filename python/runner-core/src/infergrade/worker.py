@@ -6,7 +6,7 @@ import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from infergrade import __version__
-from infergrade.doctor import run_doctor
+from infergrade.doctor import collect_runner_diagnostics, run_doctor
 from infergrade.progress import load_progress
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.runner import run_infergrade
@@ -34,6 +34,7 @@ def execute_run_job(
     provider_id: str = None,
     instance_type_id: str = None,
     emit_progress: Optional[Callable[[str], None]] = None,
+    runner_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Execute one claimed run job and report lifecycle state back to the API."""
     run_id = run_job["run_id"]
@@ -51,6 +52,9 @@ def execute_run_job(
             provider_id=provider_id,
             instance_type_id=instance_type_id,
             metadata={"message": message} if message else None,
+            environment=(runner_snapshot or {}).get("environment"),
+            contract=(runner_snapshot or {}).get("contract"),
+            diagnostics=(runner_snapshot or {}).get("diagnostics"),
         )
 
     try:
@@ -158,6 +162,7 @@ def run_worker_once(
     run_token: str = None,
     simulate: bool = False,
     emit_progress: Optional[Callable[[str], None]] = None,
+    runner_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Claim and execute at most one run job."""
     resolved_worker_id = worker_id or _default_worker_id()
@@ -193,6 +198,7 @@ def run_worker_once(
         provider_id=provider_id,
         instance_type_id=instance_type_id,
         emit_progress=emit_progress,
+        runner_snapshot=runner_snapshot,
     )
     result["worker_id"] = resolved_worker_id
     return result
@@ -216,6 +222,7 @@ def run_worker_loop(
 ) -> Dict[str, Any]:
     """Continuously poll for run jobs and execute them."""
     resolved_worker_id = worker_id or _default_worker_id()
+    runner_snapshot = collect_runner_diagnostics([execution_mode])
     register_runner(
         api_url=api_url,
         runner_id=resolved_worker_id,
@@ -228,6 +235,9 @@ def run_worker_loop(
         instance_type_id=instance_type_id,
         capabilities={"run_token_supported": True, "auto_upload": True},
         version=__version__,
+        environment=runner_snapshot.get("environment"),
+        contract=runner_snapshot.get("contract"),
+        diagnostics=runner_snapshot.get("diagnostics"),
     )
     heartbeat_runner(
         api_url=api_url,
@@ -238,6 +248,9 @@ def run_worker_loop(
         provider_id=provider_id,
         instance_type_id=instance_type_id,
         metadata={"message": "Runner registered and awaiting jobs."},
+        environment=runner_snapshot.get("environment"),
+        contract=runner_snapshot.get("contract"),
+        diagnostics=runner_snapshot.get("diagnostics"),
     )
     processed = 0
     completed = 0
@@ -258,6 +271,7 @@ def run_worker_loop(
             run_token=run_token,
             simulate=simulate,
             emit_progress=emit_progress,
+            runner_snapshot=runner_snapshot,
         )
         if not result.get("claimed"):
             heartbeat_runner(
@@ -269,6 +283,9 @@ def run_worker_loop(
                 provider_id=provider_id,
                 instance_type_id=instance_type_id,
                 metadata={"message": "Runner is polling for more work."},
+                environment=runner_snapshot.get("environment"),
+                contract=runner_snapshot.get("contract"),
+                diagnostics=runner_snapshot.get("diagnostics"),
             )
             time.sleep(max(poll_interval_seconds, 0.1))
             continue

@@ -4,7 +4,7 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.worker import _progress_percent, run_worker_once
+from infergrade.worker import _progress_percent, run_worker_loop, run_worker_once
 
 
 class WorkerTests(unittest.TestCase):
@@ -260,6 +260,29 @@ class WorkerTests(unittest.TestCase):
         }
         self.assertGreater(_progress_percent(payload), 60.0)
         self.assertLess(_progress_percent(payload), 94.1)
+
+    def test_worker_loop_registers_runner_diagnostics(self):
+        snapshot = {
+            "environment": {"hardware_class": "apple_silicon"},
+            "contract": {"publisher": "infergrade-runner", "contract_version": "0.1.0"},
+            "diagnostics": {"status": "ready", "checks": []},
+        }
+        with mock.patch("infergrade.worker.collect_runner_diagnostics", return_value=snapshot):
+            with mock.patch("infergrade.worker.register_runner") as register_mock:
+                with mock.patch("infergrade.worker.heartbeat_runner"):
+                    with mock.patch("infergrade.worker.run_worker_once", return_value={"claimed": True, "completed": True, "worker_id": "runner-1"}):
+                        result = run_worker_loop(
+                            api_url="http://localhost:8000",
+                            execution_mode="local_native",
+                            worker_id="runner-1",
+                            max_jobs=1,
+                        )
+
+        self.assertEqual(result["processed_jobs"], 1)
+        register_mock.assert_called_once()
+        self.assertEqual(register_mock.call_args.kwargs["environment"], snapshot["environment"])
+        self.assertEqual(register_mock.call_args.kwargs["contract"], snapshot["contract"])
+        self.assertEqual(register_mock.call_args.kwargs["diagnostics"], snapshot["diagnostics"])
 
 
 if __name__ == "__main__":

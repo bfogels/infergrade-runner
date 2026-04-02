@@ -10,8 +10,9 @@ from urllib import request as urllib_request
 
 from infergrade.artifacts import artifact_to_download_url, default_artifact_cache_dir
 from infergrade.capabilities import capability_images_for_request
+from infergrade.contracts import load_contract_manifest
 from infergrade.environment import capture_environment
-from infergrade.images import local_build_command
+from infergrade.images import docker_image_exists, local_build_command
 from infergrade.models import RunRequest
 
 
@@ -19,6 +20,10 @@ DEFAULT_BACKEND_IMAGES = {
     "llama.cpp": "infergrade-llama-cpp:local",
     "vllm": "infergrade-vllm:local",
 }
+DEFAULT_LOCAL_CAPABILITY_IMAGES = (
+    {"benchmark_id": "ifeval", "display_name": "IFEval", "image": "infergrade-ifeval:local"},
+    {"benchmark_id": "evalplus", "display_name": "EvalPlus", "image": "infergrade-evalplus:local"},
+)
 
 
 def run_doctor(request: Optional[RunRequest] = None, api_url: Optional[str] = None) -> Dict[str, Any]:
@@ -39,6 +44,91 @@ def run_doctor(request: Optional[RunRequest] = None, api_url: Optional[str] = No
         "warning_count": warning_count,
         "request_context": _request_context(request, api_url),
         "checks": checks,
+    }
+
+
+def collect_runner_diagnostics(execution_modes: List[str]) -> Dict[str, Any]:
+    """Collect runner-level readiness diagnostics for long-lived paired workers."""
+    modes = [str(mode).strip() for mode in (execution_modes or []) if str(mode).strip()]
+    environment_mode = "local_native" if "local_native" in modes else (modes[0] if modes else "local_container")
+    environment = capture_environment(environment_mode)
+    checks: List[Dict[str, Any]] = []
+
+    try:
+        contract = load_contract_manifest()
+        checks.append(
+            _check(
+                "runner_contract",
+                "ok",
+                "Runner contract manifest is available.",
+                {
+                    "publisher": contract.get("publisher"),
+                    "contract_version": contract.get("contract_version"),
+                },
+            )
+        )
+    except Exception as exc:
+        contract = {"publisher": "infergrade-runner", "contract_version": None}
+        checks.append(
+            _check(
+                "runner_contract",
+                "error",
+                "Runner contract manifest could not be loaded.",
+                {"error": str(exc)},
+            )
+        )
+
+    if any(mode in {"local_container", "cloud_container"} for mode in modes):
+        docker_cli = _binary_check("docker", "docker_cli", "Docker CLI is available.")
+        checks.append(docker_cli)
+        if docker_cli["status"] == "ok":
+            checks.append(_docker_daemon_check())
+            checks.extend(_runner_image_checks())
+
+    if "local_native" in modes:
+        checks.extend(_native_runner_checks(environment))
+
+    if "local_container" in modes and environment.get("hardware_class") == "apple_silicon":
+        checks.append(
+            _check(
+                "apple_silicon_local_container_warning",
+                "warning",
+                "This machine is Apple Silicon. Prefer local_native for realistic Metal-backed llama.cpp benchmarking.",
+                {
+                    "hardware_class": environment.get("hardware_class"),
+                    "suggested_execution_mode": "local_native",
+                },
+            )
+        )
+
+    blocking_checks = [item for item in checks if item.get("status") == "error"]
+    warning_checks = [item for item in checks if item.get("status") == "warning"]
+    summary_message = "Runner is ready for paired execution."
+    summary_status = "ready"
+    if blocking_checks:
+        summary_status = "blocked"
+        summary_message = blocking_checks[0]["message"]
+    elif warning_checks:
+        summary_status = "warning"
+        summary_message = warning_checks[0]["message"]
+
+    return {
+        "execution_modes": modes,
+        "environment": environment,
+        "contract": {
+            "publisher": contract.get("publisher"),
+            "contract_version": contract.get("contract_version"),
+        },
+        "diagnostics": {
+            "status": summary_status,
+            "message": summary_message,
+            "blocking_count": len(blocking_checks),
+            "warning_count": len(warning_checks),
+            "blocking_checks": blocking_checks,
+            "warning_checks": warning_checks,
+            "checks": checks,
+            "preferred_local_execution_mode": _preferred_local_execution_mode(environment),
+        },
     }
 
 
@@ -192,6 +282,44 @@ def _native_runtime_checks(request: RunRequest, environment: Dict[str, Any]) -> 
     return checks
 
 
+def _native_runner_checks(environment: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return runner-level readiness checks for native local execution."""
+    checks: List[Dict[str, Any]] = []
+    cli_path = shutil.which(os.environ.get("INFERGRADE_LLAMA_CPP_CLI", "llama-cli"))
+    server_path = shutil.which(os.environ.get("INFERGRADE_LLAMA_CPP_SERVER", "llama-server"))
+    install_hint = "brew install llama.cpp" if platform.system().lower() == "darwin" else None
+    checks.append(
+        _check(
+            "llama_cli_native",
+            "ok" if cli_path else "error",
+            "Native llama-cli is available." if cli_path else "Native llama-cli is required for local_native llama.cpp runs.",
+            {"path": cli_path, "suggested_install": install_hint},
+        )
+    )
+    checks.append(
+        _check(
+            "llama_server_native",
+            "ok" if server_path else "error",
+            "Native llama-server is available." if server_path else "Native llama-server is required for local_native llama.cpp runs.",
+            {"path": server_path, "suggested_install": install_hint},
+        )
+    )
+    if environment.get("hardware_class") == "apple_silicon":
+        checks.append(
+            _check(
+                "apple_silicon_native_runtime",
+                "ok",
+                "Apple Silicon native execution can use Metal acceleration when the installed llama.cpp binaries include Metal support.",
+                {
+                    "hardware_class": environment.get("hardware_class"),
+                    "accelerator_api": environment.get("accelerator_api"),
+                },
+            )
+        )
+    checks.extend(_runner_capability_image_checks())
+    return checks
+
+
 def _python_version_check() -> Dict[str, Any]:
     version = "%s.%s.%s" % sys.version_info[:3]
     if sys.version_info < (3, 8):
@@ -326,6 +454,47 @@ def _capability_image_checks(request: RunRequest) -> List[Dict[str, Any]]:
     return checks
 
 
+def _runner_image_checks() -> List[Dict[str, Any]]:
+    """Return readiness checks for the default local runtime images."""
+    images = [{"benchmark_id": "llama_cpp", "display_name": "llama.cpp runtime", "image": DEFAULT_BACKEND_IMAGES["llama.cpp"]}]
+    return [_local_image_check(item, warning=True) for item in images]
+
+
+def _runner_capability_image_checks() -> List[Dict[str, Any]]:
+    """Return readiness checks for local capability containers."""
+    return [_local_image_check(item, warning=True) for item in DEFAULT_LOCAL_CAPABILITY_IMAGES]
+
+
+def _local_image_check(image_info: Dict[str, Any], warning: bool = False) -> Dict[str, Any]:
+    """Return a readiness check for one known local image."""
+    image = image_info["image"]
+    if docker_image_exists(image):
+        return _check(
+            "local_image_%s" % image_info["benchmark_id"],
+            "ok",
+            "%s image is available locally." % image_info["display_name"],
+            {
+                "benchmark_id": image_info["benchmark_id"],
+                "display_name": image_info["display_name"],
+                "image": image,
+            },
+        )
+    details = {
+        "benchmark_id": image_info["benchmark_id"],
+        "display_name": image_info["display_name"],
+        "image": image,
+    }
+    build_command = local_build_command(image)
+    if build_command:
+        details["suggested_command"] = build_command
+    return _check(
+        "local_image_%s" % image_info["benchmark_id"],
+        "warning" if warning else "error",
+        "%s image is not present locally yet." % image_info["display_name"],
+        details,
+    )
+
+
 def _cache_dir_check(request: RunRequest) -> Dict[str, Any]:
     path = os.path.expanduser(request.quant_artifact_cache_dir or default_artifact_cache_dir())
     return _writable_directory_check("artifact_cache_dir", path, "Artifact cache directory is writable.")
@@ -400,6 +569,13 @@ def _writable_directory_check(check_id: str, path: str, success_message: str, ex
 def _uses_remote_artifact(request: RunRequest) -> bool:
     artifact = request.quant_artifact or ""
     return artifact.startswith("hf://") or artifact.startswith("http://") or artifact.startswith("https://")
+
+
+def _preferred_local_execution_mode(environment: Dict[str, Any]) -> str:
+    """Return the best default local execution mode for the detected hardware."""
+    if (environment or {}).get("hardware_class") == "apple_silicon":
+        return "local_native"
+    return "local_container"
 
 
 def _check(check_id: str, status: str, message: str, details: Dict[str, Any]) -> Dict[str, Any]:

@@ -41,7 +41,10 @@ class CliTests(unittest.TestCase):
         with mock.patch(
             "infergrade.cli.run_worker_loop",
             return_value={"worker_id": "worker-test", "processed_jobs": 0, "completed_jobs": 0, "failed_jobs": 0},
-        ) as run_loop_mock:
+        ) as run_loop_mock, mock.patch(
+            "infergrade.cli.resolve_runner_api_token",
+            return_value=None,
+        ):
             with redirect_stdout(output):
                 exit_code = main(
                     [
@@ -102,7 +105,10 @@ class CliTests(unittest.TestCase):
         with mock.patch(
             "infergrade.cli.run_worker_once",
             return_value={"claimed": True, "completed": True, "run": {"run_id": "run_example"}},
-        ) as run_job_mock:
+        ) as run_job_mock, mock.patch(
+            "infergrade.cli.resolve_runner_api_token",
+            return_value=None,
+        ):
             with redirect_stdout(output):
                 exit_code = main(
                     [

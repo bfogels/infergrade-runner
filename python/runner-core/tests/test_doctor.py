@@ -6,7 +6,7 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.doctor import run_doctor
+from infergrade.doctor import collect_runner_diagnostics, run_doctor
 from infergrade.models import RunRequest
 
 
@@ -136,6 +136,42 @@ class DoctorTests(unittest.TestCase):
         statuses = {item["id"]: item["status"] for item in report["checks"]}
         self.assertEqual(statuses["llama_cli_native"], "ok")
         self.assertEqual(statuses["llama_server_native"], "ok")
+
+    @mock.patch("infergrade.doctor.load_contract_manifest")
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.shutil.which")
+    @mock.patch("infergrade.doctor.docker_image_exists")
+    @mock.patch("infergrade.doctor.subprocess.run")
+    def test_collect_runner_diagnostics_reports_blockers_and_warnings(
+        self,
+        run_mock,
+        docker_image_exists_mock,
+        which_mock,
+        capture_environment_mock,
+        load_contract_manifest_mock,
+    ):
+        capture_environment_mock.return_value = {
+            "environment_class": "local_workstation",
+            "hardware_class": "apple_silicon",
+            "accelerator_api": "metal",
+            "accelerator_type": "gpu",
+            "accelerator_count": 1,
+            "hardware_id": "hw_test",
+        }
+        load_contract_manifest_mock.return_value = {"publisher": "infergrade-runner", "contract_version": "0.1.0"}
+        which_mock.side_effect = lambda name: "/usr/bin/docker" if name == "docker" else None
+        docker_image_exists_mock.return_value = False
+        run_mock.return_value = mock.Mock(returncode=0, stdout="Server Version: 26.0.0", stderr="")
+
+        diagnostics = collect_runner_diagnostics(["local_container"])
+
+        self.assertEqual(diagnostics["contract"]["contract_version"], "0.1.0")
+        self.assertEqual(diagnostics["diagnostics"]["status"], "warning")
+        check_statuses = {item["id"]: item["status"] for item in diagnostics["diagnostics"]["checks"]}
+        self.assertEqual(check_statuses["docker_cli"], "ok")
+        self.assertEqual(check_statuses["docker_daemon"], "ok")
+        self.assertEqual(check_statuses["apple_silicon_local_container_warning"], "warning")
+        self.assertEqual(check_statuses["local_image_llama_cpp"], "warning")
 
 
 if __name__ == "__main__":

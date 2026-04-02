@@ -302,6 +302,9 @@ def register_runner(
     instance_type_id: str = None,
     capabilities: Dict[str, Any] = None,
     version: str = None,
+    environment: Dict[str, Any] = None,
+    contract: Dict[str, Any] = None,
+    diagnostics: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """Register a long-lived runner with the Hub."""
     _, payload = _json_request(
@@ -318,6 +321,9 @@ def register_runner(
             "instance_type_id": instance_type_id,
             "capabilities": capabilities or {},
             "version": version,
+            "environment": environment or {},
+            "contract": contract or {},
+            "diagnostics": diagnostics or {},
         },
         api_token=api_token,
     )
@@ -334,6 +340,9 @@ def heartbeat_runner(
     provider_id: str = None,
     instance_type_id: str = None,
     metadata: Dict[str, Any] = None,
+    environment: Dict[str, Any] = None,
+    contract: Dict[str, Any] = None,
+    diagnostics: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """Send a runner readiness heartbeat to the Hub."""
     _, payload = _json_request(
@@ -347,6 +356,9 @@ def heartbeat_runner(
             "provider_id": provider_id,
             "instance_type_id": instance_type_id,
             "metadata": metadata or {},
+            "environment": environment or {},
+            "contract": contract or {},
+            "diagnostics": diagnostics or {},
         },
         api_token=api_token,
     )
