@@ -23,6 +23,7 @@ The runner still defaults to simulated execution, but it now has a first real ba
 - first real capability evaluation via containerized `IFEval` and `EvalPlus` runners
 - backend-image overrides and artifact-cache overrides through the request contract
 - Hub-token-aware fetch and upload flow for hosted deployments, with `INFERGRADE_HUB_TOKEN` preferred over `INFERGRADE_API_TOKEN`
+- paired local runner profiles so `infergrade start` and `infergrade run-job` can reuse saved Hub credentials after a one-time `infergrade pair`
 
 ## Development
 
@@ -33,8 +34,8 @@ For realistic local benchmarks on Apple Silicon, install `llama.cpp` natively an
 ```bash
 brew install llama.cpp
 PYTHONPATH=python/runner-core/src python3 -m unittest discover -s python/runner-core/tests
-PYTHONPATH=python/runner-core/src python3 -m infergrade doctor --model Qwen/Qwen2.5-7B-Instruct --backend llama.cpp --tier canary --execution-mode local_native --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
-PYTHONPATH=python/runner-core/src python3 -m infergrade start --api-url http://127.0.0.1:8000 --execution-mode local_native
+PYTHONPATH=python/runner-core/src python3 -m infergrade pair --api-url http://127.0.0.1:8000 --pair-code 'igrp_example'
+PYTHONPATH=python/runner-core/src python3 -m infergrade start --execution-mode local_native
 ```
 
 `infergrade doctor` now raises an explicit error if you try to benchmark Apple Silicon locally with `execution_mode=local_container`, because that path runs inside Docker Desktop's Linux VM and does not exercise Metal.
@@ -76,17 +77,20 @@ That helper is intended for the containerized path. On Apple Silicon, prefer the
 For Hub-generated local runs, the preferred operator flow is now:
 
 ```bash
-export INFERGRADE_HUB_TOKEN="qbhr_example"
-docker run --rm \
-  -e INFERGRADE_HUB_TOKEN="$INFERGRADE_HUB_TOKEN" \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$PWD/runs:/app/runs" \
-  -v "$HOME/.cache/infergrade/artifacts:/root/.cache/infergrade/artifacts" \
-  infergrade-runner-core:local start \
-  --api-url http://host.docker.internal:8000
+PYTHONPATH=python/runner-core/src python3 -m infergrade pair \
+  --api-url http://127.0.0.1:8000 \
+  --pair-code 'igrp_example'
+
+PYTHONPATH=python/runner-core/src python3 -m infergrade start --execution-mode local_native
 ```
 
-That starts a local runner loop that listens for queued `local_container` jobs from the Hub, claims them automatically, performs preflight checks, executes the benchmark, and uploads the finished bundle.
+After a one-time pair, `infergrade start` and `infergrade run-job` can omit `--api-url` and `--api-token`; the Runner will fall back to the saved local profile.
+
+For the containerized listener path, the helper script remains the easiest option:
+
+```bash
+./scripts/start_local_listener.sh --api-url http://host.docker.internal:8000
+```
 
 Running the runner in its own container is the recommended production path because it isolates the Python environment, makes image/runtime versions explicit, and keeps the benchmark orchestration surface closer to what will run in cloud environments.
 
@@ -98,7 +102,6 @@ If you want to run one specific Hub job immediately without keeping a local runn
 
 ```bash
 PYTHONPATH=python/runner-core/src python3 -m infergrade run-job \
-  --api-url http://localhost:8000 \
   --run-id run_example
 ```
 
@@ -118,8 +121,6 @@ Each run directory now includes `progress.json`. InferGrade will refuse to overw
 
 ```bash
 PYTHONPATH=python/runner-core/src python3 -m infergrade worker \
-  --api-url http://localhost:8000 \
-  --api-token "$INFERGRADE_API_TOKEN" \
   --execution-mode local_container \
   --once
 ```

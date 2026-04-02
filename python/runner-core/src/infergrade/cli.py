@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import socket
 import sys
 from typing import Optional
 from urllib.error import URLError
@@ -10,12 +11,25 @@ from infergrade import __version__
 from infergrade.analysis import recommend, summarize_bundle
 from infergrade.doctor import run_doctor
 from infergrade.images import install_known_images
+from infergrade.pairing import (
+    clear_runner_profile,
+    resolve_runner_api_token,
+    resolve_runner_api_url,
+    runner_profile_path,
+    save_runner_profile,
+)
 from infergrade.profiles import CAPABILITY_SUITES, DEPLOYMENT_PROFILES
 from infergrade.request import request_from_cli, request_from_file
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.runner import run_infergrade
 from infergrade.templates import render_run_config_template, render_run_request_template
-from infergrade.transport import fetch_run_config, list_run_configs, publish_run_config, upload_bundle
+from infergrade.transport import (
+    fetch_run_config,
+    list_run_configs,
+    publish_run_config,
+    redeem_runner_pairing,
+    upload_bundle,
+)
 from infergrade.utils import write_text
 from infergrade.validators import validate_bundle
 from infergrade.worker import run_worker_loop, run_worker_once
@@ -25,7 +39,7 @@ def _add_api_token_argument(parser: argparse.ArgumentParser) -> None:
     """Add the shared hosted-API token flag to a parser."""
     parser.add_argument(
         "--api-token",
-        help="Optional Hub/API token. Falls back to INFERGRADE_HUB_TOKEN, then INFERGRADE_API_TOKEN if unset.",
+        help="Optional Hub/API token. Falls back to INFERGRADE_HUB_TOKEN, then INFERGRADE_API_TOKEN, then a paired local runner profile if unset.",
     )
 
 
@@ -123,6 +137,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force a rebuild of local InferGrade images even if they already exist.",
     )
 
+    pair_parser = subparsers.add_parser("pair", help="Pair this local machine with InferGrade Hub and save a reusable runner profile.")
+    pair_parser.add_argument("--api-url", required=True)
+    pair_parser.add_argument("--pair-code", required=True)
+    pair_parser.add_argument("--label")
+    pair_parser.add_argument("--hostname")
+
+    unpair_parser = subparsers.add_parser("unpair", help="Remove the saved local runner pairing profile.")
+    unpair_parser.add_argument("--print-path", action="store_true")
+
     init_config_parser = subparsers.add_parser("init-run-config", help="Generate a starter server-style run config document.")
     init_config_parser.add_argument("--format", choices=("yaml", "json"), default="json")
     init_config_parser.add_argument("--output")
@@ -163,7 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_api_token_argument(run_config_parser)
 
     run_job_parser = subparsers.add_parser("run-job", help="Claim and execute one Hub-backed run job with automatic upload.")
-    run_job_parser.add_argument("--api-url", required=True)
+    run_job_parser.add_argument("--api-url")
     run_job_parser.add_argument("--run-id")
     run_job_parser.add_argument("--run-config-id")
     run_job_parser.add_argument("--execution-mode", choices=("local_container", "local_native", "cloud_container"), default="local_container")
@@ -180,7 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_run_token_argument(run_job_parser)
 
     start_parser = subparsers.add_parser("start", help="Start a long-lived local runner that listens for Hub-backed local jobs.")
-    start_parser.add_argument("--api-url", required=True)
+    start_parser.add_argument("--api-url")
     start_parser.add_argument("--execution-mode", choices=("local_container", "local_native"), default="local_container")
     start_parser.add_argument("--worker-id")
     start_parser.add_argument("--hostname")
@@ -195,7 +218,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_api_token_argument(start_parser)
 
     worker_parser = subparsers.add_parser("worker", help="Claim and execute API-backed run jobs.")
-    worker_parser.add_argument("--api-url", required=True)
+    worker_parser.add_argument("--api-url")
     worker_parser.add_argument("--execution-mode", choices=("local_container", "local_native", "cloud_container"), default="local_container")
     worker_parser.add_argument("--worker-id")
     worker_parser.add_argument("--run-id")
@@ -253,6 +276,14 @@ def _request_for_doctor(args: argparse.Namespace):
         request.simulate = False
         return request
     return None
+
+
+def _require_runner_api_url(api_url: Optional[str]) -> str:
+    """Resolve the API URL for paired-runner commands or stop with a helpful error."""
+    resolved = resolve_runner_api_url(api_url)
+    if resolved:
+        return resolved
+    raise SystemExit("No API URL provided and no paired runner profile found. Pass --api-url or run `infergrade pair` first.")
 
 
 def main(argv: Optional[list] = None) -> int:
@@ -325,6 +356,37 @@ def main(argv: Optional[list] = None) -> int:
     if args.command == "install-images":
         payload = install_known_images(image=args.image, rebuild=args.rebuild)
         print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "pair":
+        try:
+            payload = redeem_runner_pairing(
+                api_url=args.api_url,
+                pair_code=args.pair_code,
+                label=args.label,
+                hostname=args.hostname or socket.gethostname(),
+            )
+        except URLError as exc:
+            raise SystemExit("Failed to redeem runner pairing code against %s: %s" % (args.api_url, exc))
+        profile = dict(payload.get("runner_profile") or {})
+        if not profile:
+            raise SystemExit("Hub pairing response did not include a runner profile.")
+        path = save_runner_profile(profile)
+        result = {
+            "paired": True,
+            "profile_path": path,
+            "runner_profile": profile,
+        }
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "unpair":
+        profile_path = runner_profile_path()
+        removed = clear_runner_profile()
+        if args.print_path:
+            print(json.dumps({"removed": removed, "profile_path": profile_path}, indent=2, sort_keys=True))
+        else:
+            print(json.dumps({"removed": removed}, indent=2, sort_keys=True))
         return 0
 
     if args.command == "init-run-config":
@@ -437,7 +499,7 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.command == "run-job":
         result = run_worker_once(
-            api_url=args.api_url,
+            api_url=_require_runner_api_url(args.api_url),
             execution_mode=args.execution_mode,
             worker_id=args.worker_id,
             run_id=args.run_id,
@@ -445,7 +507,7 @@ def main(argv: Optional[list] = None) -> int:
             provider_id=args.provider_id,
             instance_type_id=args.instance_type_id,
             hostname=args.hostname,
-            api_token=args.api_token,
+            api_token=resolve_runner_api_token(args.api_token),
             run_token=args.run_token,
             simulate=bool(args.simulate),
             emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
@@ -456,22 +518,22 @@ def main(argv: Optional[list] = None) -> int:
     if args.command == "start":
         if args.once:
             result = run_worker_once(
-                api_url=args.api_url,
+                api_url=_require_runner_api_url(args.api_url),
                 execution_mode=args.execution_mode,
                 worker_id=args.worker_id,
                 hostname=args.hostname,
-                api_token=args.api_token,
+                api_token=resolve_runner_api_token(args.api_token),
                 run_token=None,
                 simulate=bool(args.simulate),
                 emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
             )
         else:
             result = run_worker_loop(
-                api_url=args.api_url,
+                api_url=_require_runner_api_url(args.api_url),
                 execution_mode=args.execution_mode,
                 worker_id=args.worker_id,
                 hostname=args.hostname,
-                api_token=args.api_token,
+                api_token=resolve_runner_api_token(args.api_token),
                 run_token=None,
                 simulate=bool(args.simulate),
                 poll_interval_seconds=args.poll_interval_seconds,
@@ -484,7 +546,7 @@ def main(argv: Optional[list] = None) -> int:
     if args.command == "worker":
         if args.once:
             result = run_worker_once(
-                api_url=args.api_url,
+                api_url=_require_runner_api_url(args.api_url),
                 execution_mode=args.execution_mode,
                 worker_id=args.worker_id,
                 run_id=args.run_id,
@@ -492,14 +554,14 @@ def main(argv: Optional[list] = None) -> int:
                 provider_id=args.provider_id,
                 instance_type_id=args.instance_type_id,
                 hostname=args.hostname,
-                api_token=args.api_token,
+                api_token=resolve_runner_api_token(args.api_token),
                 run_token=None,
                 simulate=bool(args.simulate),
                 emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
             )
         else:
             result = run_worker_loop(
-                api_url=args.api_url,
+                api_url=_require_runner_api_url(args.api_url),
                 execution_mode=args.execution_mode,
                 worker_id=args.worker_id,
                 run_id=args.run_id,
@@ -507,7 +569,7 @@ def main(argv: Optional[list] = None) -> int:
                 provider_id=args.provider_id,
                 instance_type_id=args.instance_type_id,
                 hostname=args.hostname,
-                api_token=args.api_token,
+                api_token=resolve_runner_api_token(args.api_token),
                 run_token=None,
                 simulate=bool(args.simulate),
                 poll_interval_seconds=args.poll_interval_seconds,

@@ -8,16 +8,19 @@ from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 from infergrade.analysis import summarize_bundle
+from infergrade.pairing import load_runner_profile
 from infergrade.run_configs import build_run_config_document
 from infergrade.utils import env_value, read_json
 
 
 def _resolve_api_token(api_token: str = None) -> str:
     """Return the explicit API token or fall back to the environment."""
+    profile = load_runner_profile() or {}
     return (
         api_token
         or env_value("INFERGRADE_HUB_TOKEN", "QUANTBENCH_HUB_TOKEN")
         or env_value("INFERGRADE_API_TOKEN", "QUANTBENCH_API_TOKEN")
+        or profile.get("access_token")
         or ""
     ).strip()
 
@@ -172,6 +175,26 @@ def claim_run_job(
         },
         api_token=api_token,
         run_token=run_token,
+    )
+    return payload
+
+
+def redeem_runner_pairing(
+    api_url: str,
+    pair_code: str,
+    label: str = None,
+    hostname: str = None,
+) -> Dict[str, Any]:
+    """Redeem a one-time runner pairing code for a long-lived runner token."""
+    _, payload = _json_request(
+        api_url,
+        "/v1/runner-pairings/redeem",
+        method="POST",
+        payload={
+            "pair_code": pair_code,
+            "label": label,
+            "hostname": hostname,
+        },
     )
     return payload
 

@@ -24,8 +24,8 @@ The most important implication is that Apple Silicon local benchmarking is a sep
 
 The current preferred hosted flow is:
 
-1. generate a run in InferGrade Hub
-2. start a local runner once in a container with the Hub-issued command
+1. sign in to InferGrade Hub and pair the machine once
+2. start a local runner once
 3. queue local runs from the Hub and let the Runner claim, execute, and upload them automatically
 
 Lower-level commands like `run-job`, `doctor`, `run-config`, and `upload-bundle` still exist, but they are now the manual fallback path.
@@ -47,13 +47,8 @@ If you are benchmarking locally on Apple Silicon, use the native `llama.cpp` pat
 ```bash
 brew install llama.cpp
 python3 -m pip install -e ./python/runner-core
-infergrade doctor \
-  --model Qwen/Qwen2.5-7B-Instruct \
-  --backend llama.cpp \
-  --tier canary \
-  --execution-mode local_native \
-  --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
-infergrade start --api-url http://127.0.0.1:8000 --execution-mode local_native
+infergrade pair --api-url http://127.0.0.1:8000 --pair-code 'igrp_example'
+infergrade start --execution-mode local_native
 ```
 
 `infergrade doctor` will now fail fast if you try to run a real Apple Silicon `llama.cpp` benchmark with `execution_mode=local_container`, because that path does not use Metal.
@@ -84,9 +79,37 @@ For the common local-listener path during development, the simplest entrypoint i
 ./scripts/start_local_listener.sh --api-url http://host.docker.internal:8000
 ```
 
+If you paired the machine already, native start commands can omit `--api-url` because the Runner will read the saved local profile:
+
+```bash
+infergrade start --execution-mode local_native
+```
+
 For security and reproducibility, the recommended way to operate the Runner is inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. The main exception is Apple Silicon local `llama.cpp` benchmarking, where host-native execution is the correct path because that is what enables Metal acceleration.
 
 When that listener container talks to a Hub running on your Mac host, use `http://host.docker.internal:8000` inside the container rather than `http://localhost:8000`.
+
+## Pairing A Local Runner
+
+The preferred local workflow is now:
+
+1. sign in to InferGrade Hub
+2. click `Pair Local Runner`
+3. run the emitted `infergrade pair ...` command once on the machine
+4. start the listener natively or in a container
+5. queue runs from the Hub
+
+Pairing redeems a short-lived one-time code into a durable local runner profile stored under `~/.config/infergrade/runner_profile.json` by default. After pairing:
+
+- `infergrade start` can reuse the saved Hub URL and runner token
+- `infergrade run-job` can reuse the saved Hub URL and runner token
+- you do not need to keep exporting `INFERGRADE_HUB_TOKEN` for the common local path
+
+If you ever want to remove that local profile:
+
+```bash
+infergrade unpair
+```
 
 Run the runner test suite:
 
