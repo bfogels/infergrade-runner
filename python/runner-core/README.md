@@ -92,6 +92,19 @@ For the containerized listener path, the helper script remains the easiest optio
 ./scripts/start_local_listener.sh --api-url http://host.docker.internal:8000
 ```
 
+For the pinned alpha release lane, the equivalent no-repo listener bootstrap is:
+
+```bash
+docker run --rm \
+  -e INFERGRADE_HUB_TOKEN="$INFERGRADE_HUB_TOKEN" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD/runs:/app/runs" \
+  -v "$HOME/.cache/infergrade/artifacts:/root/.cache/infergrade/artifacts" \
+  infergrade-runner-core:0.1.0-alpha start --api-url http://host.docker.internal:8000
+```
+
+That is the containerized golden path the Hub should prefer when it has pinned a released Runner snapshot. The repo-based helper script remains the development convenience path.
+
 Running the runner in its own container is the recommended production path because it isolates the Python environment, makes image/runtime versions explicit, and keeps the benchmark orchestration surface closer to what will run in cloud environments.
 
 Apple Silicon is the deliberate exception: when the goal is to benchmark local `llama.cpp` performance, the native path is the production path because it is the only path that can use Metal.
@@ -114,6 +127,18 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade upload-bundle runs/rcfg_
 ```
 
 If you are talking to a legacy or development API that still expects a shared bearer token, `INFERGRADE_API_TOKEN` remains supported.
+
+## Release Prep
+
+When you want to prepare the pinned alpha lane instead of a repo-local development flow:
+
+```bash
+./scripts/build_alpha_images.sh
+./scripts/export_alpha_images.sh
+python3 ./scripts/export_release_bundle.py --release-version 0.1.0-alpha
+```
+
+That release bundle is what the Hub should import and pin. See [docs/release_process.md](../../docs/release_process.md).
 
 Each run directory now includes `progress.json`. InferGrade will refuse to overwrite a non-empty output directory unless you explicitly opt into resuming with `--resume`.
 
@@ -141,4 +166,5 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade worker \
 For the known-good first-user alpha lane, use:
 
 - [docs/first_user_quickstart.md](../../docs/first_user_quickstart.md)
+- [docs/release_process.md](../../docs/release_process.md)
 - [schemas/examples/run_config.alpha_tinyllama_demo.json](../../schemas/examples/run_config.alpha_tinyllama_demo.json)

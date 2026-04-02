@@ -1,6 +1,7 @@
 from typing import Any, Dict
 
 from infergrade.constants import DEFAULT_GENERATION_PRESET
+from infergrade.releases import default_release_version
 from infergrade.run_configs import build_run_config_document
 from infergrade.utils import dump_simple_yaml
 
@@ -24,7 +25,7 @@ def build_run_request_template(
     if use_case:
         payload["run"]["use_case"] = use_case
     if backend == "llama.cpp":
-        payload["runtime"] = {"backend_image": "infergrade-llama-cpp:local"}
+        payload["runtime"] = {"backend_image": "infergrade-llama-cpp:%s" % default_release_version()}
         if model == "Qwen/Qwen2.5-7B-Instruct":
             payload["artifacts"] = {
                 "quantized_weights": {

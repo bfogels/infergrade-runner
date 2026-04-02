@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from infergrade.contracts import export_contract_bundle, load_contract_manifest, repo_root
+from infergrade.releases import export_release_bundle, load_release_manifest
 
 
 class ContractExportTests(unittest.TestCase):
@@ -31,6 +32,58 @@ class ContractExportTests(unittest.TestCase):
 
     def test_repo_root_points_at_runner_repo(self):
         self.assertTrue((repo_root() / "schemas" / "contract_manifest.json").exists())
+
+    def test_export_release_bundle_writes_manifest_and_artifact_checksums(self):
+        with tempfile.TemporaryDirectory() as source_dir, tempfile.TemporaryDirectory() as output_dir:
+            source_root = Path(source_dir)
+            output_root = Path(output_dir)
+            (source_root / "schemas" / "json").mkdir(parents=True)
+            (source_root / "schemas" / "examples").mkdir(parents=True)
+            (source_root / "docs").mkdir(parents=True)
+            (source_root / "schemas" / "contract_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "contract_version": "1.2.3",
+                        "publisher": "infergrade-runner",
+                        "ontology_source": "schemas/json/model_ontology.schema.json",
+                        "schema_files": ["schemas/json/model_ontology.schema.json"],
+                        "example_files": ["schemas/examples/example.json"],
+                        "supporting_docs": ["docs/contract_ownership.md"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (source_root / "schemas" / "json" / "model_ontology.schema.json").write_text("{}", encoding="utf-8")
+            (source_root / "schemas" / "examples" / "example.json").write_text("{}", encoding="utf-8")
+            (source_root / "docs" / "contract_ownership.md").write_text("# contract", encoding="utf-8")
+            image_dir = source_root / "dist" / "images" / "1.2.3-alpha"
+            image_dir.mkdir(parents=True)
+            (image_dir / "infergrade-runner-core_1.2.3-alpha.tar").write_text("runner-image", encoding="utf-8")
+            (image_dir / "infergrade-llama-cpp_1.2.3-alpha.tar").write_text("runtime-image", encoding="utf-8")
+
+            bundle_dir = export_release_bundle(
+                output_dir=output_root,
+                root=source_root,
+                release_version="1.2.3-alpha",
+            )
+
+            manifest = load_release_manifest(bundle_dir=bundle_dir)
+            self.assertEqual("1.2.3-alpha", manifest["release_version"])
+            self.assertEqual("1.2.3", manifest["contract_version"])
+            self.assertEqual("0.1.0", manifest["runner_version"])
+            self.assertEqual("alpha", manifest["release_channel"])
+            self.assertEqual(
+                "infergrade-runner-core:1.2.3-alpha",
+                manifest["golden_paths"]["local_listener_container"]["runner_image"],
+            )
+            self.assertTrue((bundle_dir / "contract" / "contract_manifest.json").exists())
+            self.assertTrue((bundle_dir / "images" / "infergrade-runner-core_1.2.3-alpha.tar").exists())
+            self.assertGreaterEqual(len(manifest["artifacts"]), 3)
+            runtime_refs = {item["image_name"]: item for item in manifest["runtime_images"]}
+            self.assertEqual(
+                "images/infergrade-runner-core_1.2.3-alpha.tar",
+                runtime_refs["infergrade-runner-core"]["archive_path"],
+            )
 
 
 if __name__ == "__main__":

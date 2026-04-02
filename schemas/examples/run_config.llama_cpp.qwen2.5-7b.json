@@ -24,7 +24,7 @@
       }
     },
     "runtime": {
-      "backend_image": "infergrade-llama-cpp:local"
+      "backend_image": "infergrade-llama-cpp:0.1.0-alpha"
     },
     "ontology_hints": {
       "family_name": "Qwen2.5",

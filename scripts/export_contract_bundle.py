@@ -2,7 +2,13 @@
 """Export the InferGrade Runner contract bundle."""
 
 import argparse
+import sys
 from pathlib import Path
+
+SCRIPT_ROOT = Path(__file__).resolve().parents[1]
+RUNNER_SRC = SCRIPT_ROOT / "python" / "runner-core" / "src"
+if str(RUNNER_SRC) not in sys.path:
+    sys.path.insert(0, str(RUNNER_SRC))
 
 from infergrade.contracts import export_contract_bundle
 

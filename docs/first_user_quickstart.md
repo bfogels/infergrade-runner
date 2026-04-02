@@ -63,6 +63,19 @@ Fallback if you received an exported archive from the host:
 docker load -i infergrade-llama-cpp_0.1.0-alpha.tar
 ```
 
+If you want the released paired-listener path instead of a repo-based manual runner invocation, fetch the listener image too:
+
+```bash
+docker pull ghcr.io/<your-github-owner>/infergrade-runner-core:0.1.0-alpha
+docker tag ghcr.io/<your-github-owner>/infergrade-runner-core:0.1.0-alpha infergrade-runner-core:0.1.0-alpha
+```
+
+Or load the exported archive:
+
+```bash
+docker load -i infergrade-runner-core_0.1.0-alpha.tar
+```
+
 ## 2. Start The Protected API
 
 ```bash
@@ -104,6 +117,19 @@ curl -X POST http://127.0.0.1:8000/v1/runs \
 ```
 
 This returns a `run_id` plus a one-command local execution handoff.
+
+If you paired a local Runner through the Hub UI, the golden-path containerized listener command is:
+
+```bash
+docker run --rm \
+  -e INFERGRADE_HUB_TOKEN="$INFERGRADE_HUB_TOKEN" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD/runs:/app/runs" \
+  -v "$HOME/.cache/infergrade/artifacts:/root/.cache/infergrade/artifacts" \
+  infergrade-runner-core:0.1.0-alpha start --api-url http://host.docker.internal:8000
+```
+
+That path does not require a local Runner repo checkout. The manual `run-job` flow below remains the explicit fallback.
 
 ## 5. Execute The Local Run
 

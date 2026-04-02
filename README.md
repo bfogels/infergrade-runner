@@ -30,6 +30,18 @@ The current preferred hosted flow is:
 
 Lower-level commands like `run-job`, `doctor`, `run-config`, and `upload-bundle` still exist, but they are now the manual fallback path.
 
+## Pinned Release Golden Path
+
+For the containerized alpha lane, the Hub should pin one released Runner artifact set instead of assuming a repo checkout or `:local` tags.
+
+That released lane currently centers on:
+
+- `infergrade-runner-core:0.1.0-alpha`
+- `infergrade-llama-cpp:0.1.0-alpha`
+- the matching Runner contract bundle and release manifest
+
+Development-only `:local` images still exist, but they should be treated as a clearly separate workflow.
+
 ## Repo Layout
 
 - `python/runner-core`: CLI, bundle orchestration, adapters, transport, and tests
@@ -85,6 +97,17 @@ If you paired the machine already, native start commands can omit `--api-url` be
 infergrade start --execution-mode local_native
 ```
 
+If you are following the released containerized lane rather than a repo-based development flow, the canonical listener bootstrap is:
+
+```bash
+docker run --rm \
+  -e INFERGRADE_HUB_TOKEN="$INFERGRADE_HUB_TOKEN" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD/runs:/app/runs" \
+  -v "$HOME/.cache/infergrade/artifacts:/root/.cache/infergrade/artifacts" \
+  infergrade-runner-core:0.1.0-alpha start --api-url http://host.docker.internal:8000
+```
+
 For security and reproducibility, the recommended way to operate the Runner is inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. The main exception is Apple Silicon local `llama.cpp` benchmarking, where host-native execution is the correct path because that is what enables Metal acceleration.
 
 When that listener container talks to a Hub running on your Mac host, use `http://host.docker.internal:8000` inside the container rather than `http://localhost:8000`.
@@ -121,6 +144,7 @@ Run the runner test suite:
 
 - [Runner vs Hub](docs/runner_vs_hub.md)
 - [Contract Ownership](docs/contract_ownership.md)
+- [Release Process](docs/release_process.md)
 - [Input/Output Spec](docs/input_output_spec_v0.1.md)
 - [Schema Draft](docs/schema_draft.md)
 - [Capability Benchmarks](docs/capability_benchmarks.md)
@@ -143,3 +167,13 @@ python ./scripts/export_contract_bundle.py
 ```
 
 That bundle is the artifact the Hub should pin to over time.
+
+For the current alpha lane, the stronger maintainer workflow is the release bundle:
+
+```bash
+./scripts/build_alpha_images.sh
+./scripts/export_alpha_images.sh
+python3 ./scripts/export_release_bundle.py --release-version 0.1.0-alpha
+```
+
+See [Release Process](docs/release_process.md) for the full pinned-release workflow, including the matching Hub import step.
