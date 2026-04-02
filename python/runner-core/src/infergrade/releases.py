@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -67,9 +68,14 @@ def export_release_bundle(
         shutil.rmtree(release_dir)
     release_dir.mkdir(parents=True, exist_ok=True)
 
-    contract_bundle_dir = export_contract_bundle(output_dir=(base / "dist" / "contracts"), root=base)
     bundled_contract_dir = release_dir / "contract"
-    shutil.copytree(contract_bundle_dir, bundled_contract_dir)
+    if output_dir is None:
+        contract_bundle_dir = export_contract_bundle(output_dir=(base / "dist" / "contracts"), root=base)
+        shutil.copytree(contract_bundle_dir, bundled_contract_dir)
+    else:
+        with tempfile.TemporaryDirectory() as temp_contract_dir:
+            contract_bundle_dir = export_contract_bundle(output_dir=Path(temp_contract_dir), root=base)
+            shutil.copytree(contract_bundle_dir, bundled_contract_dir)
 
     image_archive_source_dir = base / "dist" / "images" / resolved_release_version
     bundled_image_dir = release_dir / "images"

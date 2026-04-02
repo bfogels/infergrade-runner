@@ -79,6 +79,7 @@ class ContractExportTests(unittest.TestCase):
             self.assertTrue((bundle_dir / "contract" / "contract_manifest.json").exists())
             self.assertTrue((bundle_dir / "images" / "infergrade-runner-core_1.2.3-alpha.tar").exists())
             self.assertGreaterEqual(len(manifest["artifacts"]), 3)
+            self.assertFalse((source_root / "dist" / "contracts").exists())
             runtime_refs = {item["image_name"]: item for item in manifest["runtime_images"]}
             self.assertEqual(
                 "images/infergrade-runner-core_1.2.3-alpha.tar",
