@@ -8,6 +8,7 @@ from infergrade.images import install_image
 from infergrade.models import CapabilityExecution, RunRequest
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, write_json
 
+CAPABILITY_REGISTRY_VERSION = "2026-04-alpha"
 
 DEFAULT_CAPABILITY_IMAGES = {
     "ifeval": env_value("INFERGRADE_IFEVAL_IMAGE", "QUANTBENCH_IFEVAL_IMAGE", "infergrade-ifeval:local"),
@@ -66,7 +67,7 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
 CAPABILITY_SUITES: Dict[str, Dict[str, tuple]] = {
     "agentic_coding": {
         "canary": ("coding_canary_v2", ["EvalPlus HumanEval+"]),
-        "standard": ("coding_standard_v2", ["EvalPlus HumanEval+"]),
+        "standard": ("coding_standard_v3", ["EvalPlus HumanEval+", "EvalPlus MBPP+"]),
         "gold": ("coding_gold_v2", ["EvalPlus HumanEval+", "EvalPlus MBPP+"]),
     },
     "general_assistant": {
@@ -80,7 +81,7 @@ CAPABILITY_SUITES: Dict[str, Dict[str, tuple]] = {
 SUITE_BENCHMARK_IDS: Dict[str, Dict[str, List[str]]] = {
     "agentic_coding": {
         "canary": ["evalplus_humaneval"],
-        "standard": ["evalplus_humaneval"],
+        "standard": ["evalplus_humaneval", "evalplus_mbpp"],
         "gold": ["evalplus_humaneval", "evalplus_mbpp"],
     },
     "general_assistant": {
@@ -94,13 +95,98 @@ SUITE_BENCHMARK_IDS: Dict[str, Dict[str, List[str]]] = {
 def resolve_capability_suite(use_case: Optional[str], tier: str):
     if not use_case:
         return None
-    suite_id, components = CAPABILITY_SUITES[use_case][tier]
+    use_case_suites = CAPABILITY_SUITES.get(use_case)
+    if not use_case_suites or tier not in use_case_suites:
+        return None
+    suite_id, components = use_case_suites[tier]
     return {
         "use_case": use_case,
         "suite_id": suite_id,
         "benchmark_tier": tier,
         "components": components,
         "benchmark_ids": list(SUITE_BENCHMARK_IDS[use_case][tier]),
+    }
+
+
+def capability_registry_for_request(request: RunRequest) -> List[Dict[str, Any]]:
+    suite = resolve_capability_suite(request.use_case, request.tier)
+    benchmark_ids = list(suite["benchmark_ids"]) if suite else []
+    registry: List[Dict[str, Any]] = []
+    for benchmark_id in benchmark_ids:
+        spec = CAPABILITY_BENCHMARKS[benchmark_id]
+        registry.append(
+            {
+                "benchmark_id": benchmark_id,
+                "display_name": spec.display_name,
+                "benchmark_kind": spec.benchmark_kind,
+                "primary_metric_name": spec.primary_metric_name,
+                "generation_max_tokens": spec.generation_max_tokens,
+            }
+        )
+    return registry
+
+
+def summarize_capability_execution(
+    request: RunRequest,
+    execution: CapabilityExecution,
+    completed_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    suite = resolve_capability_suite(request.use_case, request.tier)
+    planned_benchmark_ids = list((suite or {}).get("benchmark_ids") or [])
+    benchmark_registry = capability_registry_for_request(request)
+    benchmark_results = dict(execution.benchmark_results or {})
+    simulated_scored_ids = [
+        benchmark_id for benchmark_id in planned_benchmark_ids if benchmark_id in dict(execution.component_scores or {})
+    ]
+    executed_benchmark_ids = [
+        benchmark_id for benchmark_id in planned_benchmark_ids if benchmark_id in benchmark_results or benchmark_id in simulated_scored_ids
+    ]
+    scored_benchmark_ids = [
+        benchmark_id
+        for benchmark_id in executed_benchmark_ids
+        if _benchmark_primary_metric_value(benchmark_results.get(benchmark_id) or {}) is not None
+        or benchmark_id in simulated_scored_ids
+    ]
+    missing_benchmark_ids = [benchmark_id for benchmark_id in planned_benchmark_ids if benchmark_id not in scored_benchmark_ids]
+    planned_count = len(planned_benchmark_ids)
+    scored_count = len(scored_benchmark_ids)
+    coverage_fraction = round(scored_count / float(planned_count), 4) if planned_count else 0.0
+    coverage_state = "complete" if planned_count and scored_count == planned_count else ("partial" if scored_count else "missing")
+    state = _capability_state_for_request(request, execution, suite, scored_count)
+    reason_codes = _capability_reason_codes(request, execution, suite, scored_count, planned_count)
+    component_reports = [
+        _component_report_for_benchmark(request, benchmark_id, benchmark_results.get(benchmark_id), execution.component_scores)
+        for benchmark_id in planned_benchmark_ids
+    ]
+    return {
+        "use_case": execution.use_case or request.use_case,
+        "capability_suite_id": execution.suite_id or (suite or {}).get("suite_id"),
+        "benchmark_tier": execution.benchmark_tier or (suite or {}).get("benchmark_tier") or request.tier,
+        "benchmark_components": list(execution.components or (suite or {}).get("components") or []),
+        "benchmark_registry_version": CAPABILITY_REGISTRY_VERSION,
+        "benchmark_registry": benchmark_registry,
+        "benchmark_results": benchmark_results,
+        "capability_score": execution.score,
+        "capability_score_method": execution.score_method,
+        "capability_component_scores": dict(execution.component_scores or {}),
+        "capability_component_reports": component_reports,
+        "capability_confidence": execution.confidence,
+        "capability_run_count": 1 if execution.status not in ("skipped", "failed") or scored_count else 0,
+        "capability_timestamp": completed_at if execution.status not in ("skipped", "failed") else None,
+        "capability_status": execution.status,
+        "capability_state": state,
+        "capability_reason_codes": reason_codes,
+        "benchmark_coverage": {
+            "planned_benchmark_ids": planned_benchmark_ids,
+            "executed_benchmark_ids": executed_benchmark_ids,
+            "scored_benchmark_ids": scored_benchmark_ids,
+            "missing_benchmark_ids": missing_benchmark_ids,
+            "planned_count": planned_count,
+            "executed_count": len(executed_benchmark_ids),
+            "scored_count": scored_count,
+            "coverage_fraction": coverage_fraction,
+            "coverage_state": coverage_state,
+        },
     }
 
 
@@ -119,6 +205,101 @@ def capability_images_for_request(request: RunRequest) -> List[Dict[str, str]]:
             }
         )
     return images
+
+
+def _benchmark_primary_metric_value(summary: Dict[str, Any]) -> Optional[float]:
+    primary_metric = (summary or {}).get("primary_metric") or {}
+    value = primary_metric.get("value")
+    try:
+        return None if value is None else round(float(value), 6)
+    except (TypeError, ValueError):
+        return None
+
+
+def _component_report_for_benchmark(
+    request: RunRequest,
+    benchmark_id: str,
+    benchmark_result: Optional[Dict[str, Any]],
+    component_scores: Dict[str, float],
+) -> Dict[str, Any]:
+    spec = CAPABILITY_BENCHMARKS[benchmark_id]
+    benchmark_result = dict(benchmark_result or {})
+    total_cases = benchmark_result.get("total_cases")
+    if total_cases is None:
+        total_cases = spec.case_limits.get(request.tier)
+    primary_metric_value = _benchmark_primary_metric_value(benchmark_result)
+    component_score = component_scores.get(benchmark_id)
+    if primary_metric_value is None and component_score is not None:
+        primary_metric_value = component_score
+    status = str(
+        benchmark_result.get("status")
+        or ("simulated" if benchmark_result == {} and component_score is not None else ("completed" if primary_metric_value is not None else "not_run"))
+    )
+    return {
+        "benchmark_id": benchmark_id,
+        "display_name": spec.display_name,
+        "benchmark_kind": spec.benchmark_kind,
+        "primary_metric_name": spec.primary_metric_name,
+        "primary_metric_value": primary_metric_value,
+        "component_score": component_score,
+        "status": status,
+        "completed_cases": benchmark_result.get("completed_cases"),
+        "total_cases": total_cases,
+        "generation_failure_count": benchmark_result.get("generation_failure_count"),
+    }
+
+
+def _capability_state_for_request(
+    request: RunRequest,
+    execution: CapabilityExecution,
+    suite: Optional[Dict[str, Any]],
+    scored_count: int,
+) -> str:
+    if not request.use_case or suite is None:
+        return "not_comparable"
+    if request.capability == "none" or execution.status == "skipped":
+        return "skipped"
+    if execution.status == "partial":
+        return "partial"
+    if execution.status in ("completed", "simulated") and execution.score is not None:
+        return "scored"
+    if scored_count:
+        return "partial"
+    return "not_yet_benchmarked"
+
+
+def _capability_reason_codes(
+    request: RunRequest,
+    execution: CapabilityExecution,
+    suite: Optional[Dict[str, Any]],
+    scored_count: int,
+    planned_count: int,
+) -> List[str]:
+    codes: List[str] = []
+    if not request.use_case:
+        codes.append("use_case_missing")
+    if suite is None and request.use_case:
+        codes.append("suite_unavailable_for_use_case")
+    if request.capability == "none" or execution.status == "skipped":
+        codes.append("capability_disabled")
+    if execution.status == "simulated":
+        codes.append("simulated_capability_signal")
+    if execution.status in ("completed", "simulated") and execution.score is not None:
+        codes.append("benchmark_suite_scored")
+    if execution.status == "partial" or (planned_count and scored_count and scored_count < planned_count):
+        codes.append("partial_coverage")
+    if any(
+        str((execution.benchmark_results or {}).get(benchmark_id, {}).get("status")) == "failed"
+        for benchmark_id in (suite or {}).get("benchmark_ids", [])
+    ):
+        codes.append("benchmark_component_failed")
+    if execution.status == "failed":
+        codes.append("benchmark_execution_failed")
+    if not codes and planned_count:
+        codes.append("benchmark_not_yet_run")
+    if not codes:
+        codes.append("capability_not_comparable")
+    return codes
 
 
 def execute_capability_suite(

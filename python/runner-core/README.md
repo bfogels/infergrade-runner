@@ -21,6 +21,8 @@ The runner still defaults to simulated execution, but it now has a first real ba
 - automatic resolution of local paths, `file://`, `http(s)://`, and `hf://` GGUF artifact references
 - real deployment timings parsed from `llama-cli`
 - first real capability evaluation via containerized `IFEval` and `EvalPlus` runners
+- explicit capability states and benchmark-coverage metadata so missing capability does not collapse into `N/A`
+- first-pass `llama.cpp` perplexity support as a quantization-fidelity signal for standard/gold runs
 - backend-image overrides and artifact-cache overrides through the request contract
 - Hub-token-aware fetch and upload flow for hosted deployments, with `INFERGRADE_HUB_TOKEN` preferred over `INFERGRADE_API_TOKEN`
 - paired local runner profiles so `infergrade start` and `infergrade run-job` can reuse saved Hub credentials after a one-time `infergrade pair`
@@ -108,6 +110,17 @@ That is the containerized golden path the Hub should prefer when it has pinned a
 Running the runner in its own container is the recommended production path because it isolates the Python environment, makes image/runtime versions explicit, and keeps the benchmark orchestration surface closer to what will run in cloud environments.
 
 Apple Silicon is the deliberate exception: when the goal is to benchmark local `llama.cpp` performance, the native path is the production path because it is the only path that can use Metal.
+
+## Capability And Fidelity Signals
+
+Runner-produced result payloads now carry:
+
+- explicit capability states such as `scored`, `partial`, `skipped`, `not_yet_benchmarked`, and `not_comparable`
+- benchmark coverage metadata including planned, executed, and scored benchmark components
+- component-level capability reports for suites like `IFEval`, `EvalPlus HumanEval+`, and `EvalPlus MBPP+`
+- first-pass perplexity metadata under `fidelity` for `llama.cpp` when that measurement is available
+
+Perplexity is intentionally treated as a supporting quantization-fidelity signal, not a substitute for task-level capability or deployment telemetry.
 
 When the Hub is running on your host machine, `host.docker.internal` is the correct API hostname from inside the runner container. `localhost` inside that container points back to the container itself.
 

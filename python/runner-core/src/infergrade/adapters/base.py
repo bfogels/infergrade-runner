@@ -1,7 +1,7 @@
 from typing import Callable, Dict, List, Optional
 
 from infergrade.capabilities import execute_capability_suite
-from infergrade.models import CapabilityExecution, DeploymentExecution, RunRequest
+from infergrade.models import CapabilityExecution, DeploymentExecution, FidelityExecution, RunRequest
 from infergrade.profiles import resolve_capability_suite
 from infergrade.utils import stable_hash, utcnow_iso
 
@@ -72,7 +72,7 @@ class BaseAdapter(object):
                     benchmark_results={"error": {"message": str(exc)}},
                     artifacts={},
                 )
-        raw = self._simulate_capability(request, suite["components"])
+        raw = self._simulate_capability(request, suite["benchmark_ids"])
         return CapabilityExecution(
             use_case=request.use_case,
             suite_id=suite["suite_id"],
@@ -110,6 +110,17 @@ class BaseAdapter(object):
             "status": "completed",
             "error": None,
         }
+
+    def run_fidelity(self, request: RunRequest) -> FidelityExecution:
+        if request.simulate:
+            return FidelityExecution(
+                state="not_yet_measured",
+                reason_codes=["simulated_run_skips_fidelity"],
+            )
+        return FidelityExecution(
+            state="not_yet_measured",
+            reason_codes=["backend_fidelity_not_implemented"],
+        )
 
     def _simulate_metrics(self, request: RunRequest, profile_id: str) -> Dict[str, float]:
         seed = stable_hash(

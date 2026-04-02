@@ -14,8 +14,9 @@ from infergrade.capabilities import (
     capability_images_for_request,
     execute_capability_suite,
     resolve_capability_suite,
+    summarize_capability_execution,
 )
-from infergrade.models import RunRequest
+from infergrade.models import CapabilityExecution, RunRequest
 
 
 class _FakeAdapter(object):
@@ -33,6 +34,11 @@ class CapabilityTests(unittest.TestCase):
     def test_resolve_capability_suite_includes_benchmark_ids(self):
         suite = resolve_capability_suite("agentic_coding", "gold")
         self.assertEqual(suite["suite_id"], "coding_gold_v2")
+        self.assertEqual(suite["benchmark_ids"], ["evalplus_humaneval", "evalplus_mbpp"])
+
+    def test_resolve_capability_suite_expands_standard_coding_lane(self):
+        suite = resolve_capability_suite("agentic_coding", "standard")
+        self.assertEqual(suite["suite_id"], "coding_standard_v3")
         self.assertEqual(suite["benchmark_ids"], ["evalplus_humaneval", "evalplus_mbpp"])
 
     def test_capability_images_follow_selected_suite(self):
@@ -110,6 +116,41 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(execution.status, "partial")
         self.assertAlmostEqual(execution.score, 0.5)
         self.assertEqual(execution.benchmark_results["evalplus_mbpp"]["status"], "failed")
+
+    def test_summarize_capability_execution_reports_state_and_coverage(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="agentic_coding",
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        execution = CapabilityExecution(
+            use_case="agentic_coding",
+            suite_id="coding_standard_v3",
+            benchmark_tier="standard",
+            components=["EvalPlus HumanEval+", "EvalPlus MBPP+"],
+            score=0.72,
+            score_method="mean_primary_metric_v1",
+            component_scores={"evalplus_humaneval": 0.72},
+            confidence=0.6,
+            status="partial",
+            benchmark_results={
+                "evalplus_humaneval": {
+                    "benchmark_id": "evalplus_humaneval",
+                    "display_name": "EvalPlus HumanEval+",
+                    "status": "completed",
+                    "primary_metric": {"name": "pass_at_1_plus", "value": 0.72},
+                }
+            },
+        )
+        summary = summarize_capability_execution(request, execution, completed_at="2026-04-02T12:00:00Z")
+        self.assertEqual(summary["capability_state"], "partial")
+        self.assertIn("partial_coverage", summary["capability_reason_codes"])
+        self.assertEqual(summary["benchmark_coverage"]["planned_count"], 2)
+        self.assertEqual(summary["benchmark_coverage"]["scored_count"], 1)
+        self.assertEqual(len(summary["capability_component_reports"]), 2)
 
     def test_host_mount_path_maps_listener_runs_dir_to_host_runs_dir(self):
         benchmark_dir = os.path.join("/app/runs", "run_example", "artifacts", "capability", "ifeval")

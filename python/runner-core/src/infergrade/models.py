@@ -77,3 +77,12 @@ class CapabilityExecution:
     status: str
     benchmark_results: Dict[str, Any] = field(default_factory=dict)
     artifacts: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class FidelityExecution:
+    state: str
+    reason_codes: List[str] = field(default_factory=list)
+    metrics: Dict[str, Any] = field(default_factory=dict)
+    context: Dict[str, Any] = field(default_factory=dict)
+    artifacts: Dict[str, Any] = field(default_factory=dict)

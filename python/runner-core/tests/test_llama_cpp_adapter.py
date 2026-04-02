@@ -11,6 +11,7 @@ from infergrade.adapters.llama_cpp import (
     _compute_ttft_ms,
     _metrics_from_server_completion,
     _parse_llama_timings,
+    _parse_perplexity_output,
     _safe_tokens_per_second,
 )
 from infergrade.models import RunRequest
@@ -52,6 +53,12 @@ _FAKE_SERVER_COMPLETION = {
     },
 }
 
+_FAKE_PERPLEXITY_LOG = """
+perplexity: calculating perplexity over 16 chunks, n_ctx=128, batch_size=2048, n_seq=16
+perplexity: 28.96 seconds per pass - ETA Final estimate: PPL = 1.6244 +/- 0.07827
+llama_perf_context_print:       total time =   28989.04 ms /  2049 tokens
+"""
+
 
 class LlamaCppAdapterTests(unittest.TestCase):
     def setUp(self):
@@ -89,6 +96,13 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(metrics["decode_tokens_per_second"], 6.6316)
         self.assertEqual(metrics["load_time_ms"], 1675.42)
         self.assertEqual(metrics["peak_vram_mb"], 1536.0)
+
+    def test_parse_perplexity_output_extracts_value_and_context(self):
+        parsed = _parse_perplexity_output(_FAKE_PERPLEXITY_LOG)
+        self.assertEqual(parsed["perplexity"], 1.6244)
+        self.assertEqual(parsed["stderr"], 0.07827)
+        self.assertEqual(parsed["corpus_token_count"], 2049)
+        self.assertEqual(parsed["duration_seconds"], 28.989)
 
     @mock.patch("infergrade.adapters.llama_cpp.docker_available", return_value=True)
     @mock.patch("infergrade.adapters.llama_cpp.install_image")
@@ -153,6 +167,25 @@ class LlamaCppAdapterTests(unittest.TestCase):
         generated = adapter.generate_text(request, "Write a function", 128)
         self.assertEqual(generated["status"], "completed")
         self.assertEqual(run_mock.call_args[0][0][0], "/opt/homebrew/bin/llama-cli")
+
+    @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_run_fidelity_uses_native_perplexity_binary(self, run_mock, which_mock):
+        which_mock.side_effect = lambda name: "/opt/homebrew/bin/%s" % name
+        run_mock.return_value = mock.Mock(returncode=0, stdout=_FAKE_PERPLEXITY_LOG, stderr="")
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="standard",
+            execution_mode="local_native",
+            simulate=False,
+        )
+        fidelity = adapter.run_fidelity(request)
+        self.assertEqual(fidelity.state, "measured")
+        self.assertEqual(fidelity.metrics["perplexity"]["value"], 1.6244)
+        self.assertEqual(run_mock.call_args[0][0][0], "/opt/homebrew/bin/llama-perplexity")
 
     @mock.patch("infergrade.adapters.llama_cpp.docker_available", return_value=True)
     @mock.patch("infergrade.adapters.llama_cpp.install_image")

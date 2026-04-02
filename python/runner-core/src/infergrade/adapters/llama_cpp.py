@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -17,7 +18,7 @@ from infergrade.container_runtime import (
     sample_total_gpu_memory_used_mb,
 )
 from infergrade.images import install_image
-from infergrade.models import DeploymentExecution, RunRequest
+from infergrade.models import DeploymentExecution, FidelityExecution, RunRequest
 from infergrade.utils import env_value, stable_hash, utcnow_iso
 
 
@@ -28,17 +29,35 @@ _EVAL_TIME_RE = re.compile(r"eval time\s*=\s*([0-9.]+)\s*ms", re.IGNORECASE)
 _EVAL_TOKENS_RE = re.compile(r"eval time\s*=\s*[0-9.]+\s*ms\s*/\s*([0-9.]+)\s*runs?", re.IGNORECASE)
 _EVAL_TPS_RE = re.compile(r"\(\s*[0-9.]+\s*ms per token,\s*([0-9.]+)\s*tokens per second\)", re.IGNORECASE)
 _TOTAL_TIME_RE = re.compile(r"total time\s*=\s*([0-9.]+)\s*ms", re.IGNORECASE)
+_TOTAL_TIME_TOKENS_RE = re.compile(r"total time\s*=\s*[0-9.]+\s*ms\s*/\s*([0-9.]+)\s*tokens?", re.IGNORECASE)
 _SUMMARY_TPS_RE = re.compile(
     r"\[\s*prompt:\s*([0-9.]+)\s*t/s\s*\|\s*generation:\s*([0-9.]+)\s*t/s\s*\]",
     re.IGNORECASE,
 )
+_PERPLEXITY_RE = re.compile(r"Final estimate:\s*PPL\s*=\s*([0-9.]+)\s*\+/-\s*([0-9.]+)", re.IGNORECASE)
+_PERPLEXITY_TOKENIZATION_RE = re.compile(r"tokenizes to only\s*([0-9.]+)\s*tokens", re.IGNORECASE)
 
 _DEFAULT_IMAGE = "infergrade-llama-cpp:local"
 _DEFAULT_COMMAND = "llama-cli"
 _DEFAULT_SERVER_COMMAND = "llama-server"
+_DEFAULT_PERPLEXITY_COMMAND = "llama-perplexity"
 _DEFAULT_SERVER_PORT = 8080
 _SERVER_READY_TIMEOUT_SECONDS = 180.0
 _SERVER_REQUEST_TIMEOUT_SECONDS = 300.0
+_PERPLEXITY_CORPUS_ID = "infergrade_alpha_text_v1"
+_PERPLEXITY_CONTEXT_SIZE = 128
+_PERPLEXITY_OUTPUT_TYPE = 0
+_PERPLEXITY_STRIDE = 0
+_PERPLEXITY_CORPUS_TEXT = (
+    "InferGrade measures how deployable model artifacts behave on real hardware. "
+    "Every benchmark result should preserve which quantized file ran, which runtime executed it, and which machine produced the evidence. "
+    "Throughput, load time, and time to first token all matter because users care about how a model feels in practice, not only how it looks on paper. "
+    "Capability benchmarks should stay use-case aware so coding results are not silently mixed with general assistant results. "
+    "Trust requires pinned runtime identity, hardware capture, and artifact provenance. "
+    "Users also need a fidelity signal for comparing nearby quantization variants, especially when task scores cluster tightly. "
+    "Perplexity is useful for that narrow job, but it should not replace task-level capability or deployment telemetry. "
+    "InferGrade therefore treats fidelity as a supporting signal that sits beside capability rather than above it. "
+) * 20
 
 
 class LlamaCppAdapter(BaseAdapter):
@@ -280,6 +299,62 @@ class LlamaCppAdapter(BaseAdapter):
             "load_time_ms": parsed.get("load_time_ms"),
         }
 
+    def run_fidelity(self, request: RunRequest) -> FidelityExecution:
+        if request.simulate:
+            return FidelityExecution(
+                state="not_yet_measured",
+                reason_codes=["simulated_run_skips_fidelity"],
+                context=self._perplexity_context(),
+            )
+        if request.tier == "canary":
+            return FidelityExecution(
+                state="skipped",
+                reason_codes=["tier_skips_fidelity_benchmark"],
+                context=self._perplexity_context(),
+            )
+        if request.execution_mode not in ("local_container", "local_native", "cloud_container"):
+            return FidelityExecution(
+                state="not_comparable",
+                reason_codes=["execution_mode_not_supported_for_fidelity"],
+                context=self._perplexity_context(),
+            )
+
+        model_path = self._require_local_gguf_artifact(request)
+        started = time.perf_counter()
+        try:
+            result = self._run_perplexity(request, model_path)
+            metrics = {
+                "perplexity": {
+                    "metric_name": "perplexity",
+                    "value": result["perplexity"],
+                    "stderr": result.get("stderr"),
+                    "lower_is_better": True,
+                    "evaluation_backend": result.get("evaluation_backend"),
+                    "duration_seconds": result.get("duration_seconds"),
+                    "corpus_token_count": result.get("corpus_token_count"),
+                    "status": "measured",
+                    "comparability_key": self._perplexity_comparability_key(),
+                    "corpus_id": _PERPLEXITY_CORPUS_ID,
+                }
+            }
+            return FidelityExecution(
+                state="measured",
+                reason_codes=["perplexity_measured"],
+                metrics=metrics,
+                context=self._perplexity_context(),
+                artifacts={"command": result.get("command"), "log_tail": result.get("log_tail")},
+            )
+        except Exception as exc:
+            return FidelityExecution(
+                state="not_yet_measured",
+                reason_codes=["perplexity_measurement_failed"],
+                context=self._perplexity_context(),
+                artifacts={
+                    "error": str(exc),
+                    "duration_seconds": round(time.perf_counter() - started, 4),
+                },
+            )
+
     def _ensure_docker(self) -> None:
         if not docker_available():
             raise RuntimeError("Docker is required for real llama.cpp container runs.")
@@ -296,6 +371,13 @@ class LlamaCppAdapter(BaseAdapter):
         resolved = shutil.which(binary)
         if not resolved:
             raise RuntimeError("Native llama.cpp server binary is not available on PATH: %s" % binary)
+        return resolved
+
+    def _native_perplexity_path(self, request: RunRequest = None) -> str:
+        binary = env_value("INFERGRADE_LLAMA_CPP_PERPLEXITY", "", _DEFAULT_PERPLEXITY_COMMAND)
+        resolved = shutil.which(binary)
+        if not resolved:
+            raise RuntimeError("Native llama.cpp perplexity binary is not available on PATH: %s" % binary)
         return resolved
 
     def _image_name(self, request: RunRequest = None) -> str:
@@ -617,6 +699,128 @@ class LlamaCppAdapter(BaseAdapter):
             task,
         )
 
+    def _perplexity_context(self) -> Dict[str, object]:
+        return {
+            "corpus_id": _PERPLEXITY_CORPUS_ID,
+            "corpus_label": "InferGrade Alpha Text v1",
+            "metric_family": "quantization_fidelity",
+            "tool": "llama-perplexity",
+            "context_size": _PERPLEXITY_CONTEXT_SIZE,
+            "stride": _PERPLEXITY_STRIDE,
+            "output_type": _PERPLEXITY_OUTPUT_TYPE,
+            "comparability_key": self._perplexity_comparability_key(),
+            "interpretation": "Lower perplexity suggests better quantization fidelity on the shared corpus, but it does not replace task-level capability scores.",
+        }
+
+    def _perplexity_comparability_key(self) -> str:
+        return "llama.cpp:%s:ctx%s:stride%s:out%s" % (
+            _PERPLEXITY_CORPUS_ID,
+            _PERPLEXITY_CONTEXT_SIZE,
+            _PERPLEXITY_STRIDE,
+            _PERPLEXITY_OUTPUT_TYPE,
+        )
+
+    def _run_perplexity(self, request: RunRequest, model_path: str) -> Dict[str, object]:
+        corpus_handle = tempfile.NamedTemporaryFile(prefix="infergrade-ppl-", suffix=".txt", delete=False)
+        corpus_path = corpus_handle.name
+        corpus_handle.close()
+        with open(corpus_path, "w", encoding="utf-8") as handle:
+            handle.write(_PERPLEXITY_CORPUS_TEXT)
+        try:
+            if request.execution_mode == "local_native":
+                command = [self._native_perplexity_path(request)]
+                command.extend(
+                    self._build_llama_perplexity_command(
+                        model_path=model_path,
+                        corpus_path=corpus_path,
+                        request=request,
+                    )
+                )
+            else:
+                self._ensure_docker()
+                install_image(self._image_name(request))
+                model_dir = os.path.dirname(model_path)
+                model_filename = os.path.basename(model_path)
+                container_model_path = "/models/%s" % model_filename
+                command = [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--entrypoint",
+                    "sh",
+                    "-v",
+                    "%s:/models:ro" % model_dir,
+                    "-v",
+                    "%s:/corpus.txt:ro" % corpus_path,
+                ]
+                if shutil.which("nvidia-smi") is not None:
+                    command.extend(["--gpus", "all"])
+                command.extend(
+                    [
+                        self._image_name(request),
+                        "-lc",
+                        " ".join(
+                            [
+                                shlex.quote("/opt/llama.cpp/build/bin/llama-perplexity"),
+                                *[
+                                    shlex.quote(part)
+                                    for part in self._build_llama_perplexity_command(
+                                        model_path=container_model_path,
+                                        corpus_path="/corpus.txt",
+                                        request=request,
+                                    )
+                                ],
+                            ]
+                        ),
+                    ]
+                )
+            started = time.perf_counter()
+            completed = subprocess.run(command, capture_output=True, text=True)
+            raw_log = "%s\n%s" % (completed.stdout or "", completed.stderr or "")
+            if completed.returncode != 0:
+                raise RuntimeError((raw_log or "llama.cpp perplexity failed").strip())
+            parsed = _parse_perplexity_output(raw_log)
+            if parsed.get("perplexity") is None:
+                raise RuntimeError("llama.cpp perplexity output did not include a final estimate.")
+            return {
+                "command": command,
+                "perplexity": parsed.get("perplexity"),
+                "stderr": parsed.get("stderr"),
+                "corpus_token_count": parsed.get("corpus_token_count"),
+                "duration_seconds": parsed.get("duration_seconds") or round(time.perf_counter() - started, 4),
+                "evaluation_backend": "llama-perplexity",
+                "log_tail": raw_log.splitlines()[-40:],
+            }
+        finally:
+            try:
+                os.unlink(corpus_path)
+            except OSError:
+                pass
+
+    def _build_llama_perplexity_command(
+        self,
+        model_path: str,
+        corpus_path: str,
+        request: RunRequest,
+    ) -> List[str]:
+        command = [
+            "-m",
+            model_path,
+            "-f",
+            corpus_path,
+            "-c",
+            str(_PERPLEXITY_CONTEXT_SIZE),
+            "--ppl-output-type",
+            str(_PERPLEXITY_OUTPUT_TYPE),
+            "--ppl-stride",
+            str(_PERPLEXITY_STRIDE),
+            "--threads",
+            "4",
+            "--no-warmup",
+        ]
+        command.extend(request.backend_flags)
+        return command
+
 
 def _parse_llama_timings(raw_log: str) -> Dict[str, float]:
     payload: Dict[str, float] = {}
@@ -650,12 +854,34 @@ def _parse_llama_timings(raw_log: str) -> Dict[str, float]:
             match = _TOTAL_TIME_RE.search(line)
             if match:
                 payload["total_time_ms"] = round(float(match.group(1)), 4)
+            match = _TOTAL_TIME_TOKENS_RE.search(line)
+            if match:
+                payload["total_time_tokens"] = round(float(match.group(1)), 4)
             continue
         if "prompt:" in lowered and "generation:" in lowered:
             match = _SUMMARY_TPS_RE.search(line)
             if match:
                 payload["prompt_tokens_per_second"] = round(float(match.group(1)), 4)
                 payload["eval_tokens_per_second"] = round(float(match.group(2)), 4)
+    return payload
+
+
+def _parse_perplexity_output(raw_log: str) -> Dict[str, float]:
+    payload: Dict[str, float] = {}
+    for line in raw_log.splitlines():
+        match = _PERPLEXITY_RE.search(line)
+        if match:
+            payload["perplexity"] = round(float(match.group(1)), 6)
+            payload["stderr"] = round(float(match.group(2)), 6)
+        match = _TOTAL_TIME_RE.search(line)
+        if match:
+            payload["duration_seconds"] = round(float(match.group(1)) / 1000.0, 4)
+        match = _TOTAL_TIME_TOKENS_RE.search(line)
+        if match:
+            payload["corpus_token_count"] = int(float(match.group(1)))
+        match = _PERPLEXITY_TOKENIZATION_RE.search(line)
+        if match and "corpus_token_count" not in payload:
+            payload["corpus_token_count"] = int(float(match.group(1)))
     return payload
 
 

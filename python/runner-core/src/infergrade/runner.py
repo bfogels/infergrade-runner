@@ -6,7 +6,8 @@ from typing import Any, Callable, Dict, List, Optional
 from infergrade.adapters import get_adapter
 from infergrade.artifacts import resolve_quant_artifact
 from infergrade.environment import capture_environment
-from infergrade.models import CapabilityExecution, RunRequest
+from infergrade.capabilities import summarize_capability_execution
+from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.ontology import build_ontology, resolve_artifact_sha256, resolve_quant_format
 from infergrade.progress import (
     initialize_progress,
@@ -87,6 +88,7 @@ def _build_result_record(
     adapter_version: str,
     runtime_metadata: Dict[str, Any],
     capability: CapabilityExecution,
+    fidelity: FidelityExecution,
     deployment: Dict[str, Any],
     deployment_profile: str,
     started_at: str,
@@ -209,19 +211,14 @@ def _build_result_record(
             "run_config_source": request.run_config_source,
         },
     }
-    record["capability"] = {
-        "use_case": capability.use_case or request.use_case,
-        "capability_suite_id": capability.suite_id,
-        "benchmark_tier": capability.benchmark_tier,
-        "benchmark_components": capability.components,
-        "benchmark_results": capability.benchmark_results,
-        "capability_score": capability.score,
-        "capability_score_method": capability.score_method,
-        "capability_component_scores": capability.component_scores,
-        "capability_confidence": capability.confidence,
-        "capability_run_count": 1 if capability.status != "skipped" else 0,
-        "capability_timestamp": completed_at if capability.status != "skipped" else None,
-        "capability_status": capability.status,
+    record["capability"] = summarize_capability_execution(request, capability, completed_at=completed_at)
+    record["fidelity"] = {
+        "fidelity_state": fidelity.state,
+        "fidelity_reason_codes": list(fidelity.reason_codes or []),
+        "context": dict(fidelity.context or {}),
+        "metrics": dict(fidelity.metrics or {}),
+        "artifacts": dict(fidelity.artifacts or {}),
+        "perplexity": dict((fidelity.metrics or {}).get("perplexity") or {}),
     }
     record["deployment"] = {
         "deployment_profile_id": deployment_profile,
@@ -321,6 +318,15 @@ def _deployment_metrics_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "oom_or_failure_rate": deployment["oom_or_failure_rate"],
         "deployment_confidence": deployment["deployment_confidence"],
     }
+
+
+def _run_fidelity(adapter, request: RunRequest) -> FidelityExecution:
+    """Collect optional fidelity signals without requiring every adapter to implement them."""
+    if hasattr(adapter, "run_fidelity"):
+        return adapter.run_fidelity(request)
+    if request.simulate:
+        return FidelityExecution(state="not_yet_measured", reason_codes=["simulated_run_skips_fidelity"])
+    return FidelityExecution(state="not_yet_measured", reason_codes=["backend_fidelity_not_implemented"])
 
 
 def _load_resumable_result(output_dir: str, progress: Dict[str, Any], profile_id: str) -> Optional[Dict[str, Any]]:
@@ -478,6 +484,12 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         capability_execution = adapter.run_capability(request, progress_callback=_on_capability_progress)
         mark_stage_completed(output_dir, progress, current_stage, metadata={"status": capability_execution.status})
 
+        current_stage = "fidelity"
+        mark_stage_started(output_dir, progress, current_stage)
+        _emit_progress(emit_progress, "Measuring quantization fidelity...")
+        fidelity_execution = _run_fidelity(adapter, request)
+        mark_stage_completed(output_dir, progress, current_stage, metadata={"state": fidelity_execution.state})
+
         deployment_artifacts: Dict[str, Any] = {}
         existing_metrics_path = os.path.join(output_dir, "artifacts", "deployment_metrics.json")
         if request.resume and os.path.exists(existing_metrics_path):
@@ -533,6 +545,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
                 adapter_version=adapter_version,
                 runtime_metadata=runtime_metadata,
                 capability=capability_execution,
+                fidelity=fidelity_execution,
                 deployment=execution.metrics,
                 deployment_profile=profile_id,
                 started_at=started_at,
@@ -574,6 +587,17 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
                     "benchmark_results": capability_execution.benchmark_results,
                     "artifacts": capability_execution.artifacts,
                     "status": capability_execution.status,
+                },
+            )
+        if fidelity_execution.metrics or fidelity_execution.context or fidelity_execution.reason_codes:
+            write_json(
+                os.path.join(output_dir, "artifacts", "fidelity.json"),
+                {
+                    "state": fidelity_execution.state,
+                    "reason_codes": list(fidelity_execution.reason_codes or []),
+                    "context": dict(fidelity_execution.context or {}),
+                    "metrics": dict(fidelity_execution.metrics or {}),
+                    "artifacts": dict(fidelity_execution.artifacts or {}),
                 },
             )
         write_json(
@@ -624,6 +648,8 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         }
         if resolved_artifact:
             manifest_files["artifact_resolution"] = "artifacts/receipts/artifact_resolution.json"
+        if fidelity_execution.metrics or fidelity_execution.context or fidelity_execution.reason_codes:
+            manifest_files["fidelity"] = "artifacts/fidelity.json"
         manifest = {
             "bundle_spec_version": "0.1-draft",
             "result_spec_version": "0.1-draft",
@@ -634,6 +660,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
                 "execution_status": "simulated" if request.simulate else "completed",
                 "deployment_status": "simulated" if request.simulate else "completed",
                 "capability_status": capability_execution.status,
+                "fidelity_status": fidelity_execution.state,
                 "validation_status": "pending",
             },
             "files": manifest_files,
@@ -672,6 +699,13 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
                     record["verification"]["local_comparison_grade_candidate"]
                     for record in result_records
                     if record["verification"].get("local_comparison_grade_candidate")
+                }
+            ),
+            "fidelity_states": sorted(
+                {
+                    record.get("fidelity", {}).get("fidelity_state")
+                    for record in result_records
+                    if record.get("fidelity", {}).get("fidelity_state")
                 }
             ),
             "run_config_id": request.run_config_id,

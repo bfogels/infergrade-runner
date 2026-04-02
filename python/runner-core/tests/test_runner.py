@@ -44,6 +44,11 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(payload["ontology"]["benchmark_subject"]["subject_kind"], "artifact_runtime_binding")
         self.assertEqual(payload["deployment"]["deployment_profile_id"], "interactive_chat_v1")
         self.assertEqual(payload["capability"]["use_case"], "agentic_coding")
+        self.assertEqual(payload["capability"]["capability_state"], "scored")
+        self.assertEqual(payload["capability"]["benchmark_coverage"]["planned_count"], 2)
+        self.assertEqual(payload["capability"]["benchmark_coverage"]["scored_count"], 2)
+        self.assertEqual(len(payload["capability"]["capability_component_reports"]), 2)
+        self.assertEqual(payload["fidelity"]["fidelity_state"], "not_yet_measured")
         self.assertEqual(payload["verification"]["verification_level"], "experimental")
         with open(os.path.join(output_dir, "progress.json"), "r", encoding="utf-8") as handle:
             progress = json.load(handle)
@@ -78,6 +83,24 @@ class RunnerTests(unittest.TestCase):
                     component_scores={},
                     confidence=None,
                     status="skipped",
+                )
+
+            def run_fidelity(self, request):
+                from infergrade.models import FidelityExecution
+
+                return FidelityExecution(
+                    state="measured",
+                    reason_codes=["perplexity_measured"],
+                    metrics={
+                        "perplexity": {
+                            "metric_name": "perplexity",
+                            "value": 4.21,
+                            "stderr": 0.12,
+                            "status": "measured",
+                            "comparability_key": "llama.cpp:infergrade_alpha_text_v1:ctx128:stride0:out0",
+                        }
+                    },
+                    context={"corpus_id": "infergrade_alpha_text_v1"},
                 )
 
             def run_deployment_profile(self, request, profile_id, progress_callback=None):
@@ -121,6 +144,8 @@ class RunnerTests(unittest.TestCase):
             payload = json.load(handle)
         self.assertTrue(payload["verification"]["artifact_pinned"])
         self.assertEqual(payload["execution"]["container_image"], "infergrade-llama-cpp:test")
+        self.assertEqual(payload["fidelity"]["fidelity_state"], "measured")
+        self.assertEqual(payload["fidelity"]["perplexity"]["value"], 4.21)
 
     def test_skipped_capability_still_records_use_case(self):
         output_dir = os.path.join(self.tempdir, "capability-skipped")
@@ -138,6 +163,8 @@ class RunnerTests(unittest.TestCase):
             payload = json.load(handle)
         self.assertEqual(payload["capability"]["use_case"], "general_assistant")
         self.assertEqual(payload["capability"]["capability_status"], "skipped")
+        self.assertEqual(payload["capability"]["capability_state"], "skipped")
+        self.assertIn("capability_disabled", payload["capability"]["capability_reason_codes"])
         self.assertEqual(payload["capability"]["capability_run_count"], 0)
 
     def test_existing_output_dir_requires_resume(self):
@@ -188,6 +215,16 @@ class RunnerTests(unittest.TestCase):
                     component_scores={"component_a": 0.75},
                     confidence=0.8,
                     status="completed",
+                )
+
+            def run_fidelity(self, request):
+                from infergrade.models import FidelityExecution
+
+                return FidelityExecution(
+                    state="measured",
+                    reason_codes=["perplexity_measured"],
+                    metrics={"perplexity": {"value": 5.1, "status": "measured"}},
+                    context={"corpus_id": "infergrade_alpha_text_v1"},
                 )
 
             def run_deployment_profile(self, request, profile_id, progress_callback=None):
