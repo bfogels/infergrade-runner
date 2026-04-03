@@ -82,6 +82,24 @@ The currently implemented first-user catalog is:
 
 Compatibility breadth labels like `canary`, `standard`, and `gold` are still derived from the selected checks for older flows and release planning, but they are no longer the main user-facing benchmark abstraction.
 
+## Capability State Semantics
+
+The current supported suites should report capability truthfully rather than softening failures into generic missing data:
+
+- `scored`: the planned lane completed with a trustworthy suite score
+- `partial`: only part of the planned lane scored
+- `failed`: InferGrade attempted the lane, but benchmark execution failed before producing a trustworthy score
+- `skipped`: capability execution was explicitly disabled
+- `not_yet_benchmarked`: the slice is meaningful, but no benchmark execution has happened yet
+- `not_comparable`: the run does not define a meaningful capability slice
+
+The currently supported first-user benchmark lanes are:
+
+- assistant lane: `chat_instruction_following` via `ifeval`
+- coding lane: `coding_code_editing` via `evalplus_humaneval` and `evalplus_mbpp`
+
+Those are the lanes we expect to keep locally regression-tested and operationally trustworthy first.
+
 ## Container Contract
 
 Each benchmark container follows the same basic contract:

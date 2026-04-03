@@ -157,6 +157,50 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(summary["capability_suite_ids"], ["coding_code_editing", "quant_fidelity"])
         self.assertIn("evalplus_humaneval", summary["selected_benchmark_check_ids"])
 
+    def test_summarize_capability_execution_keeps_failed_state_distinct_from_missing(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="agentic_coding",
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        execution = CapabilityExecution(
+            use_case="agentic_coding",
+            suite_id="coding_standard_v3",
+            suite_ids=["coding_code_editing"],
+            benchmark_tier="standard",
+            benchmark_group_ids=["coding_core", "coding_breadth"],
+            benchmark_check_ids=["evalplus_humaneval", "evalplus_mbpp"],
+            components=["EvalPlus HumanEval+", "EvalPlus MBPP+"],
+            score=None,
+            score_method=None,
+            component_scores={},
+            confidence=None,
+            status="failed",
+            benchmark_results={
+                "evalplus_humaneval": {
+                    "benchmark_id": "evalplus_humaneval",
+                    "display_name": "EvalPlus HumanEval+",
+                    "status": "failed",
+                    "message": "container exited non-zero",
+                }
+            },
+        )
+        summary = summarize_capability_execution(request, execution, completed_at="2026-04-03T12:00:00Z")
+        self.assertEqual(summary["capability_state"], "failed")
+        self.assertEqual(summary["capability_status"], "failed")
+        self.assertIn("benchmark_execution_failed", summary["capability_reason_codes"])
+        self.assertEqual(summary["benchmark_coverage"]["coverage_state"], "missing")
+        self.assertEqual(summary["benchmark_coverage"]["planned_count"], 2)
+        self.assertEqual(summary["benchmark_coverage"]["scored_count"], 0)
+        failed_component = next(
+            item for item in summary["capability_component_reports"] if item["benchmark_id"] == "evalplus_humaneval"
+        )
+        self.assertEqual(failed_component["status"], "failed")
+        self.assertEqual(summary["capability_run_count"], 0)
+
     def test_host_mount_path_maps_listener_runs_dir_to_host_runs_dir(self):
         benchmark_dir = os.path.join("/app/runs", "run_example", "artifacts", "capability", "ifeval")
         with mock.patch.dict(
@@ -223,6 +267,36 @@ class CapabilityTests(unittest.TestCase):
         self.assertIn("benchmark_started", event_types)
         self.assertIn("case_progress", event_types)
         self.assertIn("benchmark_completed", event_types)
+
+    def test_execute_capability_suite_scores_supported_assistant_lane(self):
+        def fake_prepare(spec, benchmark_dir, tier):
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"case_id": "case-1", "task_id": "IFEval/1", "prompt": "Follow the instruction"}) + "\n")
+
+        def fake_evaluate(spec, benchmark_dir):
+            self.assertEqual(spec.benchmark_id, "ifeval")
+            return {
+                "benchmark_id": spec.benchmark_id,
+                "display_name": spec.display_name,
+                "status": "completed",
+                "primary_metric": {"name": spec.primary_metric_name, "value": 0.84},
+                "metrics": {spec.primary_metric_name: 0.84},
+            }
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="general_assistant",
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                execution = execute_capability_suite(_FakeAdapter(), request)
+        self.assertEqual(execution.status, "completed")
+        self.assertEqual(execution.component_scores["ifeval"], 0.84)
+        self.assertIn("ifeval", execution.benchmark_results)
 
 
 if __name__ == "__main__":

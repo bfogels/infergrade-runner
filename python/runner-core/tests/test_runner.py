@@ -170,6 +170,87 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("capability_disabled", payload["capability"]["capability_reason_codes"])
         self.assertEqual(payload["capability"]["capability_run_count"], 0)
 
+    def test_failed_capability_still_records_failed_state_in_bundle(self):
+        class FakeAdapter(object):
+            def default_backend_flags(self):
+                return []
+
+            def resolve_version(self, simulate=True, request=None):
+                return "llama.cpp-test"
+
+            def runtime_metadata(self, request):
+                return {"container_image": "infergrade-llama-cpp:test", "container_runtime": "docker"}
+
+            def run_capability(self, request, progress_callback=None):
+                from infergrade.models import CapabilityExecution
+
+                return CapabilityExecution(
+                    use_case="general_assistant",
+                    suite_id="assistant_standard_v2",
+                    suite_ids=["chat_instruction_following"],
+                    benchmark_tier=request.tier,
+                    benchmark_group_ids=["instruction_following"],
+                    benchmark_check_ids=["ifeval"],
+                    components=["IFEval"],
+                    score=None,
+                    score_method=None,
+                    component_scores={},
+                    confidence=None,
+                    status="failed",
+                    benchmark_results={
+                        "ifeval": {
+                            "benchmark_id": "ifeval",
+                            "display_name": "IFEval",
+                            "status": "failed",
+                            "message": "container exited non-zero",
+                        }
+                    },
+                )
+
+            def run_fidelity(self, request):
+                from infergrade.models import FidelityExecution
+
+                return FidelityExecution(state="skipped", reason_codes=["fidelity_not_requested"], metrics={}, context={})
+
+            def run_deployment_profile(self, request, profile_id, progress_callback=None):
+                return DeploymentExecution(
+                    profile_id=profile_id,
+                    metrics={
+                        "ttft_p50_ms": 100.0,
+                        "ttft_p95_ms": 100.0,
+                        "latency_p50_ms": 400.0,
+                        "latency_p95_ms": 400.0,
+                        "decode_tokens_per_second_p50": 50.0,
+                        "decode_tokens_per_second_p95": 50.0,
+                        "request_throughput_per_minute": 150.0,
+                        "peak_vram_mb": 1024.0,
+                        "load_time_ms": 250.0,
+                        "oom_or_failure_rate": 0.0,
+                        "deployment_confidence": 0.9,
+                    },
+                    status="completed",
+                    artifacts={},
+                )
+
+        output_dir = os.path.join(self.tempdir, "capability-failed")
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="general_assistant",
+            output_dir=output_dir,
+            simulate=False,
+        )
+        with mock.patch("infergrade.runner.get_adapter", return_value=FakeAdapter()):
+            run_infergrade(request)
+        with open(os.path.join(output_dir, "results", "interactive_chat_v1.json"), "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        self.assertEqual(payload["capability"]["capability_status"], "failed")
+        self.assertEqual(payload["capability"]["capability_state"], "failed")
+        self.assertIn("benchmark_execution_failed", payload["capability"]["capability_reason_codes"])
+        self.assertEqual(payload["capability"]["benchmark_coverage"]["scored_count"], 0)
+        self.assertEqual(payload["capability"]["capability_component_reports"][0]["status"], "failed")
+
     def test_existing_output_dir_requires_resume(self):
         output_dir = os.path.join(self.tempdir, "bundle")
         request = RunRequest(

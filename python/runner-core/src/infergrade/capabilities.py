@@ -267,6 +267,8 @@ def _capability_state_for_request(
         return "not_comparable"
     if request.capability == "none" or execution.status == "skipped":
         return "skipped"
+    if execution.status == "failed":
+        return "failed"
     if execution.status == "partial":
         return "partial"
     if execution.status in ("completed", "simulated") and execution.score is not None:
