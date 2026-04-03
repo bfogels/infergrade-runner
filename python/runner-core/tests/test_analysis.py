@@ -30,11 +30,11 @@ class AnalysisTests(unittest.TestCase):
         )
         run_infergrade(request)
         summary = summarize_bundle(bundle_dir)
-        self.assertEqual(summary["result_count"], 1)
+        self.assertEqual(summary["result_count"], 2)
         self.assertEqual(summary["checkpoints"], ["Qwen2.5-7B-Instruct"])
         recommendation = recommend([bundle_dir], use_case="general_assistant")
-        self.assertEqual(recommendation["input_count"], 1)
-        self.assertEqual(recommendation["frontier_count"], 1)
+        self.assertEqual(recommendation["input_count"], 2)
+        self.assertEqual(recommendation["frontier_count"], 2)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,10 @@ class RunRequest:
     model: str
     backend: str
     tier: str
+    capability_suite_ids: List[str] = field(default_factory=list)
+    benchmark_group_ids: List[str] = field(default_factory=list)
+    benchmark_check_ids: List[str] = field(default_factory=list)
+    benchmark_shortcut_id: Optional[str] = None
     quant_artifact: Optional[str] = None
     quant_artifact_sha256: Optional[str] = None
     quant_artifact_filename: Optional[str] = None
@@ -68,7 +72,10 @@ class DeploymentExecution:
 class CapabilityExecution:
     use_case: Optional[str]
     suite_id: Optional[str]
+    suite_ids: List[str]
     benchmark_tier: Optional[str]
+    benchmark_group_ids: List[str]
+    benchmark_check_ids: List[str]
     components: List[str]
     score: Optional[float]
     score_method: Optional[str]

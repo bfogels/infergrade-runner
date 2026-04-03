@@ -13,6 +13,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from infergrade.adapters.base import BaseAdapter
+from infergrade.benchmark_catalog import fidelity_enabled_for_request
 from infergrade.container_runtime import (
     docker_available,
     sample_total_gpu_memory_used_mb,
@@ -306,10 +307,10 @@ class LlamaCppAdapter(BaseAdapter):
                 reason_codes=["simulated_run_skips_fidelity"],
                 context=self._perplexity_context(),
             )
-        if request.tier == "canary":
+        if not fidelity_enabled_for_request(request):
             return FidelityExecution(
                 state="skipped",
-                reason_codes=["tier_skips_fidelity_benchmark"],
+                reason_codes=["fidelity_check_not_selected"],
                 context=self._perplexity_context(),
             )
         if request.execution_mode not in ("local_container", "local_native", "cloud_container"):

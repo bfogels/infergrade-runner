@@ -6,6 +6,7 @@ import os
 from typing import Any, Dict, List
 from urllib import request as urllib_request
 
+from infergrade.benchmark_catalog import normalize_request_selection
 from infergrade.models import RunRequest
 
 
@@ -20,10 +21,14 @@ def _optional_import_yaml():
 
 def request_from_cli(args: argparse.Namespace) -> RunRequest:
     """Build a run request from parsed CLI arguments."""
-    return RunRequest(
+    request = RunRequest(
         model=args.model,
         backend=args.backend,
         tier=args.tier,
+        capability_suite_ids=[],
+        benchmark_group_ids=[],
+        benchmark_check_ids=[],
+        benchmark_shortcut_id=None,
         quant_artifact=args.quant_artifact,
         quant_artifact_sha256=args.quant_artifact_sha256,
         quant_artifact_filename=args.quant_artifact_filename,
@@ -51,6 +56,7 @@ def request_from_cli(args: argparse.Namespace) -> RunRequest:
         run_config_source=getattr(args, "run_config_source", None),
         simulate=not args.real_run,
     )
+    return normalize_request_selection(request)
 
 
 def request_from_file(path: str, simulate: bool = True) -> RunRequest:
@@ -91,10 +97,14 @@ def request_from_dict(data: Dict[str, Any], simulate: bool = True, run_config_so
     metadata = data.get("metadata", {})
     ontology_hints = data.get("ontology_hints", {})
     quant_artifact = run.get("quant_artifact") or quantized_weights.get("uri")
-    return RunRequest(
+    request = RunRequest(
         model=run["model"],
         backend=run["backend"],
         tier=run["tier"],
+        capability_suite_ids=list(run.get("capability_suite_ids", [])),
+        benchmark_group_ids=list(run.get("benchmark_group_ids", [])),
+        benchmark_check_ids=list(run.get("benchmark_check_ids", [])),
+        benchmark_shortcut_id=run.get("benchmark_shortcut_id"),
         quant_artifact=quant_artifact,
         quant_artifact_sha256=quantized_weights.get("sha256"),
         quant_artifact_filename=quantized_weights.get("filename"),
@@ -122,6 +132,7 @@ def request_from_dict(data: Dict[str, Any], simulate: bool = True, run_config_so
         run_config_source=run_config_source,
         simulate=simulate,
     )
+    return normalize_request_selection(request)
 
 
 def request_to_dict(request: RunRequest) -> Dict[str, Any]:
@@ -130,6 +141,10 @@ def request_to_dict(request: RunRequest) -> Dict[str, Any]:
         "model": request.model,
         "backend": request.backend,
         "tier": request.tier,
+        "capability_suite_ids": request.capability_suite_ids,
+        "benchmark_group_ids": request.benchmark_group_ids,
+        "benchmark_check_ids": request.benchmark_check_ids,
+        "benchmark_shortcut_id": request.benchmark_shortcut_id,
         "quant_artifact": request.quant_artifact,
         "quant_artifact_sha256": request.quant_artifact_sha256,
         "quant_artifact_filename": request.quant_artifact_filename,

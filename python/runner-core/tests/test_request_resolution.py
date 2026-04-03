@@ -18,10 +18,11 @@ class RequestResolutionTests(unittest.TestCase):
         self.assertEqual(request.capability, "none")
         self.assertEqual(request.deployment_profiles, ["interactive_chat_v1"])
 
-    def test_standard_without_use_case_requires_capability_disabled(self):
+    def test_standard_without_use_case_normalizes_to_non_capability_selection(self):
         request = RunRequest(model="Qwen/Qwen2.5-7B-Instruct", backend="llama.cpp", tier="standard")
-        with self.assertRaises(RequestValidationError):
-            validate_request(request)
+        validate_request(request)
+        self.assertEqual(request.capability, "none")
+        self.assertIn("batch_generation_v1", request.deployment_profiles)
 
     def test_standard_without_use_case_can_disable_capability(self):
         request = RunRequest(
@@ -63,6 +64,26 @@ class RequestResolutionTests(unittest.TestCase):
         self.assertEqual(request.quant_artifact_revision, "main")
         self.assertEqual(request.backend_image, "infergrade-llama-cpp:local")
         self.assertEqual(request.quant_artifact_cache_dir, "/tmp/infergrade-cache")
+
+    def test_request_from_dict_normalizes_capability_first_selection(self):
+        payload = {
+            "spec_version": "0.1-draft",
+            "run": {
+                "model": "Qwen/Qwen2.5-Coder-7B-Instruct",
+                "backend": "llama.cpp",
+                "tier": "canary",
+                "capability_suite_ids": ["coding_code_editing", "quant_fidelity"],
+                "benchmark_group_ids": ["coding_core", "deployment_long_context", "quant_fidelity"],
+                "benchmark_check_ids": ["evalplus_humaneval", "long_context_v1", "perplexity_reference_v1"],
+            },
+        }
+        request = request_from_dict(payload)
+        self.assertEqual(request.use_case, "agentic_coding")
+        self.assertEqual(request.tier, "standard")
+        self.assertEqual(request.deployment_profiles, ["long_context_v1"])
+        self.assertEqual(request.capability, "auto")
+        self.assertIn("quant_fidelity", request.capability_suite_ids)
+        self.assertIn("perplexity_reference_v1", request.benchmark_check_ids)
 
 
 if __name__ == "__main__":

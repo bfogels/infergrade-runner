@@ -27,6 +27,8 @@ class ContractExportTests(unittest.TestCase):
                 self.assertTrue((bundle_dir / relative_path).exists(), relative_path)
             for relative_path in exported_manifest["example_files"]:
                 self.assertTrue((bundle_dir / relative_path).exists(), relative_path)
+            for relative_path in exported_manifest.get("catalog_files", []):
+                self.assertTrue((bundle_dir / relative_path).exists(), relative_path)
             for relative_path in exported_manifest["supporting_docs"]:
                 self.assertTrue((bundle_dir / relative_path).exists(), relative_path)
 
@@ -48,6 +50,7 @@ class ContractExportTests(unittest.TestCase):
                         "ontology_source": "schemas/json/model_ontology.schema.json",
                         "schema_files": ["schemas/json/model_ontology.schema.json"],
                         "example_files": ["schemas/examples/example.json"],
+                        "catalog_files": ["schemas/capability_catalog.json"],
                         "supporting_docs": ["docs/contract_ownership.md"],
                     }
                 ),
@@ -55,6 +58,7 @@ class ContractExportTests(unittest.TestCase):
             )
             (source_root / "schemas" / "json" / "model_ontology.schema.json").write_text("{}", encoding="utf-8")
             (source_root / "schemas" / "examples" / "example.json").write_text("{}", encoding="utf-8")
+            (source_root / "schemas" / "capability_catalog.json").write_text("{}", encoding="utf-8")
             (source_root / "docs" / "contract_ownership.md").write_text("# contract", encoding="utf-8")
             image_dir = source_root / "dist" / "images" / "1.2.3-alpha"
             image_dir.mkdir(parents=True)

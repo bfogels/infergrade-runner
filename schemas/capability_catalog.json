@@ -1,0 +1,232 @@
+{
+  "catalog_version": "2026-04-03",
+  "default_shortcut_id": "quick_default",
+  "suites": [
+    {
+      "suite_id": "chat_instruction_following",
+      "display_name": "Chat and instruction following",
+      "description": "Assistant-style prompting, instruction adherence, and the latency signals people use to judge everyday chat quality.",
+      "primary_use_case": "general_assistant",
+      "default_group_ids": ["instruction_following", "deployment_chat", "deployment_batch"]
+    },
+    {
+      "suite_id": "coding_code_editing",
+      "display_name": "Coding and code editing",
+      "description": "Coding completions, practical editing behavior, and the longer interactive prompts that matter for local coding assistants.",
+      "primary_use_case": "agentic_coding",
+      "default_group_ids": ["coding_core", "coding_breadth", "deployment_chat", "deployment_long_context"]
+    },
+    {
+      "suite_id": "quant_fidelity",
+      "display_name": "Quant fidelity and perplexity",
+      "description": "Reference-text perplexity that helps compare nearby quantized variants when task scores cluster tightly.",
+      "primary_use_case": null,
+      "default_group_ids": ["quant_fidelity"],
+      "supported_backends": ["llama.cpp"],
+      "supplemental": true
+    }
+  ],
+  "benchmark_groups": [
+    {
+      "group_id": "instruction_following",
+      "display_name": "Instruction following",
+      "description": "Run IFEval to check whether the model follows detailed textual instructions cleanly.",
+      "evidence_kind": "capability",
+      "default_check_ids": ["ifeval"],
+      "effort_hint": "medium"
+    },
+    {
+      "group_id": "coding_core",
+      "display_name": "Coding core",
+      "description": "Run HumanEval+ for the most important pass@1 coding signal.",
+      "evidence_kind": "capability",
+      "default_check_ids": ["evalplus_humaneval"],
+      "effort_hint": "high"
+    },
+    {
+      "group_id": "coding_breadth",
+      "display_name": "Coding breadth",
+      "description": "Add MBPP+ for broader everyday coding coverage beyond the core set.",
+      "evidence_kind": "capability",
+      "default_check_ids": ["evalplus_mbpp"],
+      "effort_hint": "high"
+    },
+    {
+      "group_id": "deployment_chat",
+      "display_name": "Interactive chat latency",
+      "description": "Measure TTFT, load time, and output speed for interactive requests.",
+      "evidence_kind": "deployment",
+      "default_check_ids": ["interactive_chat_v1"],
+      "effort_hint": "low"
+    },
+    {
+      "group_id": "deployment_batch",
+      "display_name": "Batch generation throughput",
+      "description": "Measure throughput-oriented generation behavior under a small batch load.",
+      "evidence_kind": "deployment",
+      "default_check_ids": ["batch_generation_v1"],
+      "effort_hint": "medium"
+    },
+    {
+      "group_id": "deployment_long_context",
+      "display_name": "Long context latency",
+      "description": "Measure latency and memory pressure under longer prompts.",
+      "evidence_kind": "deployment",
+      "default_check_ids": ["long_context_v1"],
+      "effort_hint": "medium"
+    },
+    {
+      "group_id": "quant_fidelity",
+      "display_name": "Quant fidelity",
+      "description": "Run the shared perplexity reference pass for quant-to-quant comparisons.",
+      "evidence_kind": "fidelity",
+      "default_check_ids": ["perplexity_reference_v1"],
+      "effort_hint": "medium",
+      "supported_backends": ["llama.cpp"]
+    }
+  ],
+  "checks": [
+    {
+      "check_id": "ifeval",
+      "display_name": "IFEval",
+      "description": "Instruction-following benchmark.",
+      "evidence_kind": "capability",
+      "group_id": "instruction_following",
+      "runner_target": "ifeval",
+      "supported_backends": ["llama.cpp", "vllm"]
+    },
+    {
+      "check_id": "evalplus_humaneval",
+      "display_name": "EvalPlus HumanEval+",
+      "description": "Core coding benchmark for code generation quality.",
+      "evidence_kind": "capability",
+      "group_id": "coding_core",
+      "runner_target": "evalplus_humaneval",
+      "supported_backends": ["llama.cpp", "vllm"]
+    },
+    {
+      "check_id": "evalplus_mbpp",
+      "display_name": "EvalPlus MBPP+",
+      "description": "Broader coding benchmark focused on practical Python tasks.",
+      "evidence_kind": "capability",
+      "group_id": "coding_breadth",
+      "runner_target": "evalplus_mbpp",
+      "supported_backends": ["llama.cpp", "vllm"]
+    },
+    {
+      "check_id": "interactive_chat_v1",
+      "display_name": "Interactive chat v1",
+      "description": "Interactive deployment profile for TTFT, load, and output speed.",
+      "evidence_kind": "deployment",
+      "group_id": "deployment_chat",
+      "runner_target": "interactive_chat_v1",
+      "supported_backends": ["llama.cpp", "vllm"]
+    },
+    {
+      "check_id": "batch_generation_v1",
+      "display_name": "Batch generation v1",
+      "description": "Batch deployment profile for throughput-oriented comparisons.",
+      "evidence_kind": "deployment",
+      "group_id": "deployment_batch",
+      "runner_target": "batch_generation_v1",
+      "supported_backends": ["llama.cpp", "vllm"]
+    },
+    {
+      "check_id": "long_context_v1",
+      "display_name": "Long context v1",
+      "description": "Deployment profile for longer-context latency and memory behavior.",
+      "evidence_kind": "deployment",
+      "group_id": "deployment_long_context",
+      "runner_target": "long_context_v1",
+      "supported_backends": ["llama.cpp", "vllm"]
+    },
+    {
+      "check_id": "perplexity_reference_v1",
+      "display_name": "Perplexity reference v1",
+      "description": "Quant fidelity signal based on the shared reference corpus.",
+      "evidence_kind": "fidelity",
+      "group_id": "quant_fidelity",
+      "runner_target": "perplexity_reference_v1",
+      "supported_backends": ["llama.cpp"]
+    }
+  ],
+  "shortcuts": [
+    {
+      "shortcut_id": "quick_default",
+      "display_name": "Quick default",
+      "description": "Fast assistant evidence with one capability benchmark and one deployment profile.",
+      "suite_ids": ["chat_instruction_following"],
+      "group_ids": ["instruction_following", "deployment_chat"],
+      "check_ids": ["ifeval", "interactive_chat_v1"]
+    },
+    {
+      "shortcut_id": "coding_default",
+      "display_name": "Coding default",
+      "description": "Coding-focused evidence with HumanEval+ and the most useful deployment checks.",
+      "suite_ids": ["coding_code_editing"],
+      "group_ids": ["coding_core", "deployment_chat", "deployment_long_context"],
+      "check_ids": ["evalplus_humaneval", "interactive_chat_v1", "long_context_v1"]
+    },
+    {
+      "shortcut_id": "broad_compare",
+      "display_name": "Broad compare",
+      "description": "A broader assistant comparison with chat, batch, and quant fidelity signals.",
+      "suite_ids": ["chat_instruction_following", "quant_fidelity"],
+      "group_ids": ["instruction_following", "deployment_chat", "deployment_batch", "quant_fidelity"],
+      "check_ids": ["ifeval", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+    }
+  ],
+  "legacy_tier_defaults": {
+    "general_assistant": {
+      "canary": {
+        "suite_ids": ["chat_instruction_following"],
+        "group_ids": ["instruction_following", "deployment_chat"],
+        "check_ids": ["ifeval", "interactive_chat_v1"]
+      },
+      "standard": {
+        "suite_ids": ["chat_instruction_following", "quant_fidelity"],
+        "group_ids": ["instruction_following", "deployment_chat", "deployment_batch", "quant_fidelity"],
+        "check_ids": ["ifeval", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+      },
+      "gold": {
+        "suite_ids": ["chat_instruction_following", "quant_fidelity"],
+        "group_ids": ["instruction_following", "deployment_chat", "deployment_batch", "quant_fidelity"],
+        "check_ids": ["ifeval", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+      }
+    },
+    "agentic_coding": {
+      "canary": {
+        "suite_ids": ["coding_code_editing"],
+        "group_ids": ["coding_core", "deployment_chat"],
+        "check_ids": ["evalplus_humaneval", "interactive_chat_v1"]
+      },
+      "standard": {
+        "suite_ids": ["coding_code_editing", "quant_fidelity"],
+        "group_ids": ["coding_core", "coding_breadth", "deployment_chat", "deployment_long_context", "quant_fidelity"],
+        "check_ids": ["evalplus_humaneval", "evalplus_mbpp", "interactive_chat_v1", "long_context_v1", "perplexity_reference_v1"]
+      },
+      "gold": {
+        "suite_ids": ["coding_code_editing", "quant_fidelity"],
+        "group_ids": ["coding_core", "coding_breadth", "deployment_chat", "deployment_long_context", "quant_fidelity"],
+        "check_ids": ["evalplus_humaneval", "evalplus_mbpp", "interactive_chat_v1", "long_context_v1", "perplexity_reference_v1"]
+      }
+    },
+    "default": {
+      "canary": {
+        "suite_ids": [],
+        "group_ids": ["deployment_chat"],
+        "check_ids": ["interactive_chat_v1"]
+      },
+      "standard": {
+        "suite_ids": ["quant_fidelity"],
+        "group_ids": ["deployment_chat", "deployment_batch", "quant_fidelity"],
+        "check_ids": ["interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+      },
+      "gold": {
+        "suite_ids": ["quant_fidelity"],
+        "group_ids": ["deployment_chat", "deployment_batch", "quant_fidelity"],
+        "check_ids": ["interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+      }
+    }
+  }
+}

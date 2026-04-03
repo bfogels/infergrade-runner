@@ -1,6 +1,7 @@
 import os
 from typing import List
 
+from infergrade.benchmark_catalog import check_index, group_index, normalize_request_selection, suite_index
 from infergrade.constants import (
     SUPPORTED_BACKENDS,
     SUPPORTED_CAPABILITY_MODES,
@@ -19,6 +20,7 @@ class RequestValidationError(ValueError):
 
 
 def validate_request(request: RunRequest) -> None:
+    normalize_request_selection(request)
     errors: List[str] = []
     if request.backend not in SUPPORTED_BACKENDS:
         errors.append("Unsupported backend: %s" % request.backend)
@@ -32,6 +34,28 @@ def validate_request(request: RunRequest) -> None:
         errors.append("Unsupported cost source: %s" % request.cost_source)
     if request.use_case and request.use_case not in SUPPORTED_USE_CASES:
         errors.append("Unsupported use case: %s" % request.use_case)
+    suites = suite_index()
+    groups = group_index()
+    checks = check_index()
+    bad_suite_ids = [item for item in request.capability_suite_ids if item not in suites]
+    if bad_suite_ids:
+        errors.append("Unsupported capability suites: %s" % ", ".join(sorted(set(bad_suite_ids))))
+    bad_group_ids = [item for item in request.benchmark_group_ids if item not in groups]
+    if bad_group_ids:
+        errors.append("Unsupported benchmark groups: %s" % ", ".join(sorted(set(bad_group_ids))))
+    bad_check_ids = [item for item in request.benchmark_check_ids if item not in checks]
+    if bad_check_ids:
+        errors.append("Unsupported benchmark checks: %s" % ", ".join(sorted(set(bad_check_ids))))
+    incompatible_check_ids = [
+        item
+        for item in request.benchmark_check_ids
+        if item in checks and checks[item].get("supported_backends") and request.backend not in checks[item].get("supported_backends")
+    ]
+    if incompatible_check_ids:
+        errors.append(
+            "Selected benchmark checks are not supported for backend %s: %s"
+            % (request.backend, ", ".join(sorted(set(incompatible_check_ids))))
+        )
     bad_profiles = [p for p in request.deployment_profiles if p not in SUPPORTED_DEPLOYMENT_PROFILES]
     if bad_profiles:
         errors.append("Unsupported deployment profiles: %s" % ", ".join(sorted(bad_profiles)))

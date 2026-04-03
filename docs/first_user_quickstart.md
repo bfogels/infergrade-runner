@@ -22,9 +22,10 @@ It targets:
 - model: `TinyLlama/TinyLlama-1.1B-Chat-v1.0`
 - artifact: public TinyLlama GGUF on Hugging Face
 - backend: `llama.cpp`
-- tier: `canary`
-- deployment profile: `interactive_chat_v1`
-- capability: `none`
+- capability suite: `chat_instruction_following`
+- benchmark group: `deployment_chat`
+- benchmark check: `interactive_chat_v1`
+- derived compatibility tier: `canary`
 
 ## Prerequisites
 
@@ -47,6 +48,8 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade run-job \
 ```
 
 The containerized path below is still appropriate for Linux, cloud workers, and CPU-only validation, but it does not exercise Metal on Apple Silicon.
+
+The important product shift is that InferGrade is now capability-first. Even this minimal demo config carries an explicit benchmark selection and only uses `canary` as a derived compatibility label.
 
 ## 1. Get The Runtime Image
 

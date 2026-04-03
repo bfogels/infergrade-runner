@@ -129,7 +129,10 @@ class CapabilityTests(unittest.TestCase):
         execution = CapabilityExecution(
             use_case="agentic_coding",
             suite_id="coding_standard_v3",
+            suite_ids=["coding_code_editing", "quant_fidelity"],
             benchmark_tier="standard",
+            benchmark_group_ids=["coding_core", "coding_breadth", "deployment_chat", "deployment_long_context", "quant_fidelity"],
+            benchmark_check_ids=["evalplus_humaneval", "evalplus_mbpp"],
             components=["EvalPlus HumanEval+", "EvalPlus MBPP+"],
             score=0.72,
             score_method="mean_primary_metric_v1",
@@ -151,6 +154,8 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(summary["benchmark_coverage"]["planned_count"], 2)
         self.assertEqual(summary["benchmark_coverage"]["scored_count"], 1)
         self.assertEqual(len(summary["capability_component_reports"]), 2)
+        self.assertEqual(summary["capability_suite_ids"], ["coding_code_editing", "quant_fidelity"])
+        self.assertIn("evalplus_humaneval", summary["selected_benchmark_check_ids"])
 
     def test_host_mount_path_maps_listener_runs_dir_to_host_runs_dir(self):
         benchmark_dir = os.path.join("/app/runs", "run_example", "artifacts", "capability", "ifeval")

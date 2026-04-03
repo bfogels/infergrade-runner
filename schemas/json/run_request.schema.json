@@ -15,6 +15,22 @@
         "model": { "type": "string", "minLength": 1 },
         "backend": { "type": "string", "enum": ["llama.cpp", "vllm"] },
         "tier": { "type": "string", "enum": ["canary", "standard", "gold"] },
+        "capability_suite_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "benchmark_group_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "benchmark_check_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "benchmark_shortcut_id": { "type": "string" },
         "quant_artifact": { "type": "string" },
         "use_case": { "type": "string", "enum": ["agentic_coding", "general_assistant"] },
         "deployment_profiles": {

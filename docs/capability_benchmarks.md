@@ -41,19 +41,46 @@ These are selected as high-value next additions, but are not yet wired into the 
 - `SWE-bench Verified`
   - Why: highest-value software engineering benchmark in this space, but much more operationally expensive than the first-pass coding lanes.
 
-## Tiering
+## Capability Catalog Shape
 
-### `general_assistant`
+InferGrade now treats benchmark scope as:
 
-- `canary`: `IFEval` subset
-- `standard`: larger `IFEval` subset
-- `gold`: full `IFEval`
+- capability suites
+- benchmark groups
+- individual benchmark checks
 
-### `agentic_coding`
+The currently implemented first-user catalog is:
 
-- `canary`: `EvalPlus HumanEval+` subset
-- `standard`: full `EvalPlus HumanEval+`
-- `gold`: full `EvalPlus HumanEval+` plus `EvalPlus MBPP+`
+### `chat_instruction_following`
+
+- group: `instruction_following`
+  - check: `ifeval`
+- group: `deployment_chat`
+  - check: `interactive_chat_v1`
+- group: `deployment_batch`
+  - check: `batch_generation_v1`
+- group: `deployment_long_context`
+  - check: `long_context_v1`
+
+### `coding_code_editing`
+
+- group: `coding_core`
+  - check: `evalplus_humaneval`
+- group: `coding_breadth`
+  - check: `evalplus_mbpp`
+- group: `deployment_chat`
+  - check: `interactive_chat_v1`
+- group: `deployment_batch`
+  - check: `batch_generation_v1`
+- group: `deployment_long_context`
+  - check: `long_context_v1`
+
+### `quant_fidelity`
+
+- group: `quant_fidelity`
+  - check: `perplexity_reference_v1`
+
+Compatibility breadth labels like `canary`, `standard`, and `gold` are still derived from the selected checks for older flows and release planning, but they are no longer the main user-facing benchmark abstraction.
 
 ## Container Contract
 

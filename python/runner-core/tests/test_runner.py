@@ -76,7 +76,10 @@ class RunnerTests(unittest.TestCase):
                 return CapabilityExecution(
                     use_case=None,
                     suite_id=None,
+                    suite_ids=[],
                     benchmark_tier=request.tier,
+                    benchmark_group_ids=[],
+                    benchmark_check_ids=[],
                     components=[],
                     score=None,
                     score_method=None,
@@ -208,7 +211,10 @@ class RunnerTests(unittest.TestCase):
                 return CapabilityExecution(
                     use_case=request.use_case,
                     suite_id="sim_suite",
+                    suite_ids=["coding_code_editing"],
                     benchmark_tier=request.tier,
+                    benchmark_group_ids=["coding_core"],
+                    benchmark_check_ids=["evalplus_humaneval"],
                     components=["component_a"],
                     score=0.75,
                     score_method="simulated",

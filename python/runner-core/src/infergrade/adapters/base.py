@@ -1,8 +1,8 @@
 from typing import Callable, Dict, List, Optional
 
+from infergrade.benchmark_catalog import capability_benchmark_ids_for_request, selection_metadata_for_request
 from infergrade.capabilities import execute_capability_suite
 from infergrade.models import CapabilityExecution, DeploymentExecution, FidelityExecution, RunRequest
-from infergrade.profiles import resolve_capability_suite
 from infergrade.utils import stable_hash, utcnow_iso
 
 
@@ -44,7 +44,10 @@ class BaseAdapter(object):
             return CapabilityExecution(
                 use_case=request.use_case,
                 suite_id=None,
+                suite_ids=[],
                 benchmark_tier=request.tier,
+                benchmark_group_ids=[],
+                benchmark_check_ids=[],
                 components=[],
                 score=None,
                 score_method=None,
@@ -54,16 +57,22 @@ class BaseAdapter(object):
                 benchmark_results={},
                 artifacts={},
             )
-        suite = resolve_capability_suite(request.use_case, request.tier)
+        selection = selection_metadata_for_request(request)
+        capability_benchmark_ids = capability_benchmark_ids_for_request(request)
+        suite_ids = list(selection.get("capability_suite_ids") or [])
+        primary_suite_id = suite_ids[0] if suite_ids else None
         if not request.simulate:
             try:
                 return execute_capability_suite(self, request, progress_callback=progress_callback)
             except Exception as exc:
                 return CapabilityExecution(
                     use_case=request.use_case,
-                    suite_id=suite["suite_id"],
-                    benchmark_tier=suite["benchmark_tier"],
-                    components=suite["components"],
+                    suite_id=primary_suite_id,
+                    suite_ids=suite_ids,
+                    benchmark_tier=request.tier,
+                    benchmark_group_ids=list(selection.get("benchmark_group_ids") or []),
+                    benchmark_check_ids=capability_benchmark_ids,
+                    components=[item.get("display_name") for item in list(selection.get("benchmark_checks") or []) if item.get("evidence_kind") == "capability"],
                     score=None,
                     score_method=None,
                     component_scores={},
@@ -72,12 +81,15 @@ class BaseAdapter(object):
                     benchmark_results={"error": {"message": str(exc)}},
                     artifacts={},
                 )
-        raw = self._simulate_capability(request, suite["benchmark_ids"])
+        raw = self._simulate_capability(request, capability_benchmark_ids)
         return CapabilityExecution(
             use_case=request.use_case,
-            suite_id=suite["suite_id"],
-            benchmark_tier=suite["benchmark_tier"],
-            components=suite["components"],
+            suite_id=primary_suite_id,
+            suite_ids=suite_ids,
+            benchmark_tier=request.tier,
+            benchmark_group_ids=list(selection.get("benchmark_group_ids") or []),
+            benchmark_check_ids=capability_benchmark_ids,
+            components=[item.get("display_name") for item in list(selection.get("benchmark_checks") or []) if item.get("evidence_kind") == "capability"],
             score=raw["capability_score"],
             score_method="weighted_normalized_sum_v1",
             component_scores=raw["component_scores"],

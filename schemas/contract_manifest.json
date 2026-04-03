@@ -16,6 +16,9 @@
     "schemas/examples/run_request.canary.yaml",
     "schemas/examples/run_request.standard.yaml"
   ],
+  "catalog_files": [
+    "schemas/capability_catalog.json"
+  ],
   "supporting_docs": [
     "docs/contract_ownership.md",
     "docs/input_output_spec_v0.1.md",

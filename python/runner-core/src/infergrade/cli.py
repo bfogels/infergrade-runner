@@ -9,6 +9,7 @@ from urllib.error import URLError
 
 from infergrade import __version__
 from infergrade.analysis import recommend, summarize_bundle
+from infergrade.benchmark_catalog import load_capability_catalog
 from infergrade.doctor import run_doctor
 from infergrade.images import install_known_images
 from infergrade.pairing import (
@@ -18,7 +19,7 @@ from infergrade.pairing import (
     runner_profile_path,
     save_runner_profile,
 )
-from infergrade.profiles import CAPABILITY_SUITES, DEPLOYMENT_PROFILES
+from infergrade.profiles import DEPLOYMENT_PROFILES
 from infergrade.request import request_from_cli, request_from_file
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.runner import run_infergrade
@@ -309,7 +310,7 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "show-capabilities":
-        print(json.dumps(CAPABILITY_SUITES, indent=2, sort_keys=True))
+        print(json.dumps(load_capability_catalog(), indent=2, sort_keys=True))
         return 0
 
     if args.command == "doctor":

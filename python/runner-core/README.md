@@ -22,10 +22,27 @@ The runner still defaults to simulated execution, but it now has a first real ba
 - real deployment timings parsed from `llama-cli`
 - first real capability evaluation via containerized `IFEval` and `EvalPlus` runners
 - explicit capability states and benchmark-coverage metadata so missing capability does not collapse into `N/A`
-- first-pass `llama.cpp` perplexity support as a quantization-fidelity signal for standard/gold runs
+- first-pass `llama.cpp` perplexity support as a quantization-fidelity signal when the fidelity check is selected
 - backend-image overrides and artifact-cache overrides through the request contract
 - Hub-token-aware fetch and upload flow for hosted deployments, with `INFERGRADE_HUB_TOKEN` preferred over `INFERGRADE_API_TOKEN`
 - paired local runner profiles so `infergrade start` and `infergrade run-job` can reuse saved Hub credentials after a one-time `infergrade pair`
+
+## Capability Catalog
+
+Runner now publishes a machine-readable capability catalog through the pinned contract bundle. That catalog defines:
+
+- capability suites
+- benchmark groups
+- benchmark checks
+- legacy shortcut mappings so older `use_case` and `tier` inputs still normalize into the same explicit selection model
+
+New request payloads should prefer:
+
+- `capability_suite_ids`
+- `benchmark_group_ids`
+- `benchmark_check_ids`
+
+The Runner will still derive compatibility metadata like `tier`, `use_case`, deployment profiles, and capability enablement from that explicit selection when needed.
 
 ## Development
 
@@ -47,13 +64,13 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade start --execution-mode l
 ```bash
 PYTHONPATH=python/runner-core/src python3 -m unittest discover -s python/runner-core/tests
 PYTHONPATH=python/runner-core/src python3 -m infergrade install-images --image infergrade-llama-cpp:local
-PYTHONPATH=python/runner-core/src python3 -m infergrade doctor --model Qwen/Qwen2.5-7B-Instruct --backend llama.cpp --tier canary --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
-PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5-7B-Instruct --backend llama.cpp --tier canary --output runs/qwen_canary --resume
+PYTHONPATH=python/runner-core/src python3 -m infergrade doctor --model Qwen/Qwen2.5-7B-Instruct --backend llama.cpp --capability-suite-ids chat_instruction_following --benchmark-check-ids interactive_chat_v1 --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
+PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5-7B-Instruct --backend llama.cpp --capability-suite-ids chat_instruction_following --benchmark-check-ids interactive_chat_v1 --output runs/qwen_quick_default --resume
 docker build -t infergrade-llama-cpp:local -f containers/llama-cpp/Dockerfile .
 docker build -t infergrade-ifeval:local -f containers/capability-ifeval/Dockerfile .
 docker build -t infergrade-evalplus:local -f containers/capability-evalplus/Dockerfile .
-PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5-7B-Instruct --quant-artifact /absolute/path/to/model.gguf --backend llama.cpp --tier canary --output runs/local_real_run --resume --real-run
-PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5-7B-Instruct --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf --quant-artifact-filename Qwen2.5-7B-Instruct-Q4_K_M.gguf --backend llama.cpp --backend-image infergrade-llama-cpp:local --tier canary --output runs/hf_real_run --resume --real-run
+PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5-7B-Instruct --quant-artifact /absolute/path/to/model.gguf --backend llama.cpp --capability-suite-ids chat_instruction_following --benchmark-check-ids interactive_chat_v1 --output runs/local_real_run --resume --real-run
+PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5-7B-Instruct --quant-artifact hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf --quant-artifact-filename Qwen2.5-7B-Instruct-Q4_K_M.gguf --backend llama.cpp --backend-image infergrade-llama-cpp:local --capability-suite-ids chat_instruction_following --benchmark-check-ids interactive_chat_v1 --output runs/hf_real_run --resume --real-run
 ```
 
 `infergrade install-images` is the preferred local setup path now. Preparing a local runtime image like `infergrade-llama-cpp:local` also prepares `infergrade-runner-core:local`, because the recommended Hub-backed flow uses the runner-core container as the long-lived local listener.
@@ -143,6 +160,8 @@ Runner-produced result payloads now carry:
 - first-pass perplexity metadata under `fidelity` for `llama.cpp` when that measurement is available
 
 Perplexity is intentionally treated as a supporting quantization-fidelity signal, not a substitute for task-level capability or deployment telemetry.
+
+The benchmark-selection portion of the result now preserves the actual suites, groups, and checks that were selected so Hub surfaces can explain exactly what evidence produced a recommendation or comparison.
 
 When the Hub is running on your host machine, `host.docker.internal` is the correct API hostname from inside the runner container. `localhost` inside that container points back to the container itself.
 

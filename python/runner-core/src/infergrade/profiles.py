@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from infergrade.capabilities import CAPABILITY_SUITES, resolve_capability_suite
 from infergrade.constants import DEFAULT_GENERATION_PRESET
 
 

@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from infergrade.adapters import get_adapter
 from infergrade.artifacts import resolve_quant_artifact
+from infergrade.benchmark_catalog import normalize_request_selection, selection_metadata_for_request
 from infergrade.environment import capture_environment
 from infergrade.capabilities import summarize_capability_execution
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
@@ -95,6 +96,7 @@ def _build_result_record(
     completed_at: str,
 ) -> Dict[str, Any]:
     """Normalize one deployment-profile run into the shared result-record contract."""
+    selection_metadata = selection_metadata_for_request(request)
     quant_format = resolve_quant_format(
         request.quant_artifact_filename or request.quant_artifact or request.quant_artifact_resolved_path or "",
         request.backend,
@@ -141,11 +143,12 @@ def _build_result_record(
             "backend_engine": request.backend,
             "backend_wrapper": None,
             "backend_version": adapter_version,
-            "backend_execution": "container",
+            "backend_execution": "native" if request.execution_mode == "local_native" else "container",
             "backend_flags": request.backend_flags,
             "tokenizer_id": "%s_default" % slugify(request.model.split("/")[-1]),
             "chat_template_id": request.use_case or "default",
             "generation_preset_id": request.generation_preset,
+            "benchmark_selection": selection_metadata,
         },
         "hardware": environment,
         "verification": {
@@ -351,6 +354,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
     by hand.
     """
     request.generation_preset = resolve_generation_preset(request.generation_preset)
+    normalize_request_selection(request)
     request.deployment_profiles = resolve_deployment_profiles(request.use_case, request.deployment_profiles)
     request.capability = resolve_capability_behavior(request.tier, request.use_case, request.capability)
     adapter = get_adapter(request.backend)
