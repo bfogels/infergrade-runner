@@ -132,6 +132,22 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(version, "version: native-test")
         self.assertEqual(run_mock.call_args[0][0], ["/opt/homebrew/bin/llama-cli", "--version"])
 
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_resolve_version_rejects_unsupported_gemma4_architecture_early(self, run_mock):
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="google/gemma-4-27b-it",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_container",
+            ontology_hints={"architecture": "gemma4", "family_name": "Gemma 4"},
+            simulate=False,
+        )
+        with self.assertRaisesRegex(RuntimeError, "GGUF architecture 'gemma4'"):
+            adapter.resolve_version(simulate=False, request=request)
+        run_mock.assert_not_called()
+
     @mock.patch("infergrade.adapters.llama_cpp.install_image")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
     def test_generate_text_returns_stdout_payload(self, run_mock, _install_image_mock):
