@@ -85,6 +85,26 @@ class RequestResolutionTests(unittest.TestCase):
         self.assertIn("quant_fidelity", request.capability_suite_ids)
         self.assertIn("perplexity_reference_v1", request.benchmark_check_ids)
 
+    def test_request_from_dict_accepts_explicit_selection_without_tier(self):
+        payload = {
+            "request": {
+                "spec_version": "0.1-draft",
+                "run": {
+                    "model": "Qwen/Qwen2.5-Coder-7B-Instruct",
+                    "backend": "llama.cpp",
+                    "benchmark_check_ids": ["evalplus_humaneval", "long_context_v1", "perplexity_reference_v1"],
+                },
+            },
+            "run_config_id": "rcfg_explicit_selection",
+            "name": "Explicit selection",
+        }
+
+        request = request_from_dict(payload)
+        self.assertEqual(request.tier, "standard")
+        self.assertEqual(request.use_case, "agentic_coding")
+        self.assertEqual(request.deployment_profiles, ["long_context_v1"])
+        self.assertEqual(request.capability, "auto")
+
 
 if __name__ == "__main__":
     unittest.main()

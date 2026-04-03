@@ -159,6 +159,10 @@ def normalize_request_selection(request: RunRequest, catalog: Optional[Dict[str,
             if primary_use_case:
                 request.use_case = str(primary_use_case)
                 break
+    if not request.use_case:
+        inferred_use_case = _infer_use_case_from_groups(group_ids, suites)
+        if inferred_use_case:
+            request.use_case = inferred_use_case
 
     selected_profiles = deployment_profile_ids_for_request(request, payload)
     if selected_profiles:
@@ -271,3 +275,20 @@ def _dedupe_strings(values: Optional[List[Any]]) -> List[str]:
         if normalized and normalized not in cleaned:
             cleaned.append(normalized)
     return cleaned
+
+
+def _infer_use_case_from_groups(group_ids: List[str], suites: Dict[str, Dict[str, Any]]) -> Optional[str]:
+    selected_groups = set(_dedupe_strings(group_ids))
+    if not selected_groups:
+        return None
+    inferred_use_cases = []
+    for suite in suites.values():
+        suite_groups = set(_dedupe_strings(suite.get("default_group_ids")))
+        if not (selected_groups & suite_groups):
+            continue
+        use_case = str(suite.get("primary_use_case") or "").strip()
+        if use_case and use_case not in inferred_use_cases:
+            inferred_use_cases.append(use_case)
+    if len(inferred_use_cases) == 1:
+        return inferred_use_cases[0]
+    return None
