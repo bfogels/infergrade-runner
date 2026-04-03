@@ -32,7 +32,7 @@ Lower-level commands like `run-job`, `doctor`, `run-config`, and `upload-bundle`
 
 ## Pinned Release Golden Path
 
-For the containerized alpha lane, the Hub should pin one released Runner artifact set instead of assuming a repo checkout or `:local` tags.
+For the containerized first-user path, the Hub should pin one released Runner artifact set instead of assuming a repo checkout or `:local` tags.
 
 That released lane currently centers on:
 
@@ -134,7 +134,7 @@ If you ever want to remove that local profile:
 infergrade unpair
 ```
 
-## Alpha Support Export
+## Support Export
 
 When a local run fails or a maintainer needs a compact machine snapshot, the Runner can now emit a secret-free support export:
 
@@ -147,7 +147,7 @@ Without `--output`, the same command prints the JSON payload to stdout. Support 
 - the paired runner profile shape
 - current environment and execution mode
 - local progress, summary, validation, and captured environment artifacts when a run directory is supplied
-- a simple file-presence checklist for common alpha-lane debugging
+- a simple file-presence checklist for first-user-path debugging
 
 This is designed to pair with the Hub-side support export so operator debugging does not depend on screenshots or ad hoc terminal copy/paste.
 
@@ -185,7 +185,7 @@ python ./scripts/export_contract_bundle.py
 
 That bundle is the artifact the Hub should pin to over time.
 
-For the current alpha lane, the stronger maintainer workflow is the release bundle:
+For the current first-user path, the stronger maintainer workflow is the release bundle:
 
 ```bash
 ./scripts/build_alpha_images.sh

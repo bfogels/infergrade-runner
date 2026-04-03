@@ -1,6 +1,6 @@
 # Runner Release Process
 
-This is the current local, reproducible release-prep workflow for the InferGrade Runner alpha lane.
+This is the current local, reproducible release-prep workflow for the InferGrade Runner pinned first-user path.
 
 The goal is to produce one versioned bundle that the Hub can pin to explicitly:
 
@@ -8,7 +8,7 @@ The goal is to produce one versioned bundle that the Hub can pin to explicitly:
 - a release manifest with checksums
 - the Runner-owned contract bundle
 
-## Prepare The Alpha Images
+## Prepare The Release Images
 
 Build the release-tagged local images:
 

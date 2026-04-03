@@ -332,7 +332,7 @@ def _doctor_failure_message(report: Dict[str, Any]) -> str:
 
 
 def _classify_worker_failure(exc: Exception, doctor_report: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Normalize common alpha-lane failures into actionable error codes."""
+    """Normalize common first-user-path failures into actionable error codes."""
     if doctor_report and not doctor_report.get("ok"):
         return _classify_doctor_failure(doctor_report)
     message = str(exc)
@@ -362,7 +362,7 @@ def _classify_worker_failure(exc: Exception, doctor_report: Optional[Dict[str, A
             "error_code": "auth_mismatch",
             "message": "Runner authentication failed. Refresh the paired runner profile or mint a fresh run token before retrying.",
             "recovery": [
-                {"label": "Re-pair the runner or refresh the run token", "detail": "Stale tokens are a common alpha failure and are safe to rotate."},
+                {"label": "Re-pair the runner or refresh the run token", "detail": "Stale tokens are a common first-user-path failure and are safe to rotate."},
             ],
             "details": {"raw_error": message},
         }
@@ -405,7 +405,7 @@ def _classify_worker_failure(exc: Exception, doctor_report: Optional[Dict[str, A
 
 
 def _classify_doctor_failure(report: Dict[str, Any]) -> Dict[str, Any]:
-    """Turn a failed doctor report into one alpha-facing recovery summary."""
+    """Turn a failed doctor report into one operator-facing recovery summary."""
     failing_checks = [item for item in report.get("checks", []) if item.get("status") == "error"]
     primary = failing_checks[0] if failing_checks else {}
     check_id = str(primary.get("id") or "")

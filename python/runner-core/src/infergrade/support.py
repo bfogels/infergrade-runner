@@ -1,4 +1,4 @@
-"""Support export helpers for local alpha debugging."""
+"""Support export helpers for local operator debugging."""
 
 import os
 from typing import Any, Dict, Optional

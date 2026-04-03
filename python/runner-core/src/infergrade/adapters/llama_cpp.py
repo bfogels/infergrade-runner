@@ -702,7 +702,7 @@ class LlamaCppAdapter(BaseAdapter):
     def _perplexity_context(self) -> Dict[str, object]:
         return {
             "corpus_id": _PERPLEXITY_CORPUS_ID,
-            "corpus_label": "InferGrade Alpha Text v1",
+            "corpus_label": "InferGrade Reference Text v1",
             "metric_family": "quantization_fidelity",
             "tool": "llama-perplexity",
             "context_size": _PERPLEXITY_CONTEXT_SIZE,

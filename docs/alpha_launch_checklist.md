@@ -1,8 +1,8 @@
-# InferGrade Alpha Launch Checklist
+# InferGrade First-User Launch Checklist
 
-This document defines what must be true before InferGrade is ready for a small first-user alpha.
+This document defines what must be true before InferGrade is ready for a small first-user release wave.
 
-The goal of alpha is not broad benchmark coverage or perfect methodology. The goal is a trustworthy first lane that outside users can actually complete:
+The goal here is not broad benchmark coverage or perfect methodology. The goal is a trustworthy first-user path that outside users can actually complete:
 
 1. open the site
 2. generate a run config
@@ -11,9 +11,9 @@ The goal of alpha is not broad benchmark coverage or perfect methodology. The go
 5. upload the bundle
 6. browse the result in a shared catalog
 
-## Alpha Promise
+## First-User Promise
 
-For alpha, InferGrade should truthfully be able to claim:
+For the first-user release wave, InferGrade should truthfully be able to claim:
 
 - there is a known-good `llama.cpp` lane
 - users can generate server-issued run configs from the web UI
@@ -85,9 +85,9 @@ Exit criteria:
 
 - the most common failure states feel recoverable, not mysterious
 
-## Good Enough For Alpha
+## Good Enough For The First-User Wave
 
-These are explicitly not blockers for a small first-user alpha:
+These are explicitly not blockers for a small first-user release wave:
 
 - full `vLLM` support
 - large benchmark breadth

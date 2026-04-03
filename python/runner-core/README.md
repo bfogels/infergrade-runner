@@ -74,9 +74,9 @@ The runner repo also includes a helper script that refreshes the listener image 
 
 That helper is intended for the containerized path. On Apple Silicon, prefer the native `infergrade start --execution-mode local_native` flow instead.
 
-## Alpha Reliability Tools
+## Reliability Tools
 
-Two CLI surfaces now exist specifically for alpha support and operator debugging:
+Two CLI surfaces now exist specifically for support and operator debugging:
 
 ```bash
 PYTHONPATH=python/runner-core/src python3 -m infergrade doctor ...
@@ -85,7 +85,7 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade export-support --run-dir
 
 `doctor` remains the fast dependency/readiness check. `export-support` produces a secret-free JSON payload with the current machine snapshot plus any run-local progress, summary, validation, environment, and artifact-resolution receipts that are present in the supplied run directory.
 
-When a worker-reported run failure reaches the Hub, the runner now classifies common alpha issues into actionable categories such as:
+When a worker-reported run failure reaches the Hub, the runner now classifies common first-user-path issues into actionable categories such as:
 
 - missing runtime image
 - artifact download failure
@@ -116,7 +116,7 @@ For the containerized listener path, the helper script remains the easiest optio
 ./scripts/start_local_listener.sh --api-url http://host.docker.internal:8000
 ```
 
-For the pinned alpha release lane, the equivalent no-repo listener bootstrap is:
+For the pinned first-user release path, the equivalent no-repo listener bootstrap is:
 
 ```bash
 docker run --rm \
@@ -165,7 +165,7 @@ If you are talking to a legacy or development API that still expects a shared be
 
 ## Release Prep
 
-When you want to prepare the pinned alpha lane instead of a repo-local development flow:
+When you want to prepare the pinned release path instead of a repo-local development flow:
 
 ```bash
 ./scripts/build_alpha_images.sh
@@ -198,7 +198,7 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade worker \
   --once
 ```
 
-For the known-good first-user alpha lane, use:
+For the known-good first-user path, use:
 
 - [docs/first_user_quickstart.md](../../docs/first_user_quickstart.md)
 - [docs/release_process.md](../../docs/release_process.md)

@@ -11,7 +11,7 @@ It deliberately optimizes for success:
 - protected API writes
 - resumable local output
 
-If this path does not feel smooth, InferGrade is not ready for alpha.
+If this path does not feel smooth, InferGrade is not ready for first-user testing.
 
 ## The Demo Config
 
@@ -157,7 +157,7 @@ curl http://127.0.0.1:8000/stats/overview
 curl http://127.0.0.1:8000/bundles
 ```
 
-## Known-Good Alpha Expectations
+## Known-Good First-User Expectations
 
 The first run should produce:
 
