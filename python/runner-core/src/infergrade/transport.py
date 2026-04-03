@@ -259,6 +259,8 @@ def fail_run_job(
     worker_id: str,
     message: str,
     error_code: str = None,
+    recovery: Any = None,
+    details: Dict[str, Any] = None,
     api_token: str = None,
     run_token: str = None,
 ) -> Dict[str, Any]:
@@ -271,6 +273,8 @@ def fail_run_job(
             "worker_id": worker_id,
             "message": message,
             "error_code": error_code,
+            "recovery": recovery,
+            "details": details,
         },
         api_token=api_token,
         run_token=run_token,

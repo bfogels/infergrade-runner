@@ -176,6 +176,44 @@ class CliTests(unittest.TestCase):
         save_mock.assert_called_once_with(response["runner_profile"])
         self.assertIn('"paired": true', output.getvalue().lower())
 
+    def test_export_support_command_prints_json_when_output_is_omitted(self):
+        output = io.StringIO()
+        payload = {"export_kind": "infergrade_runner_support_v1", "runner_version": "0.1.0"}
+        with mock.patch("infergrade.cli.build_support_export", return_value=payload) as export_mock:
+            with redirect_stdout(output):
+                exit_code = main(["export-support", "--execution-mode", "local_native"])
+
+        self.assertEqual(exit_code, 0)
+        export_mock.assert_called_once_with(run_dir=None, execution_mode="local_native")
+        self.assertIn('"export_kind": "infergrade_runner_support_v1"', output.getvalue())
+
+    def test_export_support_command_writes_file_when_output_is_provided(self):
+        output = io.StringIO()
+        with mock.patch(
+            "infergrade.cli.write_support_export",
+            return_value="/tmp/infergrade-support.json",
+        ) as write_mock:
+            with redirect_stdout(output):
+                exit_code = main(
+                    [
+                        "export-support",
+                        "--run-dir",
+                        "runs/example",
+                        "--execution-mode",
+                        "local_native",
+                        "--output",
+                        "/tmp/infergrade-support.json",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        write_mock.assert_called_once_with(
+            "/tmp/infergrade-support.json",
+            run_dir="runs/example",
+            execution_mode="local_native",
+        )
+        self.assertIn('"written": true', output.getvalue().lower())
+
 
 if __name__ == "__main__":
     unittest.main()

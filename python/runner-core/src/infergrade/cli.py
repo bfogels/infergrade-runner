@@ -22,6 +22,7 @@ from infergrade.profiles import CAPABILITY_SUITES, DEPLOYMENT_PROFILES
 from infergrade.request import request_from_cli, request_from_file
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.runner import run_infergrade
+from infergrade.support import build_support_export, write_support_export
 from infergrade.templates import render_run_config_template, render_run_request_template
 from infergrade.transport import (
     fetch_run_config,
@@ -125,6 +126,11 @@ def build_parser() -> argparse.ArgumentParser:
     upload_parser.add_argument("path")
     upload_parser.add_argument("--api-url", required=True)
     _add_api_token_argument(upload_parser)
+
+    support_parser = subparsers.add_parser("export-support", help="Write a compact support export for a local run or runner session.")
+    support_parser.add_argument("--run-dir", help="Optional run output directory to include in the support export.")
+    support_parser.add_argument("--execution-mode", help="Optional execution mode override for environment capture.")
+    support_parser.add_argument("--output", help="Optional output path. Prints JSON to stdout when omitted.")
 
     install_images_parser = subparsers.add_parser("install-images", help="Build the local InferGrade runtime and capability images.")
     install_images_parser.add_argument(
@@ -351,6 +357,14 @@ def main(argv: Optional[list] = None) -> int:
         except URLError as exc:
             raise SystemExit("Failed to upload bundle to %s: %s" % (args.api_url, exc))
         print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "export-support":
+        if args.output:
+            path = write_support_export(args.output, run_dir=args.run_dir, execution_mode=args.execution_mode)
+            print(json.dumps({"written": True, "path": path}, indent=2, sort_keys=True))
+        else:
+            print(json.dumps(build_support_export(run_dir=args.run_dir, execution_mode=args.execution_mode), indent=2, sort_keys=True))
         return 0
 
     if args.command == "install-images":

@@ -74,6 +74,28 @@ The runner repo also includes a helper script that refreshes the listener image 
 
 That helper is intended for the containerized path. On Apple Silicon, prefer the native `infergrade start --execution-mode local_native` flow instead.
 
+## Alpha Reliability Tools
+
+Two CLI surfaces now exist specifically for alpha support and operator debugging:
+
+```bash
+PYTHONPATH=python/runner-core/src python3 -m infergrade doctor ...
+PYTHONPATH=python/runner-core/src python3 -m infergrade export-support --run-dir runs/example
+```
+
+`doctor` remains the fast dependency/readiness check. `export-support` produces a secret-free JSON payload with the current machine snapshot plus any run-local progress, summary, validation, environment, and artifact-resolution receipts that are present in the supplied run directory.
+
+When a worker-reported run failure reaches the Hub, the runner now classifies common alpha issues into actionable categories such as:
+
+- missing runtime image
+- artifact download failure
+- auth mismatch
+- insufficient disk
+- output path conflict
+- contract mismatch
+
+Those structured failures are what power the Hub’s recovery guidance and support export views.
+
 ## Recommended Flow
 
 For Hub-generated local runs, the preferred operator flow is now:

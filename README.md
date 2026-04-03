@@ -134,6 +134,23 @@ If you ever want to remove that local profile:
 infergrade unpair
 ```
 
+## Alpha Support Export
+
+When a local run fails or a maintainer needs a compact machine snapshot, the Runner can now emit a secret-free support export:
+
+```bash
+infergrade export-support --run-dir runs/example --output infergrade-runner-support.json
+```
+
+Without `--output`, the same command prints the JSON payload to stdout. Support exports intentionally omit bearer tokens while still including:
+
+- the paired runner profile shape
+- current environment and execution mode
+- local progress, summary, validation, and captured environment artifacts when a run directory is supplied
+- a simple file-presence checklist for common alpha-lane debugging
+
+This is designed to pair with the Hub-side support export so operator debugging does not depend on screenshots or ad hoc terminal copy/paste.
+
 Run the runner test suite:
 
 ```bash

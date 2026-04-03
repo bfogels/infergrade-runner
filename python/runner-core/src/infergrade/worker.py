@@ -57,6 +57,7 @@ def execute_run_job(
             diagnostics=(runner_snapshot or {}).get("diagnostics"),
         )
 
+    doctor_report = None
     try:
         _runner_heartbeat("busy", current_run_id=run_id, message="Fetching run config.")
         heartbeat_run_job(api_url, run_id, worker_id, stage="fetch_run_config", message="Fetching run config.", api_token=api_token, run_token=run_token)
@@ -131,8 +132,19 @@ def execute_run_job(
             "upload": upload,
         }
     except Exception as exc:
+        failure = _classify_worker_failure(exc, doctor_report=doctor_report)
         try:
-            fail_run_job(api_url, run_id, worker_id, message=str(exc), error_code="worker_execution_failed", api_token=api_token, run_token=run_token)
+            fail_run_job(
+                api_url,
+                run_id,
+                worker_id,
+                message=failure["message"],
+                error_code=failure["error_code"],
+                recovery=failure.get("recovery"),
+                details=failure.get("details"),
+                api_token=api_token,
+                run_token=run_token,
+            )
         except Exception:
             pass
         try:
@@ -145,7 +157,8 @@ def execute_run_job(
             "claimed": True,
             "completed": False,
             "run_id": run_id,
-            "error": str(exc),
+            "error": failure["message"],
+            "failure": failure,
         }
 
 
@@ -316,6 +329,142 @@ def _doctor_failure_message(report: Dict[str, Any]) -> str:
     if len(failing_checks) > 3:
         labels.append("and %d more" % (len(failing_checks) - 3))
     return "Preflight failed: %s." % "; ".join(labels)
+
+
+def _classify_worker_failure(exc: Exception, doctor_report: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Normalize common alpha-lane failures into actionable error codes."""
+    if doctor_report and not doctor_report.get("ok"):
+        return _classify_doctor_failure(doctor_report)
+    message = str(exc)
+    lowered = message.lower()
+    if "curl failed while downloading" in lowered or "quant artifact does not exist" in lowered or "sha256 mismatch" in lowered:
+        return {
+            "error_code": "artifact_download_failed",
+            "message": "Artifact download failed: verify the artifact reference and reconnect Hugging Face if access is required.",
+            "recovery": [
+                {"label": "Check the artifact reference", "detail": "Confirm the Hugging Face path and quant filename are still valid."},
+                {"label": "Reconnect Hugging Face if needed", "detail": "Private or gated artifacts need valid access before retrying."},
+            ],
+            "details": {"raw_error": message},
+        }
+    if "pull access denied" in lowered or "unable to find image" in lowered or "docker: error response from daemon" in lowered:
+        return {
+            "error_code": "missing_runtime_image",
+            "message": "A required runtime image is missing locally. Build or pull it, then retry the run.",
+            "recovery": [
+                {"label": "Install the runtime image", "detail": "Use infergrade install-images for the missing image before retrying."},
+                {"label": "Restart the listener", "detail": "A rebuilt listener image ensures the next claim sees the new runtime image."},
+            ],
+            "details": {"raw_error": message},
+        }
+    if "missing or invalid api token" in lowered or "run token is not valid" in lowered:
+        return {
+            "error_code": "auth_mismatch",
+            "message": "Runner authentication failed. Refresh the paired runner profile or mint a fresh run token before retrying.",
+            "recovery": [
+                {"label": "Re-pair the runner or refresh the run token", "detail": "Stale tokens are a common alpha failure and are safe to rotate."},
+            ],
+            "details": {"raw_error": message},
+        }
+    if "no space left on device" in lowered or "path is not writable" in lowered:
+        return {
+            "error_code": "insufficient_disk",
+            "message": "The runner could not write to the output or cache path. Free space or change the path, then retry.",
+            "recovery": [
+                {"label": "Free space or choose a different path", "detail": "Artifact cache and bundle output both need writable disk."},
+            ],
+            "details": {"raw_error": message},
+        }
+    if "output directory already contains infergrade state" in lowered or "cannot resume" in lowered:
+        return {
+            "error_code": "output_path_conflict",
+            "message": "The output path already contains conflicting InferGrade state. Resume the existing run or choose a fresh output path.",
+            "recovery": [
+                {"label": "Resume the interrupted run", "detail": "If you intend to continue the same run, retry with resume."},
+                {"label": "Use a clean output path", "detail": "New runs should avoid reusing partially-populated bundle directories."},
+            ],
+            "details": {"raw_error": message},
+        }
+    if "contract version does not match" in lowered:
+        return {
+            "error_code": "contract_mismatch",
+            "message": "Runner contract version does not match the Hub. Update to the pinned release lane before retrying.",
+            "recovery": [
+                {"label": "Update the runner", "detail": "Install or pull the Hub's pinned runner release before retrying."},
+            ],
+            "details": {"raw_error": message},
+        }
+    return {
+        "error_code": "worker_execution_failed",
+        "message": message,
+        "recovery": [
+            {"label": "Inspect the local progress and event timeline", "detail": "If the cause is not obvious, export support details and share them with the maintainer."},
+        ],
+        "details": {"raw_error": message},
+    }
+
+
+def _classify_doctor_failure(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Turn a failed doctor report into one alpha-facing recovery summary."""
+    failing_checks = [item for item in report.get("checks", []) if item.get("status") == "error"]
+    primary = failing_checks[0] if failing_checks else {}
+    check_id = str(primary.get("id") or "")
+    details = dict(primary.get("details") or {})
+    message = primary.get("message") or _doctor_failure_message(report)
+    if check_id in {"docker_cli", "docker_daemon", "backend_image"} or check_id.startswith("capability_image_"):
+        suggested = details.get("suggested_command") or "infergrade install-images"
+        return {
+            "error_code": "missing_runtime_image",
+            "message": "Preflight failed because the local runtime image or container runtime is not ready.",
+            "recovery": [
+                {"label": "Prepare the runtime image", "detail": "Run %s, then restart the listener before retrying." % suggested},
+            ],
+            "details": {"failed_check": primary},
+        }
+    if check_id == "api_health":
+        return {
+            "error_code": "auth_mismatch",
+            "message": "Preflight could not reach the Hub API. Confirm the API URL and token, then retry.",
+            "recovery": [
+                {"label": "Verify Hub reachability", "detail": "Make sure the paired runner can still reach the configured API URL."},
+            ],
+            "details": {"failed_check": primary},
+        }
+    if check_id in {"quant_artifact", "artifact_cache_dir"}:
+        return {
+            "error_code": "artifact_download_failed",
+            "message": "Preflight could not prepare the requested artifact or cache path.",
+            "recovery": [
+                {"label": "Fix the artifact reference or cache path", "detail": "Check the artifact URI, local file path, and Hugging Face access before retrying."},
+            ],
+            "details": {"failed_check": primary},
+        }
+    if check_id in {"output_dir"}:
+        return {
+            "error_code": "insufficient_disk",
+            "message": "Preflight found an unwritable or full output path.",
+            "recovery": [
+                {"label": "Choose a writable output path", "detail": "Free space or point the run at a different writable directory."},
+            ],
+            "details": {"failed_check": primary},
+        }
+    if check_id in {"apple_silicon_local_container", "llama_cli_native", "llama_server_native", "native_backend_support"}:
+        return {
+            "error_code": "worker_execution_failed",
+            "message": message,
+            "recovery": [
+                {"label": "Use the recommended local execution path", "detail": "Apple Silicon local llama.cpp runs should use local_native with the required native binaries installed."},
+            ],
+            "details": {"failed_check": primary},
+        }
+    return {
+        "error_code": "worker_execution_failed",
+        "message": _doctor_failure_message(report),
+        "recovery": [
+            {"label": "Review the failed preflight checks", "detail": "The doctor output names the first blocking dependency and should be fixed before retrying."},
+        ],
+        "details": {"failed_checks": failing_checks[:5]},
+    }
 
 
 def _runtime_progress_update(output_dir: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[float]]:

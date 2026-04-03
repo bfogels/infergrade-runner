@@ -4,7 +4,7 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.worker import _progress_percent, run_worker_loop, run_worker_once
+from infergrade.worker import _classify_worker_failure, _progress_percent, run_worker_loop, run_worker_once
 
 
 class WorkerTests(unittest.TestCase):
@@ -168,6 +168,8 @@ class WorkerTests(unittest.TestCase):
         self.assertFalse(result["completed"])
         self.assertIn("Preflight failed", result["error"])
         fail_mock.assert_called_once()
+        self.assertEqual(fail_mock.call_args.kwargs["error_code"], "missing_runtime_image")
+        self.assertTrue(fail_mock.call_args.kwargs["recovery"])
 
     def test_cloud_worker_passes_provider_filters_when_claiming(self):
         with mock.patch("infergrade.worker.claim_run_job", return_value={"run": None}) as claim_mock:
@@ -283,6 +285,16 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(register_mock.call_args.kwargs["environment"], snapshot["environment"])
         self.assertEqual(register_mock.call_args.kwargs["contract"], snapshot["contract"])
         self.assertEqual(register_mock.call_args.kwargs["diagnostics"], snapshot["diagnostics"])
+
+    def test_classify_worker_failure_maps_download_errors_to_actionable_code(self):
+        failure = _classify_worker_failure(
+            RuntimeError("curl failed while downloading https://example.invalid/model.gguf: 404")
+        )
+
+        self.assertEqual(failure["error_code"], "artifact_download_failed")
+        self.assertIn("Artifact download failed", failure["message"])
+        self.assertTrue(failure["recovery"])
+        self.assertIn("raw_error", failure["details"])
 
 
 if __name__ == "__main__":
