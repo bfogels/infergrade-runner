@@ -154,10 +154,17 @@ Apple Silicon is the deliberate exception: when the goal is to benchmark local `
 
 Runner-produced result payloads now carry:
 
-- explicit capability states such as `scored`, `partial`, `skipped`, `not_yet_benchmarked`, and `not_comparable`
+- explicit capability states such as `scored`, `partial`, `failed`, `skipped`, `not_yet_benchmarked`, and `not_comparable`
 - benchmark coverage metadata including planned, executed, and scored benchmark components
 - component-level capability reports for suites like `IFEval`, `EvalPlus HumanEval+`, and `EvalPlus MBPP+`
 - first-pass perplexity metadata under `fidelity` for `llama.cpp` when that measurement is available
+
+The important truthfulness rule is that benchmark execution failure stays distinct from missing data:
+
+- `failed`: InferGrade attempted the benchmark lane and the suite or component execution failed.
+- `partial`: some planned benchmark components scored, but the full lane did not complete cleanly.
+- `not_yet_benchmarked`: the requested capability slice exists, but no benchmark execution has happened yet.
+- `skipped`: the operator explicitly disabled capability execution for that run.
 
 Perplexity is intentionally treated as a supporting quantization-fidelity signal, not a substitute for task-level capability or deployment telemetry.
 
