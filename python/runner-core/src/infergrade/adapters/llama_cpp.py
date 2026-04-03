@@ -45,6 +45,10 @@ _DEFAULT_PERPLEXITY_COMMAND = "llama-perplexity"
 _DEFAULT_SERVER_PORT = 8080
 _SERVER_READY_TIMEOUT_SECONDS = 180.0
 _SERVER_REQUEST_TIMEOUT_SECONDS = 300.0
+_PINNED_LLAMA_CPP_REF = "9f102a140"
+_UNSUPPORTED_ARCHITECTURES = {
+    "gemma4": "the pinned llama.cpp runtime predates Gemma 4 GGUF support",
+}
 _PERPLEXITY_CORPUS_ID = "infergrade_alpha_text_v1"
 _PERPLEXITY_CONTEXT_SIZE = 128
 _PERPLEXITY_OUTPUT_TYPE = 0
@@ -85,6 +89,8 @@ class LlamaCppAdapter(BaseAdapter):
     def resolve_version(self, simulate: bool = True, request: RunRequest = None) -> str:
         if simulate:
             return "simulated-%s" % self.backend_name.replace(".", "-")
+        if request is not None:
+            self._ensure_backend_model_compatibility(request)
         if request and request.execution_mode == "local_native":
             command = [self._native_command_path(request), "--version"]
             completed = subprocess.run(command, capture_output=True, text=True)
@@ -119,6 +125,7 @@ class LlamaCppAdapter(BaseAdapter):
             return super().run_deployment_profile(request, profile_id, progress_callback=progress_callback)
         if request.execution_mode not in ("local_container", "local_native", "cloud_container"):
             raise NotImplementedError("Real llama.cpp execution currently supports local_container, local_native, and cloud_container modes.")
+        self._ensure_backend_model_compatibility(request)
         model_path = self._require_local_gguf_artifact(request)
         profile_spec = self._profile_spec(profile_id, request.use_case)
         warmup_runs = 1 if request.tier == "canary" else 2
@@ -239,6 +246,15 @@ class LlamaCppAdapter(BaseAdapter):
             },
         )
 
+    def run_capability(
+        self,
+        request: RunRequest,
+        progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
+    ):
+        if not request.simulate:
+            self._ensure_backend_model_compatibility(request)
+        return super().run_capability(request, progress_callback=progress_callback)
+
     def generate_text(
         self,
         request: RunRequest,
@@ -249,6 +265,7 @@ class LlamaCppAdapter(BaseAdapter):
             return super().generate_text(request, prompt, max_tokens)
         if request.execution_mode not in ("local_container", "local_native", "cloud_container"):
             raise NotImplementedError("Real llama.cpp generation currently supports local_container, local_native, and cloud_container modes.")
+        self._ensure_backend_model_compatibility(request)
         model_path = self._require_local_gguf_artifact(request)
         if request.execution_mode == "local_native":
             command = [self._native_command_path(request)]
@@ -320,6 +337,7 @@ class LlamaCppAdapter(BaseAdapter):
                 context=self._perplexity_context(),
             )
 
+        self._ensure_backend_model_compatibility(request)
         model_path = self._require_local_gguf_artifact(request)
         started = time.perf_counter()
         try:
@@ -385,6 +403,21 @@ class LlamaCppAdapter(BaseAdapter):
         if request and request.backend_image:
             return request.backend_image
         return env_value("INFERGRADE_LLAMA_CPP_IMAGE", "QUANTBENCH_LLAMA_CPP_IMAGE", _DEFAULT_IMAGE)
+
+    def _ensure_backend_model_compatibility(self, request: RunRequest) -> None:
+        architecture = _infer_llama_cpp_architecture(request)
+        if architecture not in _UNSUPPORTED_ARCHITECTURES:
+            return
+        raise RuntimeError(
+            "llama.cpp backend compatibility check failed: GGUF architecture '%s' is not supported by the pinned llama.cpp runtime (%s) because %s. "
+            "Model '%s' should use a newer llama.cpp image/runtime or another supported backend lane."
+            % (
+                architecture,
+                _PINNED_LLAMA_CPP_REF,
+                _UNSUPPORTED_ARCHITECTURES[architecture],
+                request.model,
+            )
+        )
 
     def _require_local_gguf_artifact(self, request: RunRequest) -> str:
         artifact = request.quant_artifact_resolved_path or request.quant_artifact
@@ -1190,6 +1223,35 @@ def _metrics_from_server_completion(
         "prompt_eval_time_ms": round(prompt_ms, 4) if prompt_ms is not None else None,
         "eval_time_ms": round(predicted_ms, 4) if predicted_ms is not None else None,
     }
+
+
+def _infer_llama_cpp_architecture(request: RunRequest) -> Optional[str]:
+    hints = dict(request.ontology_hints or {})
+    explicit = (
+        hints.get("architecture")
+        or hints.get("model_architecture")
+        or hints.get("gguf_architecture")
+        or hints.get("llama_cpp_architecture")
+    )
+    if explicit:
+        return str(explicit).strip().lower().replace("-", "").replace("_", "")
+
+    candidates = [
+        request.model,
+        hints.get("family_name"),
+        request.quant_artifact_filename,
+        request.quant_artifact,
+    ]
+    for candidate in candidates:
+        lowered = str(candidate or "").strip().lower()
+        normalized = lowered.replace("_", "").replace("-", "").replace(" ", "")
+        if "gemma4" in normalized:
+            return "gemma4"
+        if "gemma3" in normalized:
+            return "gemma3"
+        if "gemma2" in normalized:
+            return "gemma2"
+    return None
 
 
 def _coerce_float(value: Any) -> Optional[float]:

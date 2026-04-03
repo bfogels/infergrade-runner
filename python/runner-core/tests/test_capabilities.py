@@ -298,6 +298,84 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(execution.component_scores["ifeval"], 0.84)
         self.assertIn("ifeval", execution.benchmark_results)
 
+    def test_execute_capability_suite_marks_all_generation_failures_as_failed(self):
+        class _AlwaysFailingAdapter(object):
+            def generate_text(self, request, prompt, max_tokens):
+                raise RuntimeError("unknown model architecture: 'gemma4'")
+
+        def fake_prepare(spec, benchmark_dir, tier):
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for index in range(3):
+                    handle.write(json.dumps({"case_id": "case-%d" % index, "task_id": "IFEval/%d" % index, "prompt": "Follow"}) + "\n")
+
+        def fake_evaluate(spec, benchmark_dir):
+            return {
+                "benchmark_id": spec.benchmark_id,
+                "display_name": spec.display_name,
+                "status": "completed",
+                "primary_metric": {"name": spec.primary_metric_name, "value": 0.0},
+                "metrics": {spec.primary_metric_name: 0.0},
+            }
+
+        request = RunRequest(
+            model="google/gemma-4-27b-it",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="general_assistant",
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                execution = execute_capability_suite(_AlwaysFailingAdapter(), request)
+        self.assertEqual(execution.status, "failed")
+        self.assertEqual(execution.score, None)
+        self.assertEqual(execution.benchmark_results["ifeval"]["status"], "failed")
+        self.assertEqual(execution.benchmark_results["ifeval"]["generation_failure_severity"], "all_failed")
+        self.assertEqual(execution.benchmark_results["ifeval"]["generation_failure_count"], 3)
+
+    def test_summarize_capability_execution_marks_dominant_generation_failures_as_degraded(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="general_assistant",
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        execution = CapabilityExecution(
+            use_case="general_assistant",
+            suite_id="assistant_standard_v2",
+            suite_ids=["chat_instruction_following"],
+            benchmark_tier="standard",
+            benchmark_group_ids=["instruction_following"],
+            benchmark_check_ids=["ifeval"],
+            components=["IFEval"],
+            score=None,
+            score_method="mean_primary_metric_v1",
+            component_scores={},
+            confidence=0.6,
+            status="partial",
+            benchmark_results={
+                "ifeval": {
+                    "benchmark_id": "ifeval",
+                    "display_name": "IFEval",
+                    "status": "degraded",
+                    "primary_metric": {"name": "prompt_strict_accuracy", "value": 0.41},
+                    "generation_failure_count": 60,
+                    "generation_failure_rate": 0.6,
+                    "generation_failure_severity": "dominant",
+                    "completed_cases": 40,
+                    "total_cases": 100,
+                }
+            },
+        )
+        summary = summarize_capability_execution(request, execution, completed_at="2026-04-03T12:00:00Z")
+        self.assertEqual(summary["capability_state"], "partial")
+        self.assertIn("generation_failures_dominant", summary["capability_reason_codes"])
+        self.assertEqual(summary["benchmark_coverage"]["scored_count"], 0)
+        self.assertEqual(summary["capability_component_reports"][0]["generation_failure_severity"], "dominant")
+
 
 if __name__ == "__main__":
     unittest.main()

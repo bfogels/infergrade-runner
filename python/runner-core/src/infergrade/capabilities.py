@@ -14,6 +14,7 @@ from infergrade.models import CapabilityExecution, RunRequest
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, write_json
 
 CAPABILITY_REGISTRY_VERSION = "2026-04-alpha"
+_DOMINANT_GENERATION_FAILURE_RATE = 0.5
 
 DEFAULT_CAPABILITY_IMAGES = {
     "ifeval": env_value("INFERGRADE_IFEVAL_IMAGE", "QUANTBENCH_IFEVAL_IMAGE", "infergrade-ifeval:local"),
@@ -148,7 +149,7 @@ def summarize_capability_execution(
     scored_benchmark_ids = [
         benchmark_id
         for benchmark_id in executed_benchmark_ids
-        if _benchmark_primary_metric_value(benchmark_results.get(benchmark_id) or {}) is not None
+        if _benchmark_counts_as_scored(benchmark_results.get(benchmark_id) or {})
         or benchmark_id in simulated_scored_ids
     ]
     missing_benchmark_ids = [benchmark_id for benchmark_id in planned_benchmark_ids if benchmark_id not in scored_benchmark_ids]
@@ -224,6 +225,13 @@ def _benchmark_primary_metric_value(summary: Dict[str, Any]) -> Optional[float]:
         return None
 
 
+def _benchmark_counts_as_scored(summary: Dict[str, Any]) -> bool:
+    return _benchmark_primary_metric_value(summary) is not None and str((summary or {}).get("status") or "") not in {
+        "failed",
+        "degraded",
+    }
+
+
 def _component_report_for_benchmark(
     request: RunRequest,
     benchmark_id: str,
@@ -254,6 +262,8 @@ def _component_report_for_benchmark(
         "completed_cases": benchmark_result.get("completed_cases"),
         "total_cases": total_cases,
         "generation_failure_count": benchmark_result.get("generation_failure_count"),
+        "generation_failure_rate": benchmark_result.get("generation_failure_rate"),
+        "generation_failure_severity": benchmark_result.get("generation_failure_severity"),
     }
 
 
@@ -286,6 +296,7 @@ def _capability_reason_codes(
     planned_count: int,
 ) -> List[str]:
     codes: List[str] = []
+    benchmark_ids = _planned_benchmark_ids(execution, suite, request)
     if not request.use_case and not execution.suite_ids:
         codes.append("use_case_missing")
     if suite is None and request.use_case and not execution.suite_ids:
@@ -300,11 +311,21 @@ def _capability_reason_codes(
         codes.append("partial_coverage")
     if any(
         str((execution.benchmark_results or {}).get(benchmark_id, {}).get("status")) == "failed"
-        for benchmark_id in (suite or {}).get("benchmark_ids", [])
+        for benchmark_id in benchmark_ids
     ):
         codes.append("benchmark_component_failed")
     if execution.status == "failed":
         codes.append("benchmark_execution_failed")
+    if any(
+        str((execution.benchmark_results or {}).get(benchmark_id, {}).get("generation_failure_severity")) == "dominant"
+        for benchmark_id in benchmark_ids
+    ):
+        codes.append("generation_failures_dominant")
+    if any(
+        str((execution.benchmark_results or {}).get(benchmark_id, {}).get("generation_failure_severity")) == "all_failed"
+        for benchmark_id in benchmark_ids
+    ):
+        codes.append("generation_failures_exhausted")
     if not codes and planned_count:
         codes.append("benchmark_not_yet_run")
     if not codes:
@@ -347,6 +368,8 @@ def execute_capability_suite(
     benchmark_results: Dict[str, Any] = {}
     benchmark_artifacts: Dict[str, Any] = {}
     completed = 0
+    degraded = 0
+    hard_failed = 0
 
     for benchmark_id in benchmark_ids:
         spec = CAPABILITY_BENCHMARKS[benchmark_id]
@@ -368,9 +391,27 @@ def execute_capability_suite(
             predictions = _generate_predictions(adapter, request, spec, cases, progress_callback=progress_callback)
             _write_jsonl(os.path.join(benchmark_dir, "predictions.jsonl"), predictions)
             summary = _evaluate_benchmark(spec, benchmark_dir)
-            summary["generation_failure_count"] = len(
-                [item for item in predictions if item.get("generation_status") != "completed"]
-            )
+            failure_count = len([item for item in predictions if item.get("generation_status") != "completed"])
+            failure_severity = _generation_failure_severity(len(cases), failure_count)
+            summary["generation_failure_count"] = failure_count
+            summary["generation_failure_rate"] = round(failure_count / float(len(cases)), 4) if cases else 0.0
+            summary["generation_failure_severity"] = failure_severity
+            summary["completed_cases"] = len(cases) - failure_count
+            summary["total_cases"] = len(cases)
+            if failure_severity == "all_failed":
+                summary["status"] = "failed"
+                summary["error"] = (
+                    "All generations failed before evaluation completed. "
+                    "This usually indicates an incompatible backend/model combination or a runtime generation failure."
+                )
+                if isinstance(summary.get("primary_metric"), dict):
+                    summary["primary_metric"]["value"] = None
+            elif failure_severity == "dominant":
+                summary["status"] = "degraded"
+                summary["warning"] = (
+                    "Most generations failed before evaluation completed. "
+                    "Treat this capability benchmark as degraded rather than a healthy score."
+                )
             write_json(os.path.join(benchmark_dir, "summary.json"), summary)
             if progress_callback:
                 progress_callback(
@@ -379,10 +420,19 @@ def execute_capability_suite(
                         "benchmark_id": benchmark_id,
                         "display_name": spec.display_name,
                         "total_cases": len(cases),
-                        "completed_cases": len(cases),
-                        "status": "completed",
+                        "completed_cases": len(cases) - failure_count,
+                        "status": summary.get("status") or "completed",
                         "primary_metric": summary.get("primary_metric", {}).get("value"),
-                        "message": "Capability benchmark %s completed." % spec.display_name,
+                        "error": summary.get("error") or summary.get("warning"),
+                        "message": (
+                            "Capability benchmark %s failed before evaluation produced a trustworthy score."
+                            if summary.get("status") == "failed"
+                            else (
+                                "Capability benchmark %s completed with degraded generation quality."
+                                if summary.get("status") == "degraded"
+                                else "Capability benchmark %s completed."
+                            )
+                        ) % spec.display_name,
                     }
                 )
             benchmark_results[benchmark_id] = summary
@@ -393,9 +443,13 @@ def execute_capability_suite(
                 "summary_path": os.path.join(benchmark_dir, "summary.json"),
             }
             primary_value = summary.get("primary_metric", {}).get("value")
-            if primary_value is not None:
+            if primary_value is not None and failure_severity == "none":
                 component_scores[benchmark_id] = round(float(primary_value), 6)
                 completed += 1
+            elif failure_severity == "dominant":
+                degraded += 1
+            elif failure_severity == "all_failed":
+                hard_failed += 1
         except Exception as exc:
             if progress_callback:
                 progress_callback(
@@ -423,8 +477,10 @@ def execute_capability_suite(
     status = "failed"
     if completed == len(benchmark_ids):
         status = "completed"
-    elif completed > 0:
+    elif completed > 0 or degraded > 0:
         status = "partial"
+    elif hard_failed == len(benchmark_ids):
+        status = "failed"
 
     score = None
     if component_scores:
@@ -452,6 +508,24 @@ def execute_capability_suite(
         benchmark_results=benchmark_results,
         artifacts=benchmark_artifacts,
     )
+
+
+def _generation_failure_severity(total_cases: int, failure_count: int) -> str:
+    if total_cases <= 0 or failure_count <= 0:
+        return "none"
+    if failure_count >= total_cases:
+        return "all_failed"
+    if (failure_count / float(total_cases)) >= _DOMINANT_GENERATION_FAILURE_RATE:
+        return "dominant"
+    return "partial"
+
+
+def _planned_benchmark_ids(execution: CapabilityExecution, suite: Optional[Dict[str, Any]], request: RunRequest) -> List[str]:
+    if execution.benchmark_check_ids:
+        return list(execution.benchmark_check_ids)
+    if suite and suite.get("benchmark_ids"):
+        return list(suite.get("benchmark_ids") or [])
+    return capability_benchmark_ids_for_request(request)
 
 
 def _prepare_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir: str, tier: str) -> None:
