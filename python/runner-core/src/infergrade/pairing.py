@@ -4,6 +4,7 @@ import json
 import os
 from typing import Any, Dict, Optional
 
+from infergrade.environment import capture_environment
 from infergrade.utils import ensure_dir, env_value
 
 
@@ -69,3 +70,30 @@ def resolve_runner_api_token(api_token: Optional[str] = None) -> Optional[str]:
         return str(api_token).strip()
     profile = load_runner_profile() or {}
     return str(profile.get("access_token") or "").strip() or None
+
+
+def preferred_local_execution_mode() -> str:
+    """Return the clearest default local execution mode for this machine."""
+    environment = capture_environment("local_native")
+    if (environment or {}).get("hardware_class") == "apple_silicon":
+        return "local_native"
+    return "local_container"
+
+
+def resolve_runner_execution_mode(execution_mode: Optional[str] = None) -> str:
+    """Resolve the execution mode from an explicit value, saved profile, or local hardware."""
+    if execution_mode:
+        return str(execution_mode).strip()
+    profile = load_runner_profile() or {}
+    if profile.get("preferred_execution_mode"):
+        return str(profile["preferred_execution_mode"]).strip()
+    return preferred_local_execution_mode()
+
+
+def resolve_runner_id(runner_id: Optional[str] = None) -> Optional[str]:
+    """Resolve the durable runner identifier from an explicit value or the paired profile."""
+    if runner_id:
+        return str(runner_id).strip()
+    profile = load_runner_profile() or {}
+    saved = str(profile.get("runner_id") or "").strip()
+    return saved or None

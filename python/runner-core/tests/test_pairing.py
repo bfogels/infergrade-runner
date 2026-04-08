@@ -11,6 +11,8 @@ from infergrade.pairing import (
     load_runner_profile,
     resolve_runner_api_token,
     resolve_runner_api_url,
+    resolve_runner_execution_mode,
+    resolve_runner_id,
     runner_profile_path,
     save_runner_profile,
 )
@@ -42,6 +44,18 @@ class PairingTests(unittest.TestCase):
         self.assertEqual(loaded["api_url"], "http://localhost:8000")
         self.assertEqual(resolve_runner_api_url(None), "http://localhost:8000")
         self.assertEqual(resolve_runner_api_token(None), "qbhr_pair_test")
+
+    def test_resolve_runner_identity_from_saved_profile(self):
+        save_runner_profile(
+            {
+                "api_url": "http://localhost:8000",
+                "access_token": "qbhr_pair_test",
+                "runner_id": "runner_saved",
+                "preferred_execution_mode": "local_native",
+            }
+        )
+        self.assertEqual(resolve_runner_id(None), "runner_saved")
+        self.assertEqual(resolve_runner_execution_mode(None), "local_native")
 
     def test_clear_runner_profile(self):
         save_runner_profile({"api_url": "http://localhost:8000", "access_token": "qbhr_pair_test"})

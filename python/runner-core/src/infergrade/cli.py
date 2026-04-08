@@ -11,11 +11,15 @@ from infergrade import __version__
 from infergrade.analysis import recommend, summarize_bundle
 from infergrade.benchmark_catalog import load_capability_catalog
 from infergrade.doctor import run_doctor
+from infergrade.environment import capture_environment
 from infergrade.images import install_known_images
 from infergrade.pairing import (
     clear_runner_profile,
+    preferred_local_execution_mode,
     resolve_runner_api_token,
     resolve_runner_api_url,
+    resolve_runner_execution_mode,
+    resolve_runner_id,
     runner_profile_path,
     save_runner_profile,
 )
@@ -196,7 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_job_parser.add_argument("--api-url")
     run_job_parser.add_argument("--run-id")
     run_job_parser.add_argument("--run-config-id")
-    run_job_parser.add_argument("--execution-mode", choices=("local_container", "local_native", "cloud_container"), default="local_container")
+    run_job_parser.add_argument("--execution-mode", choices=("local_container", "local_native", "cloud_container"))
     run_job_parser.add_argument("--worker-id")
     run_job_parser.add_argument("--provider-id")
     run_job_parser.add_argument("--instance-type-id")
@@ -211,7 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     start_parser = subparsers.add_parser("start", help="Start a long-lived local runner that listens for Hub-backed local jobs.")
     start_parser.add_argument("--api-url")
-    start_parser.add_argument("--execution-mode", choices=("local_container", "local_native"), default="local_container")
+    start_parser.add_argument("--execution-mode", choices=("local_container", "local_native"))
     start_parser.add_argument("--worker-id")
     start_parser.add_argument("--hostname")
     start_parser.add_argument("--poll-interval-seconds", type=float, default=10.0)
@@ -226,7 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     worker_parser = subparsers.add_parser("worker", help="Claim and execute API-backed run jobs.")
     worker_parser.add_argument("--api-url")
-    worker_parser.add_argument("--execution-mode", choices=("local_container", "local_native", "cloud_container"), default="local_container")
+    worker_parser.add_argument("--execution-mode", choices=("local_container", "local_native", "cloud_container"))
     worker_parser.add_argument("--worker-id")
     worker_parser.add_argument("--run-id")
     worker_parser.add_argument("--run-config-id")
@@ -291,6 +295,27 @@ def _require_runner_api_url(api_url: Optional[str]) -> str:
     if resolved:
         return resolved
     raise SystemExit("No API URL provided and no paired runner profile found. Pass --api-url or run `infergrade pair` first.")
+
+
+def _resolve_local_execution_mode(execution_mode: Optional[str], allow_cloud: bool = False) -> str:
+    """Resolve the execution mode for paired-runner commands."""
+    if execution_mode:
+        return execution_mode
+    resolved = resolve_runner_execution_mode(None)
+    if allow_cloud:
+        return resolved
+    if resolved == "cloud_container":
+        return preferred_local_execution_mode()
+    return resolved
+
+
+def _resolve_runner_worker_id(worker_id: Optional[str], execution_mode: Optional[str] = None) -> Optional[str]:
+    """Resolve the durable runner identifier for paired local-runner commands."""
+    if worker_id:
+        return resolve_runner_id(worker_id)
+    if execution_mode in (None, "local_container", "local_native"):
+        return resolve_runner_id(None)
+    return None
 
 
 def main(argv: Optional[list] = None) -> int:
@@ -374,12 +399,16 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "pair":
+        execution_mode = preferred_local_execution_mode()
+        environment = capture_environment(execution_mode)
         try:
             payload = redeem_runner_pairing(
                 api_url=args.api_url,
                 pair_code=args.pair_code,
                 label=args.label,
                 hostname=args.hostname or socket.gethostname(),
+                execution_mode=execution_mode,
+                environment=environment,
             )
         except URLError as exc:
             raise SystemExit("Failed to redeem runner pairing code against %s: %s" % (args.api_url, exc))
@@ -513,10 +542,11 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "run-job":
+        execution_mode = _resolve_local_execution_mode(args.execution_mode, allow_cloud=True)
         result = run_worker_once(
             api_url=_require_runner_api_url(args.api_url),
-            execution_mode=args.execution_mode,
-            worker_id=args.worker_id,
+            execution_mode=execution_mode,
+            worker_id=_resolve_runner_worker_id(args.worker_id, execution_mode),
             run_id=args.run_id,
             run_config_id=args.run_config_id,
             provider_id=args.provider_id,
@@ -531,11 +561,13 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "start":
+        execution_mode = _resolve_local_execution_mode(args.execution_mode)
+        worker_id = _resolve_runner_worker_id(args.worker_id, execution_mode)
         if args.once:
             result = run_worker_once(
                 api_url=_require_runner_api_url(args.api_url),
-                execution_mode=args.execution_mode,
-                worker_id=args.worker_id,
+                execution_mode=execution_mode,
+                worker_id=worker_id,
                 hostname=args.hostname,
                 api_token=resolve_runner_api_token(args.api_token),
                 run_token=None,
@@ -545,8 +577,8 @@ def main(argv: Optional[list] = None) -> int:
         else:
             result = run_worker_loop(
                 api_url=_require_runner_api_url(args.api_url),
-                execution_mode=args.execution_mode,
-                worker_id=args.worker_id,
+                execution_mode=execution_mode,
+                worker_id=worker_id,
                 hostname=args.hostname,
                 api_token=resolve_runner_api_token(args.api_token),
                 run_token=None,
@@ -559,11 +591,13 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "worker":
+        execution_mode = _resolve_local_execution_mode(args.execution_mode, allow_cloud=True)
+        worker_id = _resolve_runner_worker_id(args.worker_id, execution_mode)
         if args.once:
             result = run_worker_once(
                 api_url=_require_runner_api_url(args.api_url),
-                execution_mode=args.execution_mode,
-                worker_id=args.worker_id,
+                execution_mode=execution_mode,
+                worker_id=worker_id,
                 run_id=args.run_id,
                 run_config_id=args.run_config_id,
                 provider_id=args.provider_id,
@@ -577,8 +611,8 @@ def main(argv: Optional[list] = None) -> int:
         else:
             result = run_worker_loop(
                 api_url=_require_runner_api_url(args.api_url),
-                execution_mode=args.execution_mode,
-                worker_id=args.worker_id,
+                execution_mode=execution_mode,
+                worker_id=worker_id,
                 run_id=args.run_id,
                 run_config_id=args.run_config_id,
                 provider_id=args.provider_id,
