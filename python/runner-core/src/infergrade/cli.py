@@ -309,9 +309,13 @@ def _resolve_local_execution_mode(execution_mode: Optional[str], allow_cloud: bo
     return resolved
 
 
-def _resolve_runner_worker_id(worker_id: Optional[str]) -> Optional[str]:
-    """Resolve the durable runner identifier for paired runner commands."""
-    return resolve_runner_id(worker_id)
+def _resolve_runner_worker_id(worker_id: Optional[str], execution_mode: Optional[str] = None) -> Optional[str]:
+    """Resolve the durable runner identifier for paired local-runner commands."""
+    if worker_id:
+        return resolve_runner_id(worker_id)
+    if execution_mode in (None, "local_container", "local_native"):
+        return resolve_runner_id(None)
+    return None
 
 
 def main(argv: Optional[list] = None) -> int:
@@ -538,10 +542,11 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "run-job":
+        execution_mode = _resolve_local_execution_mode(args.execution_mode, allow_cloud=True)
         result = run_worker_once(
             api_url=_require_runner_api_url(args.api_url),
-            execution_mode=_resolve_local_execution_mode(args.execution_mode, allow_cloud=True),
-            worker_id=_resolve_runner_worker_id(args.worker_id),
+            execution_mode=execution_mode,
+            worker_id=_resolve_runner_worker_id(args.worker_id, execution_mode),
             run_id=args.run_id,
             run_config_id=args.run_config_id,
             provider_id=args.provider_id,
@@ -557,7 +562,7 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.command == "start":
         execution_mode = _resolve_local_execution_mode(args.execution_mode)
-        worker_id = _resolve_runner_worker_id(args.worker_id)
+        worker_id = _resolve_runner_worker_id(args.worker_id, execution_mode)
         if args.once:
             result = run_worker_once(
                 api_url=_require_runner_api_url(args.api_url),
@@ -587,7 +592,7 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.command == "worker":
         execution_mode = _resolve_local_execution_mode(args.execution_mode, allow_cloud=True)
-        worker_id = _resolve_runner_worker_id(args.worker_id)
+        worker_id = _resolve_runner_worker_id(args.worker_id, execution_mode)
         if args.once:
             result = run_worker_once(
                 api_url=_require_runner_api_url(args.api_url),

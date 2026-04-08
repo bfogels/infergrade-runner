@@ -155,6 +155,45 @@ class CliTests(unittest.TestCase):
         )
         self.assertIn('"run_id": "run_example"', output.getvalue())
 
+    def test_worker_command_does_not_reuse_paired_local_runner_id_for_cloud_mode(self):
+        output = io.StringIO()
+        with mock.patch(
+            "infergrade.cli.run_worker_loop",
+            return_value={"worker_id": "cloud-worker", "processed_jobs": 0, "completed_jobs": 0, "failed_jobs": 0},
+        ) as run_loop_mock, mock.patch(
+            "infergrade.cli.resolve_runner_execution_mode",
+            return_value="local_native",
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_id",
+            return_value="runner-paired",
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_api_url",
+            return_value="http://localhost:8000",
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_api_token",
+            return_value="qbhr_saved_token",
+        ):
+            with redirect_stdout(output):
+                exit_code = main(["worker", "--execution-mode", "cloud_container"])
+
+        self.assertEqual(exit_code, 0)
+        run_loop_mock.assert_called_once_with(
+            api_url="http://localhost:8000",
+            execution_mode="cloud_container",
+            worker_id=None,
+            run_id=None,
+            run_config_id=None,
+            provider_id=None,
+            instance_type_id=None,
+            hostname=None,
+            api_token="qbhr_saved_token",
+            run_token=None,
+            simulate=False,
+            poll_interval_seconds=10.0,
+            max_jobs=None,
+            emit_progress=mock.ANY,
+        )
+
     def test_pair_command_redeems_code_and_saves_profile(self):
         output = io.StringIO()
         response = {
