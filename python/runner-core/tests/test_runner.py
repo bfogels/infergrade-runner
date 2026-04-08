@@ -250,6 +250,31 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("benchmark_execution_failed", payload["capability"]["capability_reason_codes"])
         self.assertEqual(payload["capability"]["benchmark_coverage"]["scored_count"], 0)
         self.assertEqual(payload["capability"]["capability_component_reports"][0]["status"], "failed")
+        self.assertEqual(payload["evidence"]["benchmark_health"]["overall_state"], "failed")
+        self.assertIn("benchmark_execution_failed", payload["evidence"]["benchmark_health"]["reason_codes"])
+        self.assertEqual(payload["evidence"]["sufficiency"]["overall_state"], "partial")
+
+    def test_result_records_evidence_summary_for_scored_runs(self):
+        output_dir = os.path.join(self.tempdir, "bundle-evidence")
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="general_assistant",
+            output_dir=output_dir,
+            simulate=True,
+        )
+        run_infergrade(request)
+        with open(os.path.join(output_dir, "results", "interactive_chat_v1.json"), "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        self.assertEqual(payload["evidence"]["benchmark_health"]["overall_state"], "healthy")
+        self.assertEqual(payload["evidence"]["metric_confidence"]["deployment"]["status"], "partial")
+        self.assertEqual(payload["evidence"]["metric_confidence"]["capability"]["status"], "strong")
+        self.assertEqual(payload["evidence"]["metric_confidence"]["fidelity"]["status"], "missing")
+        self.assertEqual(payload["evidence"]["sufficiency"]["overall_state"], "partial")
+        self.assertIn("assistant_quality", payload["evidence"]["sufficiency"]["covered_questions"])
+        self.assertIn("deployment_latency", payload["evidence"]["sufficiency"]["covered_questions"])
+        self.assertIn("deployment_throughput", payload["evidence"]["sufficiency"]["partial_questions"])
 
     def test_existing_output_dir_requires_resume(self):
         output_dir = os.path.join(self.tempdir, "bundle")

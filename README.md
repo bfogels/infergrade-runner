@@ -19,6 +19,12 @@ InferGrade now treats benchmark scope as a capability-first contract:
 
 The old `canary / standard / gold` language still exists internally as a compatibility breadth hint, but it is no longer the main product abstraction. The Runner derives that breadth from the selected checks so older flows can remain compatible without forcing new users to think in tier jargon first.
 
+Runner bundles now also carry an explicit evidence summary alongside the raw capability, fidelity, and deployment sections:
+
+- `evidence.benchmark_health` keeps benchmark failure and degraded execution distinct from merely missing evidence
+- `evidence.metric_confidence` explains how strong the deployment, capability, and fidelity measurements actually are
+- `evidence.sufficiency` states which decision questions the run can answer reliably and which are still only partially covered
+
 ## Platform Execution Paths
 
 InferGrade aims to benchmark the best realistic execution path on each platform, not to force every machine through the same runtime wrapper.

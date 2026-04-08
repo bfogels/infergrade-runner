@@ -9,6 +9,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from infergrade.artifacts import artifact_to_download_url, default_artifact_cache_dir
+from infergrade.benchmark_catalog import selection_metadata_for_request
 from infergrade.capabilities import capability_images_for_request
 from infergrade.contracts import load_contract_manifest
 from infergrade.environment import capture_environment
@@ -180,6 +181,7 @@ def _request_checks(request: RunRequest) -> List[Dict[str, Any]]:
         ),
     ]
     checks.extend(_execution_mode_guidance_checks(request, environment))
+    checks.extend(_benchmark_eligibility_checks(request))
     if request.execution_mode in ("local_container", "cloud_container"):
         checks.append(_binary_check("docker", "docker_cli", "Docker CLI is available."))
         if checks[-1]["status"] == "ok":
@@ -205,6 +207,26 @@ def _request_checks(request: RunRequest) -> List[Dict[str, Any]]:
         )
     checks.append(_output_dir_check(request))
     return checks
+
+
+def _benchmark_eligibility_checks(request: RunRequest) -> List[Dict[str, Any]]:
+    """Return early benchmark/runtime compatibility errors before execution starts."""
+    selection = selection_metadata_for_request(request)
+    checks = list(selection.get("benchmark_checks") or [])
+    fidelity_checks = [item for item in checks if item.get("evidence_kind") == "fidelity"]
+    if fidelity_checks and request.backend != "llama.cpp":
+        return [
+            _check(
+                "fidelity_backend_support",
+                "error",
+                "The selected fidelity checks currently require the llama.cpp backend.",
+                {
+                    "backend": request.backend,
+                    "benchmark_check_ids": [item.get("check_id") for item in fidelity_checks],
+                },
+            )
+        ]
+    return []
 
 
 def _execution_mode_guidance_checks(request: RunRequest, environment: Dict[str, Any]) -> List[Dict[str, Any]]:

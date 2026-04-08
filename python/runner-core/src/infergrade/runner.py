@@ -68,6 +68,192 @@ def _local_comparison_grade_candidate(request: RunRequest, verification_level: s
     return "comparable"
 
 
+def _benchmark_health_summary(capability: Dict[str, Any]) -> Dict[str, Any]:
+    """Summarize how healthy the executed benchmark evidence is."""
+    reports = list(capability.get("capability_component_reports") or [])
+    state_counts: Dict[str, int] = {}
+    degraded_components = 0
+    failed_components = 0
+    skipped_components = 0
+    generation_failure_components = 0
+    for report in reports:
+        evidence_state = str(report.get("evidence_state") or "not_yet_benchmarked")
+        state_counts[evidence_state] = state_counts.get(evidence_state, 0) + 1
+        if str(report.get("status") or "") == "degraded":
+            degraded_components += 1
+        if evidence_state == "failed":
+            failed_components += 1
+        if evidence_state == "skipped":
+            skipped_components += 1
+        if str(report.get("generation_failure_severity") or "") in {"dominant", "all_failed"}:
+            generation_failure_components += 1
+
+    overall_state = "healthy"
+    reason_codes: List[str] = []
+    capability_state = str(capability.get("capability_state") or "not_yet_benchmarked")
+    if capability_state == "failed":
+        overall_state = "failed"
+        reason_codes.append("benchmark_execution_failed")
+    elif capability_state == "partial":
+        overall_state = "partial"
+        reason_codes.append("benchmark_coverage_partial")
+    elif capability_state == "skipped":
+        overall_state = "skipped"
+        reason_codes.append("benchmarking_skipped")
+    elif capability_state == "not_yet_benchmarked":
+        overall_state = "not_yet_benchmarked"
+        reason_codes.append("benchmark_not_yet_run")
+    elif capability_state == "not_comparable":
+        overall_state = "not_comparable"
+        reason_codes.append("benchmark_not_comparable")
+    if degraded_components:
+        reason_codes.append("degraded_generation_quality")
+    if generation_failure_components:
+        reason_codes.append("generation_failures_visible")
+    if failed_components and "benchmark_execution_failed" not in reason_codes:
+        reason_codes.append("failed_components_present")
+
+    return {
+        "overall_state": overall_state,
+        "component_state_counts": state_counts,
+        "degraded_component_count": degraded_components,
+        "failed_component_count": failed_components,
+        "skipped_component_count": skipped_components,
+        "generation_failure_component_count": generation_failure_components,
+        "reason_codes": reason_codes,
+    }
+
+
+def _metric_confidence_summary(capability: Dict[str, Any], fidelity: Dict[str, Any], deployment: Dict[str, Any]) -> Dict[str, Any]:
+    """Summarize how trustworthy the recorded metrics are for comparison work."""
+    deployment_metrics = {
+        "ttft_p50_ms": deployment.get("ttft_p50_ms"),
+        "load_time_ms": deployment.get("load_time_ms"),
+        "prompt_tokens_per_second_p50": deployment.get("prompt_tokens_per_second_p50"),
+        "decode_tokens_per_second_p50": deployment.get("decode_tokens_per_second_p50"),
+    }
+    deployment_missing = [name for name, value in deployment_metrics.items() if value is None]
+    measured_runs = int(deployment.get("measured_runs") or 0)
+    if not deployment_missing and measured_runs >= 5:
+        deployment_status = "strong"
+    elif any(value is not None for value in deployment_metrics.values()):
+        deployment_status = "partial"
+    else:
+        deployment_status = "missing"
+
+    capability_state = str(capability.get("capability_state") or "not_yet_benchmarked")
+    coverage_state = str((capability.get("benchmark_coverage") or {}).get("coverage_state") or "missing")
+    if capability_state == "scored" and coverage_state == "complete":
+        capability_status = "strong"
+    elif capability_state in {"partial", "scored"}:
+        capability_status = "partial"
+    elif capability_state in {"failed", "skipped", "not_yet_benchmarked"}:
+        capability_status = "weak"
+    else:
+        capability_status = "missing"
+
+    fidelity_state = str(fidelity.get("fidelity_state") or "not_yet_measured")
+    if fidelity_state == "measured":
+        fidelity_status = "strong"
+    elif fidelity_state in {"failed", "not_comparable"}:
+        fidelity_status = "weak"
+    elif fidelity_state in {"skipped", "not_yet_measured"}:
+        fidelity_status = "missing"
+    else:
+        fidelity_status = "partial"
+
+    overall_state = "strong" if deployment_status == "strong" and capability_status in {"strong", "partial"} else "partial"
+    if deployment_status == "missing" and capability_status not in {"strong", "partial"}:
+        overall_state = "weak"
+
+    return {
+        "overall_state": overall_state,
+        "deployment": {
+            "status": deployment_status,
+            "measured_runs": measured_runs,
+            "minimum_measured_runs_for_stable_compare": 5,
+            "missing_metrics": deployment_missing,
+            "reason_codes": (
+                ["deployment_metrics_complete", "measured_runs_sufficient"]
+                if deployment_status == "strong"
+                else ["deployment_metrics_partial"] if deployment_status == "partial" else ["deployment_metrics_missing"]
+            ),
+        },
+        "capability": {
+            "status": capability_status,
+            "coverage_state": coverage_state,
+            "capability_state": capability_state,
+            "reason_codes": list(capability.get("capability_reason_codes") or []),
+        },
+        "fidelity": {
+            "status": fidelity_status,
+            "fidelity_state": fidelity_state,
+            "comparability_key": (fidelity.get("perplexity") or {}).get("comparability_key") or (fidelity.get("context") or {}).get("comparability_key"),
+            "reason_codes": list(fidelity.get("fidelity_reason_codes") or []),
+        },
+    }
+
+
+def _evidence_sufficiency_summary(request: RunRequest, capability: Dict[str, Any], fidelity: Dict[str, Any], deployment: Dict[str, Any]) -> Dict[str, Any]:
+    """Explain which decision questions this result can answer reliably."""
+    capability_state = str(capability.get("capability_state") or "not_yet_benchmarked")
+    fidelity_state = str(fidelity.get("fidelity_state") or "not_yet_measured")
+    latency_present = deployment.get("ttft_p50_ms") is not None and deployment.get("load_time_ms") is not None
+    throughput_present = (
+        deployment.get("prompt_tokens_per_second_p50") is not None and deployment.get("decode_tokens_per_second_p50") is not None
+    )
+    questions = {
+        "assistant_quality": {
+            "status": "covered" if request.use_case == "general_assistant" and capability_state == "scored" else (
+                "partial" if request.use_case == "general_assistant" and capability_state in {"partial", "failed"} else "not_targeted"
+            ),
+            "summary": "General assistant task quality.",
+        },
+        "coding_quality": {
+            "status": "covered" if request.use_case == "agentic_coding" and capability_state == "scored" else (
+                "partial" if request.use_case == "agentic_coding" and capability_state in {"partial", "failed"} else "not_targeted"
+            ),
+            "summary": "Coding task quality.",
+        },
+        "quant_fidelity": {
+            "status": "covered" if fidelity_state == "measured" else ("partial" if fidelity_state == "failed" else "not_targeted"),
+            "summary": "Quantization fidelity against the shared perplexity corpus.",
+        },
+        "deployment_latency": {
+            "status": "covered" if latency_present else ("partial" if deployment.get("ttft_p50_ms") is not None else "missing"),
+            "summary": "Cold-start and first-token latency.",
+        },
+        "deployment_throughput": {
+            "status": "covered" if throughput_present else ("partial" if deployment.get("decode_tokens_per_second_p50") is not None else "missing"),
+            "summary": "Prompt and decode throughput.",
+        },
+        "long_context_behavior": {
+            "status": "covered" if deployment.get("deployment_profile_id") == "long_context_v1" else "not_targeted",
+            "summary": "Behavior under long-context deployment pressure.",
+        },
+    }
+    relevant = [
+        name for name, payload in questions.items()
+        if payload["status"] not in {"not_targeted"}
+    ]
+    covered = [name for name in relevant if questions[name]["status"] == "covered"]
+    partial = [name for name in relevant if questions[name]["status"] == "partial"]
+    missing = [name for name in relevant if questions[name]["status"] == "missing"]
+    overall_state = "sufficient" if covered and not partial and not missing else ("partial" if covered or partial else "insufficient")
+    return {
+        "overall_state": overall_state,
+        "decision_questions": questions,
+        "covered_questions": covered,
+        "partial_questions": partial,
+        "missing_questions": missing,
+        "reason_codes": (
+            ["evidence_sufficient_for_primary_questions"]
+            if overall_state == "sufficient"
+            else ["evidence_partially_sufficient"] if overall_state == "partial" else ["evidence_insufficient"]
+        ),
+    }
+
+
 def _verification_level(request: RunRequest, hardware: Dict[str, Any], backend_version: str) -> str:
     """Estimate the trust level implied by the current run metadata."""
     if request.simulate:
@@ -245,6 +431,11 @@ def _build_result_record(
         "oom_or_failure_rate": deployment["oom_or_failure_rate"],
         "deployment_confidence": deployment["deployment_confidence"],
         "deployment_status": "simulated" if request.simulate else "completed",
+    }
+    record["evidence"] = {
+        "benchmark_health": _benchmark_health_summary(record["capability"]),
+        "metric_confidence": _metric_confidence_summary(record["capability"], record["fidelity"], record["deployment"]),
+        "sufficiency": _evidence_sufficiency_summary(request, record["capability"], record["fidelity"], record["deployment"]),
     }
     slices = _canonical_slice_ids(record, request)
     record["derived"]["canonical_analysis_slice_ids"] = slices

@@ -251,6 +251,15 @@ def _component_report_for_benchmark(
         benchmark_result.get("status")
         or ("simulated" if benchmark_result == {} and component_score is not None else ("completed" if primary_metric_value is not None else "not_run"))
     )
+    evidence_state = "not_yet_benchmarked"
+    if status in {"completed", "simulated"} and primary_metric_value is not None:
+        evidence_state = "scored"
+    elif status == "degraded":
+        evidence_state = "partial"
+    elif status == "failed":
+        evidence_state = "failed"
+    elif status == "skipped":
+        evidence_state = "skipped"
     return {
         "benchmark_id": benchmark_id,
         "display_name": spec.display_name,
@@ -259,6 +268,7 @@ def _component_report_for_benchmark(
         "primary_metric_value": primary_metric_value,
         "component_score": component_score,
         "status": status,
+        "evidence_state": evidence_state,
         "completed_cases": benchmark_result.get("completed_cases"),
         "total_cases": total_cases,
         "generation_failure_count": benchmark_result.get("generation_failure_count"),

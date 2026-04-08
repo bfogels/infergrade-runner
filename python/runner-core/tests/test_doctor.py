@@ -137,6 +137,28 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(statuses["llama_cli_native"], "ok")
         self.assertEqual(statuses["llama_server_native"], "ok")
 
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.shutil.which")
+    def test_doctor_flags_fidelity_checks_on_unsupported_backend(self, which_mock, capture_environment_mock):
+        capture_environment_mock.return_value = {
+            "environment_class": "local_workstation",
+            "accelerator_type": "unknown",
+            "accelerator_count": 0,
+            "hardware_id": "hw_test",
+        }
+        which_mock.side_effect = lambda name: None
+        request = RunRequest(
+            model="meta-llama/Llama-3.1-8B-Instruct",
+            backend="vllm",
+            tier="standard",
+            use_case="general_assistant",
+            benchmark_check_ids=["perplexity_infergrade_alpha"],
+            execution_mode="local_container",
+        )
+        report = run_doctor(request=request)
+        statuses = {item["id"]: item["status"] for item in report["checks"]}
+        self.assertEqual(statuses["fidelity_backend_support"], "error")
+
     @mock.patch("infergrade.doctor.load_contract_manifest")
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.shutil.which")
