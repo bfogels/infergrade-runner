@@ -123,7 +123,7 @@ def execute_run_job(
             api_token=api_token,
             run_token=run_token,
         )
-        _runner_heartbeat("ready", current_run_id=None, message="Idle and ready for the next run.")
+        _runner_heartbeat("listening", current_run_id=None, message="Runner is listening for the next run.")
         return {
             "claimed": True,
             "completed": True,
@@ -148,7 +148,7 @@ def execute_run_job(
         except Exception:
             pass
         try:
-            _runner_heartbeat("ready", current_run_id=None, message="Recovered to idle after a failed run.")
+            _runner_heartbeat("listening", current_run_id=None, message="Runner recovered and is listening for more work.")
         except Exception:
             pass
         if emit_progress:
@@ -241,6 +241,7 @@ def run_worker_loop(
         runner_id=resolved_worker_id,
         execution_modes=[execution_mode],
         api_token=api_token,
+        status="starting",
         label=resolved_worker_id,
         runner_kind="cloud_worker" if execution_mode == "cloud_container" else "local_listener",
         hostname=hostname or socket.gethostname(),
@@ -256,11 +257,11 @@ def run_worker_loop(
         api_url=api_url,
         runner_id=resolved_worker_id,
         api_token=api_token,
-        status="ready",
+        status="listening",
         hostname=hostname or socket.gethostname(),
         provider_id=provider_id,
         instance_type_id=instance_type_id,
-        metadata={"message": "Runner registered and awaiting jobs."},
+        metadata={"message": "Runner registered and is listening for jobs."},
         environment=runner_snapshot.get("environment"),
         contract=runner_snapshot.get("contract"),
         diagnostics=runner_snapshot.get("diagnostics"),
@@ -291,11 +292,11 @@ def run_worker_loop(
                 api_url=api_url,
                 runner_id=resolved_worker_id,
                 api_token=api_token,
-                status="ready",
+                status="listening",
                 hostname=hostname or socket.gethostname(),
                 provider_id=provider_id,
                 instance_type_id=instance_type_id,
-                metadata={"message": "Runner is polling for more work."},
+                metadata={"message": "Runner is listening for more work."},
                 environment=runner_snapshot.get("environment"),
                 contract=runner_snapshot.get("contract"),
                 diagnostics=runner_snapshot.get("diagnostics"),

@@ -184,6 +184,8 @@ def redeem_runner_pairing(
     pair_code: str,
     label: str = None,
     hostname: str = None,
+    execution_mode: str = None,
+    environment: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """Redeem a one-time runner pairing code for a long-lived runner token."""
     _, payload = _json_request(
@@ -194,6 +196,8 @@ def redeem_runner_pairing(
             "pair_code": pair_code,
             "label": label,
             "hostname": hostname,
+            "preferred_execution_mode": execution_mode,
+            "environment": environment or {},
         },
     )
     return payload
@@ -299,6 +303,7 @@ def register_runner(
     runner_id: str,
     execution_modes: Any,
     api_token: str = None,
+    status: str = None,
     label: str = None,
     runner_kind: str = None,
     hostname: str = None,
@@ -318,6 +323,7 @@ def register_runner(
         payload={
             "runner_id": runner_id,
             "execution_modes": list(execution_modes or []),
+            "status": status,
             "label": label,
             "runner_kind": runner_kind,
             "hostname": hostname,

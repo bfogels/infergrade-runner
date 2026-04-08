@@ -42,6 +42,12 @@ class CliTests(unittest.TestCase):
             "infergrade.cli.run_worker_loop",
             return_value={"worker_id": "worker-test", "processed_jobs": 0, "completed_jobs": 0, "failed_jobs": 0},
         ) as run_loop_mock, mock.patch(
+            "infergrade.cli.resolve_runner_execution_mode",
+            return_value="local_native",
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_id",
+            return_value="runner-paired",
+        ), mock.patch(
             "infergrade.cli.resolve_runner_api_token",
             return_value=None,
         ):
@@ -59,8 +65,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         run_loop_mock.assert_called_once_with(
             api_url="http://localhost:8000",
-            execution_mode="local_container",
-            worker_id=None,
+            execution_mode="local_native",
+            worker_id="runner-paired",
             hostname=None,
             api_token=None,
             run_token=None,
@@ -80,6 +86,12 @@ class CliTests(unittest.TestCase):
             "infergrade.cli.resolve_runner_api_url",
             return_value="http://localhost:8000",
         ), mock.patch(
+            "infergrade.cli.resolve_runner_execution_mode",
+            return_value="local_native",
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_id",
+            return_value="runner-saved",
+        ), mock.patch(
             "infergrade.cli.resolve_runner_api_token",
             return_value="qbhr_saved_token",
         ):
@@ -89,8 +101,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         run_loop_mock.assert_called_once_with(
             api_url="http://localhost:8000",
-            execution_mode="local_container",
-            worker_id=None,
+            execution_mode="local_native",
+            worker_id="runner-saved",
             hostname=None,
             api_token="qbhr_saved_token",
             run_token=None,
@@ -106,6 +118,12 @@ class CliTests(unittest.TestCase):
             "infergrade.cli.run_worker_once",
             return_value={"claimed": True, "completed": True, "run": {"run_id": "run_example"}},
         ) as run_job_mock, mock.patch(
+            "infergrade.cli.resolve_runner_execution_mode",
+            return_value="local_container",
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_id",
+            return_value=None,
+        ), mock.patch(
             "infergrade.cli.resolve_runner_api_token",
             return_value=None,
         ):
@@ -152,7 +170,13 @@ class CliTests(unittest.TestCase):
         ) as redeem_mock, mock.patch(
             "infergrade.cli.save_runner_profile",
             return_value="/tmp/runner_profile.json",
-        ) as save_mock:
+        ) as save_mock, mock.patch(
+            "infergrade.cli.preferred_local_execution_mode",
+            return_value="local_native",
+        ), mock.patch(
+            "infergrade.cli.capture_environment",
+            return_value={"hardware_class": "apple_silicon"},
+        ):
             with redirect_stdout(output):
                 exit_code = main(
                     [
@@ -172,6 +196,8 @@ class CliTests(unittest.TestCase):
             pair_code="igrp_example",
             label="Brian MacBook Pro",
             hostname=mock.ANY,
+            execution_mode="local_native",
+            environment={"hardware_class": "apple_silicon"},
         )
         save_mock.assert_called_once_with(response["runner_profile"])
         self.assertIn('"paired": true', output.getvalue().lower())

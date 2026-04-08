@@ -54,7 +54,7 @@ For realistic local benchmarks on Apple Silicon, install `llama.cpp` natively an
 brew install llama.cpp
 PYTHONPATH=python/runner-core/src python3 -m unittest discover -s python/runner-core/tests
 PYTHONPATH=python/runner-core/src python3 -m infergrade pair --api-url http://127.0.0.1:8000 --pair-code 'igrp_example'
-PYTHONPATH=python/runner-core/src python3 -m infergrade start --execution-mode local_native
+PYTHONPATH=python/runner-core/src python3 -m infergrade start
 ```
 
 `infergrade doctor` now raises an explicit error if you try to benchmark Apple Silicon locally with `execution_mode=local_container`, because that path runs inside Docker Desktop's Linux VM and does not exercise Metal.
@@ -122,10 +122,10 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade pair \
   --api-url http://127.0.0.1:8000 \
   --pair-code 'igrp_example'
 
-PYTHONPATH=python/runner-core/src python3 -m infergrade start --execution-mode local_native
+PYTHONPATH=python/runner-core/src python3 -m infergrade start
 ```
 
-After a one-time pair, `infergrade start` and `infergrade run-job` can omit `--api-url` and `--api-token`; the Runner will fall back to the saved local profile.
+After a one-time pair, `infergrade start` and `infergrade run-job` can omit `--api-url` and `--api-token`; the Runner will fall back to the saved local profile and choose the clearest local execution mode for the machine by default.
 
 For the containerized listener path, the helper script remains the easiest option:
 

@@ -70,7 +70,7 @@ If you are benchmarking locally on Apple Silicon, use the native `llama.cpp` pat
 brew install llama.cpp
 python3 -m pip install -e ./python/runner-core
 infergrade pair --api-url http://127.0.0.1:8000 --pair-code 'igrp_example'
-infergrade start --execution-mode local_native
+infergrade start
 ```
 
 `infergrade doctor` will now fail fast if you try to run a real Apple Silicon `llama.cpp` benchmark with `execution_mode=local_container`, because that path does not use Metal.
@@ -104,7 +104,7 @@ For the common local-listener path during development, the simplest entrypoint i
 If you paired the machine already, native start commands can omit `--api-url` because the Runner will read the saved local profile:
 
 ```bash
-infergrade start --execution-mode local_native
+infergrade start
 ```
 
 If you are following the released containerized lane rather than a repo-based development flow, the canonical listener bootstrap is:
