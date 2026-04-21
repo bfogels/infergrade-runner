@@ -677,11 +677,15 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         write_json(os.path.join(output_dir, "validation.json"), validation.to_dict())
         final_validation = validate_bundle(output_dir)
         write_json(os.path.join(output_dir, "validation.json"), final_validation.to_dict())
+        selection_metadata = selection_metadata_for_request(request)
         summary = {
             "bundle_id": bundle_id,
             "result_count": len(result_records),
             "result_ids": [record["result_id"] for record in result_records],
             "deployment_profiles": [record["deployment"]["deployment_profile_id"] for record in result_records],
+            "benchmark_selection": selection_metadata,
+            "benchmark_scope": dict(selection_metadata.get("benchmark_scope") or {}),
+            "benchmark_check_ids": list(selection_metadata.get("benchmark_check_ids") or []),
             "benchmark_subject_id": ontology["benchmark_subject"]["subject_id"],
             "checkpoint_name": ontology["checkpoint"]["checkpoint_name"],
             "model_family": ontology["model_family"]["family_name"],

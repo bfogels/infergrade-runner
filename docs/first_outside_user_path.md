@@ -13,6 +13,8 @@ infergrade start --execution-mode local_native
 
 Use this path for local Apple Silicon `llama.cpp` benchmarking. Dockerized `llama.cpp` on macOS measures Docker Desktop's Linux VM rather than Metal.
 
+The v0 proof lane uses this native path with TinyLlama, the public Q4_K_M GGUF artifact, and the short decision-suite `interactive_chat_v1` check. The expected output includes `report.md` in addition to the normalized bundle files. See [V0 End-To-End Proof Path](v0_end_to_end_proof_path.md).
+
 ## Container-Friendly Path
 
 ```bash
@@ -29,6 +31,7 @@ Use this path for Linux, cloud-like workers, and container-friendly local hosts.
 - a run directory under `runs/`
 - `progress.json`
 - normalized bundle JSON
+- `report.md`
 - deployment metrics when emitted by the backend
 - capability and benchmark coverage metadata
 - environment and hardware provenance
