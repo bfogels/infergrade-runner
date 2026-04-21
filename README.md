@@ -215,6 +215,8 @@ Run the runner test suite:
 
 InferGrade Runner is designed to work with the hosted InferGrade Hub, but it remains the open, portable execution surface for the project.
 
+For the v0 product story, the Runner repository is the trust-sensitive source of execution truth: schemas, ontology, benchmark-selection metadata, and standalone reports originate here. The Hub repository consumes that output to guide setup, store evidence, and compare same-family quant ladders against exact or similar hardware slices.
+
 The Hub owns identity, recommendations, community evidence, publishing, and hosted run planning.
 The Runner owns the ontology, schemas, and emitted bundle contract.
 
