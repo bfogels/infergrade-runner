@@ -240,7 +240,7 @@ def benchmark_scope_summary_for_selection(
             "expected_duration_band": "1-5 min",
             "token_volume_band": "tiny",
             "metadata_sources": _metadata_sources(payload, []),
-            "metadata_confidence": "estimated",
+            "metadata_confidence": _metadata_confidence(_metadata_sources(payload, [])),
             "execution_patterns": [],
             "resumability_boundaries": [],
             "reference_checks_included": False,
@@ -355,12 +355,17 @@ def _metadata_sources(catalog: Dict[str, Any], selected: List[Dict[str, Any]]) -
 
 
 def _combined_source(values: List[Any], fallback: str) -> str:
-    cleaned = _dedupe_strings(values) or [fallback]
+    normalized = [str(value or "").strip() or fallback for value in list(values or [])]
+    cleaned = _dedupe_strings(normalized) or [fallback]
     return cleaned[0] if len(set(cleaned)) == 1 else "mixed"
 
 
 def _metadata_confidence(sources: Dict[str, str]) -> str:
-    values = set((sources or {}).values())
+    values = {
+        str((sources or {}).get(field) or "").strip()
+        for field in ("duration", "token_volume", "failure_rate")
+        if str((sources or {}).get(field) or "").strip()
+    }
     if "unknown" in values:
         return "unknown"
     if "mixed" in values:

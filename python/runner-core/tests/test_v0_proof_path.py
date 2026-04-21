@@ -4,6 +4,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, "python/runner-core/src")
 
@@ -34,7 +35,17 @@ class V0ProofPathTests(unittest.TestCase):
             simulate=True,
         )
 
-        result = run_infergrade(request)
+        with patch(
+            "infergrade.adapters.llama_cpp.LlamaCppAdapter.runtime_metadata",
+            return_value={
+                "container_image": None,
+                "container_runtime": None,
+                "container_command": None,
+                "native_binary": "/usr/bin/llama-cli",
+                "native_server_binary": "/usr/bin/llama-server",
+            },
+        ):
+            result = run_infergrade(request)
 
         self.assertEqual(result["result_count"], 1)
         self.assertTrue(os.path.exists(os.path.join(output_dir, "manifest.json")))

@@ -43,7 +43,7 @@
         },
         "execution_mode": {
           "type": "string",
-          "enum": ["local_container", "cloud_container", "manual_external"]
+          "enum": ["local_container", "local_native", "cloud_container", "manual_external"]
         },
         "output_dir": { "type": "string" },
         "upload": { "type": "boolean" },
