@@ -56,6 +56,8 @@ New request payloads should prefer:
 
 The Runner will still derive compatibility metadata like `tier`, `use_case`, deployment profiles, and capability enablement from that explicit selection when needed.
 
+The catalog also labels each concrete check as either `decision` or `reference` scope. Decision-suite checks are the short first path for choosing a quantized setup locally. Reference-suite checks are heavier follow-up evidence for stronger comparison. The normalized result metadata includes `benchmark_scope` with effort, expected duration, token-volume, execution-pattern, and resumability hints so downstream tools do not infer those claims from old tier names.
+
 ## Development
 
 ### Apple Silicon Native Path

@@ -1,20 +1,38 @@
 {
   "catalog_version": "2026-04-03",
   "default_shortcut_id": "quick_default",
+  "benchmark_scopes": [
+    {
+      "scope_id": "decision",
+      "display_name": "Decision suite",
+      "description": "Short, local-friendly checks intended to help choose a quantized setup for a concrete use case.",
+      "recommended_first": true
+    },
+    {
+      "scope_id": "reference",
+      "display_name": "Reference suite",
+      "description": "Deeper, heavier checks intended for stronger comparison evidence after the first decision path works.",
+      "recommended_first": false
+    }
+  ],
   "suites": [
     {
       "suite_id": "chat_instruction_following",
       "display_name": "Chat and instruction following",
       "description": "Assistant-style prompting, instruction adherence, and the latency signals people use to judge everyday chat quality.",
       "primary_use_case": "general_assistant",
-      "default_group_ids": ["instruction_following", "deployment_chat", "deployment_batch"]
+      "default_group_ids": ["instruction_following", "deployment_chat", "deployment_batch"],
+      "default_scope": "decision",
+      "effort_level": "short"
     },
     {
       "suite_id": "coding_code_editing",
       "display_name": "Coding and code editing",
       "description": "Coding completions, practical editing behavior, and the longer interactive prompts that matter for local coding assistants.",
       "primary_use_case": "agentic_coding",
-      "default_group_ids": ["coding_core", "coding_breadth", "deployment_chat", "deployment_long_context"]
+      "default_group_ids": ["coding_core", "coding_breadth", "deployment_chat", "deployment_long_context"],
+      "default_scope": "decision",
+      "effort_level": "balanced"
     },
     {
       "suite_id": "quant_fidelity",
@@ -23,7 +41,9 @@
       "primary_use_case": null,
       "default_group_ids": ["quant_fidelity"],
       "supported_backends": ["llama.cpp"],
-      "supplemental": true
+      "supplemental": true,
+      "default_scope": "reference",
+      "effort_level": "balanced"
     }
   ],
   "benchmark_groups": [
@@ -33,7 +53,12 @@
       "description": "Run IFEval to check whether the model follows detailed textual instructions cleanly.",
       "evidence_kind": "capability",
       "default_check_ids": ["ifeval"],
-      "effort_hint": "medium"
+      "effort_hint": "medium",
+      "suite_scope": "decision",
+      "expected_duration_band": "5-15 min",
+      "token_volume_band": "small",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "fast_capability_microcheck"
     },
     {
       "group_id": "coding_core",
@@ -41,7 +66,12 @@
       "description": "Run HumanEval+ for the most important pass@1 coding signal.",
       "evidence_kind": "capability",
       "default_check_ids": ["evalplus_humaneval"],
-      "effort_hint": "high"
+      "effort_hint": "high",
+      "suite_scope": "decision",
+      "expected_duration_band": "10-25 min",
+      "token_volume_band": "small",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "fast_capability_microcheck"
     },
     {
       "group_id": "coding_breadth",
@@ -49,7 +79,12 @@
       "description": "Add MBPP+ for broader everyday coding coverage beyond the core set.",
       "evidence_kind": "capability",
       "default_check_ids": ["evalplus_mbpp"],
-      "effort_hint": "high"
+      "effort_hint": "high",
+      "suite_scope": "reference",
+      "expected_duration_band": "25-60 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "throughput_oriented_offline_suite"
     },
     {
       "group_id": "deployment_chat",
@@ -57,7 +92,12 @@
       "description": "Measure TTFT, load time, and output speed for interactive requests.",
       "evidence_kind": "deployment",
       "default_check_ids": ["interactive_chat_v1"],
-      "effort_hint": "low"
+      "effort_hint": "low",
+      "suite_scope": "decision",
+      "expected_duration_band": "1-5 min",
+      "token_volume_band": "tiny",
+      "resumability_boundary": "profile",
+      "execution_pattern": "latency_sensitive_interactive"
     },
     {
       "group_id": "deployment_batch",
@@ -65,7 +105,12 @@
       "description": "Measure throughput-oriented generation behavior under a small batch load.",
       "evidence_kind": "deployment",
       "default_check_ids": ["batch_generation_v1"],
-      "effort_hint": "medium"
+      "effort_hint": "medium",
+      "suite_scope": "reference",
+      "expected_duration_band": "5-15 min",
+      "token_volume_band": "small",
+      "resumability_boundary": "profile",
+      "execution_pattern": "throughput_oriented_offline_suite"
     },
     {
       "group_id": "deployment_long_context",
@@ -73,7 +118,12 @@
       "description": "Measure latency and memory pressure under longer prompts.",
       "evidence_kind": "deployment",
       "default_check_ids": ["long_context_v1"],
-      "effort_hint": "medium"
+      "effort_hint": "medium",
+      "suite_scope": "reference",
+      "expected_duration_band": "10-30 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "profile",
+      "execution_pattern": "latency_sensitive_interactive"
     },
     {
       "group_id": "quant_fidelity",
@@ -82,7 +132,12 @@
       "evidence_kind": "fidelity",
       "default_check_ids": ["perplexity_reference_v1"],
       "effort_hint": "medium",
-      "supported_backends": ["llama.cpp"]
+      "supported_backends": ["llama.cpp"],
+      "suite_scope": "reference",
+      "expected_duration_band": "10-30 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "throughput_oriented_offline_suite"
     }
   ],
   "checks": [
@@ -93,7 +148,13 @@
       "evidence_kind": "capability",
       "group_id": "instruction_following",
       "runner_target": "ifeval",
-      "supported_backends": ["llama.cpp", "vllm"]
+      "supported_backends": ["llama.cpp", "vllm"],
+      "suite_scope": "decision",
+      "effort_level": "balanced",
+      "expected_duration_band": "5-15 min",
+      "token_volume_band": "small",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "fast_capability_microcheck"
     },
     {
       "check_id": "evalplus_humaneval",
@@ -102,7 +163,13 @@
       "evidence_kind": "capability",
       "group_id": "coding_core",
       "runner_target": "evalplus_humaneval",
-      "supported_backends": ["llama.cpp", "vllm"]
+      "supported_backends": ["llama.cpp", "vllm"],
+      "suite_scope": "decision",
+      "effort_level": "balanced",
+      "expected_duration_band": "10-25 min",
+      "token_volume_band": "small",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "fast_capability_microcheck"
     },
     {
       "check_id": "evalplus_mbpp",
@@ -111,7 +178,13 @@
       "evidence_kind": "capability",
       "group_id": "coding_breadth",
       "runner_target": "evalplus_mbpp",
-      "supported_backends": ["llama.cpp", "vllm"]
+      "supported_backends": ["llama.cpp", "vllm"],
+      "suite_scope": "reference",
+      "effort_level": "deep",
+      "expected_duration_band": "25-60 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "throughput_oriented_offline_suite"
     },
     {
       "check_id": "interactive_chat_v1",
@@ -120,7 +193,13 @@
       "evidence_kind": "deployment",
       "group_id": "deployment_chat",
       "runner_target": "interactive_chat_v1",
-      "supported_backends": ["llama.cpp", "vllm"]
+      "supported_backends": ["llama.cpp", "vllm"],
+      "suite_scope": "decision",
+      "effort_level": "short",
+      "expected_duration_band": "1-5 min",
+      "token_volume_band": "tiny",
+      "resumability_boundary": "profile",
+      "execution_pattern": "latency_sensitive_interactive"
     },
     {
       "check_id": "batch_generation_v1",
@@ -129,7 +208,13 @@
       "evidence_kind": "deployment",
       "group_id": "deployment_batch",
       "runner_target": "batch_generation_v1",
-      "supported_backends": ["llama.cpp", "vllm"]
+      "supported_backends": ["llama.cpp", "vllm"],
+      "suite_scope": "reference",
+      "effort_level": "balanced",
+      "expected_duration_band": "5-15 min",
+      "token_volume_band": "small",
+      "resumability_boundary": "profile",
+      "execution_pattern": "throughput_oriented_offline_suite"
     },
     {
       "check_id": "long_context_v1",
@@ -138,7 +223,13 @@
       "evidence_kind": "deployment",
       "group_id": "deployment_long_context",
       "runner_target": "long_context_v1",
-      "supported_backends": ["llama.cpp", "vllm"]
+      "supported_backends": ["llama.cpp", "vllm"],
+      "suite_scope": "reference",
+      "effort_level": "balanced",
+      "expected_duration_band": "10-30 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "profile",
+      "execution_pattern": "latency_sensitive_interactive"
     },
     {
       "check_id": "perplexity_reference_v1",
@@ -147,7 +238,13 @@
       "evidence_kind": "fidelity",
       "group_id": "quant_fidelity",
       "runner_target": "perplexity_reference_v1",
-      "supported_backends": ["llama.cpp"]
+      "supported_backends": ["llama.cpp"],
+      "suite_scope": "reference",
+      "effort_level": "balanced",
+      "expected_duration_band": "10-30 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "throughput_oriented_offline_suite"
     }
   ],
   "shortcuts": [
@@ -155,6 +252,9 @@
       "shortcut_id": "quick_default",
       "display_name": "Quick default",
       "description": "Fast assistant evidence with one capability benchmark and one deployment profile.",
+      "suite_scope": "decision",
+      "effort_level": "short",
+      "expected_duration_band": "5-15 min",
       "suite_ids": ["chat_instruction_following"],
       "group_ids": ["instruction_following", "deployment_chat"],
       "check_ids": ["ifeval", "interactive_chat_v1"]
@@ -163,6 +263,9 @@
       "shortcut_id": "coding_default",
       "display_name": "Coding default",
       "description": "Coding-focused evidence with HumanEval+ and the most useful deployment checks.",
+      "suite_scope": "decision",
+      "effort_level": "balanced",
+      "expected_duration_band": "10-25 min",
       "suite_ids": ["coding_code_editing"],
       "group_ids": ["coding_core", "deployment_chat", "deployment_long_context"],
       "check_ids": ["evalplus_humaneval", "interactive_chat_v1", "long_context_v1"]
@@ -171,6 +274,9 @@
       "shortcut_id": "broad_compare",
       "display_name": "Broad compare",
       "description": "A broader assistant comparison with chat, batch, and quant fidelity signals.",
+      "suite_scope": "reference",
+      "effort_level": "balanced",
+      "expected_duration_band": "15-45 min",
       "suite_ids": ["chat_instruction_following", "quant_fidelity"],
       "group_ids": ["instruction_following", "deployment_chat", "deployment_batch", "quant_fidelity"],
       "check_ids": ["ifeval", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]

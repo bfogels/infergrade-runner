@@ -6,6 +6,10 @@ from typing import Any, Dict, List, Optional
 
 from infergrade.models import RunRequest
 
+EFFORT_ORDER = {"short": 0, "low": 0, "balanced": 1, "medium": 1, "deep": 2, "high": 2}
+DURATION_ORDER = {"1-5 min": 0, "5-15 min": 1, "10-25 min": 2, "10-30 min": 3, "15-45 min": 4, "25-60 min": 5}
+TOKEN_VOLUME_ORDER = {"tiny": 0, "small": 1, "medium": 2, "large": 3}
+
 
 def repo_root() -> Path:
     """Return the repository root for the Runner workspace."""
@@ -218,6 +222,40 @@ def fidelity_enabled_for_request(
     return any(checks.get(item, {}).get("evidence_kind") == "fidelity" for item in _dedupe_strings(selection.get("check_ids")))
 
 
+def benchmark_scope_summary_for_selection(
+    check_ids: List[str],
+    catalog: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Summarize whether a selected benchmark set is decision-sized or reference-sized."""
+    payload = catalog or load_capability_catalog()
+    checks = check_index(payload)
+    selected = [checks[item] for item in _dedupe_strings(check_ids) if item in checks]
+    if not selected:
+        return {
+            "scope": "decision",
+            "scope_label": "Decision suite",
+            "effort_level": "short",
+            "expected_duration_band": "1-5 min",
+            "token_volume_band": "tiny",
+            "execution_patterns": [],
+            "resumability_boundaries": [],
+            "reference_checks_included": False,
+        }
+
+    scopes = _dedupe_strings([item.get("suite_scope") for item in selected])
+    scope = "reference" if "reference" in scopes else "decision"
+    return {
+        "scope": scope,
+        "scope_label": "Reference suite" if scope == "reference" else "Decision suite",
+        "effort_level": _max_by_order([item.get("effort_level") or item.get("effort_hint") for item in selected], EFFORT_ORDER, "short"),
+        "expected_duration_band": _max_by_order([item.get("expected_duration_band") for item in selected], DURATION_ORDER, "1-5 min"),
+        "token_volume_band": _max_by_order([item.get("token_volume_band") for item in selected], TOKEN_VOLUME_ORDER, "tiny"),
+        "execution_patterns": _dedupe_strings([item.get("execution_pattern") for item in selected]),
+        "resumability_boundaries": _dedupe_strings([item.get("resumability_boundary") for item in selected]),
+        "reference_checks_included": scope == "reference",
+    }
+
+
 def selection_metadata_for_request(
     request: RunRequest,
     catalog: Optional[Dict[str, Any]] = None,
@@ -228,9 +266,11 @@ def selection_metadata_for_request(
     groups = group_index(payload)
     checks = check_index(payload)
     normalized = resolve_request_selection(request, payload)
+    benchmark_scope = benchmark_scope_summary_for_selection(normalized["check_ids"], payload)
     return {
         "catalog_version": payload.get("catalog_version"),
         "shortcut_id": request.benchmark_shortcut_id,
+        "benchmark_scope": benchmark_scope,
         "capability_suite_ids": list(normalized["suite_ids"]),
         "benchmark_group_ids": list(normalized["group_ids"]),
         "benchmark_check_ids": list(normalized["check_ids"]),
@@ -239,6 +279,8 @@ def selection_metadata_for_request(
                 "suite_id": suite_id,
                 "display_name": suites[suite_id].get("display_name"),
                 "description": suites[suite_id].get("description"),
+                "default_scope": suites[suite_id].get("default_scope"),
+                "effort_level": suites[suite_id].get("effort_level"),
             }
             for suite_id in normalized["suite_ids"]
             if suite_id in suites
@@ -249,6 +291,12 @@ def selection_metadata_for_request(
                 "display_name": groups[group_id].get("display_name"),
                 "description": groups[group_id].get("description"),
                 "evidence_kind": groups[group_id].get("evidence_kind"),
+                "suite_scope": groups[group_id].get("suite_scope"),
+                "effort_hint": groups[group_id].get("effort_hint"),
+                "expected_duration_band": groups[group_id].get("expected_duration_band"),
+                "token_volume_band": groups[group_id].get("token_volume_band"),
+                "resumability_boundary": groups[group_id].get("resumability_boundary"),
+                "execution_pattern": groups[group_id].get("execution_pattern"),
             }
             for group_id in normalized["group_ids"]
             if group_id in groups
@@ -260,11 +308,24 @@ def selection_metadata_for_request(
                 "description": checks[check_id].get("description"),
                 "evidence_kind": checks[check_id].get("evidence_kind"),
                 "group_id": checks[check_id].get("group_id"),
+                "suite_scope": checks[check_id].get("suite_scope"),
+                "effort_level": checks[check_id].get("effort_level"),
+                "expected_duration_band": checks[check_id].get("expected_duration_band"),
+                "token_volume_band": checks[check_id].get("token_volume_band"),
+                "resumability_boundary": checks[check_id].get("resumability_boundary"),
+                "execution_pattern": checks[check_id].get("execution_pattern"),
             }
             for check_id in normalized["check_ids"]
             if check_id in checks
         ],
     }
+
+
+def _max_by_order(values: List[Any], order: Dict[str, int], fallback: str) -> str:
+    cleaned = _dedupe_strings(values)
+    if not cleaned:
+        return fallback
+    return max(cleaned, key=lambda item: order.get(item, -1))
 
 
 def _dedupe_strings(values: Optional[List[Any]]) -> List[str]:
