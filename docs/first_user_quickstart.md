@@ -7,7 +7,7 @@ It deliberately optimizes for success:
 - one public GGUF
 - one backend
 - one deployment profile
-- no capability suite on the first run
+- one short decision-suite deployment check
 - protected API writes
 - resumable local output
 
@@ -151,6 +151,7 @@ The runner will:
 - execute `llama.cpp` in Docker
 - upload the bundle automatically on success
 - write `manifest.json`, `summary.json`, `validation.json`, and `progress.json`
+- write `report.md`
 - preserve the artifact-resolution receipt and raw telemetry artifacts
 
 ## 6. Confirm The Catalog Updated
@@ -168,6 +169,7 @@ The first run should produce:
 - one stored result
 - server-applied trust labels
 - resumable local state
+- a standalone `report.md`
 - a browsable catalog entry in the web app
 
 If you want the fastest path possible, use the demo config exactly as written before trying broader models or capability suites.
