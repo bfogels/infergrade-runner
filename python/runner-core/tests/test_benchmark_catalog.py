@@ -19,6 +19,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(len(catalog["suites"]), 3)
         self.assertGreaterEqual(len(catalog["benchmark_groups"]), 5)
         self.assertGreaterEqual(len(catalog["checks"]), 6)
+        self.assertIn("metadata_ordering", catalog)
         self.assertEqual(catalog["benchmark_scopes"][0]["scope_id"], "decision")
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
@@ -58,6 +59,18 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(reference["scope_label"], "Reference suite")
         self.assertTrue(reference["reference_checks_included"])
         self.assertIn("throughput_oriented_offline_suite", reference["execution_patterns"])
+
+    def test_benchmark_scope_summary_uses_catalog_declared_ordering(self):
+        catalog = load_capability_catalog()
+        custom_catalog = dict(catalog)
+        custom_catalog["metadata_ordering"] = {
+            **dict(catalog.get("metadata_ordering") or {}),
+            "expected_duration_band": ["25-60 min", "5-15 min", "10-25 min", "10-30 min", "15-45 min", "1-5 min"],
+        }
+
+        summary = benchmark_scope_summary_for_selection(["interactive_chat_v1", "evalplus_mbpp"], custom_catalog)
+
+        self.assertEqual(summary["expected_duration_band"], "1-5 min")
 
 
 if __name__ == "__main__":

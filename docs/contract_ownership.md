@@ -27,25 +27,12 @@ If the Hub owns those definitions independently, the system will drift.
 
 ## Ownership Rules
 
-### Runner Owns
-
-- `schemas/json/*.json`
-- `schemas/examples/*`
-- the ontology model and benchmark-subject identity rules
-- contract versioning and publication
-- compatibility notes for older bundle versions
-
-### Hub Consumes
-
-- published schema bundles from Runner releases
-- ontology and bundle contracts from Runner
-- Runner-declared contract versions when generating run configs or validating uploads
-
-### Hub Must Not
-
-- hand-edit the meaning of the ontology independently
-- invent a new result or bundle shape without a coordinated Runner contract change
-- treat vendored schema snapshots as the ultimate source of truth
+| Boundary | Rule |
+| --- | --- |
+| Runner owns | `schemas/json/*.json`, `schemas/examples/*`, `schemas/capability_catalog.json`, benchmark-scope metadata, metadata ordering, ontology identity rules, contract versioning, publication, and compatibility notes. |
+| Hub may render | Imported schemas, imported capability suites/groups/checks, imported benchmark-scope summaries, Runner-declared contract/release versions, and result/bundle fields emitted by Runner. |
+| Hub may derive locally | Presentation filters, UI grouping, recommendation sorting, user-specific slices, and operational diagnostics that do not redefine contract semantics. |
+| Hub must not author | New ontology meaning, result or bundle shapes, benchmark scope semantics, effort/duration/token ordering, or release-truth labels without a coordinated Runner contract change. |
 
 ## Publication Model
 

@@ -1,6 +1,11 @@
 {
   "catalog_version": "2026-04-03",
   "default_shortcut_id": "quick_default",
+  "metadata_ordering": {
+    "effort_level": ["short", "low", "balanced", "medium", "deep", "high"],
+    "expected_duration_band": ["1-5 min", "5-15 min", "10-25 min", "10-30 min", "15-45 min", "25-60 min"],
+    "token_volume_band": ["tiny", "small", "medium", "large"]
+  },
   "benchmark_scopes": [
     {
       "scope_id": "decision",
