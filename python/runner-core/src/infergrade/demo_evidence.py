@@ -45,7 +45,17 @@ def _result(
             "backend_engine": "llama.cpp",
             "backend_version": "version: demo-fixture",
             "benchmark_selection": {
-                "benchmark_scope": {"scope": "decision", "scope_label": "Decision suite"},
+                "benchmark_scope": {
+                    "scope": "decision",
+                    "scope_label": "Decision suite",
+                    "metadata_confidence": "unknown",
+                    "metadata_sources": {
+                        "duration": "estimated",
+                        "token_volume": "estimated",
+                        "failure_rate": "unknown",
+                        "calibration_status": "estimated_static_catalog_v1",
+                    },
+                },
                 "benchmark_check_ids": ["interactive_chat_v1"],
             },
         },

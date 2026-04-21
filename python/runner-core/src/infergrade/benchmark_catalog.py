@@ -239,6 +239,8 @@ def benchmark_scope_summary_for_selection(
             "effort_level": "short",
             "expected_duration_band": "1-5 min",
             "token_volume_band": "tiny",
+            "metadata_sources": _metadata_sources(payload, []),
+            "metadata_confidence": "estimated",
             "execution_patterns": [],
             "resumability_boundaries": [],
             "reference_checks_included": False,
@@ -253,6 +255,8 @@ def benchmark_scope_summary_for_selection(
         "effort_level": _max_by_order([item.get("effort_level") or item.get("effort_hint") for item in selected], ordering["effort_level"], "short"),
         "expected_duration_band": _max_by_order([item.get("expected_duration_band") for item in selected], ordering["expected_duration_band"], "1-5 min"),
         "token_volume_band": _max_by_order([item.get("token_volume_band") for item in selected], ordering["token_volume_band"], "tiny"),
+        "metadata_sources": _metadata_sources(payload, selected),
+        "metadata_confidence": _metadata_confidence(_metadata_sources(payload, selected)),
         "execution_patterns": _dedupe_strings([item.get("execution_pattern") for item in selected]),
         "resumability_boundaries": _dedupe_strings([item.get("resumability_boundary") for item in selected]),
         "reference_checks_included": scope == "reference",
@@ -338,6 +342,32 @@ def _metadata_ordering(catalog: Dict[str, Any]) -> Dict[str, Dict[str, int]]:
         key: {str(value): index for index, value in enumerate(list((declared or {}).get(key) or fallback))}
         for key, fallback in FALLBACK_METADATA_ORDERING.items()
     }
+
+
+def _metadata_sources(catalog: Dict[str, Any], selected: List[Dict[str, Any]]) -> Dict[str, str]:
+    defaults = dict((catalog or {}).get("metadata_source_defaults") or {})
+    return {
+        "duration": _combined_source([item.get("duration_metadata_source") for item in selected], defaults.get("duration") or "estimated"),
+        "token_volume": _combined_source([item.get("token_volume_metadata_source") for item in selected], defaults.get("token_volume") or "estimated"),
+        "failure_rate": _combined_source([item.get("failure_rate_metadata_source") for item in selected], defaults.get("failure_rate") or "unknown"),
+        "calibration_status": defaults.get("calibration_status") or "unknown",
+    }
+
+
+def _combined_source(values: List[Any], fallback: str) -> str:
+    cleaned = _dedupe_strings(values) or [fallback]
+    return cleaned[0] if len(set(cleaned)) == 1 else "mixed"
+
+
+def _metadata_confidence(sources: Dict[str, str]) -> str:
+    values = set((sources or {}).values())
+    if "unknown" in values:
+        return "unknown"
+    if "mixed" in values:
+        return "mixed"
+    if values == {"observed"}:
+        return "observed"
+    return "estimated"
 
 
 def _dedupe_strings(values: Optional[List[Any]]) -> List[str]:

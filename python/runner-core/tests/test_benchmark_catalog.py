@@ -20,6 +20,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(len(catalog["benchmark_groups"]), 5)
         self.assertGreaterEqual(len(catalog["checks"]), 6)
         self.assertIn("metadata_ordering", catalog)
+        self.assertEqual(catalog["metadata_source_defaults"]["duration"], "estimated")
         self.assertEqual(catalog["benchmark_scopes"][0]["scope_id"], "decision")
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
@@ -53,6 +54,9 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(decision["scope"], "decision")
         self.assertEqual(decision["effort_level"], "balanced")
         self.assertFalse(decision["reference_checks_included"])
+        self.assertEqual(decision["metadata_sources"]["duration"], "estimated")
+        self.assertEqual(decision["metadata_sources"]["failure_rate"], "unknown")
+        self.assertEqual(decision["metadata_confidence"], "unknown")
 
         reference = benchmark_scope_summary_for_selection(["interactive_chat_v1", "perplexity_reference_v1"])
         self.assertEqual(reference["scope"], "reference")

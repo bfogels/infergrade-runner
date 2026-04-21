@@ -27,6 +27,7 @@ class DemoEvidenceTests(unittest.TestCase):
 
         self.assertIn("TinyLlama", report)
         self.assertIn("Decision suite", report)
+        self.assertIn("Metadata confidence: unknown", report)
         self.assertIn("interactive_chat_v1", report)
         self.assertIn("24.00", report)
         self.assertEqual(results[0]["provenance"]["source_bundle_origin"], DEMO_SOURCE_ORIGIN)

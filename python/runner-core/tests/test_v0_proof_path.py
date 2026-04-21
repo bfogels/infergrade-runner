@@ -46,6 +46,7 @@ class V0ProofPathTests(unittest.TestCase):
         self.assertEqual(summary["model_family"], "TinyLlama")
         self.assertEqual(summary["benchmark_scope"]["scope"], "decision")
         self.assertEqual(summary["benchmark_scope"]["scope_label"], "Decision suite")
+        self.assertEqual(summary["benchmark_scope"]["metadata_confidence"], "unknown")
         self.assertEqual(summary["benchmark_check_ids"], ["interactive_chat_v1"])
 
         with open(os.path.join(output_dir, "manifest.json"), "r", encoding="utf-8") as handle:
@@ -63,6 +64,7 @@ class V0ProofPathTests(unittest.TestCase):
             report = handle.read()
         self.assertIn("TinyLlama-1.1B-Chat-v1.0", report)
         self.assertIn("Decision suite", report)
+        self.assertIn("Metadata confidence: unknown", report)
         self.assertIn("interactive_chat_v1", report)
         self.assertIn("local_native", report)
 

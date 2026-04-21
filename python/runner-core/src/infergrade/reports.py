@@ -113,6 +113,7 @@ def render_bundle_report(
         "- Effort: %s" % _dash(benchmark_scope.get("effort_level")),
         "- Expected duration: %s" % _dash(benchmark_scope.get("expected_duration_band")),
         "- Token volume: %s" % _dash(benchmark_scope.get("token_volume_band")),
+        "- Metadata confidence: %s" % _dash(benchmark_scope.get("metadata_confidence")),
         "- Checks: %s" % _dash(", ".join(benchmark_selection.get("benchmark_check_ids") or [])),
         "",
         "## Deployment Metrics",
