@@ -6,9 +6,11 @@ from typing import Any, Dict, List, Optional
 
 from infergrade.models import RunRequest
 
-EFFORT_ORDER = {"short": 0, "low": 0, "balanced": 1, "medium": 1, "deep": 2, "high": 2}
-DURATION_ORDER = {"1-5 min": 0, "5-15 min": 1, "10-25 min": 2, "10-30 min": 3, "15-45 min": 4, "25-60 min": 5}
-TOKEN_VOLUME_ORDER = {"tiny": 0, "small": 1, "medium": 2, "large": 3}
+FALLBACK_METADATA_ORDERING = {
+    "effort_level": ["short", "low", "balanced", "medium", "deep", "high"],
+    "expected_duration_band": ["1-5 min", "5-15 min", "10-25 min", "10-30 min", "15-45 min", "25-60 min"],
+    "token_volume_band": ["tiny", "small", "medium", "large"],
+}
 
 
 def repo_root() -> Path:
@@ -244,12 +246,13 @@ def benchmark_scope_summary_for_selection(
 
     scopes = _dedupe_strings([item.get("suite_scope") for item in selected])
     scope = "reference" if "reference" in scopes else "decision"
+    ordering = _metadata_ordering(payload)
     return {
         "scope": scope,
         "scope_label": "Reference suite" if scope == "reference" else "Decision suite",
-        "effort_level": _max_by_order([item.get("effort_level") or item.get("effort_hint") for item in selected], EFFORT_ORDER, "short"),
-        "expected_duration_band": _max_by_order([item.get("expected_duration_band") for item in selected], DURATION_ORDER, "1-5 min"),
-        "token_volume_band": _max_by_order([item.get("token_volume_band") for item in selected], TOKEN_VOLUME_ORDER, "tiny"),
+        "effort_level": _max_by_order([item.get("effort_level") or item.get("effort_hint") for item in selected], ordering["effort_level"], "short"),
+        "expected_duration_band": _max_by_order([item.get("expected_duration_band") for item in selected], ordering["expected_duration_band"], "1-5 min"),
+        "token_volume_band": _max_by_order([item.get("token_volume_band") for item in selected], ordering["token_volume_band"], "tiny"),
         "execution_patterns": _dedupe_strings([item.get("execution_pattern") for item in selected]),
         "resumability_boundaries": _dedupe_strings([item.get("resumability_boundary") for item in selected]),
         "reference_checks_included": scope == "reference",
@@ -326,6 +329,15 @@ def _max_by_order(values: List[Any], order: Dict[str, int], fallback: str) -> st
     if not cleaned:
         return fallback
     return max(cleaned, key=lambda item: order.get(item, -1))
+
+
+def _metadata_ordering(catalog: Dict[str, Any]) -> Dict[str, Dict[str, int]]:
+    """Return ordering maps declared by the Runner-owned capability catalog."""
+    declared = catalog.get("metadata_ordering") if isinstance(catalog, dict) else {}
+    return {
+        key: {str(value): index for index, value in enumerate(list((declared or {}).get(key) or fallback))}
+        for key, fallback in FALLBACK_METADATA_ORDERING.items()
+    }
 
 
 def _dedupe_strings(values: Optional[List[Any]]) -> List[str]:
