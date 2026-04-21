@@ -6,6 +6,12 @@
     "expected_duration_band": ["1-5 min", "5-15 min", "10-25 min", "10-30 min", "15-45 min", "25-60 min"],
     "token_volume_band": ["tiny", "small", "medium", "large"]
   },
+  "metadata_source_defaults": {
+    "duration": "estimated",
+    "token_volume": "estimated",
+    "failure_rate": "unknown",
+    "calibration_status": "estimated_static_catalog_v1"
+  },
   "benchmark_scopes": [
     {
       "scope_id": "decision",

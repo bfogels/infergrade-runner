@@ -27,9 +27,13 @@ class DemoEvidenceTests(unittest.TestCase):
 
         self.assertIn("TinyLlama", report)
         self.assertIn("Decision suite", report)
+        self.assertIn("Metadata confidence: unknown", report)
         self.assertIn("interactive_chat_v1", report)
         self.assertIn("24.00", report)
         self.assertEqual(results[0]["provenance"]["source_bundle_origin"], DEMO_SOURCE_ORIGIN)
+        self.assertIn("cost", results[0])
+        self.assertEqual(results[0]["execution"]["execution_profile_id"], "local_container_v1")
+        self.assertEqual(results[0]["provenance"]["normalizer_version"], "0.1.0")
 
 
 if __name__ == "__main__":

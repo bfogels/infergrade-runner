@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 
 
 DEMO_SOURCE_ORIGIN = "infergrade_demo_fixture"
+DEMO_SUBMITTER = "infergrade-demo"
 
 
 def tinyllama_demo_quant_ladder_results(bundle_id: str = "demo_tinyllama_assistant_quant_ladder") -> List[Dict[str, Any]]:
@@ -40,34 +41,93 @@ def _result(
                 "quantization_scheme": quantization_scheme,
                 "weight_precision_bits": weight_precision_bits,
             },
+            "artifact": {"artifact_id": "artifact-%s" % result_id},
+            "runtime_binding": {"runtime_binding_id": "binding-%s" % result_id},
+            "benchmark_subject": {"subject_id": "subject-%s" % result_id},
         },
         "configuration": {
+            "configuration_id": "cfg-%s" % result_id,
+            "model_base": "tinyllama-1.1b-chat-v1.0",
+            "model_source": "demo_fixture",
             "backend_engine": "llama.cpp",
             "backend_version": "version: demo-fixture",
             "benchmark_selection": {
-                "benchmark_scope": {"scope": "decision", "scope_label": "Decision suite"},
+                "benchmark_scope": {
+                    "scope": "decision",
+                    "scope_label": "Decision suite",
+                    "metadata_confidence": "unknown",
+                    "metadata_sources": {
+                        "duration": "estimated",
+                        "token_volume": "estimated",
+                        "failure_rate": "unknown",
+                        "calibration_status": "estimated_static_catalog_v1",
+                    },
+                },
                 "benchmark_check_ids": ["interactive_chat_v1"],
             },
         },
         "hardware": {
+            "hardware_id": "hw-%s" % result_id,
+            "environment_class": "local_workstation",
+            "accelerator_type": "gpu",
+            "accelerator_count": 1,
             "hardware_class": "nvidia_gpu",
+            "accelerator_vendor": "nvidia",
             "accelerator_model": "RTX 4090 demo lane",
             "accelerator_vram_gb": 24.0,
+            "memory_gb": 64.0,
             "system_ram_gb": 64.0,
             "cpu_model": "demo fixture",
+            "os": "Linux",
         },
-        "verification": {"verification_level": "experimental", "local_comparison_grade_candidate": "informational_only"},
-        "execution": {"execution_mode": "local_container", "simulated": True},
+        "verification": {
+            "verification_level": "experimental",
+            "artifact_pinned": True,
+            "backend_version_pinned": True,
+            "hardware_captured": True,
+            "missing_requirements": [],
+            "local_comparison_grade_candidate": "informational_only",
+        },
+        "execution": {
+            "execution_profile_id": "local_container_v1",
+            "execution_mode": "local_container",
+            "started_at": "2026-04-21T00:00:00Z",
+            "completed_at": "2026-04-21T00:01:00Z",
+            "benchmark_job_runtime_seconds": 60,
+            "execution_cost_source": "none",
+            "simulated": True,
+        },
         "deployment": {
             "deployment_profile_id": "interactive_chat_v1",
+            "deployment_status": "simulated",
             "ttft_p50_ms": ttft_p50_ms,
             "decode_tokens_per_second_p50": decode_tokens_per_second_p50,
             "load_time_ms": load_time_ms,
             "peak_vram_mb": None,
             "oom_or_failure_rate": 0.0,
         },
-        "capability": {"capability_state": "scored", "capability_score": capability_score, "capability_status": "completed"},
-        "fidelity": {"fidelity_state": "measured", "perplexity": {"value": perplexity}},
+        "capability": {
+            "use_case": "general_assistant",
+            "capability_suite_id": "demo_decision_suite",
+            "benchmark_tier": "canary",
+            "capability_state": "scored",
+            "capability_score": capability_score,
+            "capability_status": "completed",
+        },
+        "cost": {
+            "cost_source": "none",
+            "benchmark_job_cost_included": False,
+            "benchmark_job_cost_usd": None,
+        },
+        "fidelity": {
+            "fidelity_state": "measured",
+            "perplexity": {"metric_name": "perplexity", "value": perplexity, "status": "measured"},
+        },
         "derived": {"comparison_grade": "informational_only", "demo_evidence": True},
-        "provenance": {"source_bundle_origin": DEMO_SOURCE_ORIGIN},
+        "provenance": {
+            "submitter": DEMO_SUBMITTER,
+            "source_bundle_origin": DEMO_SOURCE_ORIGIN,
+            "normalized_at": "2026-04-21T00:01:00Z",
+            "normalizer_version": "0.1.0",
+        },
     }

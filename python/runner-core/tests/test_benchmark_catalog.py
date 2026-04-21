@@ -20,6 +20,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(len(catalog["benchmark_groups"]), 5)
         self.assertGreaterEqual(len(catalog["checks"]), 6)
         self.assertIn("metadata_ordering", catalog)
+        self.assertEqual(catalog["metadata_source_defaults"]["duration"], "estimated")
         self.assertEqual(catalog["benchmark_scopes"][0]["scope_id"], "decision")
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
@@ -53,12 +54,45 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(decision["scope"], "decision")
         self.assertEqual(decision["effort_level"], "balanced")
         self.assertFalse(decision["reference_checks_included"])
+        self.assertEqual(decision["metadata_sources"]["duration"], "estimated")
+        self.assertEqual(decision["metadata_sources"]["failure_rate"], "unknown")
+        self.assertEqual(decision["metadata_confidence"], "unknown")
 
         reference = benchmark_scope_summary_for_selection(["interactive_chat_v1", "perplexity_reference_v1"])
         self.assertEqual(reference["scope"], "reference")
         self.assertEqual(reference["scope_label"], "Reference suite")
         self.assertTrue(reference["reference_checks_included"])
         self.assertIn("throughput_oriented_offline_suite", reference["execution_patterns"])
+
+
+    def test_benchmark_scope_summary_empty_selection_uses_computed_confidence(self):
+        summary = benchmark_scope_summary_for_selection([])
+        self.assertEqual(summary["metadata_sources"]["failure_rate"], "unknown")
+        self.assertEqual(summary["metadata_confidence"], "unknown")
+
+    def test_benchmark_scope_summary_treats_missing_metadata_as_default_source(self):
+        catalog = load_capability_catalog()
+        custom_catalog = dict(catalog)
+        custom_catalog["checks"] = [dict(item) for item in catalog["checks"]]
+        for check in custom_catalog["checks"]:
+            if check["check_id"] == "interactive_chat_v1":
+                check["duration_metadata_source"] = "observed"
+            if check["check_id"] == "evalplus_mbpp":
+                check.pop("duration_metadata_source", None)
+        summary = benchmark_scope_summary_for_selection(["interactive_chat_v1", "evalplus_mbpp"], custom_catalog)
+        self.assertEqual(summary["metadata_sources"]["duration"], "mixed")
+
+    def test_benchmark_scope_summary_ignores_calibration_status_for_observed_confidence(self):
+        catalog = load_capability_catalog()
+        custom_catalog = dict(catalog)
+        custom_catalog["checks"] = [dict(item) for item in catalog["checks"]]
+        for check in custom_catalog["checks"]:
+            if check["check_id"] in {"interactive_chat_v1", "evalplus_mbpp"}:
+                check["duration_metadata_source"] = "observed"
+                check["token_volume_metadata_source"] = "observed"
+                check["failure_rate_metadata_source"] = "observed"
+        summary = benchmark_scope_summary_for_selection(["interactive_chat_v1", "evalplus_mbpp"], custom_catalog)
+        self.assertEqual(summary["metadata_confidence"], "observed")
 
     def test_benchmark_scope_summary_uses_catalog_declared_ordering(self):
         catalog = load_capability_catalog()
