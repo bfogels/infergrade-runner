@@ -33,6 +33,8 @@ class RunnerTests(unittest.TestCase):
         result = run_infergrade(request)
         self.assertTrue(os.path.exists(os.path.join(output_dir, "manifest.json")))
         self.assertTrue(os.path.exists(os.path.join(output_dir, "validation.json")))
+        self.assertTrue(os.path.exists(os.path.join(output_dir, "report.md")))
+        self.assertTrue(result["report_path"].endswith("report.md"))
         self.assertTrue(os.path.isdir(os.path.join(output_dir, "results")))
         result_files = sorted(os.listdir(os.path.join(output_dir, "results")))
         self.assertEqual(result["result_count"], 2)
@@ -50,6 +52,12 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(len(payload["capability"]["capability_component_reports"]), 2)
         self.assertEqual(payload["fidelity"]["fidelity_state"], "not_yet_measured")
         self.assertEqual(payload["verification"]["verification_level"], "experimental")
+        with open(os.path.join(output_dir, "report.md"), "r", encoding="utf-8") as handle:
+            report = handle.read()
+        self.assertIn("# InferGrade Runner Report", report)
+        self.assertIn("Qwen2.5-7B-Instruct", report)
+        self.assertIn("Deployment Metrics", report)
+        self.assertIn("Reference suite", report)
         with open(os.path.join(output_dir, "progress.json"), "r", encoding="utf-8") as handle:
             progress = json.load(handle)
         self.assertEqual(progress["status"], "completed")
@@ -250,6 +258,9 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("benchmark_execution_failed", payload["capability"]["capability_reason_codes"])
         self.assertEqual(payload["capability"]["benchmark_coverage"]["scored_count"], 0)
         self.assertEqual(payload["capability"]["capability_component_reports"][0]["status"], "failed")
+        with open(os.path.join(output_dir, "report.md"), "r", encoding="utf-8") as handle:
+            report = handle.read()
+        self.assertIn("Capability state: failed", report)
 
     def test_existing_output_dir_requires_resume(self):
         output_dir = os.path.join(self.tempdir, "bundle")
@@ -350,6 +361,10 @@ class RunnerTests(unittest.TestCase):
         with mock.patch("infergrade.runner.get_adapter", return_value=adapter):
             with self.assertRaises(RuntimeError):
                 run_infergrade(initial_request)
+            with open(os.path.join(output_dir, "report.md"), "r", encoding="utf-8") as handle:
+                failure_report = handle.read()
+            self.assertIn("failed before a complete bundle was finalized", failure_report)
+            self.assertIn("simulated interruption", failure_report)
             resumed = run_infergrade(
                 RunRequest(
                     model="Qwen/Qwen2.5-7B-Instruct",

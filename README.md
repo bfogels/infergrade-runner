@@ -36,6 +36,12 @@ The Runner-owned catalog now separates benchmark scope from legacy tier names:
 
 Every catalog check carries effort, duration-band, token-volume, execution-pattern, and resumability metadata. Result bundles preserve the derived scope summary in `configuration.benchmark_selection.benchmark_scope` so the Hub can explain whether a recommendation is backed by first-pass decision evidence or deeper reference evidence.
 
+## Standalone Runner Reports
+
+Every finalized Runner bundle now includes `report.md`, a human-readable Markdown artifact that is useful even without the Hub. It summarizes the model and quant artifact, hardware/backend, benchmark scope, deployment metrics, capability/fidelity status, trust/comparability status, and rerun metadata.
+
+If a run fails before bundle finalization, the Runner still writes a truthful failure report where possible. That report includes the requested setup, failing stage/detail, error message, and progress snapshot instead of pretending the run produced comparable evidence.
+
 ## Capability-First Benchmark Selection
 
 InferGrade now treats benchmark scope as a capability-first contract:

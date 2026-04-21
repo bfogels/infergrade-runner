@@ -58,6 +58,10 @@ The Runner will still derive compatibility metadata like `tier`, `use_case`, dep
 
 The catalog also labels each concrete check as either `decision` or `reference` scope. Decision-suite checks are the short first path for choosing a quantized setup locally. Reference-suite checks are heavier follow-up evidence for stronger comparison. The normalized result metadata includes `benchmark_scope` with effort, expected duration, token-volume, execution-pattern, and resumability hints so downstream tools do not infer those claims from old tier names.
 
+## Standalone Report Artifact
+
+Each completed bundle includes `report.md`, a compact Markdown report for users who run the open-source Runner without the Hub. Failed runs also write a best-effort failure report with the failing stage and requested setup when enough local state exists.
+
 ## Development
 
 ### Apple Silicon Native Path
