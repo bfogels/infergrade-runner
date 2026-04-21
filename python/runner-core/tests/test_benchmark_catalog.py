@@ -4,6 +4,7 @@ import unittest
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.benchmark_catalog import (
+    benchmark_scope_summary_for_selection,
     capability_benchmark_ids_for_request,
     fidelity_enabled_for_request,
     load_capability_catalog,
@@ -18,6 +19,11 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(len(catalog["suites"]), 3)
         self.assertGreaterEqual(len(catalog["benchmark_groups"]), 5)
         self.assertGreaterEqual(len(catalog["checks"]), 6)
+        self.assertEqual(catalog["benchmark_scopes"][0]["scope_id"], "decision")
+        for check in catalog["checks"]:
+            self.assertIn(check["suite_scope"], {"decision", "reference"})
+            self.assertTrue(check["expected_duration_band"])
+            self.assertTrue(check["execution_pattern"])
 
     def test_normalize_request_selection_derives_breadth_from_legacy_lane(self):
         request = RunRequest(model="Qwen/Qwen2.5-7B-Instruct", backend="llama.cpp", tier="standard", use_case="general_assistant")
@@ -40,6 +46,18 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(capability_benchmark_ids_for_request(request), ["evalplus_humaneval"])
         self.assertTrue(fidelity_enabled_for_request(request))
         self.assertEqual(request.tier, "standard")
+
+    def test_benchmark_scope_summary_distinguishes_decision_and_reference_sets(self):
+        decision = benchmark_scope_summary_for_selection(["ifeval", "interactive_chat_v1"])
+        self.assertEqual(decision["scope"], "decision")
+        self.assertEqual(decision["effort_level"], "balanced")
+        self.assertFalse(decision["reference_checks_included"])
+
+        reference = benchmark_scope_summary_for_selection(["interactive_chat_v1", "perplexity_reference_v1"])
+        self.assertEqual(reference["scope"], "reference")
+        self.assertEqual(reference["scope_label"], "Reference suite")
+        self.assertTrue(reference["reference_checks_included"])
+        self.assertIn("throughput_oriented_offline_suite", reference["execution_patterns"])
 
 
 if __name__ == "__main__":

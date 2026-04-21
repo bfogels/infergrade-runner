@@ -27,6 +27,15 @@ The clearest first path is:
 
 The broader Runner architecture remains available, but the v0 default is intentionally narrower than a general benchmark platform.
 
+## Decision Suite vs Reference Suite
+
+The Runner-owned catalog now separates benchmark scope from legacy tier names:
+
+- `decision` checks are the default first-user path: short, local-friendly evidence for choosing a quantized setup on the current hardware.
+- `reference` checks are deeper follow-up evidence: broader throughput, long-context, fidelity, or breadth checks that take longer and should be selected intentionally.
+
+Every catalog check carries effort, duration-band, token-volume, execution-pattern, and resumability metadata. Result bundles preserve the derived scope summary in `configuration.benchmark_selection.benchmark_scope` so the Hub can explain whether a recommendation is backed by first-pass decision evidence or deeper reference evidence.
+
 ## Capability-First Benchmark Selection
 
 InferGrade now treats benchmark scope as a capability-first contract:
