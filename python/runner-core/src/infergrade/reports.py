@@ -30,6 +30,7 @@ def write_failure_report(
 ) -> str:
     """Write a truthful Markdown report for a run that failed before finalization."""
     report_path = os.path.join(output_dir, "report.md")
+    selected_checks = list(getattr(request, "benchmark_check_ids", None) or [])
     lines = [
         "# InferGrade Runner Report",
         "",
@@ -47,7 +48,7 @@ def write_failure_report(
         "- Backend: %s" % _dash(request.backend),
         "- Execution mode: %s" % _dash(request.execution_mode),
         "- Use case: %s" % _dash(request.use_case),
-        "- Selected checks: %s" % _dash(", ".join(request.benchmark_check_ids)),
+        "- Selected checks: %s" % _dash(", ".join(selected_checks)),
         "",
         "## Progress Snapshot",
         "",
