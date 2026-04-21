@@ -28,6 +28,7 @@ from infergrade.progress import (
     save_progress,
 )
 from infergrade.profiles import resolve_capability_behavior, resolve_deployment_profiles, resolve_generation_preset
+from infergrade.reports import write_bundle_report, write_failure_report
 from infergrade.request import request_to_dict
 from infergrade.utils import ensure_dir, read_json, slugify, stable_hash, utcnow_iso, write_json
 from infergrade.validators import validate_bundle, validate_request
@@ -293,12 +294,14 @@ def _completed_bundle_result(output_dir: str, bundle_id: str) -> Dict[str, Any]:
     """Return the minimal response payload for a previously completed bundle."""
     summary = read_json(os.path.join(output_dir, "summary.json"))
     validation = read_json(os.path.join(output_dir, "validation.json"))
+    report_path = os.path.join(output_dir, "report.md")
     return {
         "bundle_id": bundle_id,
         "output_dir": output_dir,
         "result_count": summary.get("result_count", 0),
         "summary_path": os.path.join(output_dir, "summary.json"),
         "progress_path": progress_path(output_dir),
+        "report_path": report_path if os.path.exists(report_path) else None,
         "validation": validation,
     }
 
@@ -719,7 +722,9 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         }
         write_json(os.path.join(output_dir, "summary.json"), summary)
         manifest["status"]["validation_status"] = "valid" if final_validation.valid else "invalid"
+        manifest["files"]["report"] = "report.md"
         write_json(os.path.join(output_dir, "manifest.json"), manifest)
+        report_path = write_bundle_report(output_dir, manifest, summary, final_validation.to_dict(), result_records)
         mark_stage_completed(output_dir, progress, current_stage, metadata={"result_count": len(result_records)})
         mark_completed(output_dir, progress, len(result_records))
         _emit_progress(emit_progress, "Completed bundle %s" % bundle_id)
@@ -729,10 +734,12 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             "result_count": len(result_records),
             "summary_path": os.path.join(output_dir, "summary.json"),
             "progress_path": progress_path(output_dir),
+            "report_path": report_path,
             "validation": final_validation.to_dict(),
         }
     except Exception as exc:
         mark_failed(output_dir, progress, current_stage, current_detail, str(exc))
+        write_failure_report(output_dir, request, progress, str(exc), stage=current_stage, detail=current_detail)
         raise
 
 
