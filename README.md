@@ -1,6 +1,10 @@
 # InferGrade Runner
 
-InferGrade Runner is the open execution engine for InferGrade.
+InferGrade Runner is the open execution engine for answering one practical local-model question:
+
+> Which quantized model setup should I run on my hardware for this use case?
+
+The Runner owns execution truth. It resolves quantized artifacts, runs the benchmark on the right local execution path, captures provenance, and writes bundles the Hub can compare.
 
 It is responsible for:
 
@@ -8,6 +12,20 @@ It is responsible for:
 - executing container-backed benchmark runs locally or in cloud-hosted worker environments
 - capturing deployment telemetry and capability evidence
 - writing reproducible run bundles that can be uploaded to InferGrade Hub
+
+## V0 First Path
+
+The clearest first path is:
+
+1. pick a use case in the Hub
+2. resolve a quantized GGUF artifact
+3. generate a short decision-suite run config
+4. pair this machine once
+5. start the Runner in the correct local mode
+6. let the Hub queue the run
+7. inspect the normalized result and compare nearby quants
+
+The broader Runner architecture remains available, but the v0 default is intentionally narrower than a general benchmark platform.
 
 ## Capability-First Benchmark Selection
 
@@ -169,6 +187,8 @@ Run the runner test suite:
 
 ## Key Docs
 
+- [V0 Decision Workflow](docs/v0_decision_workflow.md)
+- [First Outside User Path](docs/first_outside_user_path.md)
 - [Runner vs Hub](docs/runner_vs_hub.md)
 - [Contract Ownership](docs/contract_ownership.md)
 - [Release Process](docs/release_process.md)

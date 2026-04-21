@@ -2,6 +2,8 @@
 
 This package contains the Python benchmark runner core for InferGrade.
 
+The v0 product focus is narrow on purpose: benchmark a quantized model setup on the user's hardware for a concrete use case, then produce normalized evidence that can be compared honestly.
+
 ## Responsibilities
 
 - CLI entrypoints
@@ -11,6 +13,16 @@ This package contains the Python benchmark runner core for InferGrade.
 - bundle generation
 - result record normalization
 - local bundle validation
+
+## V0 Decision Workflow
+
+For the first outside-user path, prefer:
+
+- `llama.cpp`
+- GGUF quantized artifacts
+- `local_native` on Apple Silicon
+- `local_container` on container-friendly hosts
+- short decision-suite benchmark selections before deeper reference-style runs
 
 ## Current State
 
