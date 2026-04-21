@@ -204,6 +204,7 @@ Run the runner test suite:
 
 - [V0 Decision Workflow](docs/v0_decision_workflow.md)
 - [First Outside User Path](docs/first_outside_user_path.md)
+- [Demo Evidence Fixtures](docs/demo_evidence.md)
 - [Runner vs Hub](docs/runner_vs_hub.md)
 - [Contract Ownership](docs/contract_ownership.md)
 - [Release Process](docs/release_process.md)
