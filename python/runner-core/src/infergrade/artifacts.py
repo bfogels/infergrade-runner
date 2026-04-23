@@ -60,7 +60,8 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
             original_uri=artifact,
             resolved_path=local_path,
             sha256=sha256,
-            filename=request.quant_artifact_filename or os.path.basename(local_path),
+            filename=_safe_artifact_filename(request.quant_artifact_filename)
+            or os.path.basename(local_path),
             cache_hit=False,
             source_kind="local_file",
             cache_dir=None,
@@ -69,10 +70,11 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
         )
 
     resolved_artifact_uri = artifact
+    _require_secure_remote_artifact(resolved_artifact_uri, request.quant_artifact_sha256)
     download_url = artifact_to_download_url(resolved_artifact_uri, revision=request.quant_artifact_revision)
     cache_dir = _normalized_cache_dir(request.quant_artifact_cache_dir or default_artifact_cache_dir())
     ensure_dir(cache_dir)
-    filename = request.quant_artifact_filename or _infer_filename(resolved_artifact_uri)
+    filename = _safe_artifact_filename(request.quant_artifact_filename) or _infer_filename(resolved_artifact_uri)
     cache_path = _cache_path(cache_dir, resolved_artifact_uri, filename, request.quant_artifact_sha256)
     if os.path.isfile(cache_path):
         cached_sha = compute_file_sha256(cache_path)
@@ -100,7 +102,7 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
                 if canonical_artifact_uri != resolved_artifact_uri:
                     resolved_artifact_uri = canonical_artifact_uri
                     download_url = artifact_to_download_url(resolved_artifact_uri, revision=request.quant_artifact_revision)
-                    filename = request.quant_artifact_filename or _infer_filename(resolved_artifact_uri)
+                    filename = _safe_artifact_filename(request.quant_artifact_filename) or _infer_filename(resolved_artifact_uri)
                     cache_path = _cache_path(cache_dir, resolved_artifact_uri, filename, request.quant_artifact_sha256)
                     _download_remote_artifact(download_url, tmp_path)
                 else:
@@ -205,10 +207,16 @@ def _should_fallback_to_curl(exc: Exception) -> bool:
     return False
 
 
+# curl's --proto / --proto-redir accept a list of permitted protocols with a
+# leading "=" meaning "replace the default list". "=https" forbids cleartext
+# http even if a 30x redirect tries to downgrade us mid-transfer.
+_CURL_HTTPS_ONLY = ["--proto", "=https", "--proto-redir", "=https"]
+
+
 def _download_with_curl(download_url: str, destination_path: str) -> None:
     """Use curl as a pragmatic fallback for artifact downloads."""
     completed = subprocess.run(
-        ["curl", "-L", "--fail", "-o", destination_path, download_url],
+        ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY + ["-o", destination_path, download_url],
         capture_output=True,
         text=True,
     )
@@ -235,7 +243,7 @@ def _fetch_huggingface_siblings(repo_id: str) -> list:
 def _fetch_json_with_curl(url: str) -> Dict[str, object]:
     """Fetch JSON via curl as a pragmatic fallback on local Python SSL issues."""
     completed = subprocess.run(
-        ["curl", "-L", "--fail", "-H", "Accept: application/json", url],
+        ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY + ["-H", "Accept: application/json", url],
         capture_output=True,
         text=True,
     )
@@ -299,3 +307,74 @@ def _verify_expected_sha256(path: str, actual_sha256: str, expected_sha256: Opti
             "SHA256 mismatch for %s. Expected %s, got %s."
             % (path, expected_sha256.lower(), actual_sha256.lower())
         )
+
+
+def _safe_artifact_filename(candidate: Optional[str]) -> Optional[str]:
+    """Return a hub-supplied filename verified to be a plain basename.
+
+    The runner previously joined ``quant_artifact_filename`` (which the hub
+    controls via the run config) straight into the cache path. A value like
+    ``"../../../etc/passwd"`` would cause ``os.path.abspath`` to resolve
+    the cache path outside ``cache_dir``, letting a malicious hub drop
+    downloaded bytes anywhere the runner user can write
+    (``~/.ssh/authorized_keys``, ``~/.config/infergrade/runner_profile.json``
+    to clobber the token, shell rc files, etc.).
+
+    Rather than silently basename-ing and hiding the hub's intent, fail
+    loud: reject any filename that contains path separators, null bytes,
+    or a ``..`` / ``.`` component. Operators investigating a rejected run
+    will see the raw filename the hub asked for.
+    """
+    if candidate is None:
+        return None
+    trimmed = str(candidate).strip()
+    if not trimmed:
+        return None
+    if "\x00" in trimmed:
+        raise ValueError(
+            "Invalid quant_artifact_filename %r: null bytes are not allowed"
+            % candidate
+        )
+    if "/" in trimmed or "\\" in trimmed:
+        raise ValueError(
+            "Invalid quant_artifact_filename %r: path separators are not allowed"
+            % candidate
+        )
+    if trimmed in {".", ".."}:
+        raise ValueError(
+            "Invalid quant_artifact_filename %r: traversal components are not allowed"
+            % candidate
+        )
+    # Redundant sanity check - basename should match trimmed now that we have
+    # rejected every way a separator could slip through.
+    basename = os.path.basename(trimmed)
+    if basename != trimmed or not basename:
+        raise ValueError(
+            "Invalid quant_artifact_filename %r: must be a plain basename"
+            % candidate
+        )
+    return basename
+
+
+def _require_secure_remote_artifact(uri: str, expected_sha256: Optional[str]) -> None:
+    """Gate cleartext remote artifact downloads behind a pinned SHA256.
+
+    ``https://`` and ``hf://`` URIs travel over TLS so TLS itself is the
+    integrity guarantee. A plain ``http://`` URI is MITM-able (coffee shop
+    wifi, hostile ISP, compromised transparent proxy), and the hub's run
+    config is not itself signed, so the only defence left is the pinned
+    digest. Refuse to download unpinned ``http://`` artifacts rather than
+    silently pulling whatever bytes the network served.
+    """
+    if not uri:
+        return
+    if uri.startswith("https://") or uri.startswith("hf://"):
+        return
+    if uri.startswith("http://"):
+        if not expected_sha256:
+            raise ValueError(
+                "Refusing to download artifact over cleartext http:// without a "
+                "pinned quant_artifact_sha256: %s" % uri
+            )
+        return
+    # Any other scheme is rejected upstream by ``artifact_to_download_url``.
