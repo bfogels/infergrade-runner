@@ -79,6 +79,9 @@ def _add_run_request_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cloud-instance-type")
     parser.add_argument("--backend-image")
     parser.add_argument("--artifact-cache-dir")
+    parser.add_argument("--llama-cpp-cli-path", help="Explicit llama.cpp CLI binary for local_native runs.")
+    parser.add_argument("--llama-cpp-server-path", help="Explicit llama.cpp server binary for local_native runs.")
+    parser.add_argument("--llama-cpp-perplexity-path", help="Explicit llama.cpp perplexity binary for local_native fidelity runs.")
     parser.add_argument("--cost-source")
     parser.add_argument("--hourly-rate-usd", type=float)
     parser.add_argument("--capability", default="auto")
@@ -505,12 +508,18 @@ def main(argv: Optional[list] = None) -> int:
             if request.quant_artifact_revision:
                 quantized_weights["revision"] = request.quant_artifact_revision
             request_payload["artifacts"] = {"quantized_weights": quantized_weights}
-        if request.backend_image or request.quant_artifact_cache_dir:
+        if request.backend_image or request.quant_artifact_cache_dir or request.llama_cpp_cli_path or request.llama_cpp_server_path or request.llama_cpp_perplexity_path:
             runtime_payload = {}
             if request.backend_image:
                 runtime_payload["backend_image"] = request.backend_image
             if request.quant_artifact_cache_dir:
                 runtime_payload["artifact_cache_dir"] = request.quant_artifact_cache_dir
+            if request.llama_cpp_cli_path:
+                runtime_payload["llama_cpp_cli_path"] = request.llama_cpp_cli_path
+            if request.llama_cpp_server_path:
+                runtime_payload["llama_cpp_server_path"] = request.llama_cpp_server_path
+            if request.llama_cpp_perplexity_path:
+                runtime_payload["llama_cpp_perplexity_path"] = request.llama_cpp_perplexity_path
             request_payload["runtime"] = runtime_payload
         if request.ontology_hints:
             request_payload["ontology_hints"] = request.ontology_hints

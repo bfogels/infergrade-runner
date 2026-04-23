@@ -99,7 +99,7 @@ class DoctorTests(unittest.TestCase):
             "accelerator_count": 1,
             "hardware_id": "hw_test",
         }
-        which_mock.side_effect = lambda name: "/usr/bin/%s" % name if name == "docker" else None
+        which_mock.side_effect = lambda name: None
         request = RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",
             backend="llama.cpp",
@@ -136,6 +136,62 @@ class DoctorTests(unittest.TestCase):
         statuses = {item["id"]: item["status"] for item in report["checks"]}
         self.assertEqual(statuses["llama_cli_native"], "ok")
         self.assertEqual(statuses["llama_server_native"], "ok")
+        checks = {item["id"]: item for item in report["checks"]}
+        self.assertIn(checks["llama_cli_native"]["details"]["version_status"], ("detected", "unknown"))
+
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.shutil.which")
+    def test_doctor_reports_custom_native_llama_paths(self, which_mock, capture_environment_mock):
+        capture_environment_mock.return_value = {
+            "environment_class": "local_workstation",
+            "hardware_class": "apple_silicon",
+            "accelerator_api": "metal",
+            "accelerator_type": "gpu",
+            "accelerator_count": 1,
+            "hardware_id": "hw_test",
+        }
+        which_mock.side_effect = lambda name: name if name in ("/custom/llama-cli", "/custom/llama-server") else None
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact=os.path.join(self.tempdir.name, "missing.gguf"),
+            execution_mode="local_native",
+            llama_cpp_cli_path="/custom/llama-cli",
+            llama_cpp_server_path="/custom/llama-server",
+            simulate=False,
+        )
+        report = run_doctor(request=request)
+        checks = {item["id"]: item for item in report["checks"]}
+        self.assertEqual(checks["llama_cli_native"]["details"]["source"], "custom_path")
+        self.assertEqual(checks["llama_cli_native"]["details"]["requested"], "/custom/llama-cli")
+        self.assertEqual(checks["llama_server_native"]["details"]["source"], "custom_path")
+
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.shutil.which")
+    def test_doctor_fails_unsupported_llama_architecture_before_execution(self, which_mock, capture_environment_mock):
+        capture_environment_mock.return_value = {
+            "environment_class": "local_workstation",
+            "hardware_class": "nvidia_gpu",
+            "accelerator_api": "cuda",
+            "accelerator_type": "gpu",
+            "accelerator_count": 1,
+            "hardware_id": "hw_test",
+        }
+        which_mock.side_effect = lambda name: None
+        request = RunRequest(
+            model="google/gemma-4-27b-it",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://example/gemma4.gguf",
+            execution_mode="local_container",
+            ontology_hints={"architecture": "gemma4"},
+            simulate=False,
+        )
+        report = run_doctor(request=request)
+        checks = {item["id"]: item for item in report["checks"]}
+        self.assertEqual(checks["llama_cpp_model_compatibility"]["status"], "error")
+        self.assertIn("GGUF architecture 'gemma4'", checks["llama_cpp_model_compatibility"]["message"])
 
     @mock.patch("infergrade.doctor.load_contract_manifest")
     @mock.patch("infergrade.doctor.capture_environment")

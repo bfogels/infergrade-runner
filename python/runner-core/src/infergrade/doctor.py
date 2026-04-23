@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+from infergrade.adapters.llama_cpp import LlamaCppAdapter
 from infergrade.artifacts import artifact_to_download_url, default_artifact_cache_dir
 from infergrade.capabilities import capability_images_for_request
 from infergrade.contracts import load_contract_manifest
@@ -180,6 +181,7 @@ def _request_checks(request: RunRequest) -> List[Dict[str, Any]]:
         ),
     ]
     checks.extend(_execution_mode_guidance_checks(request, environment))
+    checks.extend(_backend_compatibility_checks(request))
     if request.execution_mode in ("local_container", "cloud_container"):
         checks.append(_binary_check("docker", "docker_cli", "Docker CLI is available."))
         if checks[-1]["status"] == "ok":
@@ -231,6 +233,86 @@ def _execution_mode_guidance_checks(request: RunRequest, environment: Dict[str, 
     return checks
 
 
+def _backend_compatibility_checks(request: RunRequest) -> List[Dict[str, Any]]:
+    if request.backend != "llama.cpp":
+        return []
+    adapter = LlamaCppAdapter()
+    try:
+        adapter._ensure_backend_model_compatibility(request)
+    except Exception as exc:
+        return [
+            _check(
+                "llama_cpp_model_compatibility",
+                "error",
+                str(exc),
+                {
+                    "backend": request.backend,
+                    "model": request.model,
+                    "quant_artifact": request.quant_artifact,
+                    "action": "Use a newer explicit llama.cpp runtime, choose a supported artifact, or switch backend lane.",
+                },
+            )
+        ]
+    return [
+        _check(
+            "llama_cpp_model_compatibility",
+            "ok",
+            "No known llama.cpp/model architecture incompatibility was detected before execution.",
+            {
+                "backend": request.backend,
+                "model": request.model,
+            },
+        )
+    ]
+
+
+def _llama_native_binary_check(check_id: str, explicit_path: Optional[str], env_name: str, default_binary: str, label: str) -> Dict[str, Any]:
+    requested = explicit_path or os.environ.get(env_name) or default_binary
+    path = shutil.which(requested)
+    install_hint = "brew install llama.cpp" if platform.system().lower() == "darwin" else None
+    if not path:
+        return _check(
+            check_id,
+            "error",
+            "%s is required for local_native llama.cpp runs." % label,
+            {
+                "requested": requested,
+                "path": None,
+                "source": "custom_path" if explicit_path else ("environment_path" if os.environ.get(env_name) else "system_path"),
+                "env_var": env_name,
+                "suggested_install": install_hint,
+            },
+        )
+    version = _binary_version(path)
+    return _check(
+        check_id,
+        "ok",
+        "%s is available." % label,
+        {
+            "requested": requested,
+            "path": path,
+            "version": version,
+            "version_status": "detected" if version else "unknown",
+            "source": "custom_path" if explicit_path else ("environment_path" if os.environ.get(env_name) else "system_path"),
+            "env_var": env_name,
+            "suggested_install": install_hint,
+        },
+    )
+
+
+def _binary_version(path: str) -> Optional[str]:
+    if not os.path.exists(path):
+        return None
+    try:
+        completed = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=5)
+    except Exception:
+        return None
+    output = (completed.stdout or completed.stderr or "").strip()
+    if completed.returncode != 0 or not output:
+        return None
+    return output.splitlines()[0]
+
+
 def _native_runtime_checks(request: RunRequest, environment: Dict[str, Any]) -> List[Dict[str, Any]]:
     checks: List[Dict[str, Any]] = []
     if request.backend != "llama.cpp":
@@ -243,30 +325,8 @@ def _native_runtime_checks(request: RunRequest, environment: Dict[str, Any]) -> 
             )
         )
         return checks
-    cli_path = shutil.which(os.environ.get("INFERGRADE_LLAMA_CPP_CLI", "llama-cli"))
-    server_path = shutil.which(os.environ.get("INFERGRADE_LLAMA_CPP_SERVER", "llama-server"))
-    checks.append(
-        _check(
-            "llama_cli_native",
-            "ok" if cli_path else "error",
-            "Native llama-cli is available." if cli_path else "Native llama-cli is required for local_native llama.cpp runs.",
-            {
-                "path": cli_path,
-                "suggested_install": "brew install llama.cpp" if platform.system().lower() == "darwin" else None,
-            },
-        )
-    )
-    checks.append(
-        _check(
-            "llama_server_native",
-            "ok" if server_path else "error",
-            "Native llama-server is available." if server_path else "Native llama-server is required for local_native llama.cpp runs.",
-            {
-                "path": server_path,
-                "suggested_install": "brew install llama.cpp" if platform.system().lower() == "darwin" else None,
-            },
-        )
-    )
+    checks.append(_llama_native_binary_check("llama_cli_native", request.llama_cpp_cli_path, "INFERGRADE_LLAMA_CPP_CLI", "llama-cli", "Native llama-cli"))
+    checks.append(_llama_native_binary_check("llama_server_native", request.llama_cpp_server_path, "INFERGRADE_LLAMA_CPP_SERVER", "llama-server", "Native llama-server"))
     if environment.get("hardware_class") == "apple_silicon":
         checks.append(
             _check(
@@ -285,25 +345,8 @@ def _native_runtime_checks(request: RunRequest, environment: Dict[str, Any]) -> 
 def _native_runner_checks(environment: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Return runner-level readiness checks for native local execution."""
     checks: List[Dict[str, Any]] = []
-    cli_path = shutil.which(os.environ.get("INFERGRADE_LLAMA_CPP_CLI", "llama-cli"))
-    server_path = shutil.which(os.environ.get("INFERGRADE_LLAMA_CPP_SERVER", "llama-server"))
-    install_hint = "brew install llama.cpp" if platform.system().lower() == "darwin" else None
-    checks.append(
-        _check(
-            "llama_cli_native",
-            "ok" if cli_path else "error",
-            "Native llama-cli is available." if cli_path else "Native llama-cli is required for local_native llama.cpp runs.",
-            {"path": cli_path, "suggested_install": install_hint},
-        )
-    )
-    checks.append(
-        _check(
-            "llama_server_native",
-            "ok" if server_path else "error",
-            "Native llama-server is available." if server_path else "Native llama-server is required for local_native llama.cpp runs.",
-            {"path": server_path, "suggested_install": install_hint},
-        )
-    )
+    checks.append(_llama_native_binary_check("llama_cli_native", None, "INFERGRADE_LLAMA_CPP_CLI", "llama-cli", "Native llama-cli"))
+    checks.append(_llama_native_binary_check("llama_server_native", None, "INFERGRADE_LLAMA_CPP_SERVER", "llama-server", "Native llama-server"))
     if environment.get("hardware_class") == "apple_silicon":
         checks.append(
             _check(

@@ -1,4 +1,5 @@
 import os
+import struct
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from infergrade.adapters.llama_cpp import (
     _metrics_from_server_completion,
     _parse_llama_timings,
     _parse_perplexity_output,
+    _read_gguf_architecture,
     _safe_tokens_per_second,
 )
 from infergrade.models import RunRequest
@@ -104,6 +106,24 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(parsed["corpus_token_count"], 2049)
         self.assertEqual(parsed["duration_seconds"], 28.989)
 
+    def test_reads_gguf_architecture_metadata(self):
+        gguf_path = os.path.join(self.tempdir.name, "gemma4.gguf")
+
+        def gguf_string(value):
+            encoded = value.encode("utf-8")
+            return struct.pack("<Q", len(encoded)) + encoded
+
+        with open(gguf_path, "wb") as handle:
+            handle.write(b"GGUF")
+            handle.write(struct.pack("<I", 3))
+            handle.write(struct.pack("<Q", 0))
+            handle.write(struct.pack("<Q", 1))
+            handle.write(gguf_string("general.architecture"))
+            handle.write(struct.pack("<I", 8))
+            handle.write(gguf_string("gemma4"))
+
+        self.assertEqual(_read_gguf_architecture(gguf_path), "gemma4")
+
     @mock.patch("infergrade.adapters.llama_cpp.docker_available", return_value=True)
     @mock.patch("infergrade.adapters.llama_cpp.install_image")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
@@ -132,6 +152,24 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(version, "version: native-test")
         self.assertEqual(run_mock.call_args[0][0], ["/opt/homebrew/bin/llama-cli", "--version"])
 
+    @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_resolve_version_uses_explicit_native_binary_path(self, run_mock, which_mock):
+        which_mock.side_effect = lambda name: name if name == "/custom/llama-cli" else None
+        run_mock.return_value = mock.Mock(returncode=0, stdout="version: custom-runtime\n", stderr="")
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            llama_cpp_cli_path="/custom/llama-cli",
+            simulate=False,
+        )
+        version = adapter.resolve_version(simulate=False, request=request)
+        self.assertEqual(version, "version: custom-runtime")
+        self.assertEqual(run_mock.call_args[0][0], ["/custom/llama-cli", "--version"])
+
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
     def test_resolve_version_rejects_unsupported_gemma4_architecture_early(self, run_mock):
         adapter = LlamaCppAdapter()
@@ -142,6 +180,36 @@ class LlamaCppAdapterTests(unittest.TestCase):
             tier="canary",
             execution_mode="local_container",
             ontology_hints={"architecture": "gemma4", "family_name": "Gemma 4"},
+            simulate=False,
+        )
+        with self.assertRaisesRegex(RuntimeError, "GGUF architecture 'gemma4'"):
+            adapter.resolve_version(simulate=False, request=request)
+        run_mock.assert_not_called()
+
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_resolve_version_rejects_unsupported_architecture_from_gguf_metadata(self, run_mock):
+        gguf_path = os.path.join(self.tempdir.name, "gemma4.gguf")
+
+        def gguf_string(value):
+            encoded = value.encode("utf-8")
+            return struct.pack("<Q", len(encoded)) + encoded
+
+        with open(gguf_path, "wb") as handle:
+            handle.write(b"GGUF")
+            handle.write(struct.pack("<I", 3))
+            handle.write(struct.pack("<Q", 0))
+            handle.write(struct.pack("<Q", 1))
+            handle.write(gguf_string("general.architecture"))
+            handle.write(struct.pack("<I", 8))
+            handle.write(gguf_string("gemma4"))
+
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="google/gemma-4-27b-it",
+            quant_artifact=gguf_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_container",
             simulate=False,
         )
         with self.assertRaisesRegex(RuntimeError, "GGUF architecture 'gemma4'"):
