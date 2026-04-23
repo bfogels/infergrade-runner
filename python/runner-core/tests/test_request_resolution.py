@@ -52,6 +52,9 @@ class RequestResolutionTests(unittest.TestCase):
             "runtime": {
                 "backend_image": "infergrade-llama-cpp:local",
                 "artifact_cache_dir": "/tmp/infergrade-cache",
+                "llama_cpp_cli_path": "/custom/llama-cli",
+                "llama_cpp_server_path": "/custom/llama-server",
+                "llama_cpp_perplexity_path": "/custom/llama-perplexity",
             },
         }
         request = request_from_dict(payload)
@@ -64,6 +67,9 @@ class RequestResolutionTests(unittest.TestCase):
         self.assertEqual(request.quant_artifact_revision, "main")
         self.assertEqual(request.backend_image, "infergrade-llama-cpp:local")
         self.assertEqual(request.quant_artifact_cache_dir, "/tmp/infergrade-cache")
+        self.assertEqual(request.llama_cpp_cli_path, "/custom/llama-cli")
+        self.assertEqual(request.llama_cpp_server_path, "/custom/llama-server")
+        self.assertEqual(request.llama_cpp_perplexity_path, "/custom/llama-perplexity")
 
     def test_request_from_dict_normalizes_capability_first_selection(self):
         payload = {

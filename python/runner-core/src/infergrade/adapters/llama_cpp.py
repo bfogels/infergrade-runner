@@ -4,6 +4,7 @@ import re
 import shlex
 import shutil
 import socket
+import struct
 import subprocess
 import tempfile
 import threading
@@ -73,17 +74,28 @@ class LlamaCppAdapter(BaseAdapter):
 
     def runtime_metadata(self, request: RunRequest) -> Dict[str, object]:
         if request and request.execution_mode == "local_native":
+            cli_binary = self._native_command_path(request)
+            server_binary = self._native_server_path(request)
             return {
                 "container_image": None,
                 "container_runtime": None,
                 "container_command": None,
-                "native_binary": self._native_command_path(request),
-                "native_server_binary": self._native_server_path(request),
+                "native_binary": cli_binary,
+                "native_server_binary": server_binary,
+                "native_perplexity_binary": _try_resolve_native_binary(
+                    explicit=getattr(request, "llama_cpp_perplexity_path", None),
+                    env_name="INFERGRADE_LLAMA_CPP_PERPLEXITY",
+                    default=_DEFAULT_PERPLEXITY_COMMAND,
+                ),
+                "runtime_source": _native_runtime_source(request),
+                "pinned_runtime_ref": None,
             }
         return {
             "container_image": self._image_name(request),
             "container_runtime": "docker",
             "container_command": _DEFAULT_COMMAND,
+            "runtime_source": "container_image",
+            "pinned_runtime_ref": _PINNED_LLAMA_CPP_REF,
         }
 
     def resolve_version(self, simulate: bool = True, request: RunRequest = None) -> str:
@@ -379,25 +391,28 @@ class LlamaCppAdapter(BaseAdapter):
             raise RuntimeError("Docker is required for real llama.cpp container runs.")
 
     def _native_command_path(self, request: RunRequest = None) -> str:
-        binary = env_value("INFERGRADE_LLAMA_CPP_CLI", "", _DEFAULT_COMMAND)
-        resolved = shutil.which(binary)
-        if not resolved:
-            raise RuntimeError("Native llama.cpp CLI binary is not available on PATH: %s" % binary)
-        return resolved
+        return _resolve_native_binary(
+            explicit=getattr(request, "llama_cpp_cli_path", None),
+            env_name="INFERGRADE_LLAMA_CPP_CLI",
+            default=_DEFAULT_COMMAND,
+            label="CLI",
+        )
 
     def _native_server_path(self, request: RunRequest = None) -> str:
-        binary = env_value("INFERGRADE_LLAMA_CPP_SERVER", "", _DEFAULT_SERVER_COMMAND)
-        resolved = shutil.which(binary)
-        if not resolved:
-            raise RuntimeError("Native llama.cpp server binary is not available on PATH: %s" % binary)
-        return resolved
+        return _resolve_native_binary(
+            explicit=getattr(request, "llama_cpp_server_path", None),
+            env_name="INFERGRADE_LLAMA_CPP_SERVER",
+            default=_DEFAULT_SERVER_COMMAND,
+            label="server",
+        )
 
     def _native_perplexity_path(self, request: RunRequest = None) -> str:
-        binary = env_value("INFERGRADE_LLAMA_CPP_PERPLEXITY", "", _DEFAULT_PERPLEXITY_COMMAND)
-        resolved = shutil.which(binary)
-        if not resolved:
-            raise RuntimeError("Native llama.cpp perplexity binary is not available on PATH: %s" % binary)
-        return resolved
+        return _resolve_native_binary(
+            explicit=getattr(request, "llama_cpp_perplexity_path", None),
+            env_name="INFERGRADE_LLAMA_CPP_PERPLEXITY",
+            default=_DEFAULT_PERPLEXITY_COMMAND,
+            label="perplexity",
+        )
 
     def _image_name(self, request: RunRequest = None) -> str:
         if request and request.backend_image:
@@ -1225,6 +1240,107 @@ def _metrics_from_server_completion(
     }
 
 
+def _native_runtime_source(request: RunRequest = None) -> str:
+    if request and (request.llama_cpp_cli_path or request.llama_cpp_server_path or request.llama_cpp_perplexity_path):
+        return "custom_path"
+    if any(os.environ.get(name) for name in ("INFERGRADE_LLAMA_CPP_CLI", "INFERGRADE_LLAMA_CPP_SERVER", "INFERGRADE_LLAMA_CPP_PERPLEXITY")):
+        return "environment_path"
+    return "system_path"
+
+
+def _resolve_native_binary(explicit: Optional[str], env_name: str, default: str, label: str) -> str:
+    binary = explicit or env_value(env_name, "", default)
+    resolved = shutil.which(binary)
+    if not resolved:
+        raise RuntimeError(
+            "Native llama.cpp %s binary is not available: %s. Set %s or pass the matching --llama-cpp-* path flag."
+            % (label, binary, env_name)
+        )
+    return resolved
+
+
+def _try_resolve_native_binary(explicit: Optional[str], env_name: str, default: str) -> Optional[str]:
+    return shutil.which(explicit or env_value(env_name, "", default))
+
+
+def _read_exact(handle, length: int) -> bytes:
+    payload = handle.read(length)
+    if len(payload) != length:
+        raise ValueError("Unexpected end of GGUF metadata.")
+    return payload
+
+
+def _read_u32(handle) -> int:
+    return struct.unpack("<I", _read_exact(handle, 4))[0]
+
+
+def _read_u64(handle) -> int:
+    return struct.unpack("<Q", _read_exact(handle, 8))[0]
+
+
+def _read_gguf_string(handle) -> str:
+    length = _read_u64(handle)
+    if length > 1024 * 1024:
+        raise ValueError("GGUF metadata string is unexpectedly large.")
+    return _read_exact(handle, length).decode("utf-8", errors="replace")
+
+
+def _skip_gguf_value(handle, value_type: int) -> None:
+    fixed_width = {
+        0: 1,  # uint8
+        1: 1,  # int8
+        2: 2,  # uint16
+        3: 2,  # int16
+        4: 4,  # uint32
+        5: 4,  # int32
+        6: 4,  # float32
+        7: 1,  # bool
+        10: 8,  # uint64
+        11: 8,  # int64
+        12: 8,  # float64
+    }
+    if value_type in fixed_width:
+        _read_exact(handle, fixed_width[value_type])
+        return
+    if value_type == 8:
+        _read_gguf_string(handle)
+        return
+    if value_type == 9:
+        item_type = _read_u32(handle)
+        count = _read_u64(handle)
+        if count > 100000:
+            raise ValueError("GGUF metadata array is unexpectedly large.")
+        for _ in range(count):
+            _skip_gguf_value(handle, item_type)
+        return
+    raise ValueError("Unsupported GGUF metadata value type: %s" % value_type)
+
+
+def _read_gguf_architecture(path: str) -> Optional[str]:
+    try:
+        with open(path, "rb") as handle:
+            if _read_exact(handle, 4) != b"GGUF":
+                return None
+            _read_u32(handle)  # version
+            _read_u64(handle)  # tensor_count
+            metadata_count = _read_u64(handle)
+            if metadata_count > 100000:
+                return None
+            for _ in range(metadata_count):
+                key = _read_gguf_string(handle)
+                value_type = _read_u32(handle)
+                if key == "general.architecture" and value_type == 8:
+                    return _normalize_architecture(_read_gguf_string(handle))
+                _skip_gguf_value(handle, value_type)
+    except (OSError, struct.error, UnicodeDecodeError, ValueError):
+        return None
+    return None
+
+
+def _normalize_architecture(value: str) -> str:
+    return str(value or "").strip().lower().replace("-", "").replace("_", "")
+
+
 def _infer_llama_cpp_architecture(request: RunRequest) -> Optional[str]:
     hints = dict(request.ontology_hints or {})
     explicit = (
@@ -1234,7 +1350,13 @@ def _infer_llama_cpp_architecture(request: RunRequest) -> Optional[str]:
         or hints.get("llama_cpp_architecture")
     )
     if explicit:
-        return str(explicit).strip().lower().replace("-", "").replace("_", "")
+        return _normalize_architecture(str(explicit))
+
+    artifact = request.quant_artifact_resolved_path or request.quant_artifact
+    if artifact and os.path.isfile(artifact) and artifact.lower().endswith(".gguf"):
+        architecture = _read_gguf_architecture(artifact)
+        if architecture:
+            return architecture
 
     candidates = [
         request.model,
@@ -1243,8 +1365,7 @@ def _infer_llama_cpp_architecture(request: RunRequest) -> Optional[str]:
         request.quant_artifact,
     ]
     for candidate in candidates:
-        lowered = str(candidate or "").strip().lower()
-        normalized = lowered.replace("_", "").replace("-", "").replace(" ", "")
+        normalized = _normalize_architecture(str(candidate or "").replace(" ", ""))
         if "gemma4" in normalized:
             return "gemma4"
         if "gemma3" in normalized:

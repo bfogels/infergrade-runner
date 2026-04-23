@@ -108,6 +108,20 @@ infergrade start
 
 `infergrade doctor` will now fail fast if you try to run a real Apple Silicon `llama.cpp` benchmark with `execution_mode=local_container`, because that path does not use Metal.
 
+Advanced users can point native execution at a specific `llama.cpp` build without making it look like an InferGrade-managed runtime:
+
+```bash
+infergrade doctor \
+  --model Qwen/Qwen2.5-7B-Instruct \
+  --backend llama.cpp \
+  --tier canary \
+  --execution-mode local_native \
+  --llama-cpp-cli-path /path/to/llama-cli \
+  --llama-cpp-server-path /path/to/llama-server
+```
+
+The same values can be supplied through `runtime.llama_cpp_cli_path`, `runtime.llama_cpp_server_path`, and `runtime.llama_cpp_perplexity_path` in a run config, or through the `INFERGRADE_LLAMA_CPP_*` environment variables. See [docs/llama_cpp_runtime_compatibility.md](docs/llama_cpp_runtime_compatibility.md) for the compatibility and provenance rules.
+
 ### Containerized Local And Cloud Paths
 
 For Linux, cloud workers, and the common containerized development path:
