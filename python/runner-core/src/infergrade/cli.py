@@ -27,6 +27,7 @@ from infergrade.profiles import DEPLOYMENT_PROFILES
 from infergrade.request import request_from_cli, request_from_file
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.runner import run_infergrade
+from infergrade.runtimes import install_llama_cpp_runtime, runtime_manifest, select_llama_cpp_runtime, selected_llama_cpp_runtime
 from infergrade.support import build_support_export, write_support_export
 from infergrade.templates import render_run_config_template, render_run_request_template
 from infergrade.transport import (
@@ -150,6 +151,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Force a rebuild of local InferGrade images even if they already exist.",
     )
+
+    runtime_parser = subparsers.add_parser("install-runtime", help="Inspect, install, or select an explicit managed runtime.")
+    runtime_parser.add_argument("--runtime", choices=("llama.cpp",), default="llama.cpp")
+    runtime_parser.add_argument("--runtime-id")
+    runtime_parser.add_argument("--execute", action="store_true", help="Run the manifest install command after inspecting the plan.")
+    runtime_parser.add_argument("--select-existing", action="store_true", help="Select existing local binaries as the managed runtime.")
+    runtime_parser.add_argument("--llama-cpp-cli-path")
+    runtime_parser.add_argument("--llama-cpp-server-path")
+    runtime_parser.add_argument("--llama-cpp-perplexity-path")
+    runtime_parser.add_argument("--list", action="store_true", help="Print the Runner-owned known-good runtime manifest.")
 
     pair_parser = subparsers.add_parser("pair", help="Pair this local machine with InferGrade Hub and save a reusable runner profile.")
     pair_parser.add_argument("--api-url", required=True)
@@ -398,6 +409,24 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.command == "install-images":
         payload = install_known_images(image=args.image, rebuild=args.rebuild)
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "install-runtime":
+        if args.list:
+            print(json.dumps(runtime_manifest(), indent=2, sort_keys=True))
+            return 0
+        if args.select_existing:
+            payload = select_llama_cpp_runtime(
+                runtime_id=args.runtime_id,
+                cli_path=args.llama_cpp_cli_path,
+                server_path=args.llama_cpp_server_path,
+                perplexity_path=args.llama_cpp_perplexity_path,
+            )
+        else:
+            payload = install_llama_cpp_runtime(runtime_id=args.runtime_id, execute=args.execute)
+        payload = dict(payload)
+        payload["current_selection"] = selected_llama_cpp_runtime()
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 

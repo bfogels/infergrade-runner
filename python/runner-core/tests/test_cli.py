@@ -36,6 +36,22 @@ class CliTests(unittest.TestCase):
         install_mock.assert_called_once_with(image="infergrade-runner-core:local", rebuild=True)
         self.assertIn('"rebuilt"', output.getvalue())
 
+    def test_install_runtime_lists_manifest(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = main(["install-runtime", "--runtime", "llama.cpp", "--list"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"runtime_family": "llama.cpp"', output.getvalue())
+
+    def test_install_runtime_preview_does_not_execute(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = main(["install-runtime", "--runtime", "llama.cpp"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"action": "plan"', output.getvalue())
+
     def test_start_command_invokes_local_worker_loop(self):
         output = io.StringIO()
         with mock.patch(

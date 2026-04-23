@@ -13,8 +13,11 @@ from infergrade.models import RunRequest
 class DoctorTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory(prefix="infergrade-doctor-")
+        self.env_patch = mock.patch.dict(os.environ, {"INFERGRADE_RUNTIME_CACHE_DIR": self.tempdir.name})
+        self.env_patch.start()
 
     def tearDown(self):
+        self.env_patch.stop()
         self.tempdir.cleanup()
 
     @mock.patch("infergrade.doctor.capture_environment")
