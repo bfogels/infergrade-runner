@@ -15,6 +15,7 @@ from infergrade.contracts import load_contract_manifest
 from infergrade.environment import capture_environment
 from infergrade.images import docker_image_exists, local_build_command
 from infergrade.models import RunRequest
+from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cpp_runtime
 
 
 DEFAULT_BACKEND_IMAGES = {
@@ -267,9 +268,13 @@ def _backend_compatibility_checks(request: RunRequest) -> List[Dict[str, Any]]:
 
 
 def _llama_native_binary_check(check_id: str, explicit_path: Optional[str], env_name: str, default_binary: str, label: str) -> Dict[str, Any]:
-    requested = explicit_path or os.environ.get(env_name) or default_binary
+    managed_selection = selected_llama_cpp_runtime()
+    binary_kind = "cli" if "cli" in check_id else "server"
+    managed_path = managed_llama_cpp_binary_path(binary_kind) if not explicit_path and not os.environ.get(env_name) else None
+    requested = explicit_path or os.environ.get(env_name) or managed_path or default_binary
     path = shutil.which(requested)
     install_hint = "brew install llama.cpp" if platform.system().lower() == "darwin" else None
+    source = "custom_path" if explicit_path else ("environment_path" if os.environ.get(env_name) else ("managed_runtime" if managed_path else "system_path"))
     if not path:
         return _check(
             check_id,
@@ -278,9 +283,11 @@ def _llama_native_binary_check(check_id: str, explicit_path: Optional[str], env_
             {
                 "requested": requested,
                 "path": None,
-                "source": "custom_path" if explicit_path else ("environment_path" if os.environ.get(env_name) else "system_path"),
+                "source": source,
+                "managed_runtime": managed_selection,
                 "env_var": env_name,
                 "suggested_install": install_hint,
+                "managed_install_suggestion": "Run `infergrade install-runtime --runtime llama.cpp` to inspect the pinned managed runtime plan.",
             },
         )
     version = _binary_version(path)
@@ -293,7 +300,8 @@ def _llama_native_binary_check(check_id: str, explicit_path: Optional[str], env_
             "path": path,
             "version": version,
             "version_status": "detected" if version else "unknown",
-            "source": "custom_path" if explicit_path else ("environment_path" if os.environ.get(env_name) else "system_path"),
+            "source": source,
+            "managed_runtime": managed_selection,
             "env_var": env_name,
             "suggested_install": install_hint,
         },

@@ -122,6 +122,23 @@ infergrade doctor \
 
 The same values can be supplied through `runtime.llama_cpp_cli_path`, `runtime.llama_cpp_server_path`, and `runtime.llama_cpp_perplexity_path` in a run config, or through the `INFERGRADE_LLAMA_CPP_*` environment variables. See [docs/llama_cpp_runtime_compatibility.md](docs/llama_cpp_runtime_compatibility.md) for the compatibility and provenance rules.
 
+To inspect the pinned managed-runtime plan without changing the machine:
+
+```bash
+infergrade install-runtime --runtime llama.cpp --list
+infergrade install-runtime --runtime llama.cpp
+```
+
+To explicitly select already-installed binaries as the managed runtime:
+
+```bash
+infergrade install-runtime --runtime llama.cpp --select-existing \
+  --llama-cpp-cli-path /opt/homebrew/bin/llama-cli \
+  --llama-cpp-server-path /opt/homebrew/bin/llama-server
+```
+
+InferGrade never silently installs or upgrades `llama.cpp`; `--execute` is required before any manifest install command is run.
+
 ### Containerized Local And Cloud Paths
 
 For Linux, cloud workers, and the common containerized development path:

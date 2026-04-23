@@ -21,6 +21,7 @@ from infergrade.container_runtime import (
 )
 from infergrade.images import install_image
 from infergrade.models import DeploymentExecution, FidelityExecution, RunRequest
+from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cpp_runtime
 from infergrade.utils import env_value, stable_hash, utcnow_iso
 
 
@@ -1245,11 +1246,18 @@ def _native_runtime_source(request: RunRequest = None) -> str:
         return "custom_path"
     if any(os.environ.get(name) for name in ("INFERGRADE_LLAMA_CPP_CLI", "INFERGRADE_LLAMA_CPP_SERVER", "INFERGRADE_LLAMA_CPP_PERPLEXITY")):
         return "environment_path"
+    if selected_llama_cpp_runtime():
+        return "managed_runtime"
     return "system_path"
 
 
 def _resolve_native_binary(explicit: Optional[str], env_name: str, default: str, label: str) -> str:
-    binary = explicit or env_value(env_name, "", default)
+    binary = explicit or env_value(env_name, "", "")
+    if not binary:
+        managed = managed_llama_cpp_binary_path({"CLI": "cli", "server": "server", "perplexity": "perplexity"}.get(label, label))
+        if managed:
+            return managed
+        binary = default
     resolved = shutil.which(binary)
     if not resolved:
         raise RuntimeError(
@@ -1260,7 +1268,10 @@ def _resolve_native_binary(explicit: Optional[str], env_name: str, default: str,
 
 
 def _try_resolve_native_binary(explicit: Optional[str], env_name: str, default: str) -> Optional[str]:
-    return shutil.which(explicit or env_value(env_name, "", default))
+    binary = explicit or env_value(env_name, "", "")
+    if binary:
+        return shutil.which(binary)
+    return managed_llama_cpp_binary_path("perplexity") or shutil.which(default)
 
 
 def _read_exact(handle, length: int) -> bytes:

@@ -17,6 +17,7 @@ from infergrade.adapters.llama_cpp import (
     _safe_tokens_per_second,
 )
 from infergrade.models import RunRequest
+from infergrade.runtimes import select_llama_cpp_runtime
 
 
 _FAKE_TIMING_LOG = """
@@ -65,11 +66,14 @@ llama_perf_context_print:       total time =   28989.04 ms /  2049 tokens
 class LlamaCppAdapterTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory(prefix="infergrade-llama-adapter-")
+        self.env_patch = mock.patch.dict(os.environ, {"INFERGRADE_RUNTIME_CACHE_DIR": self.tempdir.name})
+        self.env_patch.start()
         self.model_path = os.path.join(self.tempdir.name, "model.gguf")
         with open(self.model_path, "w", encoding="utf-8") as handle:
             handle.write("fake gguf")
 
     def tearDown(self):
+        self.env_patch.stop()
         self.tempdir.cleanup()
 
     def test_parse_llama_timings_extracts_expected_metrics(self):
@@ -169,6 +173,26 @@ class LlamaCppAdapterTests(unittest.TestCase):
         version = adapter.resolve_version(simulate=False, request=request)
         self.assertEqual(version, "version: custom-runtime")
         self.assertEqual(run_mock.call_args[0][0], ["/custom/llama-cli", "--version"])
+
+    @mock.patch("infergrade.runtimes.shutil.which")
+    @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_resolve_version_uses_selected_managed_runtime(self, run_mock, adapter_which_mock, runtime_which_mock):
+        runtime_which_mock.side_effect = lambda name: name if name in ("/managed/llama-cli", "/managed/llama-server") else None
+        select_llama_cpp_runtime(cli_path="/managed/llama-cli", server_path="/managed/llama-server")
+        adapter_which_mock.side_effect = lambda name: name if name == "/managed/llama-cli" else None
+        run_mock.return_value = mock.Mock(returncode=0, stdout="version: managed-runtime\n", stderr="")
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+        )
+        version = adapter.resolve_version(simulate=False, request=request)
+        self.assertEqual(version, "version: managed-runtime")
+        self.assertEqual(run_mock.call_args[0][0], ["/managed/llama-cli", "--version"])
 
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
     def test_resolve_version_rejects_unsupported_gemma4_architecture_early(self, run_mock):
