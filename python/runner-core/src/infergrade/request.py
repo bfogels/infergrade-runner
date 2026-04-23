@@ -1,13 +1,69 @@
 """Load and normalize InferGrade run requests from multiple entrypoints."""
 
 import argparse
+import copy
 import json
 import os
+import re
 from typing import Any, Dict, List
 from urllib import request as urllib_request
 
 from infergrade.benchmark_catalog import normalize_request_selection
 from infergrade.models import RunRequest
+
+
+# Conservative regex for a docker-style image reference. Accepts the common
+# forms we use (``ubuntu:latest``, ``registry/project/image:tag``,
+# ``image@sha256:...``) while rejecting references that would be parsed as
+# flags by ``docker run`` (leading ``-``) or that contain whitespace or
+# other characters that have no business inside an image name.
+_IMAGE_REFERENCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,255}$")
+
+# Runtime fields that must never be supplied by a remote hub. These steer the
+# runner at specific local binaries, so letting a hub populate them would
+# allow a compromised or malicious hub to run arbitrary executables on the
+# runner via ``shutil.which`` + ``subprocess.run``. Operators can still set
+# them via CLI flags, env vars, or a locally-authored request file.
+_HUB_FORBIDDEN_RUNTIME_FIELDS = (
+    "llama_cpp_cli_path",
+    "llama_cpp_cli",
+    "llama_cpp_server_path",
+    "llama_cpp_server",
+    "llama_cpp_perplexity_path",
+    "llama_cpp_perplexity",
+)
+
+
+def sanitize_hub_supplied_payload(data: Any) -> Any:
+    """Reject hub-originated run config fields that could hijack subprocess argv.
+
+    Applied to payloads sourced from the hub (``request_from_url``,
+    ``request_from_run_config_document``). Mutates a deep copy so callers can
+    still hold the original response for logging. Raises ``ValueError`` when a
+    forbidden field is present or when ``backend_image`` is not a plain image
+    reference — failing loud surfaces hub-side bugs instead of silently
+    dropping a field an operator might actually need.
+    """
+    if not isinstance(data, dict):
+        return data
+    sanitized = copy.deepcopy(data)
+    nested = sanitized.get("request") if isinstance(sanitized.get("request"), dict) else sanitized
+    runtime = nested.get("runtime")
+    if isinstance(runtime, dict):
+        for key in _HUB_FORBIDDEN_RUNTIME_FIELDS:
+            value = runtime.get(key)
+            if value:
+                raise ValueError(
+                    "Hub-supplied run config must not set runtime.%s; native binary "
+                    "paths are operator-owned." % key
+                )
+        image = runtime.get("backend_image")
+        if image is not None and image != "":
+            if not isinstance(image, str) or not _IMAGE_REFERENCE_RE.match(image):
+                raise ValueError(
+                    "Hub-supplied backend_image %r is not a valid image reference." % image
+                )
+    return sanitized
 
 
 def _optional_import_yaml():
@@ -82,6 +138,7 @@ def request_from_url(url: str, simulate: bool = True) -> RunRequest:
     with urllib_request.urlopen(url) as response:
         payload = response.read().decode("utf-8")
     data = json.loads(payload)
+    data = sanitize_hub_supplied_payload(data)
     return request_from_dict(data, simulate=simulate, run_config_source=url)
 
 

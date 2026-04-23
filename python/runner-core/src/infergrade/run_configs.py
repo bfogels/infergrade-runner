@@ -1,6 +1,6 @@
 from typing import Any, Dict, Optional
 
-from infergrade.request import request_from_dict
+from infergrade.request import request_from_dict, sanitize_hub_supplied_payload
 from infergrade.utils import dump_simple_yaml, stable_hash, utcnow_iso
 
 
@@ -34,4 +34,5 @@ def render_run_config_document(payload: Dict[str, Any], output_format: str = "js
 
 
 def request_from_run_config_document(payload: Dict[str, Any], simulate: bool = True):
-    return request_from_dict(payload, simulate=simulate, run_config_source=payload.get("run_config_id"))
+    sanitized = sanitize_hub_supplied_payload(payload)
+    return request_from_dict(sanitized, simulate=simulate, run_config_source=sanitized.get("run_config_id"))
