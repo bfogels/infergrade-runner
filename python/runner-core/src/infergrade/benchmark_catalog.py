@@ -236,6 +236,7 @@ def benchmark_scope_summary_for_selection(
         return {
             "scope": "decision",
             "scope_label": "Decision suite",
+            "selection_guidance": "Decision checks are selected. This is the recommended short local path for choosing a quantized setup.",
             "effort_level": "short",
             "expected_duration_band": "1-5 min",
             "token_volume_band": "tiny",
@@ -252,6 +253,11 @@ def benchmark_scope_summary_for_selection(
     return {
         "scope": scope,
         "scope_label": "Reference suite" if scope == "reference" else "Decision suite",
+        "selection_guidance": (
+            "Reference checks are included. Expect deeper evidence, longer runs, and stronger quant-ladder confidence."
+            if scope == "reference"
+            else "Decision checks are selected. This is the recommended short local path for choosing a quantized setup."
+        ),
         "effort_level": _max_by_order([item.get("effort_level") or item.get("effort_hint") for item in selected], ordering["effort_level"], "short"),
         "expected_duration_band": _max_by_order([item.get("expected_duration_band") for item in selected], ordering["expected_duration_band"], "1-5 min"),
         "token_volume_band": _max_by_order([item.get("token_volume_band") for item in selected], ordering["token_volume_band"], "tiny"),
@@ -260,6 +266,59 @@ def benchmark_scope_summary_for_selection(
         "execution_patterns": _dedupe_strings([item.get("execution_pattern") for item in selected]),
         "resumability_boundaries": _dedupe_strings([item.get("resumability_boundary") for item in selected]),
         "reference_checks_included": scope == "reference",
+    }
+
+
+def capability_coverage_guidance_for_selection(
+    check_ids: List[str],
+    catalog: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Return user-facing coverage guidance without treating unknown as failure."""
+    payload = catalog or load_capability_catalog()
+    checks = check_index(payload)
+    selected_ids = [item for item in _dedupe_strings(check_ids) if item in checks]
+    selected_checks = [checks[item] for item in selected_ids]
+    selected_kinds = set(_dedupe_strings([item.get("evidence_kind") for item in selected_checks]))
+    selected_decision = [item["check_id"] for item in selected_checks if item.get("suite_scope") == "decision"]
+    selected_reference = [item["check_id"] for item in selected_checks if item.get("suite_scope") == "reference"]
+    available_reference = [
+        check_id
+        for check_id, check in checks.items()
+        if check.get("suite_scope") == "reference" and check_id not in selected_ids and check.get("status", "available") != "planned"
+    ]
+    planned = list(payload.get("planned_benchmark_candidates") or []) + [
+        {
+            "check_id": check_id,
+            "display_name": check.get("display_name"),
+            "value": check.get("planned_value"),
+            "implementation_risk": check.get("implementation_risk"),
+            "suite_placement": check.get("suite_placement") or check.get("group_id"),
+        }
+        for check_id, check in checks.items()
+        if check.get("status") == "planned"
+    ]
+    missing_core = []
+    for kind, label in (
+        ("deployment", "deployment telemetry"),
+        ("capability", "task capability"),
+        ("fidelity", "quant fidelity"),
+    ):
+        if kind not in selected_kinds:
+            missing_core.append(
+                {
+                    "evidence_kind": kind,
+                    "label": label,
+                    "state": "not_selected",
+                    "message": "%s is not selected for this run. That is a coverage gap, not a failed benchmark." % label.capitalize(),
+                }
+            )
+    return {
+        "selected_decision_check_ids": selected_decision,
+        "selected_reference_check_ids": selected_reference,
+        "available_reference_check_ids": available_reference,
+        "missing_core_evidence": missing_core,
+        "planned_benchmark_candidates": planned,
+        "next_actions": _coverage_next_actions(missing_core, available_reference),
     }
 
 
@@ -274,10 +333,12 @@ def selection_metadata_for_request(
     checks = check_index(payload)
     normalized = resolve_request_selection(request, payload)
     benchmark_scope = benchmark_scope_summary_for_selection(normalized["check_ids"], payload)
+    coverage_guidance = capability_coverage_guidance_for_selection(normalized["check_ids"], payload)
     return {
         "catalog_version": payload.get("catalog_version"),
         "shortcut_id": request.benchmark_shortcut_id,
         "benchmark_scope": benchmark_scope,
+        "capability_coverage_guidance": coverage_guidance,
         "capability_suite_ids": list(normalized["suite_ids"]),
         "benchmark_group_ids": list(normalized["group_ids"]),
         "benchmark_check_ids": list(normalized["check_ids"]),
@@ -321,11 +382,25 @@ def selection_metadata_for_request(
                 "token_volume_band": checks[check_id].get("token_volume_band"),
                 "resumability_boundary": checks[check_id].get("resumability_boundary"),
                 "execution_pattern": checks[check_id].get("execution_pattern"),
+                "selection_guidance": checks[check_id].get("selection_guidance"),
+                "status": checks[check_id].get("status", "available"),
             }
             for check_id in normalized["check_ids"]
             if check_id in checks
         ],
     }
+
+
+def _coverage_next_actions(missing_core: List[Dict[str, Any]], available_reference: List[str]) -> List[Dict[str, str]]:
+    actions: List[Dict[str, str]] = []
+    missing_kinds = {item.get("evidence_kind") for item in missing_core}
+    if "deployment" in missing_kinds:
+        actions.append({"action": "add_deployment_check", "label": "Add deployment telemetry", "detail": "Include interactive_chat_v1 before comparing speed or TTFT."})
+    if "capability" in missing_kinds:
+        actions.append({"action": "add_capability_check", "label": "Add task capability", "detail": "Include a use-case capability check before trusting quality claims."})
+    if "fidelity" in missing_kinds and available_reference:
+        actions.append({"action": "add_reference_fidelity", "label": "Add quant fidelity", "detail": "Use reference checks when nearby quant variants need a tie-breaker."})
+    return actions
 
 
 def _max_by_order(values: List[Any], order: Dict[str, int], fallback: str) -> str:

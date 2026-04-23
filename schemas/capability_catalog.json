@@ -293,6 +293,35 @@
       "check_ids": ["ifeval", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
     }
   ],
+  "planned_benchmark_candidates": [
+    {
+      "check_id": "arena_hard_local_reference_v1",
+      "display_name": "Arena-style local preference reference",
+      "value": "Adds preference-style assistant quality evidence for models that look similar on instruction following.",
+      "cost": "medium token volume; requires careful prompt and judge policy design",
+      "implementation_risk": "medium",
+      "suite_placement": "chat_instruction_following/reference",
+      "status": "planned"
+    },
+    {
+      "check_id": "repo_edit_smoke_v1",
+      "display_name": "Repository edit smoke",
+      "value": "Adds a small local coding-agent edit task before broader SWE-style suites.",
+      "cost": "small-to-medium token volume; needs deterministic fixture repos",
+      "implementation_risk": "medium",
+      "suite_placement": "coding_code_editing/decision",
+      "status": "planned"
+    },
+    {
+      "check_id": "multiturn_chat_memory_v1",
+      "display_name": "Multi-turn chat memory",
+      "value": "Adds continuity and instruction retention evidence for everyday assistant use.",
+      "cost": "small token volume; mostly prompt-design and scoring risk",
+      "implementation_risk": "low",
+      "suite_placement": "chat_instruction_following/decision",
+      "status": "planned"
+    }
+  ],
   "legacy_tier_defaults": {
     "general_assistant": {
       "canary": {

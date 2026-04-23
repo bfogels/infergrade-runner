@@ -5,10 +5,12 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.benchmark_catalog import (
     benchmark_scope_summary_for_selection,
+    capability_coverage_guidance_for_selection,
     capability_benchmark_ids_for_request,
     fidelity_enabled_for_request,
     load_capability_catalog,
     normalize_request_selection,
+    selection_metadata_for_request,
 )
 from infergrade.models import RunRequest
 
@@ -26,6 +28,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.assertIn(check["suite_scope"], {"decision", "reference"})
             self.assertTrue(check["expected_duration_band"])
             self.assertTrue(check["execution_pattern"])
+        self.assertTrue(catalog["planned_benchmark_candidates"])
 
     def test_normalize_request_selection_derives_breadth_from_legacy_lane(self):
         request = RunRequest(model="Qwen/Qwen2.5-7B-Instruct", backend="llama.cpp", tier="standard", use_case="general_assistant")
@@ -52,6 +55,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
     def test_benchmark_scope_summary_distinguishes_decision_and_reference_sets(self):
         decision = benchmark_scope_summary_for_selection(["ifeval", "interactive_chat_v1"])
         self.assertEqual(decision["scope"], "decision")
+        self.assertIn("recommended short local path", decision["selection_guidance"])
         self.assertEqual(decision["effort_level"], "balanced")
         self.assertFalse(decision["reference_checks_included"])
         self.assertEqual(decision["metadata_sources"]["duration"], "estimated")
@@ -61,8 +65,30 @@ class BenchmarkCatalogTests(unittest.TestCase):
         reference = benchmark_scope_summary_for_selection(["interactive_chat_v1", "perplexity_reference_v1"])
         self.assertEqual(reference["scope"], "reference")
         self.assertEqual(reference["scope_label"], "Reference suite")
+        self.assertIn("deeper evidence", reference["selection_guidance"])
         self.assertTrue(reference["reference_checks_included"])
         self.assertIn("throughput_oriented_offline_suite", reference["execution_patterns"])
+
+    def test_capability_coverage_guidance_marks_unselected_evidence_as_gap(self):
+        guidance = capability_coverage_guidance_for_selection(["interactive_chat_v1"])
+        missing = {item["evidence_kind"]: item for item in guidance["missing_core_evidence"]}
+        self.assertEqual(missing["capability"]["state"], "not_selected")
+        self.assertIn("not a failed benchmark", missing["capability"]["message"])
+        self.assertIn("perplexity_reference_v1", guidance["available_reference_check_ids"])
+        self.assertTrue(guidance["planned_benchmark_candidates"])
+        self.assertTrue(any(action["action"] == "add_capability_check" for action in guidance["next_actions"]))
+
+    def test_selection_metadata_includes_scope_and_coverage_guidance(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            benchmark_check_ids=["ifeval", "interactive_chat_v1"],
+        )
+        metadata = selection_metadata_for_request(request)
+        self.assertEqual(metadata["benchmark_scope"]["scope"], "decision")
+        self.assertEqual(metadata["capability_coverage_guidance"]["selected_decision_check_ids"], ["ifeval", "interactive_chat_v1"])
+        self.assertIn("status", metadata["benchmark_checks"][0])
 
 
     def test_benchmark_scope_summary_empty_selection_uses_computed_confidence(self):
