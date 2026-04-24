@@ -71,7 +71,11 @@ def _json_request(
     except urllib_error.HTTPError as exc:
         status = exc.code
         text = exc.read().decode("utf-8")
-    return status, (json.loads(text) if text else {})
+    try:
+        parsed = json.loads(text) if text else {}
+    except ValueError:
+        parsed = {"error": text[:200] if text else ""}
+    return status, parsed
 
 
 def bundle_payload(bundle_dir: str) -> Dict[str, Any]:
