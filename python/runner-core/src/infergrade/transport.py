@@ -71,7 +71,11 @@ def _json_request(
     except urllib_error.HTTPError as exc:
         status = exc.code
         text = exc.read().decode("utf-8")
-    return status, (json.loads(text) if text else {})
+    try:
+        parsed = json.loads(text) if text else {}
+    except ValueError:
+        parsed = {"error": text[:200] if text else ""}
+    return status, parsed
 
 
 def bundle_payload(bundle_dir: str) -> Dict[str, Any]:
@@ -99,13 +103,18 @@ def bundle_payload(bundle_dir: str) -> Dict[str, Any]:
 
 def upload_bundle(bundle_dir: str, api_url: str, api_token: str = None) -> Dict[str, Any]:
     """Upload a local bundle to the hosted catalog."""
-    _, payload = _json_request(api_url, "/bundles", method="POST", payload=bundle_payload(bundle_dir), api_token=api_token)
+    status, payload = _json_request(api_url, "/bundles", method="POST", payload=bundle_payload(bundle_dir), api_token=api_token)
+    if status >= 400:
+        detail = payload.get("detail") or payload.get("error") or ""
+        if isinstance(detail, dict):
+            detail = detail.get("message") or str(detail)
+        raise RuntimeError("bundle upload failed (HTTP %d): %s" % (status, detail or "no detail"))
     return payload
 
 
 def upload_run_bundle(bundle_dir: str, api_url: str, run_id: str, run_token: str = None, api_token: str = None) -> Dict[str, Any]:
     """Upload a local bundle through the run-scoped upload route."""
-    _, payload = _json_request(
+    status, payload = _json_request(
         api_url,
         "/v1/runs/%s/bundle" % run_id,
         method="POST",
@@ -113,6 +122,11 @@ def upload_run_bundle(bundle_dir: str, api_url: str, run_id: str, run_token: str
         api_token=api_token,
         run_token=run_token,
     )
+    if status >= 400:
+        detail = payload.get("detail") or payload.get("error") or ""
+        if isinstance(detail, dict):
+            detail = detail.get("message") or str(detail)
+        raise RuntimeError("bundle upload failed (HTTP %d): %s" % (status, detail or "no detail"))
     return payload
 
 
