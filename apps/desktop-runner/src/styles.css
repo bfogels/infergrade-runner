@@ -186,6 +186,22 @@ label {
   line-height: 1.45;
 }
 
+.advanced-token-panel {
+  margin-top: 18px;
+  border-top: 1px solid #d4dddf;
+  padding-top: 14px;
+}
+
+.advanced-token-panel summary {
+  color: #33404a;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.advanced-token-panel label {
+  margin-top: 14px;
+}
+
 .panel-heading {
   display: flex;
   justify-content: space-between;
