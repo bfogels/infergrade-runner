@@ -1,0 +1,34 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Main window access for the InferGrade Runner sidecar prototype.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "binaries/infergrade-sidecar",
+          "sidecar": true,
+          "args": [
+            "start",
+            "--api-url",
+            {
+              "validator": "https?://\\S+"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-kill",
+      "allow": [
+        {
+          "name": "binaries/infergrade-sidecar",
+          "sidecar": true
+        }
+      ]
+    }
+  ]
+}

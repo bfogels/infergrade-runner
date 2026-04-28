@@ -12,4 +12,6 @@ node_modules/
 .next/
 data/
 memory/reference_runs/
+apps/desktop-runner/src-tauri/gen/
+apps/desktop-runner/src-tauri/target/
 ~/
