@@ -17,6 +17,7 @@ from infergrade.transport import (
     list_run_configs,
     publish_run_config,
     upload_bundle,
+    upload_run_bundle,
 )
 
 
@@ -31,6 +32,9 @@ class _CaptureHandler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         payload = self._record_request()
         if self.path == "/bundles":
+            self._send_json({"stored": True, "bundle_id": payload["manifest"]["bundle_id"]})
+            return
+        if self.path.startswith("/v1/runs/") and self.path.endswith("/bundle"):
             self._send_json({"stored": True, "bundle_id": payload["manifest"]["bundle_id"]})
             return
         if self.path == "/run-configs":
@@ -138,20 +142,26 @@ class TransportHttpTests(unittest.TestCase):
                 api_token="alpha-secret",
             )
             uploaded = upload_bundle(bundle_dir, server.base_url, api_token="alpha-secret")
+            run_uploaded = upload_run_bundle(bundle_dir, server.base_url, run_id="run-http", api_token="runner-secret")
             listed = list_run_configs(server.base_url, api_token="alpha-secret")
             fetched = fetch_run_config(server.base_url, "rcfg_fetch", api_token="alpha-secret")
 
         self.assertTrue(published["stored"])
         self.assertEqual(uploaded["bundle_id"], "bundle-http")
+        self.assertEqual(run_uploaded["bundle_id"], "bundle-http")
         self.assertEqual(listed["run_configs"][0]["run_config_id"], "rcfg_listed")
         self.assertEqual(fetched["run_config_id"], "rcfg_fetch")
 
         paths = [item["path"] for item in _CaptureHandler.requests]
         self.assertIn("/run-configs", paths)
         self.assertIn("/bundles", paths)
+        self.assertIn("/v1/runs/run-http/bundle", paths)
         self.assertIn("/run-configs/rcfg_fetch", paths)
-        for item in _CaptureHandler.requests:
-            self.assertEqual(item["headers"].get("Authorization"), "Bearer alpha-secret")
+        auth_by_path = {item["path"]: item["headers"].get("Authorization") for item in _CaptureHandler.requests}
+        self.assertEqual(auth_by_path["/run-configs"], "Bearer alpha-secret")
+        self.assertEqual(auth_by_path["/bundles"], "Bearer alpha-secret")
+        self.assertEqual(auth_by_path["/run-configs/rcfg_fetch"], "Bearer alpha-secret")
+        self.assertEqual(auth_by_path["/v1/runs/run-http/bundle"], "Bearer runner-secret")
 
     def test_hub_token_env_is_used_before_legacy_api_token(self):
         os.environ["INFERGRADE_API_TOKEN"] = "legacy-token"

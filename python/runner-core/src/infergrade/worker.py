@@ -19,7 +19,6 @@ from infergrade.transport import (
     heartbeat_run_job,
     register_runner,
     upload_run_bundle,
-    upload_bundle,
 )
 
 
@@ -109,11 +108,7 @@ def execute_run_job(
 
         result = run_infergrade(request, emit_progress=_emit)
         heartbeat_run_job(api_url, run_id, worker_id, stage="upload", message="Uploading completed bundle.", progress_percent=95.0, api_token=api_token, run_token=run_token)
-        upload = (
-            upload_run_bundle(result["output_dir"], api_url, run_id=run_id, run_token=run_token, api_token=api_token)
-            if run_token
-            else upload_bundle(result["output_dir"], api_url, api_token=api_token)
-        )
+        upload = upload_run_bundle(result["output_dir"], api_url, run_id=run_id, run_token=run_token, api_token=api_token)
         completed = complete_run_job(
             api_url,
             run_id,
