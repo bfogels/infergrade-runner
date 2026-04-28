@@ -10,6 +10,33 @@ from infergrade.cli import main
 
 
 class CliTests(unittest.TestCase):
+    def test_default_help_shows_canonical_runner_commands_only(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            with self.assertRaises(SystemExit) as caught:
+                main(["--help"])
+
+        self.assertEqual(caught.exception.code, 0)
+        help_text = output.getvalue()
+        self.assertIn("{doctor,cache,install-runtime,pair,unpair,start}", help_text)
+        self.assertIn("start               Start a long-lived local runner", help_text)
+        self.assertIn("infergrade --all --help", help_text)
+        self.assertNotIn("run-job", help_text)
+        self.assertNotIn("upload-bundle", help_text)
+        self.assertNotIn("show-capabilities", help_text)
+
+    def test_all_help_shows_advanced_commands(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            with self.assertRaises(SystemExit) as caught:
+                main(["--all", "--help"])
+
+        self.assertEqual(caught.exception.code, 0)
+        help_text = output.getvalue()
+        self.assertIn("run-job", help_text)
+        self.assertIn("upload-bundle", help_text)
+        self.assertIn("show-capabilities", help_text)
+
     def test_install_images_command_invokes_image_installer(self):
         output = io.StringIO()
         with mock.patch(

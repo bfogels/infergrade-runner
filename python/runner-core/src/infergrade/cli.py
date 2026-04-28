@@ -43,6 +43,44 @@ from infergrade.validators import validate_bundle
 from infergrade.worker import run_worker_loop, run_worker_once
 
 
+ADVANCED_COMMANDS = {
+    "run",
+    "run-job",
+    "worker",
+    "init-request",
+    "init-run-config",
+    "list-run-configs",
+    "fetch-run-config",
+    "publish-run-config",
+    "run-config",
+    "validate-bundle",
+    "inspect-bundle",
+    "recommend",
+    "upload-bundle",
+    "export-support",
+    "install-images",
+    "show-profiles",
+    "show-capabilities",
+}
+DEFAULT_COMMANDS = ("doctor", "cache", "install-runtime", "pair", "unpair", "start")
+
+
+class _InferGradeHelpFormatter(argparse.HelpFormatter):
+    """Hide advanced command rows cleanly in the default command list."""
+
+    def _format_action(self, action):  # pragma: no cover - exercised through CLI help tests
+        if isinstance(action, argparse._SubParsersAction):
+            action._choices_actions = [choice for choice in action._choices_actions if choice.help != argparse.SUPPRESS]
+        return super()._format_action(action)
+
+
+def _command_help(command: str, help_text: str, show_advanced: bool) -> str:
+    """Hide non-canonical commands from default help while keeping them callable."""
+    if command in ADVANCED_COMMANDS and not show_advanced:
+        return argparse.SUPPRESS
+    return help_text
+
+
 def _add_api_token_argument(parser: argparse.ArgumentParser) -> None:
     """Add the shared hosted-API token flag to a parser."""
     parser.add_argument(
@@ -96,13 +134,19 @@ def _add_run_request_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     """Build the top-level InferGrade CLI parser."""
-    parser = argparse.ArgumentParser(prog="infergrade")
+    parser = argparse.ArgumentParser(
+        prog="infergrade",
+        formatter_class=_InferGradeHelpFormatter,
+        epilog="Run `infergrade --all --help` to list advanced and compatibility commands.",
+    )
     parser.add_argument("--version", action="version", version="%(prog)s " + __version__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
+    metavar = None if show_advanced else "{%s}" % ",".join(DEFAULT_COMMANDS)
+    subparsers = parser.add_subparsers(dest="command", required=True, metavar=metavar)
 
-    run_parser = subparsers.add_parser("run", help="Run or simulate an InferGrade bundle.")
+    run_parser = subparsers.add_parser("run", help=_command_help("run", "Run or simulate an InferGrade bundle.", show_advanced))
     _add_run_request_arguments(run_parser)
 
     doctor_parser = subparsers.add_parser("doctor", help="Check whether the current machine is ready for a InferGrade run.")
@@ -111,20 +155,20 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser.add_argument("--run-config-id")
     _add_api_token_argument(doctor_parser)
 
-    validate_parser = subparsers.add_parser("validate-bundle", help="Validate an existing bundle.")
+    validate_parser = subparsers.add_parser("validate-bundle", help=_command_help("validate-bundle", "Validate an existing bundle.", show_advanced))
     validate_parser.add_argument("path")
 
-    inspect_parser = subparsers.add_parser("inspect-bundle", help="Summarize a bundle.")
+    inspect_parser = subparsers.add_parser("inspect-bundle", help=_command_help("inspect-bundle", "Summarize a bundle.", show_advanced))
     inspect_parser.add_argument("path")
 
-    recommend_parser = subparsers.add_parser("recommend", help="Compute local frontier-style recommendations.")
+    recommend_parser = subparsers.add_parser("recommend", help=_command_help("recommend", "Compute local frontier-style recommendations.", show_advanced))
     recommend_parser.add_argument("paths", nargs="+")
     recommend_parser.add_argument("--use-case")
     recommend_parser.add_argument("--deployment-profile")
     recommend_parser.add_argument("--max-vram-gb", type=float)
     recommend_parser.add_argument("--verification-level", action="append")
 
-    init_parser = subparsers.add_parser("init-request", help="Generate a starter run request template.")
+    init_parser = subparsers.add_parser("init-request", help=_command_help("init-request", "Generate a starter run request template.", show_advanced))
     init_parser.add_argument("--format", choices=("yaml", "json"), default="yaml")
     init_parser.add_argument("--output")
     init_parser.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct")
@@ -132,17 +176,23 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--tier", default="canary")
     init_parser.add_argument("--use-case")
 
-    upload_parser = subparsers.add_parser("upload-bundle", help="Upload a local bundle to a InferGrade API.")
+    upload_parser = subparsers.add_parser("upload-bundle", help=_command_help("upload-bundle", "Upload a local bundle to a InferGrade API.", show_advanced))
     upload_parser.add_argument("path")
     upload_parser.add_argument("--api-url", required=True)
     _add_api_token_argument(upload_parser)
 
-    support_parser = subparsers.add_parser("export-support", help="Write a compact support export for a local run or runner session.")
+    support_parser = subparsers.add_parser(
+        "export-support",
+        help=_command_help("export-support", "Write a compact support export for a local run or runner session.", show_advanced),
+    )
     support_parser.add_argument("--run-dir", help="Optional run output directory to include in the support export.")
     support_parser.add_argument("--execution-mode", help="Optional execution mode override for environment capture.")
     support_parser.add_argument("--output", help="Optional output path. Prints JSON to stdout when omitted.")
 
-    install_images_parser = subparsers.add_parser("install-images", help="Build the local InferGrade runtime and capability images.")
+    install_images_parser = subparsers.add_parser(
+        "install-images",
+        help=_command_help("install-images", "Build the local InferGrade runtime and capability images.", show_advanced),
+    )
     install_images_parser.add_argument(
         "--image",
         help="Optional specific image tag to build locally, for example infergrade-llama-cpp:local.",
@@ -179,7 +229,10 @@ def build_parser() -> argparse.ArgumentParser:
     unpair_parser = subparsers.add_parser("unpair", help="Remove the saved local runner pairing profile.")
     unpair_parser.add_argument("--print-path", action="store_true")
 
-    init_config_parser = subparsers.add_parser("init-run-config", help="Generate a starter server-style run config document.")
+    init_config_parser = subparsers.add_parser(
+        "init-run-config",
+        help=_command_help("init-run-config", "Generate a starter server-style run config document.", show_advanced),
+    )
     init_config_parser.add_argument("--format", choices=("yaml", "json"), default="json")
     init_config_parser.add_argument("--output")
     init_config_parser.add_argument("--name", default="General assistant canary run")
@@ -188,17 +241,20 @@ def build_parser() -> argparse.ArgumentParser:
     init_config_parser.add_argument("--tier", default="canary")
     init_config_parser.add_argument("--use-case")
 
-    list_configs_parser = subparsers.add_parser("list-run-configs", help="List server-side run configs.")
+    list_configs_parser = subparsers.add_parser("list-run-configs", help=_command_help("list-run-configs", "List server-side run configs.", show_advanced))
     list_configs_parser.add_argument("--api-url", required=True)
     _add_api_token_argument(list_configs_parser)
 
-    fetch_config_parser = subparsers.add_parser("fetch-run-config", help="Fetch a run config from the API.")
+    fetch_config_parser = subparsers.add_parser("fetch-run-config", help=_command_help("fetch-run-config", "Fetch a run config from the API.", show_advanced))
     fetch_config_parser.add_argument("--api-url", required=True)
     fetch_config_parser.add_argument("--run-config-id", required=True)
     fetch_config_parser.add_argument("--output")
     _add_api_token_argument(fetch_config_parser)
 
-    publish_config_parser = subparsers.add_parser("publish-run-config", help="Publish a run config to the API.")
+    publish_config_parser = subparsers.add_parser(
+        "publish-run-config",
+        help=_command_help("publish-run-config", "Publish a run config to the API.", show_advanced),
+    )
     _add_run_request_arguments(publish_config_parser)
     publish_config_parser.add_argument("--api-url", required=True)
     publish_config_parser.add_argument("--name", required=True)
@@ -206,7 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
     publish_config_parser.add_argument("--created-by")
     _add_api_token_argument(publish_config_parser)
 
-    run_config_parser = subparsers.add_parser("run-config", help="Fetch a run config from the API and execute it.")
+    run_config_parser = subparsers.add_parser("run-config", help=_command_help("run-config", "Fetch a run config from the API and execute it.", show_advanced))
     run_config_parser.add_argument("--api-url", required=True)
     run_config_parser.add_argument("--run-config-id", required=True)
     run_config_parser.add_argument("--output")
@@ -218,7 +274,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_config_parser.add_argument("--resume", action="store_true")
     _add_api_token_argument(run_config_parser)
 
-    run_job_parser = subparsers.add_parser("run-job", help="Claim and execute one Hub-backed run job with automatic upload.")
+    run_job_parser = subparsers.add_parser(
+        "run-job",
+        help=_command_help("run-job", "Claim and execute one Hub-backed run job with automatic upload.", show_advanced),
+    )
     run_job_parser.add_argument("--api-url")
     run_job_parser.add_argument("--run-id")
     run_job_parser.add_argument("--run-config-id")
@@ -250,7 +309,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_api_token_argument(start_parser)
 
-    worker_parser = subparsers.add_parser("worker", help="Claim and execute API-backed run jobs.")
+    worker_parser = subparsers.add_parser("worker", help=_command_help("worker", "Claim and execute API-backed run jobs.", show_advanced))
     worker_parser.add_argument("--api-url")
     worker_parser.add_argument("--execution-mode", choices=("local_container", "local_native", "cloud_container"))
     worker_parser.add_argument("--worker-id")
@@ -269,10 +328,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_api_token_argument(worker_parser)
 
-    profiles_parser = subparsers.add_parser("show-profiles", help="Show deployment profiles.")
+    profiles_parser = subparsers.add_parser("show-profiles", help=_command_help("show-profiles", "Show deployment profiles.", show_advanced))
     profiles_parser.set_defaults(_profiles=True)
 
-    capabilities_parser = subparsers.add_parser("show-capabilities", help="Show capability suites.")
+    capabilities_parser = subparsers.add_parser("show-capabilities", help=_command_help("show-capabilities", "Show capability suites.", show_advanced))
     capabilities_parser.set_defaults(_capabilities=True)
 
     return parser
@@ -342,7 +401,8 @@ def _resolve_runner_worker_id(worker_id: Optional[str], execution_mode: Optional
 
 def main(argv: Optional[list] = None) -> int:
     """Run the InferGrade CLI."""
-    parser = build_parser()
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    parser = build_parser(show_advanced="--all" in raw_argv)
     args = parser.parse_args(argv)
 
     if args.command == "show-profiles":
