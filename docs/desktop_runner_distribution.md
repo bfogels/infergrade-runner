@@ -1,6 +1,6 @@
 # Desktop Runner Distribution
 
-Sprint 74 makes the desktop Runner app reproducible before making it public.
+Sprint 74 adds a repeatable unsigned local build lane before making the desktop Runner app public.
 
 The first release lane should be boring:
 
@@ -32,7 +32,7 @@ It then prints any macOS DMG artifacts under:
 apps/desktop-runner/src-tauri/target/release/bundle/dmg/
 ```
 
-with file sizes and SHA-256 digests.
+with file sizes and SHA-256 digests. The digest identifies the emitted artifact for that candidate build; it is not a bit-for-bit reproducibility guarantee until the toolchain and packaging timestamps are pinned.
 
 ## Signing Gates
 
