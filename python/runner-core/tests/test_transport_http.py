@@ -16,6 +16,7 @@ from infergrade.transport import (
     fetch_run_config,
     list_run_configs,
     publish_run_config,
+    redeem_runner_pairing,
     upload_bundle,
     upload_run_bundle,
 )
@@ -23,11 +24,13 @@ from infergrade.transport import (
 
 class _CaptureHandler(BaseHTTPRequestHandler):
     responses = {}
+    response_statuses = {}
     requests = []
 
     def do_GET(self):  # noqa: N802
         self._record_request()
-        self._send_json(self.responses.get((self.command, self.path), {}))
+        key = (self.command, self.path)
+        self._send_json(self.responses.get(key, {}), status=self.response_statuses.get(key, 200))
 
     def do_POST(self):  # noqa: N802
         payload = self._record_request()
@@ -40,7 +43,8 @@ class _CaptureHandler(BaseHTTPRequestHandler):
         if self.path == "/run-configs":
             self._send_json({"stored": True, "run_config_id": payload["run_config_id"]})
             return
-        self._send_json(self.responses.get((self.command, self.path), {}))
+        key = (self.command, self.path)
+        self._send_json(self.responses.get(key, {}), status=self.response_statuses.get(key, 200))
 
     def log_message(self, format, *args):  # pragma: no cover
         return
@@ -59,9 +63,9 @@ class _CaptureHandler(BaseHTTPRequestHandler):
         )
         return payload
 
-    def _send_json(self, payload):
+    def _send_json(self, payload, status=200):
         encoded = json.dumps(payload).encode("utf-8")
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
@@ -76,6 +80,7 @@ class _HttpHarness(object):
 
     def __enter__(self):
         _CaptureHandler.responses = {}
+        _CaptureHandler.response_statuses = {}
         _CaptureHandler.requests = []
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.bind(("127.0.0.1", 0))
@@ -167,6 +172,27 @@ class TransportHttpTests(unittest.TestCase):
         os.environ["INFERGRADE_API_TOKEN"] = "legacy-token"
         os.environ["INFERGRADE_HUB_TOKEN"] = "hub-token"
         self.assertEqual(_resolve_api_token(), "hub-token")
+
+    def test_redeem_runner_pairing_surfaces_api_error_code_and_message(self):
+        with _HttpHarness() as server:
+            _CaptureHandler.responses = {
+                ("POST", "/v1/runner-pairings/redeem"): {
+                    "error": {
+                        "code": "pair_code_expired",
+                        "message": "runner pairing code has expired",
+                    }
+                }
+            }
+            _CaptureHandler.response_statuses = {
+                ("POST", "/v1/runner-pairings/redeem"): 410,
+            }
+
+            with self.assertRaises(RuntimeError) as caught:
+                redeem_runner_pairing(server.base_url, "igrp_expired")
+
+        self.assertIn("pair_code_expired", str(caught.exception))
+        self.assertIn("HTTP 410", str(caught.exception))
+        self.assertIn("runner pairing code has expired", str(caught.exception))
 
 
 if __name__ == "__main__":

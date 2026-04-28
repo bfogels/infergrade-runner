@@ -282,6 +282,33 @@ class CliTests(unittest.TestCase):
         )
         save_mock.assert_called_once_with(response["runner_profile"])
         self.assertIn('"paired": true', output.getvalue().lower())
+        self.assertIn('"next_action": "start_runner"', output.getvalue())
+        self.assertIn('"start": "infergrade start"', output.getvalue())
+
+    def test_pair_command_surfaces_hub_pairing_errors(self):
+        with mock.patch(
+            "infergrade.cli.redeem_runner_pairing",
+            side_effect=RuntimeError("runner pairing failed (pair_code_expired): HTTP 410: runner pairing code has expired"),
+        ), mock.patch(
+            "infergrade.cli.preferred_local_execution_mode",
+            return_value="local_native",
+        ), mock.patch(
+            "infergrade.cli.capture_environment",
+            return_value={"hardware_class": "apple_silicon"},
+        ):
+            with self.assertRaises(SystemExit) as caught:
+                main(
+                    [
+                        "pair",
+                        "--api-url",
+                        "http://localhost:8000",
+                        "--pair-code",
+                        "igrp_expired",
+                    ]
+                )
+
+        self.assertIn("pair_code_expired", str(caught.exception))
+        self.assertIn("runner pairing code has expired", str(caught.exception))
 
     def test_export_support_command_prints_json_when_output_is_omitted(self):
         output = io.StringIO()

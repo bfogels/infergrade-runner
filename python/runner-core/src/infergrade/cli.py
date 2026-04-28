@@ -457,7 +457,7 @@ def main(argv: Optional[list] = None) -> int:
                 execution_mode=execution_mode,
                 environment=environment,
             )
-        except URLError as exc:
+        except (URLError, RuntimeError) as exc:
             raise SystemExit("Failed to redeem runner pairing code against %s: %s" % (args.api_url, exc))
         profile = dict(payload.get("runner_profile") or {})
         if not profile:
@@ -467,6 +467,10 @@ def main(argv: Optional[list] = None) -> int:
             "paired": True,
             "profile_path": path,
             "runner_profile": profile,
+            "next_action": "start_runner",
+            "commands": {
+                "start": "infergrade start",
+            },
         }
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
