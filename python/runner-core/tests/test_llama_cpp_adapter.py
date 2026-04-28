@@ -10,9 +10,12 @@ sys.path.insert(0, "python/runner-core/src")
 from infergrade.adapters.llama_cpp import (
     LlamaCppAdapter,
     _compute_ttft_ms,
+    _decode_utf8_lossy,
+    _fetch_container_logs,
     _metrics_from_server_completion,
     _parse_llama_timings,
     _parse_perplexity_output,
+    _read_log_file,
     _read_gguf_architecture,
     _safe_tokens_per_second,
 )
@@ -110,6 +113,29 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(parsed["corpus_token_count"], 2049)
         self.assertEqual(parsed["duration_seconds"], 28.989)
 
+    def test_decode_utf8_lossy_replaces_invalid_bytes(self):
+        self.assertEqual(_decode_utf8_lossy(b"ok\xc4bad"), "ok\ufffdbad")
+        self.assertEqual(_decode_utf8_lossy("already text"), "already text")
+        self.assertEqual(_decode_utf8_lossy(None), "")
+
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_fetch_container_logs_decodes_invalid_bytes(self, run_mock):
+        run_mock.return_value = mock.Mock(
+            returncode=0,
+            stdout=b"line 1\ninvalid: \xc4\n",
+            stderr=b"stderr invalid: \xc4\n",
+        )
+        logs = _fetch_container_logs("container-123")
+        self.assertIn("invalid: \ufffd", logs)
+        self.assertIn("stderr invalid: \ufffd", logs)
+        self.assertNotIn("text", run_mock.call_args.kwargs)
+
+    def test_read_log_file_decodes_invalid_native_log_bytes(self):
+        log_path = os.path.join(self.tempdir.name, "native.log")
+        with open(log_path, "wb") as handle:
+            handle.write(b"native log\ninvalid: \xc4\n")
+        self.assertEqual(_read_log_file(log_path), "native log\ninvalid: \ufffd\n")
+
     def test_reads_gguf_architecture_metadata(self):
         gguf_path = os.path.join(self.tempdir.name, "gemma4.gguf")
 
@@ -138,6 +164,16 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(version, "version: 8508 (9f102a140)")
         command = run_mock.call_args[0][0]
         self.assertEqual(command[:5], ["docker", "run", "--rm", "--entrypoint", "llama-cli"])
+
+    @mock.patch("infergrade.adapters.llama_cpp.docker_available", return_value=True)
+    @mock.patch("infergrade.adapters.llama_cpp.install_image")
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_resolve_version_decodes_invalid_docker_output_bytes(self, run_mock, _install_image_mock, _docker_mock):
+        run_mock.return_value = mock.Mock(returncode=0, stdout=b"version: \xc4-runtime\n", stderr=b"")
+        adapter = LlamaCppAdapter()
+        version = adapter.resolve_version(simulate=False)
+        self.assertEqual(version, "version: \ufffd-runtime")
+        self.assertNotIn("text", run_mock.call_args.kwargs)
 
     @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
@@ -258,6 +294,24 @@ class LlamaCppAdapterTests(unittest.TestCase):
         command = run_mock.call_args[0][0]
         self.assertEqual(command[:4], ["docker", "run", "--rm", "--entrypoint"])
 
+    @mock.patch("infergrade.adapters.llama_cpp.install_image")
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_generate_text_failure_decodes_invalid_external_output(self, run_mock, _install_image_mock):
+        run_mock.return_value = mock.Mock(returncode=1, stdout=b"partial \xc4\n", stderr=b"fatal \xc4\n")
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            simulate=False,
+        )
+        with self.assertRaises(RuntimeError) as raised:
+            adapter.generate_text(request, "Write a function", 128)
+        self.assertIn("partial \ufffd", str(raised.exception))
+        self.assertIn("fatal \ufffd", str(raised.exception))
+        self.assertNotIn("text", run_mock.call_args.kwargs)
+
     @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
     def test_generate_text_local_native_uses_host_binary(self, run_mock, which_mock):
@@ -294,6 +348,28 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(fidelity.state, "measured")
         self.assertEqual(fidelity.metrics["perplexity"]["value"], 1.6244)
         self.assertEqual(run_mock.call_args[0][0][0], "/opt/homebrew/bin/llama-perplexity")
+
+    @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_run_fidelity_perplexity_invalid_output_becomes_structured_failure(self, run_mock, which_mock):
+        which_mock.side_effect = lambda name: "/opt/homebrew/bin/%s" % name
+        run_mock.return_value = mock.Mock(returncode=1, stdout=b"perplexity output \xc4\n", stderr=b"fatal \xc4\n")
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="standard",
+            execution_mode="local_native",
+            simulate=False,
+        )
+        fidelity = adapter.run_fidelity(request)
+        self.assertEqual(fidelity.state, "not_yet_measured")
+        self.assertEqual(fidelity.reason_codes, ["perplexity_measurement_failed"])
+        self.assertIn("perplexity output \ufffd", fidelity.artifacts["error"])
+        self.assertIn("fatal \ufffd", fidelity.artifacts["error"])
+        self.assertNotIn("UnicodeDecodeError", fidelity.artifacts["error"])
+        self.assertNotIn("text", run_mock.call_args.kwargs)
 
     @mock.patch("infergrade.adapters.llama_cpp.docker_available", return_value=True)
     @mock.patch("infergrade.adapters.llama_cpp.install_image")

@@ -67,6 +67,15 @@ _PERPLEXITY_CORPUS_TEXT = (
 ) * 20
 
 
+def _decode_utf8_lossy(value) -> str:
+    """Decode external runtime bytes without letting bad UTF-8 crash the runner."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return value.decode("utf-8", errors="replace")
+
+
 class LlamaCppAdapter(BaseAdapter):
     backend_name = "llama.cpp"
 
@@ -106,26 +115,30 @@ class LlamaCppAdapter(BaseAdapter):
             self._ensure_backend_model_compatibility(request)
         if request and request.execution_mode == "local_native":
             command = [self._native_command_path(request), "--version"]
-            completed = subprocess.run(command, capture_output=True, text=True)
+            completed = subprocess.run(command, capture_output=True)
+            stdout = _decode_utf8_lossy(completed.stdout)
+            stderr = _decode_utf8_lossy(completed.stderr)
             if completed.returncode != 0:
-                message = (completed.stderr or completed.stdout or "").strip()
+                message = (stderr or stdout or "").strip()
                 raise RuntimeError(
                     "Failed to resolve llama.cpp version via native binary %s: %s"
                     % (self._native_command_path(request), message or "unknown error")
                 )
-            output = (completed.stdout or completed.stderr or "").strip()
+            output = (stdout or stderr or "").strip()
             return output.splitlines()[0] if output else self._native_command_path(request)
         self._ensure_docker()
         install_image(self._image_name(request))
         command = ["docker", "run", "--rm", "--entrypoint", _DEFAULT_COMMAND, self._image_name(request), "--version"]
-        completed = subprocess.run(command, capture_output=True, text=True)
+        completed = subprocess.run(command, capture_output=True)
+        stdout = _decode_utf8_lossy(completed.stdout)
+        stderr = _decode_utf8_lossy(completed.stderr)
         if completed.returncode != 0:
-            message = (completed.stderr or completed.stdout or "").strip()
+            message = (stderr or stdout or "").strip()
             raise RuntimeError(
                 "Failed to resolve llama.cpp version via Docker image %s: %s"
                 % (self._image_name(request), message or "unknown error")
             )
-        output = (completed.stdout or completed.stderr or "").strip()
+        output = (stdout or stderr or "").strip()
         return output.splitlines()[0] if output else self._image_name(request)
 
     def run_deployment_profile(
@@ -317,13 +330,15 @@ class LlamaCppAdapter(BaseAdapter):
                     request=request,
                 )
             )
-        completed = subprocess.run(command, capture_output=True, text=True)
-        raw_log = "%s\n%s" % (completed.stdout, completed.stderr)
+        completed = subprocess.run(command, capture_output=True)
+        stdout = _decode_utf8_lossy(completed.stdout)
+        stderr = _decode_utf8_lossy(completed.stderr)
+        raw_log = "%s\n%s" % (stdout, stderr)
         if completed.returncode != 0:
             raise RuntimeError((raw_log or "llama.cpp generation failed").strip())
         parsed = _parse_llama_timings(raw_log)
         return {
-            "text": (completed.stdout or "").strip(),
+            "text": stdout.strip(),
             "status": "completed",
             "error": None,
             "latency_ms": parsed.get("total_time_ms"),
@@ -502,8 +517,10 @@ class LlamaCppAdapter(BaseAdapter):
         started = time.perf_counter()
         logs_text = ""
         try:
-            completed = subprocess.run(command, capture_output=True, text=True)
-            startup_output = (completed.stdout or completed.stderr or "").strip()
+            completed = subprocess.run(command, capture_output=True)
+            stdout = _decode_utf8_lossy(completed.stdout)
+            stderr = _decode_utf8_lossy(completed.stderr)
+            startup_output = (stdout or stderr or "").strip()
             if completed.returncode != 0:
                 return {
                     "iteration": iteration,
@@ -593,12 +610,11 @@ class LlamaCppAdapter(BaseAdapter):
         process = None
         logs_text = ""
         try:
-            with open(log_path, "w", encoding="utf-8") as log_file:
+            with open(log_path, "wb") as log_file:
                 process = subprocess.Popen(
                     command,
                     stdout=log_file,
                     stderr=subprocess.STDOUT,
-                    text=True,
                 )
             base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
             completion = _stream_server_completion(
@@ -825,8 +841,10 @@ class LlamaCppAdapter(BaseAdapter):
                     ]
                 )
             started = time.perf_counter()
-            completed = subprocess.run(command, capture_output=True, text=True)
-            raw_log = "%s\n%s" % (completed.stdout or "", completed.stderr or "")
+            completed = subprocess.run(command, capture_output=True)
+            stdout = _decode_utf8_lossy(completed.stdout)
+            stderr = _decode_utf8_lossy(completed.stderr)
+            raw_log = "%s\n%s" % (stdout, stderr)
             if completed.returncode != 0:
                 raise RuntimeError((raw_log or "llama.cpp perplexity failed").strip())
             parsed = _parse_perplexity_output(raw_log)
@@ -1029,12 +1047,13 @@ def _resolve_published_port(container_name: str, container_port: int) -> int:
     completed = subprocess.run(
         ["docker", "port", container_name, "%s/tcp" % container_port],
         capture_output=True,
-        text=True,
     )
+    stdout = _decode_utf8_lossy(completed.stdout)
+    stderr = _decode_utf8_lossy(completed.stderr)
     if completed.returncode != 0:
-        message = (completed.stderr or completed.stdout or "").strip()
+        message = (stderr or stdout or "").strip()
         raise RuntimeError("Failed to inspect published port for %s: %s" % (container_name, message or "unknown error"))
-    lines = [line.strip() for line in (completed.stdout or "").splitlines() if line.strip()]
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
     if not lines:
         raise RuntimeError("Docker did not report a published port for %s." % container_name)
     first = lines[0]
@@ -1102,25 +1121,26 @@ def _container_is_running(container_name: str) -> bool:
     completed = subprocess.run(
         ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
         capture_output=True,
-        text=True,
     )
-    return completed.returncode == 0 and (completed.stdout or "").strip().lower() == "true"
+    stdout = _decode_utf8_lossy(completed.stdout)
+    return completed.returncode == 0 and stdout.strip().lower() == "true"
 
 
 def _fetch_container_logs(container_name: str) -> str:
     completed = subprocess.run(
         ["docker", "logs", container_name],
         capture_output=True,
-        text=True,
     )
-    return ("%s\n%s" % (completed.stdout or "", completed.stderr or "")).strip()
+    stdout = _decode_utf8_lossy(completed.stdout)
+    stderr = _decode_utf8_lossy(completed.stderr)
+    return ("%s\n%s" % (stdout, stderr)).strip()
 
 
 def _read_log_file(path: str) -> str:
     try:
-        with open(path, "r", encoding="utf-8") as handle:
-            return handle.read()
-    except FileNotFoundError:
+        with open(path, "rb") as handle:
+            return _decode_utf8_lossy(handle.read())
+    except OSError:
         return ""
 
 
@@ -1128,7 +1148,6 @@ def _stop_container(container_name: str) -> None:
     subprocess.run(
         ["docker", "stop", container_name],
         capture_output=True,
-        text=True,
     )
 
 
@@ -1179,7 +1198,10 @@ def _stream_server_completion(base_url: str, prompt: str, max_tokens: int) -> Di
                 text = line.decode("utf-8", errors="replace").strip()
                 if not text or not text.startswith("data:"):
                     continue
-                chunk_payload = json.loads(text[len("data:") :].strip())
+                try:
+                    chunk_payload = json.loads(text[len("data:") :].strip())
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError("Malformed llama.cpp streaming JSON: %s" % text) from exc
                 if (
                     chunk_payload.get("tokens_predicted", 0) > 0
                     and not chunk_payload.get("stop")
@@ -1191,7 +1213,7 @@ def _stream_server_completion(base_url: str, prompt: str, max_tokens: int) -> Di
                 if chunk_payload.get("stop"):
                     final_payload = chunk_payload
     except urllib_error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
+        body = _decode_utf8_lossy(exc.read())
         raise RuntimeError("llama.cpp completion request failed: %s %s" % (exc.code, body))
     if final_payload is None:
         raise RuntimeError("llama.cpp streaming completion ended without a final payload.")
