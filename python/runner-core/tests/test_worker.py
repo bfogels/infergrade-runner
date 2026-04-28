@@ -4,7 +4,7 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.worker import _classify_worker_failure, _progress_percent, run_worker_loop, run_worker_once
+from infergrade.worker import _claim_error_message, _classify_worker_failure, _progress_percent, run_worker_loop, run_worker_once
 
 
 class WorkerTests(unittest.TestCase):
@@ -41,6 +41,30 @@ class WorkerTests(unittest.TestCase):
             instance_type_id=None,
             hostname=mock.ANY,
         )
+
+    def test_worker_once_reports_string_claim_errors(self):
+        with mock.patch("infergrade.worker.claim_run_job", return_value={"error": "runner session expired"}):
+            with self.assertRaisesRegex(RuntimeError, "runner session expired"):
+                run_worker_once(
+                    api_url="http://localhost:8000",
+                    execution_mode="local_container",
+                    worker_id="worker-1",
+                )
+
+    def test_worker_once_reports_detail_only_claim_errors(self):
+        with mock.patch("infergrade.worker.claim_run_job", return_value={"detail": [{"msg": "field required"}]}):
+            with self.assertRaisesRegex(RuntimeError, "field required"):
+                run_worker_once(
+                    api_url="http://localhost:8000",
+                    execution_mode="local_container",
+                    worker_id="worker-1",
+                )
+
+    def test_claim_error_message_handles_common_api_envelopes(self):
+        self.assertEqual(_claim_error_message({"error": "plain failure"}), "plain failure")
+        self.assertEqual(_claim_error_message({"error": {"message": "structured failure"}}), "structured failure")
+        self.assertEqual(_claim_error_message({"detail": "detail failure"}), "detail failure")
+        self.assertEqual(_claim_error_message({"detail": [{"msg": "field required"}]}), "field required")
 
     def test_worker_once_executes_claimed_job_and_uploads_bundle(self):
         claimed_run = {
@@ -341,6 +365,48 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(register_mock.call_args.kwargs["environment"], snapshot["environment"])
         self.assertEqual(register_mock.call_args.kwargs["contract"], snapshot["contract"])
         self.assertEqual(register_mock.call_args.kwargs["diagnostics"], snapshot["diagnostics"])
+
+    def test_worker_loop_retries_after_claim_error(self):
+        snapshot = {
+            "environment": {"hardware_class": "apple_silicon"},
+            "contract": {"publisher": "infergrade-runner", "contract_version": "0.1.0"},
+            "diagnostics": {"status": "ready", "checks": []},
+        }
+        messages = []
+        attempts = [
+            RuntimeError("temporary claim failure"),
+            {"claimed": True, "completed": True, "worker_id": "runner-1"},
+        ]
+
+        def worker_once_side_effect(**_kwargs):
+            next_attempt = attempts.pop(0)
+            if isinstance(next_attempt, Exception):
+                raise next_attempt
+            return next_attempt
+
+        with mock.patch("infergrade.worker.collect_runner_diagnostics", return_value=snapshot):
+            with mock.patch("infergrade.worker.register_runner"):
+                with mock.patch("infergrade.worker.heartbeat_runner") as heartbeat_mock:
+                    with mock.patch("infergrade.worker.time.sleep") as sleep_mock:
+                        with mock.patch("infergrade.worker.run_worker_once", side_effect=worker_once_side_effect):
+                            result = run_worker_loop(
+                                api_url="http://localhost:8000",
+                                execution_mode="local_native",
+                                worker_id="runner-1",
+                                max_jobs=1,
+                                emit_progress=messages.append,
+                            )
+
+        self.assertEqual(result["processed_jobs"], 1)
+        self.assertEqual(result["completed_jobs"], 1)
+        self.assertTrue(any("temporary claim failure" in message for message in messages))
+        sleep_mock.assert_called_once()
+        self.assertTrue(
+            any(
+                "Last claim failed: temporary claim failure" == call.kwargs.get("metadata", {}).get("message")
+                for call in heartbeat_mock.call_args_list
+            )
+        )
 
     def test_classify_worker_failure_maps_download_errors_to_actionable_code(self):
         failure = _classify_worker_failure(

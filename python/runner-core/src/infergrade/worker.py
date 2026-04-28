@@ -186,8 +186,8 @@ def run_worker_once(
         api_token=api_token,
         run_token=run_token,
     )
-    if claimed.get("error"):
-        raise RuntimeError(claimed["error"].get("message") or "Failed to claim run job.")
+    if claimed.get("error") or ("detail" in claimed and "run" not in claimed):
+        raise RuntimeError(_claim_error_message(claimed))
     run_job = claimed.get("run")
     if not run_job:
         if emit_progress:
@@ -267,21 +267,40 @@ def run_worker_loop(
     while True:
         if max_jobs is not None and processed >= max_jobs:
             break
-        result = run_worker_once(
-            api_url=api_url,
-            execution_mode=execution_mode,
-            worker_id=resolved_worker_id,
-            run_id=run_id,
-            run_config_id=run_config_id,
-            provider_id=provider_id,
-            instance_type_id=instance_type_id,
-            hostname=hostname,
-            api_token=api_token,
-            run_token=run_token,
-            simulate=simulate,
-            emit_progress=emit_progress,
-            runner_snapshot=runner_snapshot,
-        )
+        try:
+            result = run_worker_once(
+                api_url=api_url,
+                execution_mode=execution_mode,
+                worker_id=resolved_worker_id,
+                run_id=run_id,
+                run_config_id=run_config_id,
+                provider_id=provider_id,
+                instance_type_id=instance_type_id,
+                hostname=hostname,
+                api_token=api_token,
+                run_token=run_token,
+                simulate=simulate,
+                emit_progress=emit_progress,
+                runner_snapshot=runner_snapshot,
+            )
+        except RuntimeError as exc:
+            if emit_progress:
+                emit_progress("Claim failed: %s Retrying." % exc)
+            heartbeat_runner(
+                api_url=api_url,
+                runner_id=resolved_worker_id,
+                api_token=api_token,
+                status="listening",
+                hostname=hostname or socket.gethostname(),
+                provider_id=provider_id,
+                instance_type_id=instance_type_id,
+                metadata={"message": "Last claim failed: %s" % exc},
+                environment=runner_snapshot.get("environment"),
+                contract=runner_snapshot.get("contract"),
+                diagnostics=runner_snapshot.get("diagnostics"),
+            )
+            time.sleep(max(poll_interval_seconds, 0.1))
+            continue
         if not result.get("claimed"):
             heartbeat_runner(
                 api_url=api_url,
@@ -314,6 +333,25 @@ def run_worker_loop(
 def _default_worker_id() -> str:
     """Build a host-scoped default worker identifier."""
     return "worker-%s" % socket.gethostname()
+
+
+def _claim_error_message(payload: Dict[str, Any]) -> str:
+    """Extract a stable human message from Hub claim error envelopes."""
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("detail") or error.get("code") or "Failed to claim run job.")
+    if error:
+        return str(error)
+    detail = payload.get("detail")
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, list):
+        messages = [
+            str(item.get("msg") or item.get("message") or item) if isinstance(item, dict) else str(item)
+            for item in detail
+        ]
+        return "; ".join(messages) or "Failed to claim run job."
+    return "Failed to claim run job."
 
 
 def _doctor_failure_message(report: Dict[str, Any]) -> str:
