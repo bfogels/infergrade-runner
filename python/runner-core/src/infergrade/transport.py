@@ -3,7 +3,7 @@
 import ipaddress
 import json
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
@@ -114,11 +114,9 @@ def bundle_payload(bundle_dir: str) -> Dict[str, Any]:
     manifest = read_json(os.path.join(bundle_dir, "manifest.json"))
     validation_path = os.path.join(bundle_dir, "validation.json")
     summary_path = os.path.join(bundle_dir, "summary.json")
-    results_dir = os.path.join(bundle_dir, "results")
     results = []
-    for filename in sorted(os.listdir(results_dir)):
-        if filename.endswith(".json"):
-            results.append(read_json(os.path.join(results_dir, filename)))
+    for relative_path in _manifest_result_paths(manifest):
+        results.append(read_json(os.path.join(bundle_dir, relative_path)))
     payload = {
         "manifest": manifest,
         "results": results,
@@ -130,6 +128,28 @@ def bundle_payload(bundle_dir: str) -> Dict[str, Any]:
     else:
         payload["summary"] = summarize_bundle(bundle_dir)
     return payload
+
+
+def _manifest_result_paths(manifest: Dict[str, Any]) -> List[str]:
+    """Return manifest-declared result files, rejecting unsafe paths."""
+    result_paths = ((manifest.get("files") or {}).get("results") or [])
+    if not isinstance(result_paths, list):
+        raise ValueError("manifest files.results must be a list")
+    normalized = []
+    for raw_path in result_paths:
+        relative_path = str(raw_path or "").strip()
+        if not relative_path:
+            continue
+        if os.path.isabs(relative_path):
+            raise ValueError("manifest result path must be relative: %s" % relative_path)
+        clean_path = os.path.normpath(relative_path)
+        if clean_path.startswith("..%s" % os.sep) or clean_path == "..":
+            raise ValueError("manifest result path escapes bundle directory: %s" % relative_path)
+        parts = clean_path.split(os.sep)
+        if len(parts) != 2 or parts[0] != "results" or not parts[1].endswith(".json"):
+            raise ValueError("manifest result path must be results/<name>.json: %s" % relative_path)
+        normalized.append(clean_path)
+    return normalized
 
 
 def upload_bundle(bundle_dir: str, api_url: str, api_token: str = None) -> Dict[str, Any]:
