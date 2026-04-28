@@ -283,11 +283,11 @@ def run_worker_loop(
                 emit_progress=emit_progress,
                 runner_snapshot=runner_snapshot,
             )
-        except RuntimeError as exc:
+        except Exception as exc:
             if emit_progress:
                 emit_progress("Claim failed: %s Retrying." % exc)
-            heartbeat_runner(
-                api_url=api_url,
+            _safe_runner_heartbeat(
+                api_url,
                 runner_id=resolved_worker_id,
                 api_token=api_token,
                 status="listening",
@@ -298,12 +298,13 @@ def run_worker_loop(
                 environment=runner_snapshot.get("environment"),
                 contract=runner_snapshot.get("contract"),
                 diagnostics=runner_snapshot.get("diagnostics"),
+                emit_progress=emit_progress,
             )
             time.sleep(max(poll_interval_seconds, 0.1))
             continue
         if not result.get("claimed"):
-            heartbeat_runner(
-                api_url=api_url,
+            _safe_runner_heartbeat(
+                api_url,
                 runner_id=resolved_worker_id,
                 api_token=api_token,
                 status="listening",
@@ -314,6 +315,7 @@ def run_worker_loop(
                 environment=runner_snapshot.get("environment"),
                 contract=runner_snapshot.get("contract"),
                 diagnostics=runner_snapshot.get("diagnostics"),
+                emit_progress=emit_progress,
             )
             time.sleep(max(poll_interval_seconds, 0.1))
             continue
@@ -328,6 +330,17 @@ def run_worker_loop(
         "completed_jobs": completed,
         "failed_jobs": failed,
     }
+
+
+def _safe_runner_heartbeat(api_url: str, emit_progress: Optional[Callable[[str], None]] = None, **kwargs: Any) -> bool:
+    """Best-effort listener heartbeat that should not kill the worker loop."""
+    try:
+        heartbeat_runner(api_url=api_url, **kwargs)
+        return True
+    except Exception as exc:
+        if emit_progress:
+            emit_progress("Runner heartbeat failed: %s Retrying." % exc)
+        return False
 
 
 def _default_worker_id() -> str:

@@ -1,6 +1,7 @@
 import sys
 import unittest
 from unittest import mock
+from urllib import error as urllib_error
 
 sys.path.insert(0, "python/runner-core/src")
 
@@ -407,6 +408,43 @@ class WorkerTests(unittest.TestCase):
                 for call in heartbeat_mock.call_args_list
             )
         )
+
+    def test_worker_loop_retries_after_transient_api_disconnect(self):
+        snapshot = {
+            "environment": {"hardware_class": "apple_silicon"},
+            "contract": {"publisher": "infergrade-runner", "contract_version": "0.1.0"},
+            "diagnostics": {"status": "ready", "checks": []},
+        }
+        messages = []
+        attempts = [
+            urllib_error.URLError("connection refused"),
+            {"claimed": True, "completed": True, "worker_id": "runner-1"},
+        ]
+
+        def worker_once_side_effect(**_kwargs):
+            next_attempt = attempts.pop(0)
+            if isinstance(next_attempt, Exception):
+                raise next_attempt
+            return next_attempt
+
+        with mock.patch("infergrade.worker.collect_runner_diagnostics", return_value=snapshot):
+            with mock.patch("infergrade.worker.register_runner"):
+                with mock.patch("infergrade.worker.heartbeat_runner", side_effect=[None, urllib_error.URLError("still down")]):
+                    with mock.patch("infergrade.worker.time.sleep") as sleep_mock:
+                        with mock.patch("infergrade.worker.run_worker_once", side_effect=worker_once_side_effect):
+                            result = run_worker_loop(
+                                api_url="http://localhost:8000",
+                                execution_mode="local_native",
+                                worker_id="runner-1",
+                                max_jobs=1,
+                                emit_progress=messages.append,
+                            )
+
+        self.assertEqual(result["processed_jobs"], 1)
+        self.assertEqual(result["completed_jobs"], 1)
+        self.assertTrue(any("Claim failed:" in message and "connection refused" in message for message in messages))
+        self.assertTrue(any("Runner heartbeat failed:" in message and "still down" in message for message in messages))
+        sleep_mock.assert_called_once()
 
     def test_classify_worker_failure_maps_download_errors_to_actionable_code(self):
         failure = _classify_worker_failure(
