@@ -3,6 +3,7 @@ import json
 import os
 
 from evalplus.data import get_human_eval_plus, get_mbpp_plus, write_jsonl
+from evalplus.data.mbpp import mbpp_serialize_inputs
 from evalplus.evaluate import evaluate as evalplus_evaluate
 
 
@@ -30,12 +31,21 @@ def _dataset_problems(dataset: str):
     raise ValueError("Unsupported EvalPlus dataset: %s" % dataset)
 
 
+def _jsonl_ready_task(dataset: str, task: dict) -> dict:
+    normalized = dict(task)
+    if dataset == "mbpp":
+        normalized["base_input"] = mbpp_serialize_inputs(task["task_id"], task["base_input"])
+        normalized["plus_input"] = mbpp_serialize_inputs(task["task_id"], task["plus_input"])
+    json.dumps(normalized)
+    return normalized
+
+
 def prepare(dataset: str, output_dir: str, limit: int = None) -> None:
     problems = _dataset_problems(dataset)
     items = list(problems.items())
     if limit:
         items = items[:limit]
-    selected_tasks = [problem for _task_id, problem in items]
+    selected_tasks = [_jsonl_ready_task(dataset, problem) for _task_id, problem in items]
     override_path = os.path.join(output_dir, "%s_override.jsonl" % dataset)
     write_jsonl(override_path, selected_tasks, drop_builtin=False)
     write_jsonl(
