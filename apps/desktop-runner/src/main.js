@@ -17,26 +17,78 @@ const logOutput = document.querySelector("[data-log-output]");
 
 let childProcess = null;
 let logLines = [];
+let tauriInvoke = null;
 
-function restoreFormState() {
+function isTauriRuntime() {
+  return "__TAURI_INTERNALS__" in window;
+}
+
+async function restoreFormState() {
   const savedApiUrl = window.localStorage.getItem(API_URL_STORAGE_KEY);
-  const savedToken = window.localStorage.getItem(TOKEN_STORAGE_KEY);
 
   if (savedApiUrl) {
     form.elements.apiUrl.value = savedApiUrl;
   }
-  if (savedToken) {
-    form.elements.hubToken.value = savedToken;
+
+  if (!isTauriRuntime()) {
+    const savedPreviewToken = window.localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (savedPreviewToken) {
+      form.elements.hubToken.value = savedPreviewToken;
+    }
   }
 
-  updateTokenState();
+  await updateTokenState();
 }
 
-function updateTokenState() {
-  const hasToken = Boolean(window.localStorage.getItem(TOKEN_STORAGE_KEY));
+async function loadTauriInvoke() {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  if (!tauriInvoke) {
+    const core = await import("@tauri-apps/api/core");
+    tauriInvoke = core.invoke;
+  }
+  return tauriInvoke;
+}
+
+async function loadStoredToken() {
+  const invoke = await loadTauriInvoke();
+  if (invoke) {
+    return invoke("load_runner_token");
+  }
+  return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+async function saveStoredToken(token) {
+  const invoke = await loadTauriInvoke();
+  if (invoke) {
+    await invoke("save_runner_token", { token });
+    return;
+  }
+  window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+}
+
+async function clearStoredToken() {
+  const invoke = await loadTauriInvoke();
+  if (invoke) {
+    await invoke("clear_runner_token");
+    return;
+  }
+  window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
+async function updateTokenState() {
+  const hasToken = Boolean(await loadStoredToken());
+  if (isTauriRuntime()) {
+    tokenState.textContent = hasToken
+      ? "Runner token saved in the OS credential store."
+      : "No token saved. Paste a paired runner token before listening for Hub jobs.";
+    return;
+  }
+
   tokenState.textContent = hasToken
-    ? "Prototype token saved locally. Replace with OS secure storage before beta."
-    : "No token saved. Paste a paired runner token before listening for Hub jobs.";
+    ? "Preview token saved in local browser storage."
+    : "Preview mode uses browser storage only; the app uses the OS credential store.";
 }
 
 function setStatus(status, tone = "idle") {
@@ -57,7 +109,7 @@ function appendLog(message) {
 }
 
 async function loadTauriShell() {
-  if (!("__TAURI_INTERNALS__" in window)) {
+  if (!isTauriRuntime()) {
     return null;
   }
 
@@ -65,9 +117,11 @@ async function loadTauriShell() {
   return shell.Command;
 }
 
-function runnerEnvironment() {
-  const savedToken = window.localStorage.getItem(TOKEN_STORAGE_KEY);
-  return savedToken ? { INFERGRADE_HUB_TOKEN: savedToken } : {};
+async function runnerEnvironment() {
+  const typedToken = form.elements.hubToken.value.trim();
+  const savedToken = await loadStoredToken();
+  const token = typedToken || savedToken;
+  return token ? { INFERGRADE_HUB_TOKEN: token } : {};
 }
 
 function readApiUrl() {
@@ -96,7 +150,7 @@ async function startRunner() {
   }
 
   const command = Command.sidecar(SIDECAR_NAME, ["start", "--api-url", apiUrl], {
-    env: runnerEnvironment()
+    env: await runnerEnvironment()
   });
 
   command.stdout.on("data", (line) => appendLog(line));
@@ -134,17 +188,22 @@ async function stopRunner() {
 
 saveTokenButton.addEventListener("click", () => {
   const token = form.elements.hubToken.value.trim();
-  if (token) {
-    window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
-  }
-  window.localStorage.setItem(API_URL_STORAGE_KEY, form.elements.apiUrl.value.trim());
-  updateTokenState();
+  saveStoredToken(token)
+    .then(() => {
+      form.elements.hubToken.value = "";
+      window.localStorage.setItem(API_URL_STORAGE_KEY, form.elements.apiUrl.value.trim());
+      return updateTokenState();
+    })
+    .catch((error) => appendLog(`Could not save token: ${error.message || error}`));
 });
 
 clearTokenButton.addEventListener("click", () => {
-  window.localStorage.removeItem(TOKEN_STORAGE_KEY);
-  form.elements.hubToken.value = "";
-  updateTokenState();
+  clearStoredToken()
+    .then(() => {
+      form.elements.hubToken.value = "";
+      return updateTokenState();
+    })
+    .catch((error) => appendLog(`Could not clear token: ${error.message || error}`));
 });
 
 startButton.addEventListener("click", () => {
@@ -163,5 +222,5 @@ clearLogsButton.addEventListener("click", () => {
   logOutput.textContent = "Waiting for Runner output...";
 });
 
-restoreFormState();
+restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");

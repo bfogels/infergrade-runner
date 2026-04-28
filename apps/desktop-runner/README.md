@@ -8,7 +8,7 @@ The app is intentionally small:
 - vanilla JavaScript frontend
 - sidecar wrapper that launches the existing `infergrade` CLI
 - process controls for start, stop, status, and log streaming
-- placeholder local token storage so Sprint 73 can swap in an OS-backed secure store
+- OS-backed token storage through the Rust `keyring` crate
 
 The Hub should remain the model, benchmark, recommendation, and result surface. This app should stay focused on pairing, readiness, Runner lifecycle, logs, and recovery.
 
@@ -51,14 +51,15 @@ Verified in this PR:
 - sidecar wrapper can resolve the local Runner CLI and print `infergrade --help`
 - Rust compile passes with `cargo check`
 - macOS Apple Silicon DMG build completes locally
+- token storage commands compile against the OS credential-store abstraction
 
 Not yet verified in this PR:
 
 - `npm run tauri dev`
+- macOS Keychain save/load/clear through the live Tauri window
 - Windows or Linux packaging
-- OS-backed secure token storage
 
-Sprint 73 should start by running `npm run tauri dev`, replacing placeholder token storage with keychain/credential-vault storage, and adding a Windows or Linux build attempt before any beta distribution.
+Sprint 73 should continue by running `npm run tauri dev`, exercising the Keychain prompt on macOS, and adding a Windows or Linux build attempt before any beta distribution.
 
 ## Sidecar Contract
 
