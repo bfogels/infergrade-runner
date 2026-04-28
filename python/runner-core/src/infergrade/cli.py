@@ -136,7 +136,11 @@ def _add_run_request_arguments(parser: argparse.ArgumentParser) -> None:
 
 def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     """Build the top-level InferGrade CLI parser."""
-    parser = argparse.ArgumentParser(prog="infergrade", formatter_class=_InferGradeHelpFormatter)
+    parser = argparse.ArgumentParser(
+        prog="infergrade",
+        formatter_class=_InferGradeHelpFormatter,
+        epilog="Run `infergrade --all --help` to list advanced and compatibility commands.",
+    )
     parser.add_argument("--version", action="version", version="%(prog)s " + __version__)
     parser.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
     metavar = None if show_advanced else "{%s}" % ",".join(DEFAULT_COMMANDS)

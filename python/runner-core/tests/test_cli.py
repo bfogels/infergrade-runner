@@ -20,6 +20,7 @@ class CliTests(unittest.TestCase):
         help_text = output.getvalue()
         self.assertIn("{doctor,cache,install-runtime,pair,unpair,start}", help_text)
         self.assertIn("start               Start a long-lived local runner", help_text)
+        self.assertIn("infergrade --all --help", help_text)
         self.assertNotIn("run-job", help_text)
         self.assertNotIn("upload-bundle", help_text)
         self.assertNotIn("show-capabilities", help_text)
