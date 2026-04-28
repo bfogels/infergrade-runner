@@ -7,13 +7,18 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 from infergrade.models import RunRequest
 from infergrade.utils import ensure_dir, stable_hash
+
+
+DEFAULT_MIN_ARTIFACT_CACHE_FREE_GB = 5.0
+PARTIAL_ARTIFACT_PREFIX = "infergrade-artifact-"
+PARTIAL_ARTIFACT_SUFFIX = ".tmp"
 
 
 @dataclass
@@ -91,6 +96,7 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
             size_bytes=os.path.getsize(cache_path),
         )
 
+    ensure_min_free_space(cache_dir, min_artifact_cache_free_bytes(), "artifact cache")
     tmp_fd, tmp_path = tempfile.mkstemp(prefix="infergrade-artifact-", suffix=".tmp", dir=cache_dir)
     os.close(tmp_fd)
     try:
@@ -136,9 +142,127 @@ def default_artifact_cache_dir() -> str:
     return os.path.join(home, ".cache", "infergrade", "artifacts")
 
 
+def min_artifact_cache_free_bytes() -> int:
+    """Return the configured minimum free bytes required for artifact downloads."""
+    return _env_gb_to_bytes("INFERGRADE_MIN_ARTIFACT_CACHE_FREE_GB", DEFAULT_MIN_ARTIFACT_CACHE_FREE_GB)
+
+
+def artifact_cache_status(cache_dir: Optional[str] = None) -> Dict[str, object]:
+    """Return size, partial-file, and free-space details for the artifact cache."""
+    path = _normalized_cache_dir(cache_dir or default_artifact_cache_dir())
+    files = _artifact_cache_files(path)
+    partial_files = [item for item in files if _is_partial_artifact_path(item["path"])]
+    artifact_files = [item for item in files if not _is_partial_artifact_path(item["path"])]
+    disk_path = _existing_disk_usage_path(path)
+    free_bytes = shutil.disk_usage(disk_path).free
+    min_free_bytes = min_artifact_cache_free_bytes()
+    return {
+        "cache_dir": path,
+        "exists": os.path.isdir(path),
+        "artifact_count": len(artifact_files),
+        "artifact_bytes": sum(int(item["size_bytes"]) for item in artifact_files),
+        "partial_count": len(partial_files),
+        "partial_bytes": sum(int(item["size_bytes"]) for item in partial_files),
+        "total_count": len(files),
+        "total_bytes": sum(int(item["size_bytes"]) for item in files),
+        "free_bytes": free_bytes,
+        "free_gb": _bytes_to_gb(free_bytes),
+        "min_required_free_bytes": min_free_bytes,
+        "min_required_free_gb": _bytes_to_gb(min_free_bytes),
+    }
+
+
+def prune_partial_artifacts(cache_dir: Optional[str] = None, dry_run: bool = False) -> Dict[str, object]:
+    """Remove incomplete artifact temp files from the cache, leaving completed artifacts intact."""
+    path = _normalized_cache_dir(cache_dir or default_artifact_cache_dir())
+    partial_files = [item for item in _artifact_cache_files(path) if _is_partial_artifact_path(item["path"])]
+    removed: List[Dict[str, object]] = []
+    for item in partial_files:
+        if not dry_run:
+            try:
+                os.unlink(item["path"])
+            except FileNotFoundError:
+                continue
+        removed.append(item)
+    return {
+        "cache_dir": path,
+        "dry_run": dry_run,
+        "removed_count": len(removed),
+        "removed_bytes": sum(int(item["size_bytes"]) for item in removed),
+        "removed": removed,
+        "status": artifact_cache_status(path),
+    }
+
+
+def ensure_min_free_space(path: str, min_free_bytes: int, context: str) -> None:
+    """Raise when a directory has less free disk space than the configured floor."""
+    if min_free_bytes <= 0:
+        return
+    expanded = _normalized_cache_dir(path)
+    free_bytes = shutil.disk_usage(_existing_disk_usage_path(expanded)).free
+    if free_bytes >= min_free_bytes:
+        return
+    raise RuntimeError(
+        "insufficient free disk space for %s: %.2f GB free, %.2f GB required at %s"
+        % (context, _bytes_to_gb(free_bytes), _bytes_to_gb(min_free_bytes), expanded)
+    )
+
+
 def _normalized_cache_dir(path: str) -> str:
     """Expand user-relative cache paths before resolving them to absolute paths."""
     return os.path.abspath(os.path.expanduser(path))
+
+
+def _env_gb_to_bytes(name: str, default_gb: float) -> int:
+    """Parse an environment variable expressed in GiB into bytes."""
+    raw_value = os.environ.get(name)
+    if raw_value is None or str(raw_value).strip() == "":
+        gb_value = default_gb
+    else:
+        try:
+            gb_value = float(str(raw_value).strip())
+        except ValueError:
+            gb_value = default_gb
+    return max(0, int(gb_value * (1024 ** 3)))
+
+
+def _bytes_to_gb(value: int) -> float:
+    """Return a two-decimal GiB value for human-facing diagnostics."""
+    return round(float(value) / float(1024 ** 3), 2)
+
+
+def _existing_disk_usage_path(path: str) -> str:
+    """Return the nearest existing path suitable for shutil.disk_usage."""
+    candidate = os.path.abspath(os.path.expanduser(path))
+    while candidate and not os.path.exists(candidate):
+        parent = os.path.dirname(candidate)
+        if parent == candidate:
+            break
+        candidate = parent
+    return candidate or os.path.abspath(os.sep)
+
+
+def _artifact_cache_files(path: str) -> List[Dict[str, object]]:
+    """Return top-level cache files with sizes for status and pruning."""
+    if not os.path.isdir(path):
+        return []
+    files: List[Dict[str, object]] = []
+    for name in sorted(os.listdir(path)):
+        file_path = os.path.join(path, name)
+        if not os.path.isfile(file_path):
+            continue
+        try:
+            size_bytes = os.path.getsize(file_path)
+        except OSError:
+            continue
+        files.append({"path": file_path, "name": name, "size_bytes": size_bytes})
+    return files
+
+
+def _is_partial_artifact_path(path: str) -> bool:
+    """Return whether a path looks like an interrupted artifact temp download."""
+    name = os.path.basename(path)
+    return name.startswith(PARTIAL_ARTIFACT_PREFIX) and name.endswith(PARTIAL_ARTIFACT_SUFFIX)
 
 
 def compute_file_sha256(path: str) -> str:

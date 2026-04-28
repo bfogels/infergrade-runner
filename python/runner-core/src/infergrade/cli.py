@@ -9,6 +9,7 @@ from urllib.error import URLError
 
 from infergrade import __version__
 from infergrade.analysis import recommend, summarize_bundle
+from infergrade.artifacts import artifact_cache_status, default_artifact_cache_dir, prune_partial_artifacts
 from infergrade.benchmark_catalog import load_capability_catalog
 from infergrade.doctor import run_doctor
 from infergrade.environment import capture_environment
@@ -151,6 +152,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Force a rebuild of local InferGrade images even if they already exist.",
     )
+
+    cache_parser = subparsers.add_parser("cache", help="Inspect or clean the local artifact cache.")
+    cache_parser.add_argument("--artifact-cache-dir", default=default_artifact_cache_dir())
+    cache_parser.add_argument("--status", action="store_true", help="Print artifact cache size and free-space details.")
+    cache_parser.add_argument("--prune-partials", action="store_true", help="Remove interrupted artifact downloads.")
+    cache_parser.add_argument("--dry-run", action="store_true", help="Report what would be removed without deleting files.")
 
     runtime_parser = subparsers.add_parser("install-runtime", help="Inspect, install, or select an explicit managed runtime.")
     runtime_parser.add_argument("--runtime", choices=("llama.cpp",), default="llama.cpp")
@@ -409,6 +416,14 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.command == "install-images":
         payload = install_known_images(image=args.image, rebuild=args.rebuild)
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "cache":
+        if args.prune_partials:
+            payload = prune_partial_artifacts(cache_dir=args.artifact_cache_dir, dry_run=args.dry_run)
+        else:
+            payload = artifact_cache_status(cache_dir=args.artifact_cache_dir)
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 

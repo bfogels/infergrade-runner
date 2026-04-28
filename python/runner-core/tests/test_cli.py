@@ -36,6 +36,32 @@ class CliTests(unittest.TestCase):
         install_mock.assert_called_once_with(image="infergrade-runner-core:local", rebuild=True)
         self.assertIn('"rebuilt"', output.getvalue())
 
+    def test_cache_status_command_prints_artifact_cache_status(self):
+        output = io.StringIO()
+        with mock.patch(
+            "infergrade.cli.artifact_cache_status",
+            return_value={"cache_dir": "/tmp/cache", "total_bytes": 123},
+        ) as status_mock:
+            with redirect_stdout(output):
+                exit_code = main(["cache", "--artifact-cache-dir", "/tmp/cache", "--status"])
+
+        self.assertEqual(exit_code, 0)
+        status_mock.assert_called_once_with(cache_dir="/tmp/cache")
+        self.assertIn('"total_bytes": 123', output.getvalue())
+
+    def test_cache_prune_partials_command_supports_dry_run(self):
+        output = io.StringIO()
+        with mock.patch(
+            "infergrade.cli.prune_partial_artifacts",
+            return_value={"cache_dir": "/tmp/cache", "dry_run": True, "removed_count": 1},
+        ) as prune_mock:
+            with redirect_stdout(output):
+                exit_code = main(["cache", "--artifact-cache-dir", "/tmp/cache", "--prune-partials", "--dry-run"])
+
+        self.assertEqual(exit_code, 0)
+        prune_mock.assert_called_once_with(cache_dir="/tmp/cache", dry_run=True)
+        self.assertIn('"removed_count": 1', output.getvalue())
+
     def test_install_runtime_lists_manifest(self):
         output = io.StringIO()
         with redirect_stdout(output):

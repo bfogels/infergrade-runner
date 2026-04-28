@@ -352,6 +352,15 @@ class WorkerTests(unittest.TestCase):
         self.assertTrue(failure["recovery"])
         self.assertIn("raw_error", failure["details"])
 
+    def test_classify_worker_failure_maps_low_disk_errors_to_actionable_code(self):
+        failure = _classify_worker_failure(
+            RuntimeError("insufficient free disk space for artifact cache: 1.00 GB free, 5.00 GB required")
+        )
+
+        self.assertEqual(failure["error_code"], "insufficient_disk")
+        self.assertIn("could not write", failure["message"])
+        self.assertIn("raw_error", failure["details"])
+
 
 if __name__ == "__main__":
     unittest.main()

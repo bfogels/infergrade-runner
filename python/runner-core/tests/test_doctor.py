@@ -66,6 +66,10 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(statuses["quant_artifact"], "ok")
         self.assertEqual(statuses["artifact_cache_dir"], "ok")
         self.assertEqual(statuses["output_dir"], "ok")
+        checks = {item["id"]: item for item in report["checks"]}
+        self.assertIn("free_bytes", checks["artifact_cache_dir"]["details"])
+        self.assertIn("total_bytes", checks["artifact_cache_dir"]["details"])
+        self.assertIn("min_required_free_bytes", checks["output_dir"]["details"])
 
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.shutil.which")
@@ -195,6 +199,75 @@ class DoctorTests(unittest.TestCase):
         checks = {item["id"]: item for item in report["checks"]}
         self.assertEqual(checks["llama_cpp_model_compatibility"]["status"], "error")
         self.assertIn("GGUF architecture 'gemma4'", checks["llama_cpp_model_compatibility"]["message"])
+
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.shutil.which")
+    @mock.patch("infergrade.doctor.shutil.disk_usage")
+    def test_doctor_fails_when_artifact_cache_is_below_free_space_floor(
+        self,
+        disk_usage_mock,
+        which_mock,
+        capture_environment_mock,
+    ):
+        capture_environment_mock.return_value = {
+            "environment_class": "local_workstation",
+            "accelerator_type": "unknown",
+            "accelerator_count": 0,
+            "hardware_id": "hw_test",
+        }
+        which_mock.side_effect = lambda name: None
+        disk_usage_mock.return_value = mock.Mock(free=1024)
+        request = RunRequest(
+            model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+            quant_artifact_cache_dir=os.path.join(self.tempdir.name, "cache"),
+            output_dir=os.path.join(self.tempdir.name, "runs", "tiny"),
+            execution_mode="local_native",
+            simulate=False,
+        )
+        with mock.patch.dict(os.environ, {"INFERGRADE_MIN_ARTIFACT_CACHE_FREE_GB": "1", "INFERGRADE_MIN_OUTPUT_FREE_GB": "0"}, clear=False):
+            report = run_doctor(request=request)
+        checks = {item["id"]: item for item in report["checks"]}
+        self.assertEqual(checks["artifact_cache_dir"]["status"], "error")
+        self.assertEqual(checks["artifact_cache_dir"]["message"], "Insufficient free disk space.")
+        self.assertEqual(checks["artifact_cache_dir"]["details"]["min_required_free_bytes"], 1024 ** 3)
+
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.shutil.which")
+    @mock.patch("infergrade.doctor.shutil.disk_usage")
+    def test_doctor_fails_when_output_dir_is_below_free_space_floor(
+        self,
+        disk_usage_mock,
+        which_mock,
+        capture_environment_mock,
+    ):
+        capture_environment_mock.return_value = {
+            "environment_class": "local_workstation",
+            "accelerator_type": "unknown",
+            "accelerator_count": 0,
+            "hardware_id": "hw_test",
+        }
+        which_mock.side_effect = lambda name: None
+        disk_usage_mock.return_value = mock.Mock(free=1024)
+        request = RunRequest(
+            model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact=os.path.join(self.tempdir.name, "model.gguf"),
+            output_dir=os.path.join(self.tempdir.name, "runs", "tiny"),
+            execution_mode="local_native",
+            simulate=False,
+        )
+        with open(request.quant_artifact, "wb") as handle:
+            handle.write(b"gguf")
+        with mock.patch.dict(os.environ, {"INFERGRADE_MIN_OUTPUT_FREE_GB": "1"}, clear=False):
+            report = run_doctor(request=request)
+        checks = {item["id"]: item for item in report["checks"]}
+        self.assertEqual(checks["output_dir"]["status"], "error")
+        self.assertEqual(checks["output_dir"]["message"], "Insufficient free disk space.")
+        self.assertEqual(checks["output_dir"]["details"]["min_required_free_bytes"], 1024 ** 3)
 
     @mock.patch("infergrade.doctor.load_contract_manifest")
     @mock.patch("infergrade.doctor.capture_environment")
