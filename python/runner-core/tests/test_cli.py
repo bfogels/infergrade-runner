@@ -191,6 +191,24 @@ class CliTests(unittest.TestCase):
             emit_progress=mock.ANY,
         )
 
+    def test_start_command_refuses_remote_http_profile_url(self):
+        with mock.patch("infergrade.cli.run_worker_once") as run_once_mock, mock.patch(
+            "infergrade.cli.resolve_runner_api_url",
+            return_value="http://hub.example.com",
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_execution_mode",
+            return_value="local_native",
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_id",
+            return_value="runner-saved",
+        ):
+            with self.assertRaises(SystemExit) as caught:
+                main(["start", "--once"])
+
+        self.assertIn("https://", str(caught.exception))
+        self.assertIn("localhost", str(caught.exception))
+        run_once_mock.assert_not_called()
+
     def test_run_job_command_invokes_single_job_execution(self):
         output = io.StringIO()
         with mock.patch(
@@ -321,6 +339,23 @@ class CliTests(unittest.TestCase):
         self.assertIn('"paired": true', output.getvalue().lower())
         self.assertIn('"next_action": "start_runner"', output.getvalue())
         self.assertIn('"start": "infergrade start"', output.getvalue())
+
+    def test_pair_command_refuses_remote_http_before_redeeming_code(self):
+        with mock.patch("infergrade.cli.redeem_runner_pairing") as redeem_mock:
+            with self.assertRaises(SystemExit) as caught:
+                main(
+                    [
+                        "pair",
+                        "--api-url",
+                        "http://hub.example.com",
+                        "--pair-code",
+                        "igrp_example",
+                    ]
+                )
+
+        self.assertIn("https://", str(caught.exception))
+        self.assertIn("127.0.0.1", str(caught.exception))
+        redeem_mock.assert_not_called()
 
     def test_pair_command_surfaces_hub_pairing_errors(self):
         with mock.patch(
