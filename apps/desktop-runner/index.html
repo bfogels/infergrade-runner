@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InferGrade Runner</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero-panel" aria-labelledby="app-title">
+        <div>
+          <p class="eyebrow">InferGrade Runner</p>
+          <h1 id="app-title">Keep your machine ready for Hub jobs.</h1>
+          <p class="lede">
+            Pair once, leave the Runner listening, and inspect local logs without opening a terminal.
+          </p>
+        </div>
+        <div class="status-card" aria-live="polite">
+          <span class="status-dot" data-status-dot></span>
+          <div>
+            <p class="status-label">Runner status</p>
+            <strong data-runner-status>Idle</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="control-grid" aria-label="Runner controls">
+        <form class="panel" data-runner-form>
+          <h2>Pairing</h2>
+          <label>
+            <span>Hub URL</span>
+            <input name="apiUrl" type="url" value="http://127.0.0.1:8000" autocomplete="url" />
+          </label>
+          <label>
+            <span>Runner token</span>
+            <input name="hubToken" type="password" autocomplete="off" placeholder="Paste a paired runner token" />
+          </label>
+          <div class="button-row">
+            <button type="button" data-save-token>Save token</button>
+            <button type="button" data-clear-token>Clear</button>
+          </div>
+          <p class="hint" data-token-state>Token storage is local prototype storage.</p>
+        </form>
+
+        <section class="panel">
+          <h2>Listener</h2>
+          <p>
+            Start the Runner sidecar when you want this machine to claim queued Hub jobs.
+          </p>
+          <div class="button-row">
+            <button type="button" data-start-runner>Start listening</button>
+            <button type="button" data-stop-runner disabled>Stop</button>
+          </div>
+          <p class="hint">The app passes the token through the process environment, not command arguments.</p>
+        </section>
+      </section>
+
+      <section class="panel log-panel" aria-labelledby="log-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Runtime output</p>
+            <h2 id="log-title">Logs</h2>
+          </div>
+          <button type="button" data-clear-logs>Clear logs</button>
+        </div>
+        <pre data-log-output>Waiting for Runner output...</pre>
+      </section>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

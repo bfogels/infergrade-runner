@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "InferGrade Runner",
+  "version": "0.1.0",
+  "identifier": "com.infergrade.runner",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "InferGrade Runner",
+        "width": 1080,
+        "height": 760,
+        "minWidth": 360,
+        "minHeight": 620,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg"],
+    "externalBin": ["binaries/infergrade-sidecar"],
+    "category": "DeveloperTool",
+    "shortDescription": "Local companion app for InferGrade Runner jobs",
+    "longDescription": "Pairs with InferGrade Hub, keeps the local Runner listening, and surfaces Runner process logs without terminal access."
+  }
+}
