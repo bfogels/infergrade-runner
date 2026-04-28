@@ -17,15 +17,17 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 
 cd "$APP_DIR"
-npm install
+npm ci
 npm run build
 npm audit --audit-level=moderate
 
 cd "$TAURI_DIR"
-cargo check
+cargo check --locked
+
+rm -rf "$DMG_DIR"
 
 cd "$APP_DIR"
-npm run tauri -- build
+npm run tauri -- build -- --locked
 
 if [ ! -d "$DMG_DIR" ]; then
   echo "No DMG output directory found at $DMG_DIR" >&2

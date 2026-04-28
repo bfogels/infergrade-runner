@@ -19,11 +19,12 @@ From the Runner repo root:
 
 The script runs:
 
-- `npm install`
+- `npm ci`
 - `npm run build`
 - `npm audit --audit-level=moderate`
-- `cargo check`
-- `npm run tauri -- build`
+- `cargo check --locked`
+- clear the previous DMG output directory
+- `npm run tauri -- build -- --locked`
 
 It then prints any macOS DMG artifacts under:
 
