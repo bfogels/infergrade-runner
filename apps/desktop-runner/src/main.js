@@ -7,11 +7,13 @@ const API_URL_STORAGE_KEY = "infergrade.runner.apiUrl";
 const form = document.querySelector("[data-runner-form]");
 const startButton = document.querySelector("[data-start-runner]");
 const stopButton = document.querySelector("[data-stop-runner]");
+const pairButton = document.querySelector("[data-pair-runner]");
 const saveTokenButton = document.querySelector("[data-save-token]");
 const clearTokenButton = document.querySelector("[data-clear-token]");
 const clearLogsButton = document.querySelector("[data-clear-logs]");
 const statusText = document.querySelector("[data-runner-status]");
 const statusDot = document.querySelector("[data-status-dot]");
+const pairState = document.querySelector("[data-pair-state]");
 const tokenState = document.querySelector("[data-token-state]");
 const logOutput = document.querySelector("[data-log-output]");
 
@@ -108,6 +110,17 @@ function appendLog(message) {
   logOutput.scrollTop = logOutput.scrollHeight;
 }
 
+function pairingSummary(stdout) {
+  try {
+    const payload = JSON.parse(stdout || "{}");
+    const label = payload.runner_profile?.label || payload.runner_profile?.runner_id || "local runner";
+    const profilePath = payload.profile_path ? ` Profile saved at ${payload.profile_path}.` : "";
+    return `Paired ${label}.${profilePath}`;
+  } catch (_error) {
+    return "Pairing completed and the runner profile was saved.";
+  }
+}
+
 async function loadTauriShell() {
   if (!isTauriRuntime()) {
     return null;
@@ -180,6 +193,52 @@ async function startRunner() {
   appendLog(`Started infergrade listener for ${apiUrl}.`);
 }
 
+async function pairRunner() {
+  const apiUrl = readApiUrl();
+  const pairCode = form.elements.pairCode.value.trim();
+  const runnerLabel = form.elements.runnerLabel.value.trim();
+  if (!pairCode) {
+    throw new Error("Paste the one-time pairing code from the Hub first.");
+  }
+  window.localStorage.setItem(API_URL_STORAGE_KEY, apiUrl);
+
+  const Command = await loadTauriShell();
+  if (!Command) {
+    setStatus("Preview mode", "warning");
+    pairState.textContent = "Browser preview cannot redeem pairing codes. Open the desktop app to pair this machine.";
+    appendLog("Tauri runtime not detected. Desktop pairing needs the Runner sidecar.");
+    return;
+  }
+
+  pairButton.disabled = true;
+  startButton.disabled = true;
+  pairState.textContent = "Redeeming pairing code...";
+  const args = ["pair", "--api-url", apiUrl, "--pair-code", pairCode];
+  if (runnerLabel) {
+    args.push("--label", runnerLabel);
+  }
+  try {
+    const output = await Command.sidecar(SIDECAR_NAME, args).execute();
+    if (output.code !== 0) {
+      throw new Error(output.stderr || output.stdout || `Pairing command exited with code ${output.code}.`);
+    }
+    if (output.stderr) {
+      appendLog(output.stderr);
+    }
+    appendLog(pairingSummary(output.stdout));
+    form.elements.pairCode.value = "";
+    pairState.textContent = "Paired. Starting the local Runner listener...";
+    setStatus("Paired", "good");
+    await startRunner();
+    pairState.textContent = "Paired and listening for Hub jobs.";
+  } finally {
+    pairButton.disabled = false;
+    if (!childProcess) {
+      startButton.disabled = false;
+    }
+  }
+}
+
 async function stopRunner() {
   if (!childProcess) {
     return;
@@ -188,6 +247,14 @@ async function stopRunner() {
   await childProcess.kill();
   appendLog("Stop requested.");
 }
+
+pairButton.addEventListener("click", () => {
+  pairRunner().catch((error) => {
+    setStatus("Pairing failed", "error");
+    pairState.textContent = "Pairing failed. Check that the code has not expired, then try again.";
+    appendLog(`Could not pair Runner: ${error.message || error}`);
+  });
+});
 
 saveTokenButton.addEventListener("click", () => {
   const token = form.elements.hubToken.value.trim();

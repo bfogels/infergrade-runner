@@ -32,6 +32,20 @@
             <input name="apiUrl" type="url" value="http://127.0.0.1:8000" autocomplete="url" />
           </label>
           <label>
+            <span>Pairing code</span>
+            <input name="pairCode" type="text" autocomplete="off" placeholder="igrp_..." />
+          </label>
+          <label>
+            <span>Runner label</span>
+            <input name="runnerLabel" type="text" autocomplete="organization-title" placeholder="This computer" />
+          </label>
+          <div class="button-row">
+            <button type="button" data-pair-runner>Pair and start</button>
+          </div>
+          <p class="hint" data-pair-state>Click Pair Local Runner in the Hub, then paste the one-time code here.</p>
+          <details class="advanced-token-panel">
+            <summary>Advanced token fallback</summary>
+          <label>
             <span>Runner token</span>
             <input name="hubToken" type="password" autocomplete="off" placeholder="Paste a paired runner token" />
           </label>
@@ -40,6 +54,7 @@
             <button type="button" data-clear-token>Clear</button>
           </div>
           <p class="hint" data-token-state>Token storage is local prototype storage.</p>
+          </details>
         </form>
 
         <section class="panel">

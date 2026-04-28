@@ -29,6 +29,45 @@
           "sidecar": true
         }
       ]
+    },
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/infergrade-sidecar",
+          "sidecar": true,
+          "args": [
+            "pair",
+            "--api-url",
+            {
+              "validator": "https?://\\S+"
+            },
+            "--pair-code",
+            {
+              "validator": "igrp_\\S+"
+            }
+          ]
+        },
+        {
+          "name": "binaries/infergrade-sidecar",
+          "sidecar": true,
+          "args": [
+            "pair",
+            "--api-url",
+            {
+              "validator": "https?://\\S+"
+            },
+            "--pair-code",
+            {
+              "validator": "igrp_\\S+"
+            },
+            "--label",
+            {
+              "validator": ".{1,120}"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

@@ -7,7 +7,7 @@ The app is intentionally small:
 - Tauri 2 desktop shell
 - vanilla JavaScript frontend
 - sidecar wrapper that launches the existing `infergrade` CLI
-- process controls for start, stop, status, and log streaming
+- pair-code redemption through the sidecar, then process controls for start, stop, status, and log streaming
 - OS-backed token storage through the Rust `keyring` crate
 
 The Hub should remain the model, benchmark, recommendation, and result surface. This app should stay focused on pairing, readiness, Runner lifecycle, logs, and recovery.
@@ -63,19 +63,26 @@ Sprint 73 should continue by running `npm run tauri dev`, exercising the Keychai
 
 ## Sidecar Contract
 
-The UI starts the sidecar with:
+The primary UI redeems the one-time Hub code with:
+
+```text
+infergrade pair --api-url <hub url> --pair-code <pairing code> --label <runner label>
+```
+
+On success, the CLI saves the durable runner profile and the app immediately starts:
 
 ```text
 infergrade start --api-url <hub url>
 ```
 
-If a token is present, the prototype passes it through `INFERGRADE_HUB_TOKEN`. That keeps token handling outside command arguments; environment variables should still be treated as process-local secrets.
+The app does not log the raw `pair` JSON because that response contains the durable runner token. The advanced token fallback can still pass `INFERGRADE_HUB_TOKEN` through the process environment; environment variables should still be treated as process-local secrets.
 
 ## Next Checks
 
 1. Install Rust and platform prerequisites.
 2. Run `npm run tauri dev`.
 3. Confirm start/stop leaves no orphaned Runner processes.
-4. Exercise secure storage in a live Tauri window.
-5. Build a macOS package.
-6. Attempt one Windows or Linux build artifact.
+4. Redeem a real Hub pairing code, confirm the app starts listening, and confirm Hub readiness updates.
+5. Exercise secure storage in a live Tauri window.
+6. Build a macOS package.
+7. Attempt one Windows or Linux build artifact.
