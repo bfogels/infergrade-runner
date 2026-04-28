@@ -9,9 +9,12 @@ from unittest import mock
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.artifacts import (
+    artifact_cache_status,
     artifact_to_download_url,
     canonicalize_hf_artifact_reference,
     compute_file_sha256,
+    ensure_min_free_space,
+    prune_partial_artifacts,
     resolve_quant_artifact,
 )
 from infergrade.models import RunRequest
@@ -178,6 +181,113 @@ class ArtifactResolutionTests(unittest.TestCase):
         resolved = resolve_quant_artifact(request)
         self.assertTrue(os.path.isfile(resolved.resolved_path))
         self.assertEqual(resolved.sha256, compute_file_sha256(resolved.resolved_path))
+
+    def test_artifact_cache_status_counts_completed_and_partial_files(self):
+        os.makedirs(self.cache_dir, exist_ok=True)
+        completed_path = os.path.join(self.cache_dir, "abc-model.gguf")
+        partial_path = os.path.join(self.cache_dir, "infergrade-artifact-old.tmp")
+        with open(completed_path, "wb") as handle:
+            handle.write(b"complete")
+        with open(partial_path, "wb") as handle:
+            handle.write(b"partial-download")
+
+        with mock.patch.dict(os.environ, {"INFERGRADE_MIN_ARTIFACT_CACHE_FREE_GB": "0"}, clear=False):
+            status = artifact_cache_status(self.cache_dir)
+
+        self.assertEqual(status["artifact_count"], 1)
+        self.assertEqual(status["artifact_bytes"], len(b"complete"))
+        self.assertEqual(status["partial_count"], 1)
+        self.assertEqual(status["partial_bytes"], len(b"partial-download"))
+        self.assertEqual(status["total_count"], 2)
+
+    def test_prune_partial_artifacts_leaves_completed_artifacts(self):
+        os.makedirs(self.cache_dir, exist_ok=True)
+        completed_path = os.path.join(self.cache_dir, "abc-model.gguf")
+        partial_path = os.path.join(self.cache_dir, "infergrade-artifact-old.tmp")
+        with open(completed_path, "wb") as handle:
+            handle.write(b"complete")
+        with open(partial_path, "wb") as handle:
+            handle.write(b"partial")
+        stale_time = 1000000000
+        os.utime(partial_path, (stale_time, stale_time))
+
+        dry_run = prune_partial_artifacts(self.cache_dir, dry_run=True)
+        self.assertEqual(dry_run["removed_count"], 1)
+        self.assertTrue(os.path.exists(partial_path))
+
+        pruned = prune_partial_artifacts(self.cache_dir)
+        self.assertEqual(pruned["removed_count"], 1)
+        self.assertTrue(os.path.exists(completed_path))
+        self.assertFalse(os.path.exists(partial_path))
+
+    def test_prune_partial_artifacts_skips_fresh_partials_by_default(self):
+        os.makedirs(self.cache_dir, exist_ok=True)
+        partial_path = os.path.join(self.cache_dir, "infergrade-artifact-active.tmp")
+        with open(partial_path, "wb") as handle:
+            handle.write(b"active")
+
+        pruned = prune_partial_artifacts(self.cache_dir)
+
+        self.assertEqual(pruned["removed_count"], 0)
+        self.assertTrue(os.path.exists(partial_path))
+
+    def test_prune_partial_artifacts_allows_explicit_zero_age(self):
+        os.makedirs(self.cache_dir, exist_ok=True)
+        partial_path = os.path.join(self.cache_dir, "infergrade-artifact-active.tmp")
+        with open(partial_path, "wb") as handle:
+            handle.write(b"active")
+
+        pruned = prune_partial_artifacts(self.cache_dir, min_age_seconds=0)
+
+        self.assertEqual(pruned["removed_count"], 1)
+        self.assertFalse(os.path.exists(partial_path))
+
+    def test_ensure_min_free_space_raises_before_download(self):
+        usage = mock.Mock(free=1024)
+        with mock.patch("infergrade.artifacts.shutil.disk_usage", return_value=usage):
+            with self.assertRaises(RuntimeError) as caught:
+                ensure_min_free_space(self.cache_dir, 2048, "artifact cache")
+        self.assertIn("insufficient free disk space", str(caught.exception))
+
+    @mock.patch("infergrade.artifacts._download_remote_artifact")
+    def test_remote_artifact_resolution_checks_free_space_before_download(self, download_mock):
+        usage = mock.Mock(free=1024)
+        request = RunRequest(
+            model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+            quant_artifact_cache_dir=self.cache_dir,
+        )
+        with mock.patch.dict(os.environ, {"INFERGRADE_MIN_ARTIFACT_CACHE_FREE_GB": "1"}, clear=False):
+            with mock.patch("infergrade.artifacts.shutil.disk_usage", return_value=usage):
+                with self.assertRaises(RuntimeError):
+                    resolve_quant_artifact(request)
+        download_mock.assert_not_called()
+
+    @mock.patch("infergrade.artifacts._download_remote_artifact")
+    def test_remote_artifact_cache_hit_does_not_require_free_space_floor(self, download_mock):
+        artifact_uri = "hf://TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+        filename = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+        cached_path = os.path.join(self.cache_dir, "28274df44091d453-%s" % filename)
+        os.makedirs(self.cache_dir, exist_ok=True)
+        with open(cached_path, "wb") as handle:
+            handle.write(b"cached-gguf")
+        request = RunRequest(
+            model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact=artifact_uri,
+            quant_artifact_filename=filename,
+            quant_artifact_cache_dir=self.cache_dir,
+        )
+        usage = mock.Mock(free=1024)
+        with mock.patch.dict(os.environ, {"INFERGRADE_MIN_ARTIFACT_CACHE_FREE_GB": "1"}, clear=False):
+            with mock.patch("infergrade.artifacts.shutil.disk_usage", return_value=usage):
+                resolved = resolve_quant_artifact(request)
+        self.assertTrue(resolved.cache_hit)
+        self.assertEqual(resolved.resolved_path, cached_path)
+        download_mock.assert_not_called()
 
 
 class ArtifactSecurityHardeningTests(unittest.TestCase):

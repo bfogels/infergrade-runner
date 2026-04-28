@@ -9,7 +9,12 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from infergrade.adapters.llama_cpp import LlamaCppAdapter
-from infergrade.artifacts import artifact_to_download_url, default_artifact_cache_dir
+from infergrade.artifacts import (
+    artifact_cache_status,
+    artifact_to_download_url,
+    default_artifact_cache_dir,
+    min_artifact_cache_free_bytes,
+)
 from infergrade.capabilities import capability_images_for_request
 from infergrade.contracts import load_contract_manifest
 from infergrade.environment import capture_environment
@@ -26,6 +31,7 @@ DEFAULT_LOCAL_CAPABILITY_IMAGES = (
     {"benchmark_id": "ifeval", "display_name": "IFEval", "image": "infergrade-ifeval:local"},
     {"benchmark_id": "evalplus", "display_name": "EvalPlus", "image": "infergrade-evalplus:local"},
 )
+DEFAULT_MIN_OUTPUT_FREE_GB = 1.0
 
 
 def run_doctor(request: Optional[RunRequest] = None, api_url: Optional[str] = None) -> Dict[str, Any]:
@@ -548,7 +554,14 @@ def _local_image_check(image_info: Dict[str, Any], warning: bool = False) -> Dic
 
 def _cache_dir_check(request: RunRequest) -> Dict[str, Any]:
     path = os.path.expanduser(request.quant_artifact_cache_dir or default_artifact_cache_dir())
-    return _writable_directory_check("artifact_cache_dir", path, "Artifact cache directory is writable.")
+    status = artifact_cache_status(path)
+    return _writable_directory_check(
+        "artifact_cache_dir",
+        path,
+        "Artifact cache directory is writable and has enough free space.",
+        status,
+        min_free_bytes=min_artifact_cache_free_bytes(),
+    )
 
 
 def _artifact_reference_check(request: RunRequest) -> Dict[str, Any]:
@@ -596,10 +609,22 @@ def _local_artifact_check(request: RunRequest) -> Dict[str, Any]:
 def _output_dir_check(request: RunRequest) -> Dict[str, Any]:
     output_dir = os.path.abspath(request.output_dir or os.path.join("runs", request.run_config_id or "infergrade_run"))
     parent = os.path.dirname(output_dir) or "."
-    return _writable_directory_check("output_dir", parent, "Output directory parent is writable.", {"output_dir": output_dir})
+    return _writable_directory_check(
+        "output_dir",
+        parent,
+        "Output directory parent is writable and has enough free space.",
+        {"output_dir": output_dir},
+        min_free_bytes=_min_output_free_bytes(),
+    )
 
 
-def _writable_directory_check(check_id: str, path: str, success_message: str, extra_details: Dict[str, Any] = None) -> Dict[str, Any]:
+def _writable_directory_check(
+    check_id: str,
+    path: str,
+    success_message: str,
+    extra_details: Dict[str, Any] = None,
+    min_free_bytes: int = 0,
+) -> Dict[str, Any]:
     details = dict(extra_details or {})
     expanded = os.path.abspath(os.path.expanduser(path))
     details["path"] = expanded
@@ -613,8 +638,30 @@ def _writable_directory_check(check_id: str, path: str, success_message: str, ex
         details["error"] = str(exc)
         return _check(check_id, "error", "Path is not writable.", details)
     free_bytes = shutil.disk_usage(expanded).free
+    details["free_bytes"] = free_bytes
     details["free_gb"] = round(free_bytes / float(1024 ** 3), 2)
+    details["min_required_free_bytes"] = min_free_bytes
+    details["min_required_free_gb"] = round(min_free_bytes / float(1024 ** 3), 2)
+    if min_free_bytes > 0 and free_bytes < min_free_bytes:
+        return _check(
+            check_id,
+            "error",
+            "Insufficient free disk space.",
+            details,
+        )
     return _check(check_id, "ok", success_message, details)
+
+
+def _min_output_free_bytes() -> int:
+    raw_value = os.environ.get("INFERGRADE_MIN_OUTPUT_FREE_GB")
+    if raw_value is None or str(raw_value).strip() == "":
+        gb_value = DEFAULT_MIN_OUTPUT_FREE_GB
+    else:
+        try:
+            gb_value = float(str(raw_value).strip())
+        except ValueError:
+            gb_value = DEFAULT_MIN_OUTPUT_FREE_GB
+    return max(0, int(gb_value * (1024 ** 3)))
 
 
 def _uses_remote_artifact(request: RunRequest) -> bool:
