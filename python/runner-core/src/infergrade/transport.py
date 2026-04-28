@@ -202,7 +202,7 @@ def redeem_runner_pairing(
     environment: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """Redeem a one-time runner pairing code for a long-lived runner token."""
-    _, payload = _json_request(
+    status, payload = _json_request(
         api_url,
         "/v1/runner-pairings/redeem",
         method="POST",
@@ -214,7 +214,35 @@ def redeem_runner_pairing(
             "environment": environment or {},
         },
     )
+    if status >= 400:
+        detail = _api_error_detail(payload)
+        code = _api_error_code(payload)
+        code_text = " (%s)" % code if code else ""
+        raise RuntimeError("runner pairing failed%s: HTTP %d: %s" % (code_text, status, detail or "no detail"))
     return payload
+
+
+def _api_error_detail(payload: Dict[str, Any]) -> str:
+    """Extract a useful API error message from common Hub error envelopes."""
+    detail = payload.get("detail")
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, list):
+        return "; ".join(str(item.get("msg") or item.get("message") or item) if isinstance(item, dict) else str(item) for item in detail)
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("detail") or error)
+    if isinstance(error, str):
+        return error
+    return ""
+
+
+def _api_error_code(payload: Dict[str, Any]) -> str:
+    """Extract a stable API error code from common Hub error envelopes."""
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return str(error.get("code") or "").strip()
+    return ""
 
 
 def heartbeat_run_job(
