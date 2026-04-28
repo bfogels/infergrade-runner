@@ -354,7 +354,7 @@ class CliTests(unittest.TestCase):
                 )
 
         self.assertIn("https://", str(caught.exception))
-        self.assertIn("127.0.0.1", str(caught.exception))
+        self.assertIn("loopback", str(caught.exception))
         redeem_mock.assert_not_called()
 
     def test_pair_command_surfaces_hub_pairing_errors(self):

@@ -41,13 +41,17 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(require_secure_api_url("https://hub.infergrade.dev"), "https://hub.infergrade.dev")
         self.assertEqual(require_secure_api_url("http://localhost:8000"), "http://localhost:8000")
         self.assertEqual(require_secure_api_url("http://127.0.0.1:8000"), "http://127.0.0.1:8000")
+        self.assertEqual(require_secure_api_url("http://127.1.2.3:8000"), "http://127.1.2.3:8000")
+        self.assertEqual(require_secure_api_url("http://[::1]:8000"), "http://[::1]:8000")
 
     def test_secure_api_url_refuses_remote_http(self):
-        with self.assertRaises(InsecureApiUrlError) as caught:
-            require_secure_api_url("http://hub.example.com")
+        for api_url in ("http://hub.example.com", "http://192.168.1.25:8000", "http://localhost.example.com:8000"):
+            with self.subTest(api_url=api_url):
+                with self.assertRaises(InsecureApiUrlError) as caught:
+                    require_secure_api_url(api_url)
 
-        self.assertIn("https://", str(caught.exception))
-        self.assertIn("localhost", str(caught.exception))
+                self.assertIn("https://", str(caught.exception))
+                self.assertIn("localhost", str(caught.exception))
 
     def test_json_request_refuses_remote_http_before_urlopen(self):
         with mock.patch("infergrade.transport.urllib_request.urlopen") as urlopen_mock:

@@ -1,5 +1,6 @@
 """HTTP transport helpers for talking to a InferGrade API."""
 
+import ipaddress
 import json
 import os
 from typing import Any, Dict, Optional, Tuple
@@ -13,11 +14,18 @@ from infergrade.run_configs import build_run_config_document
 from infergrade.utils import env_value, read_json
 
 
-_LOCAL_HTTP_API_HOSTS = {"localhost", "127.0.0.1"}
-
-
 class InsecureApiUrlError(ValueError):
     """Raised when a Hub API URL would send credentials over cleartext."""
+
+
+def _is_local_http_api_host(host: str) -> bool:
+    """Return true when cleartext HTTP is limited to the local machine."""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def require_secure_api_url(api_url: str) -> str:
@@ -28,11 +36,11 @@ def require_secure_api_url(api_url: str) -> str:
     host = (parsed.hostname or "").lower()
     if scheme == "https" and host:
         return resolved
-    if scheme == "http" and host in _LOCAL_HTTP_API_HOSTS:
+    if scheme == "http" and _is_local_http_api_host(host):
         return resolved
     raise InsecureApiUrlError(
         "Refusing Hub API URL %r. Use https:// for hosted Hub URLs; "
-        "http:// is allowed only for localhost or 127.0.0.1." % resolved
+        "http:// is allowed only for localhost or loopback IP addresses." % resolved
     )
 
 

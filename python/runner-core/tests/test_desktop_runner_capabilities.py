@@ -29,7 +29,10 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
             self.assertRegex("https://hub.example.com", pattern)
             self.assertRegex("http://localhost:8000", pattern)
             self.assertRegex("http://127.0.0.1:8000", pattern)
+            self.assertRegex("http://127.1.2.3:8000", pattern)
+            self.assertRegex("http://[::1]:8000", pattern)
             self.assertNotRegex("http://hub.example.com", pattern)
+            self.assertNotRegex("http://192.168.1.25:8000", pattern)
             self.assertNotRegex("http://localhost.example.com", pattern)
 
 
