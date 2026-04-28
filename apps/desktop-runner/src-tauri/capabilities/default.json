@@ -15,7 +15,7 @@
             "start",
             "--api-url",
             {
-              "validator": "https?://\\S+"
+              "validator": "^(?:https://\\S+|http://(?:localhost|127(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}|\\[::1\\])(?::\\d+)?(?:/\\S*)?)$"
             }
           ]
         }
@@ -40,7 +40,7 @@
             "pair",
             "--api-url",
             {
-              "validator": "https?://\\S+"
+              "validator": "^(?:https://\\S+|http://(?:localhost|127(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}|\\[::1\\])(?::\\d+)?(?:/\\S*)?)$"
             },
             "--pair-code",
             {
@@ -55,7 +55,7 @@
             "pair",
             "--api-url",
             {
-              "validator": "https?://\\S+"
+              "validator": "^(?:https://\\S+|http://(?:localhost|127(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}|\\[::1\\])(?::\\d+)?(?:/\\S*)?)$"
             },
             "--pair-code",
             {

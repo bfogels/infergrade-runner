@@ -32,10 +32,12 @@ from infergrade.runtimes import install_llama_cpp_runtime, runtime_manifest, sel
 from infergrade.support import build_support_export, write_support_export
 from infergrade.templates import render_run_config_template, render_run_request_template
 from infergrade.transport import (
+    InsecureApiUrlError,
     fetch_run_config,
     list_run_configs,
     publish_run_config,
     redeem_runner_pairing,
+    require_secure_api_url,
     upload_bundle,
 )
 from infergrade.utils import write_text
@@ -352,10 +354,11 @@ def _request_for_doctor(args: argparse.Namespace):
     if args.run_config_id:
         if not args.api_url:
             raise SystemExit("--api-url is required when --run-config-id is provided to doctor.")
+        api_url = _require_secure_hub_api_url(args.api_url)
         try:
-            payload = fetch_run_config(args.api_url, args.run_config_id, api_token=args.api_token)
-        except URLError as exc:
-            raise SystemExit("Failed to fetch run config %s from %s: %s" % (args.run_config_id, args.api_url, exc))
+            payload = fetch_run_config(api_url, args.run_config_id, api_token=args.api_token)
+        except (URLError, InsecureApiUrlError) as exc:
+            raise SystemExit("Failed to fetch run config %s from %s: %s" % (args.run_config_id, api_url, exc))
         return request_from_run_config_document(payload, simulate=False)
     if args.request_file:
         return request_from_file(args.request_file, simulate=False)
@@ -374,8 +377,16 @@ def _require_runner_api_url(api_url: Optional[str]) -> str:
     """Resolve the API URL for paired-runner commands or stop with a helpful error."""
     resolved = resolve_runner_api_url(api_url)
     if resolved:
-        return resolved
+        return _require_secure_hub_api_url(resolved)
     raise SystemExit("No API URL provided and no paired runner profile found. Pass --api-url or run `infergrade pair` first.")
+
+
+def _require_secure_hub_api_url(api_url: str) -> str:
+    """Resolve CLI Hub API URLs through the runner transport security policy."""
+    try:
+        return require_secure_api_url(api_url)
+    except InsecureApiUrlError as exc:
+        raise SystemExit(str(exc))
 
 
 def _resolve_local_execution_mode(execution_mode: Optional[str], allow_cloud: bool = False) -> str:
@@ -421,6 +432,8 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "doctor":
+        if args.api_url:
+            args.api_url = _require_secure_hub_api_url(args.api_url)
         report = run_doctor(request=_request_for_doctor(args), api_url=args.api_url)
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0 if report["ok"] else 1
@@ -460,10 +473,11 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "upload-bundle":
+        api_url = _require_secure_hub_api_url(args.api_url)
         try:
-            payload = upload_bundle(args.path, args.api_url, api_token=args.api_token)
-        except URLError as exc:
-            raise SystemExit("Failed to upload bundle to %s: %s" % (args.api_url, exc))
+            payload = upload_bundle(args.path, api_url, api_token=args.api_token)
+        except (URLError, InsecureApiUrlError) as exc:
+            raise SystemExit("Failed to upload bundle to %s: %s" % (api_url, exc))
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
@@ -511,19 +525,20 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "pair":
+        api_url = _require_secure_hub_api_url(args.api_url)
         execution_mode = preferred_local_execution_mode()
         environment = capture_environment(execution_mode)
         try:
             payload = redeem_runner_pairing(
-                api_url=args.api_url,
+                api_url=api_url,
                 pair_code=args.pair_code,
                 label=args.label,
                 hostname=args.hostname or socket.gethostname(),
                 execution_mode=execution_mode,
                 environment=environment,
             )
-        except (URLError, RuntimeError) as exc:
-            raise SystemExit("Failed to redeem runner pairing code against %s: %s" % (args.api_url, exc))
+        except (URLError, RuntimeError, InsecureApiUrlError) as exc:
+            raise SystemExit("Failed to redeem runner pairing code against %s: %s" % (api_url, exc))
         profile = dict(payload.get("runner_profile") or {})
         if not profile:
             raise SystemExit("Hub pairing response did not include a runner profile.")
@@ -565,18 +580,20 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "list-run-configs":
+        api_url = _require_secure_hub_api_url(args.api_url)
         try:
-            payload = list_run_configs(args.api_url, api_token=args.api_token)
-        except URLError as exc:
-            raise SystemExit("Failed to list run configs from %s: %s" % (args.api_url, exc))
+            payload = list_run_configs(api_url, api_token=args.api_token)
+        except (URLError, InsecureApiUrlError) as exc:
+            raise SystemExit("Failed to list run configs from %s: %s" % (api_url, exc))
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
     if args.command == "fetch-run-config":
+        api_url = _require_secure_hub_api_url(args.api_url)
         try:
-            payload = fetch_run_config(args.api_url, args.run_config_id, api_token=args.api_token)
-        except URLError as exc:
-            raise SystemExit("Failed to fetch run config %s from %s: %s" % (args.run_config_id, args.api_url, exc))
+            payload = fetch_run_config(api_url, args.run_config_id, api_token=args.api_token)
+        except (URLError, InsecureApiUrlError) as exc:
+            raise SystemExit("Failed to fetch run config %s from %s: %s" % (args.run_config_id, api_url, exc))
         text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
         if args.output:
             write_text(args.output, text)
@@ -585,6 +602,7 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "publish-run-config":
+        api_url = _require_secure_hub_api_url(args.api_url)
         request = _request_from_args(args)
         request_payload = {
             "spec_version": "0.1-draft",
@@ -638,23 +656,24 @@ def main(argv: Optional[list] = None) -> int:
             request_payload["ontology_hints"] = request.ontology_hints
         try:
             payload = publish_run_config(
-                args.api_url,
+                api_url,
                 request_payload=request_payload,
                 name=args.name,
                 description=args.description,
                 created_by=args.created_by,
                 api_token=args.api_token,
             )
-        except URLError as exc:
-            raise SystemExit("Failed to publish run config to %s: %s" % (args.api_url, exc))
+        except (URLError, InsecureApiUrlError) as exc:
+            raise SystemExit("Failed to publish run config to %s: %s" % (api_url, exc))
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
     if args.command == "run-config":
+        api_url = _require_secure_hub_api_url(args.api_url)
         try:
-            payload = fetch_run_config(args.api_url, args.run_config_id, api_token=args.api_token)
-        except URLError as exc:
-            raise SystemExit("Failed to fetch run config %s from %s: %s" % (args.run_config_id, args.api_url, exc))
+            payload = fetch_run_config(api_url, args.run_config_id, api_token=args.api_token)
+        except (URLError, InsecureApiUrlError) as exc:
+            raise SystemExit("Failed to fetch run config %s from %s: %s" % (args.run_config_id, api_url, exc))
         request = request_from_run_config_document(payload, simulate=not args.real_run)
         if args.output:
             request.output_dir = args.output

@@ -1,5 +1,6 @@
 """HTTP transport helpers for talking to a InferGrade API."""
 
+import ipaddress
 import json
 import os
 from typing import Any, Dict, Optional, Tuple
@@ -11,6 +12,36 @@ from infergrade.analysis import summarize_bundle
 from infergrade.pairing import load_runner_profile
 from infergrade.run_configs import build_run_config_document
 from infergrade.utils import env_value, read_json
+
+
+class InsecureApiUrlError(ValueError):
+    """Raised when a Hub API URL would send credentials over cleartext."""
+
+
+def _is_local_http_api_host(host: str) -> bool:
+    """Return true when cleartext HTTP is limited to the local machine."""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def require_secure_api_url(api_url: str) -> str:
+    """Return a normalized API URL or refuse cleartext non-local Hub URLs."""
+    resolved = str(api_url or "").strip()
+    parsed = urllib_parse.urlsplit(resolved)
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    if scheme == "https" and host:
+        return resolved
+    if scheme == "http" and _is_local_http_api_host(host):
+        return resolved
+    raise InsecureApiUrlError(
+        "Refusing Hub API URL %r. Use https:// for hosted Hub URLs; "
+        "http:// is allowed only for localhost or loopback IP addresses." % resolved
+    )
 
 
 def _resolve_api_token(api_token: str = None) -> str:
@@ -52,7 +83,7 @@ def _json_request(
     idempotency_key: str = None,
 ) -> Tuple[int, Dict[str, Any]]:
     """Send a JSON request to the InferGrade API and return status plus body."""
-    url = api_url.rstrip("/") + path
+    url = require_secure_api_url(api_url).rstrip("/") + path
     if params:
         query = urllib_parse.urlencode({key: value for key, value in params.items() if value is not None})
         if query:
