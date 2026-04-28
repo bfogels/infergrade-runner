@@ -361,6 +361,26 @@ class WorkerTests(unittest.TestCase):
         self.assertIn("could not write", failure["message"])
         self.assertIn("raw_error", failure["details"])
 
+    def test_classify_doctor_cache_low_disk_failure_uses_disk_error_code(self):
+        failure = _classify_worker_failure(
+            RuntimeError("Preflight failed."),
+            doctor_report={
+                "ok": False,
+                "checks": [
+                    {
+                        "id": "artifact_cache_dir",
+                        "status": "error",
+                        "message": "Insufficient free disk space.",
+                        "details": {"path": "/tmp/cache"},
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(failure["error_code"], "insufficient_disk")
+        self.assertIn("artifact cache", failure["message"])
+        self.assertIn("failed_check", failure["details"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -426,12 +426,21 @@ def _classify_doctor_failure(report: Dict[str, Any]) -> Dict[str, Any]:
             ],
             "details": {"failed_check": primary},
         }
-    if check_id in {"quant_artifact", "artifact_cache_dir"}:
+    if check_id == "artifact_cache_dir":
+        return {
+            "error_code": "insufficient_disk",
+            "message": "Preflight found an unwritable or full artifact cache path.",
+            "recovery": [
+                {"label": "Free space or choose a different cache path", "detail": "Artifact downloads need a writable cache with enough free disk before retrying."},
+            ],
+            "details": {"failed_check": primary},
+        }
+    if check_id == "quant_artifact":
         return {
             "error_code": "artifact_download_failed",
-            "message": "Preflight could not prepare the requested artifact or cache path.",
+            "message": "Preflight could not prepare the requested artifact.",
             "recovery": [
-                {"label": "Fix the artifact reference or cache path", "detail": "Check the artifact URI, local file path, and Hugging Face access before retrying."},
+                {"label": "Fix the artifact reference", "detail": "Check the artifact URI, local file path, and Hugging Face access before retrying."},
             ],
             "details": {"failed_check": primary},
         }

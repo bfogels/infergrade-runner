@@ -56,10 +56,20 @@ class CliTests(unittest.TestCase):
             return_value={"cache_dir": "/tmp/cache", "dry_run": True, "removed_count": 1},
         ) as prune_mock:
             with redirect_stdout(output):
-                exit_code = main(["cache", "--artifact-cache-dir", "/tmp/cache", "--prune-partials", "--dry-run"])
+                exit_code = main(
+                    [
+                        "cache",
+                        "--artifact-cache-dir",
+                        "/tmp/cache",
+                        "--prune-partials",
+                        "--dry-run",
+                        "--partial-min-age-seconds",
+                        "0",
+                    ]
+                )
 
         self.assertEqual(exit_code, 0)
-        prune_mock.assert_called_once_with(cache_dir="/tmp/cache", dry_run=True)
+        prune_mock.assert_called_once_with(cache_dir="/tmp/cache", dry_run=True, min_age_seconds=0)
         self.assertIn('"removed_count": 1', output.getvalue())
 
     def test_install_runtime_lists_manifest(self):

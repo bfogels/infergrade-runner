@@ -208,6 +208,8 @@ class ArtifactResolutionTests(unittest.TestCase):
             handle.write(b"complete")
         with open(partial_path, "wb") as handle:
             handle.write(b"partial")
+        stale_time = 1000000000
+        os.utime(partial_path, (stale_time, stale_time))
 
         dry_run = prune_partial_artifacts(self.cache_dir, dry_run=True)
         self.assertEqual(dry_run["removed_count"], 1)
@@ -216,6 +218,28 @@ class ArtifactResolutionTests(unittest.TestCase):
         pruned = prune_partial_artifacts(self.cache_dir)
         self.assertEqual(pruned["removed_count"], 1)
         self.assertTrue(os.path.exists(completed_path))
+        self.assertFalse(os.path.exists(partial_path))
+
+    def test_prune_partial_artifacts_skips_fresh_partials_by_default(self):
+        os.makedirs(self.cache_dir, exist_ok=True)
+        partial_path = os.path.join(self.cache_dir, "infergrade-artifact-active.tmp")
+        with open(partial_path, "wb") as handle:
+            handle.write(b"active")
+
+        pruned = prune_partial_artifacts(self.cache_dir)
+
+        self.assertEqual(pruned["removed_count"], 0)
+        self.assertTrue(os.path.exists(partial_path))
+
+    def test_prune_partial_artifacts_allows_explicit_zero_age(self):
+        os.makedirs(self.cache_dir, exist_ok=True)
+        partial_path = os.path.join(self.cache_dir, "infergrade-artifact-active.tmp")
+        with open(partial_path, "wb") as handle:
+            handle.write(b"active")
+
+        pruned = prune_partial_artifacts(self.cache_dir, min_age_seconds=0)
+
+        self.assertEqual(pruned["removed_count"], 1)
         self.assertFalse(os.path.exists(partial_path))
 
     def test_ensure_min_free_space_raises_before_download(self):

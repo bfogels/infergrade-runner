@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 from urllib import error as urllib_error
@@ -17,6 +18,7 @@ from infergrade.utils import ensure_dir, stable_hash
 
 
 DEFAULT_MIN_ARTIFACT_CACHE_FREE_GB = 5.0
+DEFAULT_PARTIAL_ARTIFACT_MIN_AGE_SECONDS = 3600
 PARTIAL_ARTIFACT_PREFIX = "infergrade-artifact-"
 PARTIAL_ARTIFACT_SUFFIX = ".tmp"
 
@@ -172,10 +174,19 @@ def artifact_cache_status(cache_dir: Optional[str] = None) -> Dict[str, object]:
     }
 
 
-def prune_partial_artifacts(cache_dir: Optional[str] = None, dry_run: bool = False) -> Dict[str, object]:
-    """Remove incomplete artifact temp files from the cache, leaving completed artifacts intact."""
+def prune_partial_artifacts(
+    cache_dir: Optional[str] = None,
+    dry_run: bool = False,
+    min_age_seconds: int = DEFAULT_PARTIAL_ARTIFACT_MIN_AGE_SECONDS,
+) -> Dict[str, object]:
+    """Remove stale incomplete temp files from the cache, leaving active downloads intact."""
     path = _normalized_cache_dir(cache_dir or default_artifact_cache_dir())
-    partial_files = [item for item in _artifact_cache_files(path) if _is_partial_artifact_path(item["path"])]
+    now = time.time()
+    partial_files = [
+        item
+        for item in _artifact_cache_files(path)
+        if _is_partial_artifact_path(item["path"]) and _is_stale_partial_artifact(item, now, min_age_seconds)
+    ]
     removed: List[Dict[str, object]] = []
     for item in partial_files:
         if not dry_run:
@@ -187,6 +198,7 @@ def prune_partial_artifacts(cache_dir: Optional[str] = None, dry_run: bool = Fal
     return {
         "cache_dir": path,
         "dry_run": dry_run,
+        "min_age_seconds": max(0, int(min_age_seconds)),
         "removed_count": len(removed),
         "removed_bytes": sum(int(item["size_bytes"]) for item in removed),
         "removed": removed,
@@ -253,10 +265,20 @@ def _artifact_cache_files(path: str) -> List[Dict[str, object]]:
             continue
         try:
             size_bytes = os.path.getsize(file_path)
+            mtime = os.path.getmtime(file_path)
         except OSError:
             continue
-        files.append({"path": file_path, "name": name, "size_bytes": size_bytes})
+        files.append({"path": file_path, "name": name, "size_bytes": size_bytes, "mtime": mtime})
     return files
+
+
+def _is_stale_partial_artifact(item: Dict[str, object], now: float, min_age_seconds: int) -> bool:
+    """Return whether a temp artifact is old enough to treat as interrupted."""
+    try:
+        age_seconds = now - float(item.get("mtime") or now)
+    except (TypeError, ValueError):
+        age_seconds = 0
+    return age_seconds >= max(0, int(min_age_seconds))
 
 
 def _is_partial_artifact_path(path: str) -> bool:

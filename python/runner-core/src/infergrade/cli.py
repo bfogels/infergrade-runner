@@ -158,6 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     cache_parser.add_argument("--status", action="store_true", help="Print artifact cache size and free-space details.")
     cache_parser.add_argument("--prune-partials", action="store_true", help="Remove interrupted artifact downloads.")
     cache_parser.add_argument("--dry-run", action="store_true", help="Report what would be removed without deleting files.")
+    cache_parser.add_argument("--partial-min-age-seconds", type=int, default=3600, help="Only prune partial downloads at least this old.")
 
     runtime_parser = subparsers.add_parser("install-runtime", help="Inspect, install, or select an explicit managed runtime.")
     runtime_parser.add_argument("--runtime", choices=("llama.cpp",), default="llama.cpp")
@@ -421,7 +422,11 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.command == "cache":
         if args.prune_partials:
-            payload = prune_partial_artifacts(cache_dir=args.artifact_cache_dir, dry_run=args.dry_run)
+            payload = prune_partial_artifacts(
+                cache_dir=args.artifact_cache_dir,
+                dry_run=args.dry_run,
+                min_age_seconds=args.partial_min_age_seconds,
+            )
         else:
             payload = artifact_cache_status(cache_dir=args.artifact_cache_dir)
         print(json.dumps(payload, indent=2, sort_keys=True))
