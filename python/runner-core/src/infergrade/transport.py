@@ -3,12 +3,11 @@
 import ipaddress
 import json
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
-from infergrade.analysis import summarize_bundle
 from infergrade.pairing import load_runner_profile
 from infergrade.run_configs import build_run_config_document
 from infergrade.utils import env_value, read_json
@@ -114,22 +113,125 @@ def bundle_payload(bundle_dir: str) -> Dict[str, Any]:
     manifest = read_json(os.path.join(bundle_dir, "manifest.json"))
     validation_path = os.path.join(bundle_dir, "validation.json")
     summary_path = os.path.join(bundle_dir, "summary.json")
-    results_dir = os.path.join(bundle_dir, "results")
+    validation = read_json(validation_path) if os.path.exists(validation_path) else None
+    summary = read_json(summary_path) if os.path.exists(summary_path) else None
     results = []
-    for filename in sorted(os.listdir(results_dir)):
-        if filename.endswith(".json"):
-            results.append(read_json(os.path.join(results_dir, filename)))
+    for relative_path in _manifest_result_paths(manifest, summary):
+        results.append(read_json(os.path.join(bundle_dir, relative_path)))
     payload = {
         "manifest": manifest,
         "results": results,
     }
-    if os.path.exists(validation_path):
-        payload["validation"] = read_json(validation_path)
-    if os.path.exists(summary_path):
-        payload["summary"] = read_json(summary_path)
-    else:
-        payload["summary"] = summarize_bundle(bundle_dir)
+    if validation is not None:
+        payload["validation"] = validation
+    payload["summary"] = summary or _summarize_payload_results(manifest, validation, results)
     return payload
+
+
+def _manifest_result_paths(manifest: Dict[str, Any], summary: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Return manifest-declared result files, rejecting unsafe paths."""
+    files = manifest.get("files") or {}
+    result_paths = files.get("results") if isinstance(files, dict) else None
+    if result_paths is None:
+        legacy_stems = (summary or {}).get("deployment_profiles") or (summary or {}).get("result_ids") or []
+        if not isinstance(legacy_stems, list) or not legacy_stems:
+            raise ValueError("manifest files.results is required when summary deployment/result ids are unavailable")
+        result_paths = ["results/%s.json" % item for item in legacy_stems]
+    if not isinstance(result_paths, list):
+        raise ValueError("manifest files.results must be a list")
+    normalized = []
+    for raw_path in result_paths:
+        relative_path = str(raw_path or "").strip()
+        if not relative_path:
+            continue
+        if os.path.isabs(relative_path):
+            raise ValueError("manifest result path must be relative: %s" % relative_path)
+        clean_path = os.path.normpath(relative_path)
+        if clean_path.startswith("..%s" % os.sep) or clean_path == "..":
+            raise ValueError("manifest result path escapes bundle directory: %s" % relative_path)
+        parts = clean_path.split(os.sep)
+        if len(parts) != 2 or parts[0] != "results" or not parts[1].endswith(".json"):
+            raise ValueError("manifest result path must be results/<name>.json: %s" % relative_path)
+        normalized.append(clean_path)
+    return normalized
+
+
+def _summarize_payload_results(
+    manifest: Dict[str, Any],
+    validation: Optional[Dict[str, Any]],
+    results: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Build an upload summary from the selected payload results only."""
+    return {
+        "bundle_id": manifest["bundle_id"],
+        "result_count": len(results),
+        "result_ids": [item["result_id"] for item in results],
+        "benchmark_subject_ids": sorted(
+            {
+                item.get("ontology", {}).get("benchmark_subject", {}).get("subject_id")
+                for item in results
+                if item.get("ontology", {}).get("benchmark_subject", {}).get("subject_id")
+            }
+        ),
+        "checkpoints": sorted(
+            {
+                item.get("ontology", {}).get("checkpoint", {}).get("checkpoint_name")
+                for item in results
+                if item.get("ontology", {}).get("checkpoint", {}).get("checkpoint_name")
+            }
+        ),
+        "model_families": sorted(
+            {
+                item.get("ontology", {}).get("model_family", {}).get("family_name")
+                for item in results
+                if item.get("ontology", {}).get("model_family", {}).get("family_name")
+            }
+        ),
+        "deployment_profiles": [item.get("deployment", {}).get("deployment_profile_id") for item in results],
+        "use_cases": sorted(
+            {
+                item.get("capability", {}).get("use_case")
+                for item in results
+                if item.get("capability", {}).get("use_case")
+            }
+        ),
+        "verification_levels": sorted(
+            {
+                item.get("verification", {}).get("verification_level")
+                for item in results
+                if item.get("verification", {}).get("verification_level")
+            }
+        ),
+        "comparison_grade_candidates": sorted(
+            {
+                item.get("verification", {}).get("local_comparison_grade_candidate")
+                for item in results
+                if item.get("verification", {}).get("local_comparison_grade_candidate")
+            }
+        ),
+        "created_at": manifest.get("created_at"),
+        "validation": validation,
+        "results": [_brief_payload_result(item) for item in results],
+    }
+
+
+def _brief_payload_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "result_id": result.get("result_id"),
+        "benchmark_subject_id": result.get("ontology", {}).get("benchmark_subject", {}).get("subject_id"),
+        "checkpoint_name": result.get("ontology", {}).get("checkpoint", {}).get("checkpoint_name"),
+        "model_family": result.get("ontology", {}).get("model_family", {}).get("family_name"),
+        "quantization_label": result.get("ontology", {}).get("quantization", {}).get("quantization_label"),
+        "backend_engine": result.get("ontology", {}).get("runtime_binding", {}).get("backend_engine"),
+        "deployment_profile_id": result.get("deployment", {}).get("deployment_profile_id"),
+        "use_case": result.get("capability", {}).get("use_case"),
+        "verification_level": result.get("verification", {}).get("verification_level"),
+        "comparison_grade_candidate": result.get("verification", {}).get("local_comparison_grade_candidate"),
+        "ttft_p50_ms": result.get("deployment", {}).get("ttft_p50_ms"),
+        "decode_tokens_per_second_p50": result.get("deployment", {}).get("decode_tokens_per_second_p50"),
+        "capability_score": result.get("capability", {}).get("capability_score"),
+        "benchmark_job_cost_usd": result.get("cost", {}).get("benchmark_job_cost_usd"),
+    }
 
 
 def upload_bundle(bundle_dir: str, api_url: str, api_token: str = None) -> Dict[str, Any]:
