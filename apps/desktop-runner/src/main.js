@@ -119,9 +119,12 @@ async function loadTauriShell() {
 
 async function runnerEnvironment() {
   const typedToken = form.elements.hubToken.value.trim();
+  if (typedToken) {
+    return { INFERGRADE_HUB_TOKEN: typedToken };
+  }
+
   const savedToken = await loadStoredToken();
-  const token = typedToken || savedToken;
-  return token ? { INFERGRADE_HUB_TOKEN: token } : {};
+  return savedToken ? { INFERGRADE_HUB_TOKEN: savedToken } : {};
 }
 
 function readApiUrl() {

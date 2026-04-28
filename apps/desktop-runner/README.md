@@ -69,13 +69,13 @@ The UI starts the sidecar with:
 infergrade start --api-url <hub url>
 ```
 
-If a token is present, the prototype passes it through `INFERGRADE_HUB_TOKEN`. That keeps token handling outside command arguments, but it is still prototype-only token handling and does not replace OS-backed secure storage.
+If a token is present, the prototype passes it through `INFERGRADE_HUB_TOKEN`. That keeps token handling outside command arguments; environment variables should still be treated as process-local secrets.
 
 ## Next Checks
 
 1. Install Rust and platform prerequisites.
 2. Run `npm run tauri dev`.
 3. Confirm start/stop leaves no orphaned Runner processes.
-4. Add secure storage.
+4. Exercise secure storage in a live Tauri window.
 5. Build a macOS package.
 6. Attempt one Windows or Linux build artifact.
