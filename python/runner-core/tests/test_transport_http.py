@@ -119,7 +119,15 @@ class TransportHttpTests(unittest.TestCase):
             json.dump({"server": {"valid": True}}, handle)
         if include_summary:
             with open(os.path.join(bundle_dir, "summary.json"), "w", encoding="utf-8") as handle:
-                json.dump({"bundle_id": "bundle-http", "result_count": 1}, handle)
+                json.dump(
+                    {
+                        "bundle_id": "bundle-http",
+                        "result_count": 1,
+                        "result_ids": ["result-http"],
+                        "deployment_profiles": ["interactive_chat_v1"],
+                    },
+                    handle,
+                )
         return bundle_dir
 
     def test_bundle_payload_reads_results_and_existing_summary(self):
@@ -137,6 +145,36 @@ class TransportHttpTests(unittest.TestCase):
         payload = bundle_payload(bundle_dir)
 
         self.assertEqual([item["result_id"] for item in payload["results"]], ["result-http"])
+
+    def test_bundle_payload_generated_summary_uses_manifest_result_list(self):
+        bundle_dir = self._write_bundle(include_summary=False)
+        with open(os.path.join(bundle_dir, "results", "injected.json"), "w", encoding="utf-8") as handle:
+            json.dump({"result_id": "injected", "bundle_id": "bundle-http"}, handle)
+
+        payload = bundle_payload(bundle_dir)
+
+        self.assertEqual([item["result_id"] for item in payload["results"]], ["result-http"])
+        self.assertEqual(payload["summary"]["result_count"], 1)
+        self.assertEqual(payload["summary"]["result_ids"], ["result-http"])
+
+    def test_bundle_payload_supports_legacy_summary_result_ids(self):
+        bundle_dir = self._write_bundle(include_summary=True)
+        with open(os.path.join(bundle_dir, "manifest.json"), "w", encoding="utf-8") as handle:
+            json.dump({"bundle_id": "bundle-http"}, handle)
+        with open(os.path.join(bundle_dir, "results", "injected.json"), "w", encoding="utf-8") as handle:
+            json.dump({"result_id": "injected", "bundle_id": "bundle-http"}, handle)
+
+        payload = bundle_payload(bundle_dir)
+
+        self.assertEqual([item["result_id"] for item in payload["results"]], ["result-http"])
+
+    def test_bundle_payload_rejects_legacy_bundle_without_result_ids(self):
+        bundle_dir = self._write_bundle(include_summary=False)
+        with open(os.path.join(bundle_dir, "manifest.json"), "w", encoding="utf-8") as handle:
+            json.dump({"bundle_id": "bundle-http"}, handle)
+
+        with self.assertRaises(ValueError):
+            bundle_payload(bundle_dir)
 
     def test_bundle_payload_rejects_unsafe_manifest_result_path(self):
         bundle_dir = self._write_bundle(include_summary=True)
