@@ -68,7 +68,7 @@ The UI starts the sidecar with:
 infergrade start --api-url <hub url>
 ```
 
-If a token is present, the prototype passes it through `INFERGRADE_HUB_TOKEN`. That keeps token handling outside command arguments and avoids leaking the token in process listings.
+If a token is present, the prototype passes it through `INFERGRADE_HUB_TOKEN`. That keeps token handling outside command arguments, but it is still prototype-only token handling and does not replace OS-backed secure storage.
 
 ## Next Checks
 

@@ -70,8 +70,17 @@ function runnerEnvironment() {
   return savedToken ? { INFERGRADE_HUB_TOKEN: savedToken } : {};
 }
 
+function readApiUrl() {
+  const rawApiUrl = form.elements.apiUrl.value.trim() || "http://127.0.0.1:8000";
+  const parsed = new URL(rawApiUrl);
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Hub URL must start with http:// or https://.");
+  }
+  return parsed.href;
+}
+
 async function startRunner() {
-  const apiUrl = form.elements.apiUrl.value.trim() || "http://127.0.0.1:8000";
+  const apiUrl = readApiUrl();
   window.localStorage.setItem(API_URL_STORAGE_KEY, apiUrl);
 
   const Command = await loadTauriShell();
