@@ -9,6 +9,11 @@ sys.path.insert(0, "/opt")
 import nltk
 from instruction_following_eval import evaluation_lib
 
+_NLTK_TOKENIZER_RESOURCES = (
+    ("tokenizers/punkt", "punkt"),
+    ("tokenizers/punkt_tab/english", "punkt_tab"),
+)
+
 
 def _write_json(path: str, payload) -> None:
     with open(path, "w", encoding="utf-8") as handle:
@@ -43,20 +48,28 @@ def _instruction_accuracy(outputs: List) -> float:
     return correct / float(total)
 
 
-def _ensure_nltk_punkt(output_dir: str) -> None:
+def _ensure_nltk_tokenizers(output_dir: str) -> None:
     nltk_data_dir = os.path.join(output_dir, "nltk_data")
     os.makedirs(nltk_data_dir, exist_ok=True)
-    os.environ.setdefault("NLTK_DATA", nltk_data_dir)
-    try:
-        nltk.data.find("tokenizers/punkt")
-        return
-    except LookupError:
-        pass
-    nltk.download("punkt", download_dir=nltk_data_dir, quiet=True)
+    if nltk_data_dir not in nltk.data.path:
+        nltk.data.path.insert(0, nltk_data_dir)
+    existing_data_dirs = [item for item in os.environ.get("NLTK_DATA", "").split(os.pathsep) if item]
+    if nltk_data_dir not in existing_data_dirs:
+        os.environ["NLTK_DATA"] = os.pathsep.join([nltk_data_dir] + existing_data_dirs)
+    missing_packages = []
+    for resource_path, package_name in _NLTK_TOKENIZER_RESOURCES:
+        try:
+            nltk.data.find(resource_path)
+        except LookupError:
+            missing_packages.append(package_name)
+    for package_name in missing_packages:
+        nltk.download(package_name, download_dir=nltk_data_dir, quiet=True)
+    for resource_path, _package_name in _NLTK_TOKENIZER_RESOURCES:
+        nltk.data.find(resource_path)
 
 
 def prepare(output_dir: str, limit: int = None) -> None:
-    _ensure_nltk_punkt(output_dir)
+    _ensure_nltk_tokenizers(output_dir)
     input_path = "/opt/instruction_following_eval/data/input_data.jsonl"
     inputs = evaluation_lib.read_prompt_list(input_path)
     if limit:
@@ -100,7 +113,7 @@ def prepare(output_dir: str, limit: int = None) -> None:
 
 
 def evaluate(output_dir: str) -> None:
-    _ensure_nltk_punkt(output_dir)
+    _ensure_nltk_tokenizers(output_dir)
     filtered_input_path = os.path.join(output_dir, "input_data.jsonl")
     predictions_path = os.path.join(output_dir, "predictions.jsonl")
     inputs = evaluation_lib.read_prompt_list(filtered_input_path)
