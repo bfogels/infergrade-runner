@@ -75,7 +75,7 @@ On success, the CLI saves the durable runner profile and the app immediately sta
 infergrade start --api-url <hub url>
 ```
 
-The app does not log the raw `pair` JSON because that response contains the durable runner token. The advanced token fallback can still pass `INFERGRADE_HUB_TOKEN` through the process environment; environment variables should still be treated as process-local secrets.
+The app does not log the raw `pair` JSON because that response contains the durable runner token. The browser preview does not persist tokens; the live app stores fallback tokens in the OS credential store and can pass `INFERGRADE_HUB_TOKEN` through the process environment. Environment variables should still be treated as process-local secrets.
 
 ## Next Checks
 
