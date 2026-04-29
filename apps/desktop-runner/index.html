@@ -86,6 +86,22 @@
             Inspect the managed runtime plan, then choose whether to use the pinned lane or your installed
             llama.cpp binaries.
           </p>
+          <details class="advanced-token-panel runtime-advanced-panel">
+            <summary>Advanced runtime version</summary>
+            <label>
+              <span>Managed runtime ID</span>
+              <input
+                name="runtimeId"
+                type="text"
+                autocomplete="off"
+                placeholder="llama-cpp-homebrew-stable-2026-04"
+              />
+            </label>
+            <p class="hint">
+              Leave blank for the Runner-pinned default. Use a specific ID only when a Hub or support note asks
+              for a newer compatibility lane.
+            </p>
+          </details>
           <div class="button-row">
             <button type="button" data-runtime-plan>Inspect plan</button>
             <button type="button" data-runtime-select-existing>Select installed</button>

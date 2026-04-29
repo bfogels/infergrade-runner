@@ -212,6 +212,15 @@ function readApiUrl() {
   return parsed.href;
 }
 
+function runtimeCommandArgs(extraArgs = []) {
+  const runtimeId = form.elements.runtimeId?.value.trim();
+  const args = ["install-runtime", "--runtime", "llama.cpp"];
+  if (runtimeId) {
+    args.push("--runtime-id", runtimeId);
+  }
+  return [...args, ...extraArgs];
+}
+
 async function startRunner() {
   const apiUrl = readApiUrl();
   window.localStorage.setItem(API_URL_STORAGE_KEY, apiUrl);
@@ -363,14 +372,14 @@ clearLogsButton.addEventListener("click", () => {
 themeToggle?.addEventListener("click", toggleTheme);
 
 runtimePlanButton?.addEventListener("click", () => {
-  executeSidecar(["install-runtime", "--runtime", "llama.cpp"]).catch((error) => {
+  executeSidecar(runtimeCommandArgs()).catch((error) => {
     setStatus("Runtime check failed", "error");
     appendLog(`Could not inspect llama.cpp runtime plan: ${error.message || error}`);
   });
 });
 
 runtimeSelectExistingButton?.addEventListener("click", () => {
-  executeSidecar(["install-runtime", "--runtime", "llama.cpp", "--select-existing"]).catch((error) => {
+  executeSidecar(runtimeCommandArgs(["--select-existing"])).catch((error) => {
     setStatus("Runtime selection failed", "error");
     appendLog(`Could not select installed llama.cpp runtime: ${error.message || error}`);
   });

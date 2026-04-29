@@ -67,10 +67,30 @@ The app intentionally does not install or upgrade `llama.cpp` silently. The Runt
 
 ```text
 infergrade install-runtime --runtime llama.cpp
+infergrade install-runtime --runtime llama.cpp --runtime-id <runtime id>
 infergrade install-runtime --runtime llama.cpp --select-existing
 ```
 
 That means a user can inspect the pinned managed runtime plan or select already-installed `llama-cli` / `llama-server` binaries without touching a terminal. A richer version picker is feasible, but it should wait until the Runner has a curated cross-platform runtime manifest with signed artifacts, compatibility labels, checksums, and rollback guidance.
+
+The app now exposes an advanced runtime ID field. It intentionally defaults to blank so ordinary users stay on
+the Runner-pinned compatibility lane, while support/debug sessions can inspect a named runtime lane when the
+Runner manifest grows beyond the first Apple Silicon Homebrew entry.
+
+## Release And Update Scripts
+
+The package keeps platform bundle commands named even before every platform is distributable:
+
+```bash
+npm run build:mac
+npm run build:windows
+npm run build:linux
+```
+
+Only the macOS Apple Silicon lane currently has a checked-in sidecar. The Windows and Linux commands are
+readiness targets for CI/build-machine work once matching sidecar artifacts and signing credentials exist.
+Automatic app updates should use signed Tauri update artifacts only after OS code signing/notarization and the
+Runner sidecar artifact matrix are in place.
 
 ## Windows And Linux Status
 

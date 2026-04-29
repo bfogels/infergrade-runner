@@ -248,6 +248,10 @@ label {
   margin-top: 14px;
 }
 
+.runtime-advanced-panel {
+  margin-bottom: 14px;
+}
+
 .panel-heading {
   display: flex;
   justify-content: space-between;
