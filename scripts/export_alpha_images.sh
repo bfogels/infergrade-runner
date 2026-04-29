@@ -21,6 +21,7 @@ export_image() {
 export_image "infergrade-llama-cpp" "infergrade-llama-cpp_${VERSION_TAG}.tar"
 export_image "infergrade-ifeval" "infergrade-ifeval_${VERSION_TAG}.tar"
 export_image "infergrade-evalplus" "infergrade-evalplus_${VERSION_TAG}.tar"
+export_image "infergrade-mmlu-pro" "infergrade-mmlu-pro_${VERSION_TAG}.tar"
 export_image "infergrade-runner-core" "infergrade-runner-core_${VERSION_TAG}.tar"
 
 echo

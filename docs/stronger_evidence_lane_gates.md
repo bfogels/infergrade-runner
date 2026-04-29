@@ -42,6 +42,8 @@ Every new third-party evidence lane must land in stacked PRs:
 
 MMLU-Pro is the best first heavier assistant lane because it is broad, recognized, and can be sampled for local use. It should be a reference check, not a quick default.
 
+Status: Runner harness implemented as `mmlu_pro_reference_v1` with a pinned dataset snapshot, sampled local limits, exact answer-letter scoring, and category breakdowns.
+
 Source candidates:
 
 - Official code: https://github.com/TIGER-AI-Lab/MMLU-Pro
@@ -49,15 +51,15 @@ Source candidates:
 
 Runner scope:
 
-- Add a `capability-mmlu-pro` container.
-- Pin the dataset revision.
-- Prepare a sampled local split first, for example 100-300 questions, with full reference left as an intentional deeper path.
-- Score exact multiple-choice accuracy.
-- Emit subject/category breakdowns.
+- Add a `capability-mmlu-pro` container. Done.
+- Pin the dataset revision. Done: `54611cde22c74cca43dd78732198de6abe971398`.
+- Prepare a sampled local split first, for example 100-300 questions, with full reference left as an intentional deeper path. Done for canary/standard/gold limits.
+- Score exact multiple-choice accuracy. Done.
+- Emit subject/category breakdowns. Done.
 
 Acceptance:
 
-- `mmlu_pro_reference_v1` moves from planned to runnable only after the container can run offline against a pinned snapshot.
+- `mmlu_pro_reference_v1` moves from planned to runnable only after the container can run offline against a pinned snapshot. Done.
 - `summary.json` includes `accuracy`, `correct_count`, `total_count`, and per-category metrics.
 - Local canary test uses tiny fixtures and does not require network.
 - Full Runner test suite passes without pulling the real dataset.

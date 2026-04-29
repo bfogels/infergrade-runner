@@ -20,6 +20,7 @@ DEFAULT_CAPABILITY_IMAGES = {
     "ifeval": env_value("INFERGRADE_IFEVAL_IMAGE", "QUANTBENCH_IFEVAL_IMAGE", "infergrade-ifeval:local"),
     "evalplus_humaneval": env_value("INFERGRADE_EVALPLUS_IMAGE", "QUANTBENCH_EVALPLUS_IMAGE", "infergrade-evalplus:local"),
     "evalplus_mbpp": env_value("INFERGRADE_EVALPLUS_IMAGE", "QUANTBENCH_EVALPLUS_IMAGE", "infergrade-evalplus:local"),
+    "mmlu_pro_reference_v1": env_value("INFERGRADE_MMLU_PRO_IMAGE", "QUANTBENCH_MMLU_PRO_IMAGE", "infergrade-mmlu-pro:local"),
 }
 
 _LISTENER_RUNS_DIR = "/app/runs"
@@ -76,6 +77,15 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=96,
         execution_mode="native",
         case_limits={"canary": 3, "standard": 5, "gold": 5},
+    ),
+    "mmlu_pro_reference_v1": CapabilityBenchmarkSpec(
+        benchmark_id="mmlu_pro_reference_v1",
+        display_name="MMLU-Pro reference",
+        benchmark_kind="multiple_choice",
+        primary_metric_name="accuracy",
+        generation_max_tokens=64,
+        container_image=DEFAULT_CAPABILITY_IMAGES["mmlu_pro_reference_v1"],
+        case_limits={"canary": 25, "standard": 100, "gold": 300},
     ),
 }
 

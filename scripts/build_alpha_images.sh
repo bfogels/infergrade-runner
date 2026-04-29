@@ -19,6 +19,7 @@ build_image() {
 build_image "infergrade-llama-cpp" "containers/llama-cpp/Dockerfile"
 build_image "infergrade-ifeval" "containers/capability-ifeval/Dockerfile"
 build_image "infergrade-evalplus" "containers/capability-evalplus/Dockerfile"
+build_image "infergrade-mmlu-pro" "containers/capability-mmlu-pro/Dockerfile"
 build_image "infergrade-runner-core" "containers/runner-core/Dockerfile"
 
 echo
@@ -26,4 +27,5 @@ echo "Built release-ready local images:"
 echo "  infergrade-llama-cpp:${VERSION_TAG}"
 echo "  infergrade-ifeval:${VERSION_TAG}"
 echo "  infergrade-evalplus:${VERSION_TAG}"
+echo "  infergrade-mmlu-pro:${VERSION_TAG}"
 echo "  infergrade-runner-core:${VERSION_TAG}"

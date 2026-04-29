@@ -29,7 +29,9 @@ class BenchmarkCatalogTests(unittest.TestCase):
         check_ids = {item["check_id"] for item in catalog["checks"]}
         planned_ids = {item["check_id"] for item in catalog["planned_benchmark_candidates"]}
         self.assertIn("multiturn_chat_memory_v1", check_ids)
+        self.assertIn("mmlu_pro_reference_v1", check_ids)
         self.assertNotIn("multiturn_chat_memory_v1", planned_ids)
+        self.assertNotIn("mmlu_pro_reference_v1", planned_ids)
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
             self.assertTrue(check["expected_duration_band"])
@@ -70,6 +72,12 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(selection["suite_ids"], ["chat_instruction_following"])
         self.assertEqual(selection["group_ids"], ["instruction_following", "chat_memory", "deployment_chat"])
         self.assertEqual(selection["check_ids"], ["ifeval", "multiturn_chat_memory_v1", "interactive_chat_v1"])
+
+    def test_assistant_reference_shortcut_adds_mmlu_pro_intentionally(self):
+        selection = shortcut_selection("assistant_reference")
+        self.assertIn("broad_reasoning_knowledge", selection["group_ids"])
+        self.assertIn("mmlu_pro_reference_v1", selection["check_ids"])
+        self.assertNotIn("mmlu_pro_reference_v1", shortcut_selection("quick_default")["check_ids"])
 
     def test_normalize_request_selection_uses_shortcut_before_legacy_lane(self):
         request = RunRequest(
@@ -157,11 +165,10 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(missing["capability"]["state"], "not_selected")
         self.assertIn("not a failed benchmark", missing["capability"]["message"])
         self.assertIn("perplexity_reference_v1", guidance["available_reference_check_ids"])
+        self.assertIn("mmlu_pro_reference_v1", guidance["available_reference_check_ids"])
         self.assertTrue(guidance["planned_benchmark_candidates"])
         planned = {item["check_id"]: item for item in guidance["planned_benchmark_candidates"]}
-        self.assertIn("mmlu_pro_reference_v1", planned)
-        self.assertEqual(planned["mmlu_pro_reference_v1"]["primary_use_case"], "general_assistant")
-        self.assertEqual(planned["mmlu_pro_reference_v1"]["local_feasibility"], "sampled_reference")
+        self.assertNotIn("mmlu_pro_reference_v1", planned)
         self.assertEqual(planned["swe_bench_verified_reference_v1"]["benchmark_tier"], "gold")
         self.assertTrue(planned["swe_bench_verified_reference_v1"]["why_not_default"])
         self.assertTrue(any(action["action"] == "add_capability_check" for action in guidance["next_actions"]))
@@ -199,6 +206,19 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(metadata["benchmark_checks"][0]["primary_score_metric"], "constraint_retention_accuracy")
         self.assertIn("case_accuracy", metadata["benchmark_checks"][0]["score_breakdown_fields"])
         self.assertEqual(metadata["score_policies"][0]["score_policy_id"], "multiturn_constraint_retention_v1")
+
+    def test_selection_metadata_includes_mmlu_pro_reference_score_policy(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="gold",
+            benchmark_check_ids=["mmlu_pro_reference_v1"],
+        )
+        metadata = selection_metadata_for_request(request)
+        self.assertEqual(metadata["benchmark_scope"]["scope"], "reference")
+        self.assertEqual(metadata["benchmark_checks"][0]["score_dimension"], "broad_reasoning_knowledge")
+        self.assertEqual(metadata["benchmark_checks"][0]["primary_score_metric"], "accuracy")
+        self.assertEqual(metadata["score_policies"][0]["score_policy_id"], "multiple_choice_accuracy_v1")
 
     def test_benchmark_scope_summary_empty_selection_uses_computed_confidence(self):
         summary = benchmark_scope_summary_for_selection([])

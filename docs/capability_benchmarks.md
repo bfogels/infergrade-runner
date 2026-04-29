@@ -19,6 +19,10 @@ InferGrade needs capability benchmarks that are:
   - Why: low-cost assistant decision signal for retaining facts, corrections, and output constraints across a short transcript.
   - InferGrade role: native local-friendly assistant decision check after IFEval.
 
+- `MMLU-Pro reference`
+  - Why: recognized broad knowledge and reasoning benchmark with harder, more robust multiple-choice questions than legacy MMLU.
+  - InferGrade role: explicit sampled assistant reference lane with category breakdowns; useful for stronger evidence, but not a quick default or leaderboard claim.
+
 ### Agentic Coding
 
 - `EvalPlus HumanEval+`
@@ -36,10 +40,6 @@ These are selected as high-value next additions, but are not yet wired into the 
 - `Repository edit smoke`
   - Why: a deterministic, small repo-edit task can bridge the gap between code-generation benchmarks and SWE-style work.
   - InferGrade role: likely next local-friendly coding decision check before heavier reference suites.
-
-- `MMLU-Pro`
-  - Why: stronger broad knowledge/reasoning signal than legacy MMLU and already recognized in modern open-model evaluation stacks.
-  - InferGrade role: assistant reference suite, ideally with an explicitly labeled sampled local lane and a fuller reference lane.
 
 - `GPQA`
   - Why: high-value hard reasoning/knowledge benchmark with strong anti-memorization properties.
@@ -83,6 +83,8 @@ The currently implemented first-user catalog is:
   - check: `ifeval`
 - group: `chat_memory`
   - check: `multiturn_chat_memory_v1`
+- group: `broad_reasoning_knowledge`
+  - check: `mmlu_pro_reference_v1`
 - group: `deployment_chat`
   - check: `interactive_chat_v1`
 - group: `deployment_batch`
@@ -123,7 +125,7 @@ The current supported suites should report capability truthfully rather than sof
 
 The currently supported first-user benchmark lanes are:
 
-- assistant lane: `chat_instruction_following` via `ifeval` and `multiturn_chat_memory_v1`
+- assistant lane: `chat_instruction_following` via `ifeval`, `multiturn_chat_memory_v1`, and explicit sampled `mmlu_pro_reference_v1`
 - coding lane: `coding_code_editing` via `evalplus_humaneval` and `evalplus_mbpp`
 
 Those are the lanes we expect to keep locally regression-tested and operationally trustworthy first.

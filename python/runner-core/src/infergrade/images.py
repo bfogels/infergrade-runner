@@ -12,6 +12,7 @@ LOCAL_IMAGE_DOCKERFILES: Dict[str, str] = {
     "infergrade-llama-cpp": "containers/llama-cpp/Dockerfile",
     "infergrade-ifeval": "containers/capability-ifeval/Dockerfile",
     "infergrade-evalplus": "containers/capability-evalplus/Dockerfile",
+    "infergrade-mmlu-pro": "containers/capability-mmlu-pro/Dockerfile",
     "infergrade-runner-core": "containers/runner-core/Dockerfile",
 }
 RUNNER_CORE_IMAGE = "infergrade-runner-core:local"

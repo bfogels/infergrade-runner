@@ -49,6 +49,11 @@ class ImageInstallTests(unittest.TestCase):
         command = local_build_command("infergrade-llama-cpp:local")
         self.assertIn("docker build -t infergrade-llama-cpp:local", command)
 
+    @mock.patch("infergrade.images._repo_root", return_value="/tmp/infergrade-runner")
+    def test_local_build_command_is_available_for_mmlu_pro_image(self, _repo_root_mock):
+        command = local_build_command("infergrade-mmlu-pro:local")
+        self.assertIn("containers/capability-mmlu-pro/Dockerfile", command)
+
     @mock.patch("infergrade.images.install_image")
     def test_install_known_images_includes_runner_core_for_local_runtime_setup(self, install_mock):
         install_mock.side_effect = lambda image, **_kwargs: {"image": image, "action": "present"}
