@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-04-03",
+  "catalog_version": "2026-04-29",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": ["short", "low", "balanced", "medium", "deep", "high"],
@@ -17,6 +17,12 @@
       "score_policy_id": "instruction_following_primary_accuracy_v1",
       "display_name": "Instruction following primary accuracy",
       "description": "Use IFEval prompt-level strict accuracy as the primary assistant instruction-following score.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "multiturn_constraint_retention_v1",
+      "display_name": "Multi-turn constraint retention",
+      "description": "Score short assistant transcripts by deterministic retention of corrected facts, output constraints, and user preferences.",
       "score_method": "primary_metric_value_v1"
     },
     {
@@ -58,7 +64,7 @@
       "display_name": "Chat and instruction following",
       "description": "Assistant-style prompting, instruction adherence, and the latency signals people use to judge everyday chat quality.",
       "primary_use_case": "general_assistant",
-      "default_group_ids": ["instruction_following", "deployment_chat", "deployment_batch"],
+      "default_group_ids": ["instruction_following", "chat_memory", "deployment_chat", "deployment_batch"],
       "default_scope": "decision",
       "effort_level": "short"
     },
@@ -96,6 +102,19 @@
       "token_volume_band": "small",
       "resumability_boundary": "benchmark",
       "execution_pattern": "fast_capability_microcheck"
+    },
+    {
+      "group_id": "chat_memory",
+      "display_name": "Chat memory",
+      "description": "Run short multi-turn transcript checks for remembered facts, corrections, and output constraints.",
+      "evidence_kind": "capability",
+      "default_check_ids": ["multiturn_chat_memory_v1"],
+      "effort_hint": "short",
+      "suite_scope": "decision",
+      "expected_duration_band": "1-5 min",
+      "token_volume_band": "tiny",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "native_capability_microcheck"
     },
     {
       "group_id": "coding_core",
@@ -198,6 +217,29 @@
       "primary_score_weight": 1.0,
       "higher_is_better": true,
       "score_policy_id": "instruction_following_primary_accuracy_v1"
+    },
+    {
+      "check_id": "multiturn_chat_memory_v1",
+      "display_name": "Multi-turn chat memory",
+      "description": "Short transcript-retention benchmark for corrected facts, remembered preferences, and output constraints.",
+      "evidence_kind": "capability",
+      "group_id": "chat_memory",
+      "runner_target": "multiturn_chat_memory_v1",
+      "supported_backends": ["llama.cpp", "vllm"],
+      "suite_scope": "decision",
+      "effort_level": "short",
+      "expected_duration_band": "1-5 min",
+      "token_volume_band": "tiny",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "native_capability_microcheck",
+      "selection_guidance": "Adds a quick local signal for whether an assistant retains facts and corrections across short transcript turns.",
+      "score_dimension": "multiturn_instruction_retention",
+      "primary_score_metric": "constraint_retention_accuracy",
+      "score_floor": 0.0,
+      "primary_score_weight": 1.0,
+      "higher_is_better": true,
+      "score_policy_id": "multiturn_constraint_retention_v1",
+      "score_breakdown_fields": ["passed_constraints", "total_constraints", "case_accuracy"]
     },
     {
       "check_id": "evalplus_humaneval",
@@ -338,8 +380,8 @@
       "effort_level": "short",
       "expected_duration_band": "5-15 min",
       "suite_ids": ["chat_instruction_following"],
-      "group_ids": ["instruction_following", "deployment_chat"],
-      "check_ids": ["ifeval", "interactive_chat_v1"]
+      "group_ids": ["instruction_following", "chat_memory", "deployment_chat"],
+      "check_ids": ["ifeval", "multiturn_chat_memory_v1", "interactive_chat_v1"]
     },
     {
       "shortcut_id": "coding_default",
@@ -360,8 +402,8 @@
       "effort_level": "balanced",
       "expected_duration_band": "15-45 min",
       "suite_ids": ["chat_instruction_following", "quant_fidelity"],
-      "group_ids": ["instruction_following", "deployment_chat", "deployment_batch", "quant_fidelity"],
-      "check_ids": ["ifeval", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+      "group_ids": ["instruction_following", "chat_memory", "deployment_chat", "deployment_batch", "quant_fidelity"],
+      "check_ids": ["ifeval", "multiturn_chat_memory_v1", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
     }
   ],
   "planned_benchmark_candidates": [
@@ -393,21 +435,6 @@
       "planned_score_policy_id": "repo_edit_task_success_v1",
       "local_feasibility": "good",
       "why_not_default": "Needs deterministic fixture repositories and rollback-safe execution before default inclusion.",
-      "status": "planned"
-    },
-    {
-      "check_id": "multiturn_chat_memory_v1",
-      "display_name": "Multi-turn chat memory",
-      "value": "Adds continuity and instruction retention evidence for everyday assistant use.",
-      "cost": "small token volume; mostly prompt-design and scoring risk",
-      "implementation_risk": "low",
-      "suite_placement": "chat_instruction_following/decision",
-      "primary_use_case": "general_assistant",
-      "benchmark_tier": "decision",
-      "score_dimension": "multiturn_instruction_retention",
-      "planned_score_policy_id": "multiturn_constraint_retention_v1",
-      "local_feasibility": "good",
-      "why_not_default": "Needs scoring fixtures that separate chat-memory failures from ordinary prompt variance.",
       "status": "planned"
     },
     {
@@ -480,13 +507,13 @@
       },
       "standard": {
         "suite_ids": ["chat_instruction_following", "quant_fidelity"],
-        "group_ids": ["instruction_following", "deployment_chat", "deployment_batch", "quant_fidelity"],
-        "check_ids": ["ifeval", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+        "group_ids": ["instruction_following", "chat_memory", "deployment_chat", "deployment_batch", "quant_fidelity"],
+        "check_ids": ["ifeval", "multiturn_chat_memory_v1", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
       },
       "gold": {
         "suite_ids": ["chat_instruction_following", "quant_fidelity"],
-        "group_ids": ["instruction_following", "deployment_chat", "deployment_batch", "quant_fidelity"],
-        "check_ids": ["ifeval", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+        "group_ids": ["instruction_following", "chat_memory", "deployment_chat", "deployment_batch", "quant_fidelity"],
+        "check_ids": ["ifeval", "multiturn_chat_memory_v1", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
       }
     },
     "agentic_coding": {

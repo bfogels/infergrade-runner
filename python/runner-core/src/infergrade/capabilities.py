@@ -13,7 +13,7 @@ from infergrade.images import install_image
 from infergrade.models import CapabilityExecution, RunRequest
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, write_json
 
-CAPABILITY_REGISTRY_VERSION = "2026-04-alpha"
+CAPABILITY_REGISTRY_VERSION = "2026-04-multiturn-alpha"
 _DOMINANT_GENERATION_FAILURE_RATE = 0.5
 
 DEFAULT_CAPABILITY_IMAGES = {
@@ -32,7 +32,8 @@ class CapabilityBenchmarkSpec:
     benchmark_kind: str
     primary_metric_name: str
     generation_max_tokens: int
-    container_image: str
+    container_image: str = ""
+    execution_mode: str = "container"
     container_args: List[str] = field(default_factory=list)
     case_limits: Dict[str, int] = field(default_factory=dict)
 
@@ -67,6 +68,15 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         container_args=["--dataset", "mbpp"],
         case_limits={"canary": 25, "standard": 100, "gold": 378},
     ),
+    "multiturn_chat_memory_v1": CapabilityBenchmarkSpec(
+        benchmark_id="multiturn_chat_memory_v1",
+        display_name="Multi-turn chat memory",
+        benchmark_kind="multiturn_instruction_retention",
+        primary_metric_name="constraint_retention_accuracy",
+        generation_max_tokens=96,
+        execution_mode="native",
+        case_limits={"canary": 3, "standard": 5, "gold": 5},
+    ),
 }
 
 
@@ -78,8 +88,8 @@ CAPABILITY_SUITES: Dict[str, Dict[str, tuple]] = {
     },
     "general_assistant": {
         "canary": ("assistant_canary_v2", ["IFEval"]),
-        "standard": ("assistant_standard_v2", ["IFEval"]),
-        "gold": ("assistant_gold_v2", ["IFEval"]),
+        "standard": ("assistant_standard_v3", ["IFEval", "Multi-turn chat memory"]),
+        "gold": ("assistant_gold_v3", ["IFEval", "Multi-turn chat memory"]),
     },
 }
 
@@ -92,8 +102,8 @@ SUITE_BENCHMARK_IDS: Dict[str, Dict[str, List[str]]] = {
     },
     "general_assistant": {
         "canary": ["ifeval"],
-        "standard": ["ifeval"],
-        "gold": ["ifeval"],
+        "standard": ["ifeval", "multiturn_chat_memory_v1"],
+        "gold": ["ifeval", "multiturn_chat_memory_v1"],
     },
 }
 
@@ -206,6 +216,8 @@ def capability_images_for_request(request: RunRequest) -> List[Dict[str, str]]:
     images = []
     for benchmark_id in benchmark_ids:
         spec = CAPABILITY_BENCHMARKS[benchmark_id]
+        if spec.execution_mode != "container":
+            continue
         images.append(
             {
                 "benchmark_id": benchmark_id,
@@ -529,6 +541,9 @@ def _planned_benchmark_ids(execution: CapabilityExecution, suite: Optional[Dict[
 
 
 def _prepare_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir: str, tier: str) -> None:
+    if spec.execution_mode == "native":
+        _prepare_native_benchmark_cases(spec, benchmark_dir, tier)
+        return
     limit = spec.case_limits.get(tier)
     command = ["prepare", "--output-dir", "/work"]
     command.extend(spec.container_args)
@@ -538,6 +553,8 @@ def _prepare_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir: str, 
 
 
 def _evaluate_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str) -> Dict[str, Any]:
+    if spec.execution_mode == "native":
+        return _evaluate_native_benchmark(spec, benchmark_dir)
     command = ["evaluate", "--output-dir", "/work"]
     command.extend(spec.container_args)
     _run_capability_container(spec.container_image, benchmark_dir, command)
@@ -611,7 +628,7 @@ def _generate_predictions(
             "generation_status": status,
             "generation_error": error,
         }
-        if spec.benchmark_kind == "instruction_following":
+        if spec.benchmark_kind in {"instruction_following", "multiturn_instruction_retention"}:
             record["prompt"] = case["prompt"]
             record["response"] = text
         else:
@@ -631,6 +648,168 @@ def _generate_predictions(
                 }
             )
     return predictions
+
+
+def _prepare_native_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir: str, tier: str) -> None:
+    if spec.benchmark_id != "multiturn_chat_memory_v1":
+        raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
+    cases = _multiturn_chat_memory_cases()
+    limit = spec.case_limits.get(tier)
+    if limit:
+        cases = cases[:limit]
+    _write_jsonl(os.path.join(benchmark_dir, "cases.jsonl"), cases)
+
+
+def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str) -> Dict[str, Any]:
+    if spec.benchmark_id != "multiturn_chat_memory_v1":
+        raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
+    cases_by_id = {
+        str(item.get("case_id") or item.get("task_id") or stable_hash(item, length=12)): item
+        for item in _read_jsonl(os.path.join(benchmark_dir, "cases.jsonl"))
+    }
+    predictions = _read_jsonl(os.path.join(benchmark_dir, "predictions.jsonl"))
+    total_constraints = 0
+    passed_constraints = 0
+    case_results = []
+    for prediction in predictions:
+        case_id = str(prediction.get("case_id") or "")
+        case = cases_by_id.get(case_id) or {}
+        checks = list(case.get("checks") or [])
+        response = str(prediction.get("response") or prediction.get("completion") or "")
+        normalized_response = _normalize_score_text(response)
+        case_passed = 0
+        for check in checks:
+            required_any = [_normalize_score_text(item) for item in list(check.get("required_any") or [])]
+            required_all = [_normalize_score_text(item) for item in list(check.get("required_all") or [])]
+            passed = False
+            if required_any:
+                passed = any(item and item in normalized_response for item in required_any)
+            elif required_all:
+                passed = all(item and item in normalized_response for item in required_all)
+            total_constraints += 1
+            if passed:
+                passed_constraints += 1
+                case_passed += 1
+        case_results.append(
+            {
+                "case_id": case_id,
+                "passed_constraints": case_passed,
+                "total_constraints": len(checks),
+                "score": round(case_passed / float(len(checks)), 6) if checks else None,
+            }
+        )
+    score = round(passed_constraints / float(total_constraints), 6) if total_constraints else None
+    return {
+        "benchmark_id": spec.benchmark_id,
+        "display_name": spec.display_name,
+        "status": "completed",
+        "primary_metric": {"name": spec.primary_metric_name, "value": score},
+        "metrics": {
+            spec.primary_metric_name: score,
+            "passed_constraints": passed_constraints,
+            "total_constraints": total_constraints,
+            "case_accuracy": round(
+                len([item for item in case_results if item.get("score") == 1.0]) / float(len(case_results)),
+                6,
+            )
+            if case_results
+            else None,
+        },
+        "case_results": case_results,
+        "scoring_policy": "deterministic_required_phrase_match_v1",
+    }
+
+
+def _normalize_score_text(value: Any) -> str:
+    return " ".join(str(value or "").lower().split())
+
+
+def _multiturn_chat_memory_cases() -> List[Dict[str, Any]]:
+    return [
+        {
+            "case_id": "memory-project-quant",
+            "task_id": "multiturn_chat_memory_v1/memory-project-quant",
+            "prompt": (
+                "You are replaying a multi-turn assistant conversation. Answer only the final assistant message.\n\n"
+                "User: For this conversation, remember that the project codename is HARBOR-17 and the selected quant is q4_k_m.\n"
+                "Assistant: Noted.\n"
+                "User: Later, if I ask for the saved setup, answer exactly: HARBOR-17 uses q4_k_m.\n"
+                "Assistant: Understood.\n"
+                "User: What saved setup did I pick?\n"
+                "Assistant:"
+            ),
+            "checks": [
+                {"label": "project codename retained", "required_any": ["HARBOR-17"]},
+                {"label": "quant retained", "required_any": ["q4_k_m"]},
+            ],
+        },
+        {
+            "case_id": "memory-output-format",
+            "task_id": "multiturn_chat_memory_v1/memory-output-format",
+            "prompt": (
+                "You are replaying a multi-turn assistant conversation. Answer only the final assistant message.\n\n"
+                "User: Remember these two rules: use the label READY and do not use bullet points.\n"
+                "Assistant: I will remember.\n"
+                "User: The deployment target is local runner.\n"
+                "Assistant: Noted.\n"
+                "User: Give the shortest possible status update using the remembered label and target.\n"
+                "Assistant:"
+            ),
+            "checks": [
+                {"label": "ready label retained", "required_any": ["READY"]},
+                {"label": "target retained", "required_any": ["local runner"]},
+            ],
+        },
+        {
+            "case_id": "memory-correction",
+            "task_id": "multiturn_chat_memory_v1/memory-correction",
+            "prompt": (
+                "You are replaying a multi-turn assistant conversation. Answer only the final assistant message.\n\n"
+                "User: Remember that my hardware is RTX 4090.\n"
+                "Assistant: Remembered.\n"
+                "User: Correction: my hardware is actually Apple M2 Max, not RTX 4090.\n"
+                "Assistant: Updated.\n"
+                "User: Which hardware should you use for the recommendation?\n"
+                "Assistant:"
+            ),
+            "checks": [
+                {"label": "correction retained", "required_any": ["Apple M2 Max"]},
+            ],
+        },
+        {
+            "case_id": "memory-two-preferences",
+            "task_id": "multiturn_chat_memory_v1/memory-two-preferences",
+            "prompt": (
+                "You are replaying a multi-turn assistant conversation. Answer only the final assistant message.\n\n"
+                "User: Remember that I prefer fast first tokens over maximum throughput.\n"
+                "Assistant: Got it.\n"
+                "User: Also remember that I want a public model only.\n"
+                "Assistant: Noted.\n"
+                "User: State my two remembered preferences in one sentence.\n"
+                "Assistant:"
+            ),
+            "checks": [
+                {"label": "latency preference retained", "required_any": ["fast first tokens", "first tokens"]},
+                {"label": "public model preference retained", "required_any": ["public model", "public"]},
+            ],
+        },
+        {
+            "case_id": "memory-numeric-token",
+            "task_id": "multiturn_chat_memory_v1/memory-numeric-token",
+            "prompt": (
+                "You are replaying a multi-turn assistant conversation. Answer only the final assistant message.\n\n"
+                "User: Save this exact pairing code for the next question: IGRP-8421.\n"
+                "Assistant: Saved.\n"
+                "User: Do not explain it later; just return the code.\n"
+                "Assistant: Understood.\n"
+                "User: What was the pairing code?\n"
+                "Assistant:"
+            ),
+            "checks": [
+                {"label": "pairing code retained", "required_any": ["IGRP-8421"]},
+            ],
+        },
+    ]
 
 
 def _read_jsonl(path: str) -> List[Dict[str, Any]]:
