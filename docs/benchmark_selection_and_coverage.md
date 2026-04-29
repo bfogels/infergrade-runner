@@ -21,9 +21,10 @@ The catalog includes planned candidates only as planning metadata. They are not 
 
 - `arena_hard_local_reference_v1` for preference-style assistant quality
 - `repo_edit_smoke_v1` for small repository editing tasks
-- `mmlu_pro_reference_v1` for sampled broader knowledge and reasoning reference evidence
 - `gpqa_reference_v1` for harder expert-level reasoning reference evidence
 - `livecodebench_reference_v1` for contemporary coding-task reference evidence
 - `swe_bench_verified_reference_v1` for curated or gold software-engineering task evidence
 
 These should become executable only after fixture design, scoring policy, runtime cost, and provenance are reviewed.
+
+`mmlu_pro_reference_v1` has graduated from planned metadata to an explicit runnable reference check. It remains out of the quick default path because the sampled lane is heavier and supports stronger comparison confidence, not a first-run leaderboard claim.

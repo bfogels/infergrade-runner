@@ -2,9 +2,28 @@
   "catalog_version": "2026-04-29",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
-    "effort_level": ["short", "low", "balanced", "medium", "deep", "high"],
-    "expected_duration_band": ["1-5 min", "5-15 min", "10-25 min", "10-30 min", "15-45 min", "25-60 min"],
-    "token_volume_band": ["tiny", "small", "medium", "large"]
+    "effort_level": [
+      "short",
+      "low",
+      "balanced",
+      "medium",
+      "deep",
+      "high"
+    ],
+    "expected_duration_band": [
+      "1-5 min",
+      "5-15 min",
+      "10-25 min",
+      "10-30 min",
+      "15-45 min",
+      "25-60 min"
+    ],
+    "token_volume_band": [
+      "tiny",
+      "small",
+      "medium",
+      "large"
+    ]
   },
   "metadata_source_defaults": {
     "duration": "estimated",
@@ -23,6 +42,12 @@
       "score_policy_id": "multiturn_constraint_retention_v1",
       "display_name": "Multi-turn constraint retention",
       "description": "Score short assistant transcripts by deterministic retention of corrected facts, output constraints, and user preferences.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "multiple_choice_accuracy_v1",
+      "display_name": "Multiple-choice accuracy",
+      "description": "Use exact answer-letter accuracy for sampled multiple-choice reference checks.",
       "score_method": "primary_metric_value_v1"
     },
     {
@@ -64,7 +89,12 @@
       "display_name": "Chat and instruction following",
       "description": "Assistant-style prompting, instruction adherence, and the latency signals people use to judge everyday chat quality.",
       "primary_use_case": "general_assistant",
-      "default_group_ids": ["instruction_following", "chat_memory", "deployment_chat", "deployment_batch"],
+      "default_group_ids": [
+        "instruction_following",
+        "chat_memory",
+        "deployment_chat",
+        "deployment_batch"
+      ],
       "default_scope": "decision",
       "effort_level": "short"
     },
@@ -73,7 +103,12 @@
       "display_name": "Coding and code editing",
       "description": "Coding completions, practical editing behavior, and the longer interactive prompts that matter for local coding assistants.",
       "primary_use_case": "agentic_coding",
-      "default_group_ids": ["coding_core", "coding_breadth", "deployment_chat", "deployment_long_context"],
+      "default_group_ids": [
+        "coding_core",
+        "coding_breadth",
+        "deployment_chat",
+        "deployment_long_context"
+      ],
       "default_scope": "decision",
       "effort_level": "balanced"
     },
@@ -82,8 +117,12 @@
       "display_name": "Quant fidelity and perplexity",
       "description": "Reference-text perplexity that helps compare nearby quantized variants when task scores cluster tightly.",
       "primary_use_case": null,
-      "default_group_ids": ["quant_fidelity"],
-      "supported_backends": ["llama.cpp"],
+      "default_group_ids": [
+        "quant_fidelity"
+      ],
+      "supported_backends": [
+        "llama.cpp"
+      ],
       "supplemental": true,
       "default_scope": "reference",
       "effort_level": "balanced"
@@ -95,7 +134,9 @@
       "display_name": "Instruction following",
       "description": "Run IFEval to check whether the model follows detailed textual instructions cleanly.",
       "evidence_kind": "capability",
-      "default_check_ids": ["ifeval"],
+      "default_check_ids": [
+        "ifeval"
+      ],
       "effort_hint": "medium",
       "suite_scope": "decision",
       "expected_duration_band": "5-15 min",
@@ -108,7 +149,9 @@
       "display_name": "Chat memory",
       "description": "Run short multi-turn transcript checks for remembered facts, corrections, and output constraints.",
       "evidence_kind": "capability",
-      "default_check_ids": ["multiturn_chat_memory_v1"],
+      "default_check_ids": [
+        "multiturn_chat_memory_v1"
+      ],
       "effort_hint": "short",
       "suite_scope": "decision",
       "expected_duration_band": "1-5 min",
@@ -117,11 +160,28 @@
       "execution_pattern": "native_capability_microcheck"
     },
     {
+      "group_id": "broad_reasoning_knowledge",
+      "display_name": "Broad reasoning knowledge",
+      "description": "Run a sampled MMLU-Pro reference pass for harder broad knowledge and reasoning coverage.",
+      "evidence_kind": "capability",
+      "default_check_ids": [
+        "mmlu_pro_reference_v1"
+      ],
+      "effort_hint": "deep",
+      "suite_scope": "reference",
+      "expected_duration_band": "25-60 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "throughput_oriented_offline_suite"
+    },
+    {
       "group_id": "coding_core",
       "display_name": "Coding core",
       "description": "Run HumanEval+ for the most important pass@1 coding signal.",
       "evidence_kind": "capability",
-      "default_check_ids": ["evalplus_humaneval"],
+      "default_check_ids": [
+        "evalplus_humaneval"
+      ],
       "effort_hint": "high",
       "suite_scope": "decision",
       "expected_duration_band": "10-25 min",
@@ -134,7 +194,9 @@
       "display_name": "Coding breadth",
       "description": "Add MBPP+ for broader everyday coding coverage beyond the core set.",
       "evidence_kind": "capability",
-      "default_check_ids": ["evalplus_mbpp"],
+      "default_check_ids": [
+        "evalplus_mbpp"
+      ],
       "effort_hint": "high",
       "suite_scope": "reference",
       "expected_duration_band": "25-60 min",
@@ -147,7 +209,9 @@
       "display_name": "Interactive chat latency",
       "description": "Measure TTFT, load time, and output speed for interactive requests.",
       "evidence_kind": "deployment",
-      "default_check_ids": ["interactive_chat_v1"],
+      "default_check_ids": [
+        "interactive_chat_v1"
+      ],
       "effort_hint": "low",
       "suite_scope": "decision",
       "expected_duration_band": "1-5 min",
@@ -160,7 +224,9 @@
       "display_name": "Batch generation throughput",
       "description": "Measure throughput-oriented generation behavior under a small batch load.",
       "evidence_kind": "deployment",
-      "default_check_ids": ["batch_generation_v1"],
+      "default_check_ids": [
+        "batch_generation_v1"
+      ],
       "effort_hint": "medium",
       "suite_scope": "reference",
       "expected_duration_band": "5-15 min",
@@ -173,7 +239,9 @@
       "display_name": "Long context latency",
       "description": "Measure latency and memory pressure under longer prompts.",
       "evidence_kind": "deployment",
-      "default_check_ids": ["long_context_v1"],
+      "default_check_ids": [
+        "long_context_v1"
+      ],
       "effort_hint": "medium",
       "suite_scope": "reference",
       "expected_duration_band": "10-30 min",
@@ -186,9 +254,13 @@
       "display_name": "Quant fidelity",
       "description": "Run the shared perplexity reference pass for quant-to-quant comparisons.",
       "evidence_kind": "fidelity",
-      "default_check_ids": ["perplexity_reference_v1"],
+      "default_check_ids": [
+        "perplexity_reference_v1"
+      ],
       "effort_hint": "medium",
-      "supported_backends": ["llama.cpp"],
+      "supported_backends": [
+        "llama.cpp"
+      ],
       "suite_scope": "reference",
       "expected_duration_band": "10-30 min",
       "token_volume_band": "medium",
@@ -204,7 +276,10 @@
       "evidence_kind": "capability",
       "group_id": "instruction_following",
       "runner_target": "ifeval",
-      "supported_backends": ["llama.cpp", "vllm"],
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
       "suite_scope": "decision",
       "effort_level": "balanced",
       "expected_duration_band": "5-15 min",
@@ -225,7 +300,10 @@
       "evidence_kind": "capability",
       "group_id": "chat_memory",
       "runner_target": "multiturn_chat_memory_v1",
-      "supported_backends": ["llama.cpp", "vllm"],
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
       "suite_scope": "decision",
       "effort_level": "short",
       "expected_duration_band": "1-5 min",
@@ -239,7 +317,45 @@
       "primary_score_weight": 1.0,
       "higher_is_better": true,
       "score_policy_id": "multiturn_constraint_retention_v1",
-      "score_breakdown_fields": ["passed_constraints", "total_constraints", "case_accuracy"]
+      "score_breakdown_fields": [
+        "passed_constraints",
+        "total_constraints",
+        "case_accuracy"
+      ]
+    },
+    {
+      "check_id": "mmlu_pro_reference_v1",
+      "display_name": "MMLU-Pro reference",
+      "description": "Sampled harder broad knowledge and reasoning benchmark.",
+      "evidence_kind": "capability",
+      "group_id": "broad_reasoning_knowledge",
+      "runner_target": "mmlu_pro_reference_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "reference",
+      "effort_level": "deep",
+      "expected_duration_band": "25-60 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "throughput_oriented_offline_suite",
+      "selection_guidance": "Adds a sampled reference signal for broad knowledge and reasoning. It is stronger than a quick decision check but not a leaderboard claim.",
+      "score_dimension": "broad_reasoning_knowledge",
+      "primary_score_metric": "accuracy",
+      "score_floor": 0.0,
+      "primary_score_weight": 1.0,
+      "higher_is_better": true,
+      "score_policy_id": "multiple_choice_accuracy_v1",
+      "score_breakdown_fields": [
+        "correct_count",
+        "total_count",
+        "invalid_count",
+        "category_metrics"
+      ],
+      "source": "https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro",
+      "source_code": "https://github.com/TIGER-AI-Lab/MMLU-Pro",
+      "dataset_revision": "54611cde22c74cca43dd78732198de6abe971398"
     },
     {
       "check_id": "evalplus_humaneval",
@@ -248,7 +364,10 @@
       "evidence_kind": "capability",
       "group_id": "coding_core",
       "runner_target": "evalplus_humaneval",
-      "supported_backends": ["llama.cpp", "vllm"],
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
       "suite_scope": "decision",
       "effort_level": "balanced",
       "expected_duration_band": "10-25 min",
@@ -269,7 +388,10 @@
       "evidence_kind": "capability",
       "group_id": "coding_breadth",
       "runner_target": "evalplus_mbpp",
-      "supported_backends": ["llama.cpp", "vllm"],
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
       "suite_scope": "reference",
       "effort_level": "deep",
       "expected_duration_band": "25-60 min",
@@ -290,7 +412,10 @@
       "evidence_kind": "deployment",
       "group_id": "deployment_chat",
       "runner_target": "interactive_chat_v1",
-      "supported_backends": ["llama.cpp", "vllm"],
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
       "suite_scope": "decision",
       "effort_level": "short",
       "expected_duration_band": "1-5 min",
@@ -303,7 +428,11 @@
       "primary_score_weight": 0.0,
       "higher_is_better": false,
       "score_policy_id": "deployment_profile_metrics_v1",
-      "score_breakdown_fields": ["time_to_first_token_ms", "tokens_per_second", "load_time_ms"]
+      "score_breakdown_fields": [
+        "time_to_first_token_ms",
+        "tokens_per_second",
+        "load_time_ms"
+      ]
     },
     {
       "check_id": "batch_generation_v1",
@@ -312,7 +441,10 @@
       "evidence_kind": "deployment",
       "group_id": "deployment_batch",
       "runner_target": "batch_generation_v1",
-      "supported_backends": ["llama.cpp", "vllm"],
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
       "suite_scope": "reference",
       "effort_level": "balanced",
       "expected_duration_band": "5-15 min",
@@ -325,7 +457,10 @@
       "primary_score_weight": 0.0,
       "higher_is_better": true,
       "score_policy_id": "deployment_profile_metrics_v1",
-      "score_breakdown_fields": ["tokens_per_second", "requests_per_second"]
+      "score_breakdown_fields": [
+        "tokens_per_second",
+        "requests_per_second"
+      ]
     },
     {
       "check_id": "long_context_v1",
@@ -334,7 +469,10 @@
       "evidence_kind": "deployment",
       "group_id": "deployment_long_context",
       "runner_target": "long_context_v1",
-      "supported_backends": ["llama.cpp", "vllm"],
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
       "suite_scope": "reference",
       "effort_level": "balanced",
       "expected_duration_band": "10-30 min",
@@ -347,7 +485,11 @@
       "primary_score_weight": 0.0,
       "higher_is_better": false,
       "score_policy_id": "deployment_profile_metrics_v1",
-      "score_breakdown_fields": ["time_to_first_token_ms", "tokens_per_second", "peak_memory_bytes"]
+      "score_breakdown_fields": [
+        "time_to_first_token_ms",
+        "tokens_per_second",
+        "peak_memory_bytes"
+      ]
     },
     {
       "check_id": "perplexity_reference_v1",
@@ -356,7 +498,9 @@
       "evidence_kind": "fidelity",
       "group_id": "quant_fidelity",
       "runner_target": "perplexity_reference_v1",
-      "supported_backends": ["llama.cpp"],
+      "supported_backends": [
+        "llama.cpp"
+      ],
       "suite_scope": "reference",
       "effort_level": "balanced",
       "expected_duration_band": "10-30 min",
@@ -379,9 +523,19 @@
       "suite_scope": "decision",
       "effort_level": "short",
       "expected_duration_band": "5-15 min",
-      "suite_ids": ["chat_instruction_following"],
-      "group_ids": ["instruction_following", "chat_memory", "deployment_chat"],
-      "check_ids": ["ifeval", "multiturn_chat_memory_v1", "interactive_chat_v1"]
+      "suite_ids": [
+        "chat_instruction_following"
+      ],
+      "group_ids": [
+        "instruction_following",
+        "chat_memory",
+        "deployment_chat"
+      ],
+      "check_ids": [
+        "ifeval",
+        "multiturn_chat_memory_v1",
+        "interactive_chat_v1"
+      ]
     },
     {
       "shortcut_id": "coding_default",
@@ -390,9 +544,19 @@
       "suite_scope": "decision",
       "effort_level": "balanced",
       "expected_duration_band": "10-25 min",
-      "suite_ids": ["coding_code_editing"],
-      "group_ids": ["coding_core", "deployment_chat", "deployment_long_context"],
-      "check_ids": ["evalplus_humaneval", "interactive_chat_v1", "long_context_v1"]
+      "suite_ids": [
+        "coding_code_editing"
+      ],
+      "group_ids": [
+        "coding_core",
+        "deployment_chat",
+        "deployment_long_context"
+      ],
+      "check_ids": [
+        "evalplus_humaneval",
+        "interactive_chat_v1",
+        "long_context_v1"
+      ]
     },
     {
       "shortcut_id": "broad_compare",
@@ -401,9 +565,52 @@
       "suite_scope": "reference",
       "effort_level": "balanced",
       "expected_duration_band": "15-45 min",
-      "suite_ids": ["chat_instruction_following", "quant_fidelity"],
-      "group_ids": ["instruction_following", "chat_memory", "deployment_chat", "deployment_batch", "quant_fidelity"],
-      "check_ids": ["ifeval", "multiturn_chat_memory_v1", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+      "suite_ids": [
+        "chat_instruction_following",
+        "quant_fidelity"
+      ],
+      "group_ids": [
+        "instruction_following",
+        "chat_memory",
+        "deployment_chat",
+        "deployment_batch",
+        "quant_fidelity"
+      ],
+      "check_ids": [
+        "ifeval",
+        "multiturn_chat_memory_v1",
+        "interactive_chat_v1",
+        "batch_generation_v1",
+        "perplexity_reference_v1"
+      ]
+    },
+    {
+      "shortcut_id": "assistant_reference",
+      "display_name": "Assistant reference",
+      "description": "Stronger assistant evidence with sampled MMLU-Pro, instruction following, chat memory, deployment, and quant fidelity signals.",
+      "suite_scope": "reference",
+      "effort_level": "deep",
+      "expected_duration_band": "25-60 min",
+      "suite_ids": [
+        "chat_instruction_following",
+        "quant_fidelity"
+      ],
+      "group_ids": [
+        "instruction_following",
+        "chat_memory",
+        "broad_reasoning_knowledge",
+        "deployment_chat",
+        "deployment_batch",
+        "quant_fidelity"
+      ],
+      "check_ids": [
+        "ifeval",
+        "multiturn_chat_memory_v1",
+        "mmlu_pro_reference_v1",
+        "interactive_chat_v1",
+        "batch_generation_v1",
+        "perplexity_reference_v1"
+      ]
     }
   ],
   "planned_benchmark_candidates": [
@@ -435,21 +642,6 @@
       "planned_score_policy_id": "repo_edit_task_success_v1",
       "local_feasibility": "good",
       "why_not_default": "Needs deterministic fixture repositories and rollback-safe execution before default inclusion.",
-      "status": "planned"
-    },
-    {
-      "check_id": "mmlu_pro_reference_v1",
-      "display_name": "MMLU-Pro reference",
-      "value": "Adds broader, harder knowledge and reasoning coverage than legacy MMLU for assistant and reasoning slices.",
-      "cost": "large token volume; should be sampled or tiered for local laptops",
-      "implementation_risk": "medium",
-      "suite_placement": "chat_instruction_following/reference",
-      "primary_use_case": "general_assistant",
-      "benchmark_tier": "reference",
-      "score_dimension": "broad_reasoning_knowledge",
-      "planned_score_policy_id": "multiple_choice_accuracy_v1",
-      "local_feasibility": "sampled_reference",
-      "why_not_default": "Too heavy for the quick local path unless InferGrade ships a sampled decision subset with clear confidence limits.",
       "status": "planned"
     },
     {
@@ -501,53 +693,153 @@
   "legacy_tier_defaults": {
     "general_assistant": {
       "canary": {
-        "suite_ids": ["chat_instruction_following"],
-        "group_ids": ["instruction_following", "deployment_chat"],
-        "check_ids": ["ifeval", "interactive_chat_v1"]
+        "suite_ids": [
+          "chat_instruction_following"
+        ],
+        "group_ids": [
+          "instruction_following",
+          "deployment_chat"
+        ],
+        "check_ids": [
+          "ifeval",
+          "interactive_chat_v1"
+        ]
       },
       "standard": {
-        "suite_ids": ["chat_instruction_following", "quant_fidelity"],
-        "group_ids": ["instruction_following", "chat_memory", "deployment_chat", "deployment_batch", "quant_fidelity"],
-        "check_ids": ["ifeval", "multiturn_chat_memory_v1", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+        "suite_ids": [
+          "chat_instruction_following",
+          "quant_fidelity"
+        ],
+        "group_ids": [
+          "instruction_following",
+          "chat_memory",
+          "deployment_chat",
+          "deployment_batch",
+          "quant_fidelity"
+        ],
+        "check_ids": [
+          "ifeval",
+          "multiturn_chat_memory_v1",
+          "interactive_chat_v1",
+          "batch_generation_v1",
+          "perplexity_reference_v1"
+        ]
       },
       "gold": {
-        "suite_ids": ["chat_instruction_following", "quant_fidelity"],
-        "group_ids": ["instruction_following", "chat_memory", "deployment_chat", "deployment_batch", "quant_fidelity"],
-        "check_ids": ["ifeval", "multiturn_chat_memory_v1", "interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+        "suite_ids": [
+          "chat_instruction_following",
+          "quant_fidelity"
+        ],
+        "group_ids": [
+          "instruction_following",
+          "chat_memory",
+          "deployment_chat",
+          "deployment_batch",
+          "quant_fidelity"
+        ],
+        "check_ids": [
+          "ifeval",
+          "multiturn_chat_memory_v1",
+          "interactive_chat_v1",
+          "batch_generation_v1",
+          "perplexity_reference_v1"
+        ]
       }
     },
     "agentic_coding": {
       "canary": {
-        "suite_ids": ["coding_code_editing"],
-        "group_ids": ["coding_core", "deployment_chat"],
-        "check_ids": ["evalplus_humaneval", "interactive_chat_v1"]
+        "suite_ids": [
+          "coding_code_editing"
+        ],
+        "group_ids": [
+          "coding_core",
+          "deployment_chat"
+        ],
+        "check_ids": [
+          "evalplus_humaneval",
+          "interactive_chat_v1"
+        ]
       },
       "standard": {
-        "suite_ids": ["coding_code_editing", "quant_fidelity"],
-        "group_ids": ["coding_core", "coding_breadth", "deployment_chat", "deployment_long_context", "quant_fidelity"],
-        "check_ids": ["evalplus_humaneval", "evalplus_mbpp", "interactive_chat_v1", "long_context_v1", "perplexity_reference_v1"]
+        "suite_ids": [
+          "coding_code_editing",
+          "quant_fidelity"
+        ],
+        "group_ids": [
+          "coding_core",
+          "coding_breadth",
+          "deployment_chat",
+          "deployment_long_context",
+          "quant_fidelity"
+        ],
+        "check_ids": [
+          "evalplus_humaneval",
+          "evalplus_mbpp",
+          "interactive_chat_v1",
+          "long_context_v1",
+          "perplexity_reference_v1"
+        ]
       },
       "gold": {
-        "suite_ids": ["coding_code_editing", "quant_fidelity"],
-        "group_ids": ["coding_core", "coding_breadth", "deployment_chat", "deployment_long_context", "quant_fidelity"],
-        "check_ids": ["evalplus_humaneval", "evalplus_mbpp", "interactive_chat_v1", "long_context_v1", "perplexity_reference_v1"]
+        "suite_ids": [
+          "coding_code_editing",
+          "quant_fidelity"
+        ],
+        "group_ids": [
+          "coding_core",
+          "coding_breadth",
+          "deployment_chat",
+          "deployment_long_context",
+          "quant_fidelity"
+        ],
+        "check_ids": [
+          "evalplus_humaneval",
+          "evalplus_mbpp",
+          "interactive_chat_v1",
+          "long_context_v1",
+          "perplexity_reference_v1"
+        ]
       }
     },
     "default": {
       "canary": {
         "suite_ids": [],
-        "group_ids": ["deployment_chat"],
-        "check_ids": ["interactive_chat_v1"]
+        "group_ids": [
+          "deployment_chat"
+        ],
+        "check_ids": [
+          "interactive_chat_v1"
+        ]
       },
       "standard": {
-        "suite_ids": ["quant_fidelity"],
-        "group_ids": ["deployment_chat", "deployment_batch", "quant_fidelity"],
-        "check_ids": ["interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+        "suite_ids": [
+          "quant_fidelity"
+        ],
+        "group_ids": [
+          "deployment_chat",
+          "deployment_batch",
+          "quant_fidelity"
+        ],
+        "check_ids": [
+          "interactive_chat_v1",
+          "batch_generation_v1",
+          "perplexity_reference_v1"
+        ]
       },
       "gold": {
-        "suite_ids": ["quant_fidelity"],
-        "group_ids": ["deployment_chat", "deployment_batch", "quant_fidelity"],
-        "check_ids": ["interactive_chat_v1", "batch_generation_v1", "perplexity_reference_v1"]
+        "suite_ids": [
+          "quant_fidelity"
+        ],
+        "group_ids": [
+          "deployment_chat",
+          "deployment_batch",
+          "quant_fidelity"
+        ],
+        "check_ids": [
+          "interactive_chat_v1",
+          "batch_generation_v1",
+          "perplexity_reference_v1"
+        ]
       }
     }
   }

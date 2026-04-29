@@ -79,6 +79,19 @@ class CapabilityTests(unittest.TestCase):
         )
         self.assertEqual(capability_images_for_request(request), [])
 
+    def test_capability_images_include_mmlu_pro_reference_when_selected(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="gold",
+            benchmark_check_ids=["mmlu_pro_reference_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        images = capability_images_for_request(request)
+        self.assertEqual([item["benchmark_id"] for item in images], ["mmlu_pro_reference_v1"])
+        self.assertEqual(images[0]["image"], "infergrade-mmlu-pro:local")
+
     def test_execute_native_multiturn_benchmark_scores_constraints_without_docker(self):
         request = RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",

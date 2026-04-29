@@ -30,6 +30,7 @@ DEFAULT_BACKEND_IMAGES = {
 DEFAULT_LOCAL_CAPABILITY_IMAGES = (
     {"benchmark_id": "ifeval", "display_name": "IFEval", "image": "infergrade-ifeval:local"},
     {"benchmark_id": "evalplus", "display_name": "EvalPlus", "image": "infergrade-evalplus:local"},
+    {"benchmark_id": "mmlu_pro_reference_v1", "display_name": "MMLU-Pro reference", "image": "infergrade-mmlu-pro:local"},
 )
 DEFAULT_MIN_OUTPUT_FREE_GB = 1.0
 

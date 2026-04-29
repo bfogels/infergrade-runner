@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -130,6 +131,69 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
             "plus_input": [[2]],
         }
         self.assertEqual(module._jsonl_ready_task("humaneval", task), task)
+
+    def test_mmlu_pro_prepares_sampled_cases_and_scores_accuracy(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
+        module = _load_module("mmlu_pro_runner_test_module", module_path)
+        rows = [
+            {
+                "question_id": 1,
+                "question": "What is 2 + 2?",
+                "options": ["1", "2", "3", "4"],
+                "answer": "D",
+                "answer_index": 3,
+                "category": "math",
+                "src": "fixture",
+            },
+            {
+                "question_id": 2,
+                "question": "Which letter starts banana?",
+                "options": ["A", "B", "C", "D"],
+                "answer": "B",
+                "answer_index": 1,
+                "category": "other",
+                "src": "fixture",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tempdir:
+            data_path = os.path.join(tempdir, "mmlu_pro_fixture.jsonl")
+            with open(data_path, "w", encoding="utf-8") as handle:
+                for row in rows:
+                    handle.write("%s\n" % json.dumps(row))
+            module.prepare(tempdir, limit=2, data_path=data_path)
+            cases_path = os.path.join(tempdir, "cases.jsonl")
+            with open(cases_path, "r", encoding="utf-8") as handle:
+                cases = [json.loads(line) for line in handle if line.strip()]
+            self.assertEqual([case["task_id"] for case in cases], ["mmlu_pro/1", "mmlu_pro/2"])
+            self.assertIn("Final answer letter", cases[0]["prompt"])
+            self.assertEqual(cases[0]["answer"], "D")
+
+            predictions_path = os.path.join(tempdir, "predictions.jsonl")
+            with open(predictions_path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"task_id": "mmlu_pro/1", "completion": "The answer is D."}) + "\n")
+                handle.write(json.dumps({"task_id": "mmlu_pro/2", "completion": "A"}) + "\n")
+            module.evaluate(tempdir)
+            with open(os.path.join(tempdir, "summary.json"), "r", encoding="utf-8") as handle:
+                summary = json.load(handle)
+
+        self.assertEqual(summary["benchmark_id"], "mmlu_pro_reference_v1")
+        self.assertEqual(summary["primary_metric"], {"name": "accuracy", "value": 0.5})
+        self.assertEqual(summary["metrics"]["correct_count"], 1)
+        self.assertEqual(summary["metrics"]["total_count"], 2)
+        self.assertEqual(summary["category_metrics"]["math"]["accuracy"], 1.0)
+        self.assertEqual(summary["category_metrics"]["other"]["accuracy"], 0.0)
+
+    def test_mmlu_pro_dockerfile_pins_official_dataset_revision(self):
+        dockerfile_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "Dockerfile")
+        with open(dockerfile_path, "r", encoding="utf-8") as handle:
+            dockerfile = handle.read()
+        build_script_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "build_snapshot.py")
+        with open(build_script_path, "r", encoding="utf-8") as handle:
+            build_script = handle.read()
+
+        self.assertIn("TIGER-Lab/MMLU-Pro", build_script)
+        self.assertIn("54611cde22c74cca43dd78732198de6abe971398", dockerfile)
+        self.assertIn("build_snapshot.py", dockerfile)
 
 
 if __name__ == "__main__":
