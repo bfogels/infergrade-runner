@@ -102,6 +102,40 @@ class CapabilityTests(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(benchmark_dir, "predictions.jsonl")))
         self.assertTrue(os.path.exists(os.path.join(benchmark_dir, "summary.json")))
 
+    def test_native_multiturn_preserves_generation_failures_without_docker(self):
+        class _FailingMemoryAdapter(object):
+            def generate_text(self, request, prompt, max_tokens):
+                raise RuntimeError("native adapter unavailable")
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=["multiturn_chat_memory_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._run_capability_container") as container_mock:
+            execution = execute_capability_suite(_FailingMemoryAdapter(), request)
+        container_mock.assert_not_called()
+        self.assertEqual(execution.status, "failed")
+        result = execution.benchmark_results["multiturn_chat_memory_v1"]
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["primary_metric"]["value"], None)
+        self.assertEqual(result["generation_failure_severity"], "all_failed")
+        benchmark_dir = os.path.join(self.tempdir, "artifacts", "capability", "multiturn_chat_memory_v1")
+        predictions = []
+        with open(os.path.join(benchmark_dir, "predictions.jsonl"), "r", encoding="utf-8") as handle:
+            for line in handle:
+                predictions.append(json.loads(line))
+        self.assertTrue(predictions)
+        self.assertEqual({item["generation_status"] for item in predictions}, {"failed"})
+        self.assertEqual({item["generation_error"] for item in predictions}, {"native adapter unavailable"})
+        summary = summarize_capability_execution(request, execution, completed_at="2026-04-29T12:00:00Z")
+        self.assertEqual(summary["capability_state"], "failed")
+        self.assertIn("generation_failures_exhausted", summary["capability_reason_codes"])
+
     def test_execute_capability_suite_aggregates_primary_scores(self):
         def fake_prepare(spec, benchmark_dir, tier):
             with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
