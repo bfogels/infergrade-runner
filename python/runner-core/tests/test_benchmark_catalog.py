@@ -83,6 +83,12 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("not a failed benchmark", missing["capability"]["message"])
         self.assertIn("perplexity_reference_v1", guidance["available_reference_check_ids"])
         self.assertTrue(guidance["planned_benchmark_candidates"])
+        planned = {item["check_id"]: item for item in guidance["planned_benchmark_candidates"]}
+        self.assertIn("mmlu_pro_reference_v1", planned)
+        self.assertEqual(planned["mmlu_pro_reference_v1"]["primary_use_case"], "general_assistant")
+        self.assertEqual(planned["mmlu_pro_reference_v1"]["local_feasibility"], "sampled_reference")
+        self.assertEqual(planned["swe_bench_verified_reference_v1"]["benchmark_tier"], "gold")
+        self.assertTrue(planned["swe_bench_verified_reference_v1"]["why_not_default"])
         self.assertTrue(any(action["action"] == "add_capability_check" for action in guidance["next_actions"]))
 
     def test_selection_metadata_includes_scope_and_coverage_guidance(self):
