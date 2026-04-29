@@ -15,11 +15,17 @@
             Pair once, leave the Runner listening, and inspect local logs without opening a terminal.
           </p>
         </div>
-        <div class="status-card" aria-live="polite">
-          <span class="status-dot" data-status-dot></span>
-          <div>
-            <p class="status-label">Runner status</p>
-            <strong data-runner-status>Idle</strong>
+        <div class="hero-side">
+          <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch color theme">
+            <span data-theme-icon>☾</span>
+            <span data-theme-label>Dark</span>
+          </button>
+          <div class="status-card" aria-live="polite">
+            <span class="status-dot" data-status-dot></span>
+            <div>
+              <p class="status-label">Runner status</p>
+              <strong data-runner-status>Idle</strong>
+            </div>
           </div>
         </div>
       </section>
@@ -67,6 +73,30 @@
             <button type="button" data-stop-runner disabled>Stop</button>
           </div>
           <p class="hint">The app passes the token through the process environment, not command arguments.</p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading compact-heading">
+            <div>
+              <h2>Runtime</h2>
+              <p class="hint">Advanced llama.cpp selection stays explicit.</p>
+            </div>
+          </div>
+          <p>
+            Inspect the managed runtime plan, then choose whether to use the pinned lane or your installed
+            llama.cpp binaries.
+          </p>
+          <div class="button-row">
+            <button type="button" data-runtime-plan>Inspect plan</button>
+            <button type="button" data-runtime-select-existing>Select installed</button>
+          </div>
+          <details class="advanced-token-panel">
+            <summary>Update and platform status</summary>
+            <p class="hint">
+              This build is a dogfood desktop app. Automatic updates, Windows/Linux installers, and signed public
+              releases need release signing and platform sidecar artifacts before they are user-ready.
+            </p>
+          </details>
         </section>
       </section>
 

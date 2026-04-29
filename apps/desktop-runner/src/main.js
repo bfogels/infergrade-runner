@@ -2,6 +2,7 @@ import "./styles.css";
 
 const SIDECAR_NAME = "binaries/infergrade-sidecar";
 const API_URL_STORAGE_KEY = "infergrade.runner.apiUrl";
+const THEME_STORAGE_KEY = "infergrade.runner.theme";
 
 const form = document.querySelector("[data-runner-form]");
 const startButton = document.querySelector("[data-start-runner]");
@@ -10,6 +11,11 @@ const pairButton = document.querySelector("[data-pair-runner]");
 const saveTokenButton = document.querySelector("[data-save-token]");
 const clearTokenButton = document.querySelector("[data-clear-token]");
 const clearLogsButton = document.querySelector("[data-clear-logs]");
+const themeToggle = document.querySelector("[data-theme-toggle]");
+const themeIcon = document.querySelector("[data-theme-icon]");
+const themeLabel = document.querySelector("[data-theme-label]");
+const runtimePlanButton = document.querySelector("[data-runtime-plan]");
+const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
 const statusText = document.querySelector("[data-runner-status]");
 const statusDot = document.querySelector("[data-status-dot]");
 const pairState = document.querySelector("[data-pair-state]");
@@ -20,6 +26,40 @@ let childProcess = null;
 let logLines = [];
 let tauriInvoke = null;
 let previewToken = "";
+
+function preferredTheme() {
+  const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (savedTheme === "dark" || savedTheme === "light") {
+    return savedTheme;
+  }
+  if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    return "dark";
+  }
+  return "light";
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  if (themeIcon) {
+    themeIcon.textContent = theme === "dark" ? "☀" : "☾";
+  }
+  if (themeLabel) {
+    themeLabel.textContent = theme === "dark" ? "Light" : "Dark";
+  }
+  themeToggle?.setAttribute("aria-label", theme === "dark" ? "Switch to light mode" : "Switch to dark mode");
+  themeToggle?.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
+}
+
+function initTheme() {
+  applyTheme(preferredTheme());
+}
+
+function toggleTheme() {
+  const currentTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  const nextTheme = currentTheme === "dark" ? "light" : "dark";
+  window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+  applyTheme(nextTheme);
+}
 
 function isTauriRuntime() {
   return "__TAURI_INTERNALS__" in window;
@@ -130,6 +170,27 @@ async function loadTauriShell() {
 
   const shell = await import("@tauri-apps/plugin-shell");
   return shell.Command;
+}
+
+async function executeSidecar(args) {
+  const Command = await loadTauriShell();
+  if (!Command) {
+    appendLog(`Preview mode cannot run: infergrade ${args.join(" ")}`);
+    setStatus("Preview mode", "warning");
+    return null;
+  }
+  appendLog(`Running: infergrade ${args.join(" ")}`);
+  const output = await Command.sidecar(SIDECAR_NAME, args).execute();
+  if (output.stdout) {
+    appendLog(output.stdout);
+  }
+  if (output.stderr) {
+    appendLog(output.stderr);
+  }
+  if (output.code !== 0) {
+    throw new Error(`infergrade ${args[0]} exited with code ${output.code}.`);
+  }
+  return output;
 }
 
 async function runnerEnvironment() {
@@ -299,5 +360,22 @@ clearLogsButton.addEventListener("click", () => {
   logOutput.textContent = "Waiting for Runner output...";
 });
 
+themeToggle?.addEventListener("click", toggleTheme);
+
+runtimePlanButton?.addEventListener("click", () => {
+  executeSidecar(["install-runtime", "--runtime", "llama.cpp"]).catch((error) => {
+    setStatus("Runtime check failed", "error");
+    appendLog(`Could not inspect llama.cpp runtime plan: ${error.message || error}`);
+  });
+});
+
+runtimeSelectExistingButton?.addEventListener("click", () => {
+  executeSidecar(["install-runtime", "--runtime", "llama.cpp", "--select-existing"]).catch((error) => {
+    setStatus("Runtime selection failed", "error");
+    appendLog(`Could not select installed llama.cpp runtime: ${error.message || error}`);
+  });
+});
+
+initTheme();
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");

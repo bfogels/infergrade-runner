@@ -9,6 +9,8 @@ The app is intentionally small:
 - sidecar wrapper that launches the existing `infergrade` CLI
 - pair-code redemption through the sidecar, then process controls for start, stop, status, and log streaming
 - OS-backed token storage through the Rust `keyring` crate
+- light/dark UI modes that follow the system preference until the user chooses one
+- explicit managed `llama.cpp` runtime inspection and selection controls for advanced users
 
 The Hub should remain the model, benchmark, recommendation, and result surface. This app should stay focused on pairing, readiness, Runner lifecycle, logs, and recovery.
 
@@ -58,6 +60,27 @@ Not yet verified in this PR:
 - `npm run tauri dev`
 - macOS Keychain save/load/clear through the live Tauri window
 - Windows or Linux packaging
+
+## Runtime Selection
+
+The app intentionally does not install or upgrade `llama.cpp` silently. The Runtime panel shells out through the existing CLI:
+
+```text
+infergrade install-runtime --runtime llama.cpp
+infergrade install-runtime --runtime llama.cpp --select-existing
+```
+
+That means a user can inspect the pinned managed runtime plan or select already-installed `llama-cli` / `llama-server` binaries without touching a terminal. A richer version picker is feasible, but it should wait until the Runner has a curated cross-platform runtime manifest with signed artifacts, compatibility labels, checksums, and rollback guidance.
+
+## Windows And Linux Status
+
+The current checked-in sidecar is macOS Apple Silicon only:
+
+```text
+src-tauri/binaries/infergrade-sidecar-aarch64-apple-darwin
+```
+
+Windows and Linux builds need matching sidecar binaries before they can be packaged or dogfooded. Tauri expects the same logical sidecar name with platform-specific suffixes, for example Windows and Linux artifacts generated from the same wrapper contract. After those exist, the next step is to add platform build attempts and record whether MSI/NSIS, AppImage, or `.deb` is the right first beta lane.
 
 Sprint 73 should continue by running `npm run tauri dev`, exercising the Keychain prompt on macOS, and adding a Windows or Linux build attempt before any beta distribution.
 
