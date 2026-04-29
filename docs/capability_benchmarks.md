@@ -29,17 +29,41 @@ InferGrade needs capability benchmarks that are:
 
 These are selected as high-value next additions, but are not yet wired into the first runnable capability container pass:
 
+- `Multi-turn chat memory`
+  - Why: low-cost assistant decision signal for instruction retention across turns.
+  - InferGrade role: likely next local-friendly assistant decision check after IFEval.
+
+- `Repository edit smoke`
+  - Why: a deterministic, small repo-edit task can bridge the gap between code-generation benchmarks and SWE-style work.
+  - InferGrade role: likely next local-friendly coding decision check before heavier reference suites.
+
 - `MMLU-Pro`
   - Why: stronger broad knowledge/reasoning signal than legacy MMLU and already recognized in modern open-model evaluation stacks.
+  - InferGrade role: assistant reference suite, ideally with an explicitly labeled sampled local lane and a fuller reference lane.
 
 - `GPQA`
   - Why: high-value hard reasoning/knowledge benchmark with strong anti-memorization properties.
+  - InferGrade role: assistant reference suite for differentiating models that look similar on instruction following.
 
 - `LiveCodeBench`
   - Why: broad contemporary coding benchmark with multiple task modes and temporal freshness.
+  - InferGrade role: coding reference suite after local sandboxing, task pinning, and cost metadata are proven.
 
 - `SWE-bench Verified`
   - Why: highest-value software engineering benchmark in this space, but much more operationally expensive than the first-pass coding lanes.
+  - InferGrade role: gold/curated reference evidence first, not a default laptop run.
+
+## Expansion Principle
+
+InferGrade should move toward benchmark legitimacy comparable to serious model-analysis products without making first users wait hours for a first answer. That means every new benchmark candidate should declare:
+
+- the use case it supports,
+- whether it belongs in the short decision lane, reference lane, or gold/curated lane,
+- the score dimension and planned score policy,
+- local feasibility and expected cost,
+- and why it is not part of the default quick path yet.
+
+Planned candidates are roadmap metadata only. They must not be rendered or validated as runnable checks until Runner owns a reproducible harness, scoring policy, fixture/version pin, and runtime-cost story.
 
 ## Capability Catalog Shape
 
