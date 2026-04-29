@@ -169,6 +169,9 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertTrue(guidance["planned_benchmark_candidates"])
         planned = {item["check_id"]: item for item in guidance["planned_benchmark_candidates"]}
         self.assertNotIn("mmlu_pro_reference_v1", planned)
+        self.assertEqual(planned["gpqa_reference_v1"]["status"], "planned_access_gated")
+        self.assertEqual(planned["gpqa_reference_v1"]["access_status"], "gated_contact_share_required")
+        self.assertIn("Do not commit", planned["gpqa_reference_v1"]["dataset_handling_policy"])
         self.assertEqual(planned["swe_bench_verified_reference_v1"]["benchmark_tier"], "gold")
         self.assertTrue(planned["swe_bench_verified_reference_v1"]["why_not_default"])
         self.assertTrue(any(action["action"] == "add_capability_check" for action in guidance["next_actions"]))

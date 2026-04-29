@@ -27,4 +27,6 @@ The catalog includes planned candidates only as planning metadata. They are not 
 
 These should become executable only after fixture design, scoring policy, runtime cost, and provenance are reviewed.
 
+`gpqa_reference_v1` is explicitly access-gated planning metadata. The Runner must not bundle or expose real GPQA examples until a leakage-safe harness, local snapshot pin, and user access/consent path exist.
+
 `mmlu_pro_reference_v1` has graduated from planned metadata to an explicit runnable reference check. It remains out of the quick default path because the sampled lane is heavier and supports stronger comparison confidence, not a first-run leaderboard claim.
