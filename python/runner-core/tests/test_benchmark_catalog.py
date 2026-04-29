@@ -11,6 +11,7 @@ from infergrade.benchmark_catalog import (
     load_capability_catalog,
     normalize_request_selection,
     selection_metadata_for_request,
+    shortcut_selection,
 )
 from infergrade.models import RunRequest
 
@@ -63,6 +64,61 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(request.benchmark_check_ids, ["multiturn_chat_memory_v1"])
         self.assertEqual(capability_benchmark_ids_for_request(request), ["multiturn_chat_memory_v1"])
         self.assertEqual(request.capability, "auto")
+
+    def test_shortcut_selection_resolves_catalog_shortcut(self):
+        selection = shortcut_selection("quick_default")
+        self.assertEqual(selection["suite_ids"], ["chat_instruction_following"])
+        self.assertEqual(selection["group_ids"], ["instruction_following", "chat_memory", "deployment_chat"])
+        self.assertEqual(selection["check_ids"], ["ifeval", "multiturn_chat_memory_v1", "interactive_chat_v1"])
+
+    def test_normalize_request_selection_uses_shortcut_before_legacy_lane(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_shortcut_id="broad_compare",
+        )
+        normalize_request_selection(request)
+        self.assertEqual(request.capability_suite_ids, ["chat_instruction_following", "quant_fidelity"])
+        self.assertEqual(
+            request.benchmark_check_ids,
+            [
+                "ifeval",
+                "multiturn_chat_memory_v1",
+                "interactive_chat_v1",
+                "batch_generation_v1",
+                "perplexity_reference_v1",
+            ],
+        )
+        self.assertEqual(request.deployment_profiles, ["interactive_chat_v1", "batch_generation_v1"])
+        self.assertEqual(request.tier, "gold")
+
+    def test_unknown_shortcut_falls_back_to_legacy_lane(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_shortcut_id="missing_shortcut",
+        )
+        normalize_request_selection(request)
+        self.assertEqual(request.benchmark_check_ids, ["ifeval", "interactive_chat_v1"])
+
+    def test_explicit_selection_takes_precedence_over_shortcut(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_shortcut_id="broad_compare",
+            capability_suite_ids=["coding_code_editing"],
+            benchmark_group_ids=["coding_core"],
+            benchmark_check_ids=["evalplus_humaneval"],
+        )
+        normalize_request_selection(request)
+        self.assertEqual(request.capability_suite_ids, ["coding_code_editing"])
+        self.assertEqual(request.benchmark_group_ids, ["coding_core"])
+        self.assertEqual(request.benchmark_check_ids, ["evalplus_humaneval"])
 
     def test_capability_and_fidelity_helpers_follow_explicit_check_selection(self):
         request = RunRequest(

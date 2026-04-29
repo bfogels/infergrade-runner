@@ -48,6 +48,26 @@ def check_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str,
     return {str(item["check_id"]): dict(item) for item in list(payload.get("checks") or [])}
 
 
+def shortcut_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+    """Return benchmark shortcuts keyed by shortcut id."""
+    payload = catalog or load_capability_catalog()
+    return {str(item["shortcut_id"]): dict(item) for item in list(payload.get("shortcuts") or [])}
+
+
+def shortcut_selection(shortcut_id: Optional[str], catalog: Optional[Dict[str, Any]] = None) -> Dict[str, List[str]]:
+    """Return the suite/group/check selection declared by a benchmark shortcut."""
+    payload = catalog or load_capability_catalog()
+    shortcut_id = str(shortcut_id or "").strip()
+    shortcut = shortcut_index(payload).get(shortcut_id) if shortcut_id else None
+    if not shortcut:
+        return {"suite_ids": [], "group_ids": [], "check_ids": []}
+    return {
+        "suite_ids": _dedupe_strings(shortcut.get("suite_ids")),
+        "group_ids": _dedupe_strings(shortcut.get("group_ids")),
+        "check_ids": _dedupe_strings(shortcut.get("check_ids")),
+    }
+
+
 def legacy_selection(use_case: Optional[str], tier: str, catalog: Optional[Dict[str, Any]] = None) -> Dict[str, List[str]]:
     """Return the legacy tier-based selection for backward compatibility."""
     payload = catalog or load_capability_catalog()
@@ -98,10 +118,16 @@ def resolve_request_selection(request: RunRequest, catalog: Optional[Dict[str, A
     check_ids = [item for item in _dedupe_strings(request.benchmark_check_ids) if item in checks]
 
     if not suite_ids and not group_ids and not check_ids:
-        legacy = legacy_selection(request.use_case, request.tier, payload)
-        suite_ids = list(legacy["suite_ids"])
-        group_ids = list(legacy["group_ids"])
-        check_ids = list(legacy["check_ids"])
+        shortcut = shortcut_selection(request.benchmark_shortcut_id, payload)
+        if shortcut["suite_ids"] or shortcut["group_ids"] or shortcut["check_ids"]:
+            suite_ids = [item for item in shortcut["suite_ids"] if item in suites]
+            group_ids = [item for item in shortcut["group_ids"] if item in groups]
+            check_ids = [item for item in shortcut["check_ids"] if item in checks]
+        else:
+            legacy = legacy_selection(request.use_case, request.tier, payload)
+            suite_ids = list(legacy["suite_ids"])
+            group_ids = list(legacy["group_ids"])
+            check_ids = list(legacy["check_ids"])
 
     if request.deployment_profiles and not request.benchmark_check_ids:
         selected_deployment_checks = [
