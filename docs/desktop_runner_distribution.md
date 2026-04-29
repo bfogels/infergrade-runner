@@ -34,6 +34,32 @@ apps/desktop-runner/src-tauri/target/release/bundle/dmg/
 
 with file sizes and SHA-256 digests. The digest identifies the emitted artifact for that candidate build; it is not a bit-for-bit reproducibility guarantee until the toolchain and packaging timestamps are pinned.
 
+## Current App Surface
+
+The dogfood app now exposes the pieces that a non-terminal user needs first:
+
+- pair with a Hub code and start listening
+- inspect process logs without a shell
+- switch between light and dark modes
+- inspect or select the explicit managed `llama.cpp` runtime through the existing Runner CLI
+
+The runtime controls are deliberately conservative. They run the same inspect/select commands a terminal user would run and do not install or upgrade anything without the existing CLI confirmation path. A true version dropdown should wait for a broader managed-runtime manifest with per-platform support, compatibility labels, signed artifacts, checksums, and rollback policy.
+
+## Windows And Linux Build Prerequisites
+
+The repository currently contains a macOS Apple Silicon sidecar wrapper only:
+
+```text
+apps/desktop-runner/src-tauri/binaries/infergrade-sidecar-aarch64-apple-darwin
+```
+
+Before claiming Windows or Linux support, add matching sidecar binaries for the target triples and run at least one package attempt per platform. The first expected additions are:
+
+- Windows: sidecar wrapper for `x86_64-pc-windows-msvc` or `aarch64-pc-windows-msvc`, then choose NSIS/MSI and an Authenticode signing path.
+- Linux: sidecar wrapper for `x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu`, then choose AppImage or `.deb` as the beta lane.
+
+The sidecar contract should remain the same: call the existing `infergrade` CLI when available, otherwise resolve the bundled or repo-local Runner core.
+
 ## Signing Gates
 
 Do not treat an unsigned local DMG as a user-ready release.
