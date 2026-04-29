@@ -105,6 +105,21 @@ class BenchmarkCatalogTests(unittest.TestCase):
         normalize_request_selection(request)
         self.assertEqual(request.benchmark_check_ids, ["ifeval", "interactive_chat_v1"])
 
+    def test_explicit_selection_takes_precedence_over_shortcut(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_shortcut_id="broad_compare",
+            capability_suite_ids=["coding_code_editing"],
+            benchmark_group_ids=["coding_core"],
+            benchmark_check_ids=["evalplus_humaneval"],
+        )
+        normalize_request_selection(request)
+        self.assertEqual(request.capability_suite_ids, ["coding_code_editing"])
+        self.assertEqual(request.benchmark_group_ids, ["coding_core"])
+        self.assertEqual(request.benchmark_check_ids, ["evalplus_humaneval"])
+
     def test_capability_and_fidelity_helpers_follow_explicit_check_selection(self):
         request = RunRequest(
             model="Qwen/Qwen2.5-Coder-7B-Instruct",
