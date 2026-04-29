@@ -15,6 +15,10 @@ InferGrade needs capability benchmarks that are:
   - Why: strong fit for instruction following, objective checking, compact enough to tier by sample count, and already used by the Hugging Face Open LLM Leaderboard.
   - InferGrade role: first real quality gate for `general_assistant`.
 
+- `Multi-turn chat memory`
+  - Why: low-cost assistant decision signal for retaining facts, corrections, and output constraints across a short transcript.
+  - InferGrade role: native local-friendly assistant decision check after IFEval.
+
 ### Agentic Coding
 
 - `EvalPlus HumanEval+`
@@ -28,10 +32,6 @@ InferGrade needs capability benchmarks that are:
 ## Selected Next
 
 These are selected as high-value next additions, but are not yet wired into the first runnable capability container pass:
-
-- `Multi-turn chat memory`
-  - Why: low-cost assistant decision signal for instruction retention across turns.
-  - InferGrade role: likely next local-friendly assistant decision check after IFEval.
 
 - `Repository edit smoke`
   - Why: a deterministic, small repo-edit task can bridge the gap between code-generation benchmarks and SWE-style work.
@@ -65,6 +65,8 @@ InferGrade should move toward benchmark legitimacy comparable to serious model-a
 
 Planned candidates are roadmap metadata only. They must not be rendered or validated as runnable checks until Runner owns a reproducible harness, scoring policy, fixture/version pin, and runtime-cost story.
 
+The detailed acceptance gates for heavier third-party lanes live in [Stronger Evidence Lane Gates](stronger_evidence_lane_gates.md).
+
 ## Capability Catalog Shape
 
 InferGrade now treats benchmark scope as:
@@ -79,6 +81,8 @@ The currently implemented first-user catalog is:
 
 - group: `instruction_following`
   - check: `ifeval`
+- group: `chat_memory`
+  - check: `multiturn_chat_memory_v1`
 - group: `deployment_chat`
   - check: `interactive_chat_v1`
 - group: `deployment_batch`
@@ -119,7 +123,7 @@ The current supported suites should report capability truthfully rather than sof
 
 The currently supported first-user benchmark lanes are:
 
-- assistant lane: `chat_instruction_following` via `ifeval`
+- assistant lane: `chat_instruction_following` via `ifeval` and `multiturn_chat_memory_v1`
 - coding lane: `coding_code_editing` via `evalplus_humaneval` and `evalplus_mbpp`
 
 Those are the lanes we expect to keep locally regression-tested and operationally trustworthy first.
