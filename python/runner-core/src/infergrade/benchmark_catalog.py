@@ -384,11 +384,32 @@ def selection_metadata_for_request(
                 "execution_pattern": checks[check_id].get("execution_pattern"),
                 "selection_guidance": checks[check_id].get("selection_guidance"),
                 "status": checks[check_id].get("status", "available"),
+                "score_dimension": checks[check_id].get("score_dimension"),
+                "primary_score_metric": checks[check_id].get("primary_score_metric"),
+                "score_floor": checks[check_id].get("score_floor"),
+                "primary_score_weight": checks[check_id].get("primary_score_weight"),
+                "higher_is_better": checks[check_id].get("higher_is_better"),
+                "score_policy_id": checks[check_id].get("score_policy_id"),
+                "score_breakdown_fields": list(checks[check_id].get("score_breakdown_fields") or []),
             }
             for check_id in normalized["check_ids"]
             if check_id in checks
         ],
+        "score_policies": _selected_score_policies(normalized["check_ids"], payload),
     }
+
+
+def _selected_score_policies(check_ids: List[str], catalog: Dict[str, Any]) -> List[Dict[str, Any]]:
+    checks = check_index(catalog)
+    policies = {
+        str(item.get("score_policy_id")): dict(item)
+        for item in list(catalog.get("score_policies") or [])
+        if item.get("score_policy_id")
+    }
+    selected_policy_ids = _dedupe_strings(
+        [checks[item].get("score_policy_id") for item in _dedupe_strings(check_ids) if item in checks]
+    )
+    return [policies[policy_id] for policy_id in selected_policy_ids if policy_id in policies]
 
 
 def _coverage_next_actions(missing_core: List[Dict[str, Any]], available_reference: List[str]) -> List[Dict[str, str]]:
