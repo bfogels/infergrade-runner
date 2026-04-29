@@ -656,8 +656,16 @@
       "score_dimension": "expert_reasoning",
       "planned_score_policy_id": "multiple_choice_accuracy_v1",
       "local_feasibility": "reference_only",
-      "why_not_default": "High-difficulty reasoning is valuable, but not the first benchmark a non-technical user should wait on.",
-      "status": "planned"
+      "why_not_default": "Access is gated and the benchmark is intentionally difficult and reference-only; it should not run without explicit user consent and leakage-safe handling.",
+      "status": "planned_access_gated",
+      "source": "https://huggingface.co/datasets/Idavidrein/gpqa",
+      "source_code": "https://github.com/idavidrein/gpqa",
+      "license": "cc-by-4.0",
+      "access_status": "gated_contact_share_required",
+      "access_requirements": "Users must accept the Hugging Face dataset conditions before files can be accessed.",
+      "dataset_handling_policy": "Do not commit, log, screenshot, or publish GPQA examples in plain text; fixtures must use synthetic non-GPQA examples until access and leakage controls are implemented.",
+      "fixture_policy": "Synthetic shape-only fixtures only until the harness can load an accepted local dataset snapshot without exposing real examples.",
+      "harness_prerequisite": "Add a local dataset path/token flow, pinned revision metadata, and redaction-safe artifacts before making this runnable."
     },
     {
       "check_id": "livecodebench_reference_v1",

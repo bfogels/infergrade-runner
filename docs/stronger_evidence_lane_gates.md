@@ -73,6 +73,8 @@ Non-goals:
 
 GPQA is harder and more differentiating, but it should reuse the multiple-choice harness shape from MMLU-Pro.
 
+Status: planned and explicitly access-gated. The official dataset card requires users to accept access conditions, so Runner must not ship real GPQA examples or silently download the dataset before the user has access and the harness has redaction-safe artifact handling.
+
 Source candidates:
 
 - Official code: https://github.com/idavidrein/gpqa
@@ -80,13 +82,16 @@ Source candidates:
 
 Runner scope:
 
+- Keep `gpqa_reference_v1` non-runnable until dataset access, leakage controls, and local snapshot pinning are implemented.
 - Generalize shared multiple-choice scoring helpers after MMLU-Pro lands.
 - Add `capability-gpqa` container or a shared `capability-mcq` container if the abstraction is clean.
-- Pin the dataset revision.
-- Start with a local sampled reference lane.
+- Pin the dataset revision only after the access flow is defined.
+- Start with synthetic shape-only fixtures for tests; do not commit or log real GPQA questions.
+- Start with a local sampled reference lane only after explicit user consent and local dataset availability are proven.
 
 Acceptance:
 
+- Catalog metadata marks GPQA as access-gated and non-runnable.
 - Exact answer accuracy is reported with question count and category metadata where available.
 - The Hub explains that GPQA is a hard reasoning reference signal, not a first-run confidence shortcut.
 - Generation failures remain separate from wrong answers.
