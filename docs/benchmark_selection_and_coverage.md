@@ -21,6 +21,9 @@ The catalog includes planned candidates only as planning metadata. They are not 
 
 - `arena_hard_local_reference_v1` for preference-style assistant quality
 - `repo_edit_smoke_v1` for small repository editing tasks
-- `multiturn_chat_memory_v1` for continuity and instruction retention
+- `mmlu_pro_reference_v1` for sampled broader knowledge and reasoning reference evidence
+- `gpqa_reference_v1` for harder expert-level reasoning reference evidence
+- `livecodebench_reference_v1` for contemporary coding-task reference evidence
+- `swe_bench_verified_reference_v1` for curated or gold software-engineering task evidence
 
 These should become executable only after fixture design, scoring policy, runtime cost, and provenance are reviewed.
