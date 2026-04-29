@@ -22,12 +22,19 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(len(catalog["benchmark_groups"]), 5)
         self.assertGreaterEqual(len(catalog["checks"]), 6)
         self.assertIn("metadata_ordering", catalog)
+        self.assertTrue(catalog["score_policies"])
         self.assertEqual(catalog["metadata_source_defaults"]["duration"], "estimated")
         self.assertEqual(catalog["benchmark_scopes"][0]["scope_id"], "decision")
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
             self.assertTrue(check["expected_duration_band"])
             self.assertTrue(check["execution_pattern"])
+            self.assertTrue(check["score_dimension"])
+            self.assertTrue(check["primary_score_metric"])
+            self.assertIn("higher_is_better", check)
+            self.assertIn("score_floor", check)
+            self.assertIn("primary_score_weight", check)
+            self.assertTrue(check["score_policy_id"])
         self.assertTrue(catalog["planned_benchmark_candidates"])
 
     def test_normalize_request_selection_derives_breadth_from_legacy_lane(self):
@@ -89,7 +96,15 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(metadata["benchmark_scope"]["scope"], "decision")
         self.assertEqual(metadata["capability_coverage_guidance"]["selected_decision_check_ids"], ["ifeval", "interactive_chat_v1"])
         self.assertIn("status", metadata["benchmark_checks"][0])
-
+        score_dimensions = {item["check_id"]: item["score_dimension"] for item in metadata["benchmark_checks"]}
+        self.assertEqual(score_dimensions["ifeval"], "instruction_following")
+        self.assertEqual(score_dimensions["interactive_chat_v1"], "interactive_latency")
+        interactive = next(item for item in metadata["benchmark_checks"] if item["check_id"] == "interactive_chat_v1")
+        self.assertFalse(interactive["higher_is_better"])
+        self.assertEqual(interactive["primary_score_weight"], 0.0)
+        self.assertIn("time_to_first_token_ms", interactive["score_breakdown_fields"])
+        policy_ids = [item["score_policy_id"] for item in metadata["score_policies"]]
+        self.assertEqual(policy_ids, ["instruction_following_primary_accuracy_v1", "deployment_profile_metrics_v1"])
 
     def test_benchmark_scope_summary_empty_selection_uses_computed_confidence(self):
         summary = benchmark_scope_summary_for_selection([])

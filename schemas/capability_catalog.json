@@ -12,6 +12,32 @@
     "failure_rate": "unknown",
     "calibration_status": "estimated_static_catalog_v1"
   },
+  "score_policies": [
+    {
+      "score_policy_id": "instruction_following_primary_accuracy_v1",
+      "display_name": "Instruction following primary accuracy",
+      "description": "Use IFEval prompt-level strict accuracy as the primary assistant instruction-following score.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "coding_primary_pass_at_1_v1",
+      "display_name": "Coding primary pass@1",
+      "description": "Use EvalPlus pass@1+ as the primary coding score. HumanEval+ is the core decision signal; MBPP+ adds breadth.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "deployment_profile_metrics_v1",
+      "display_name": "Deployment profile metrics",
+      "description": "Expose latency and throughput metrics as deployment evidence without folding them into task capability score.",
+      "score_method": "metric_breakdown_v1"
+    },
+    {
+      "score_policy_id": "quant_fidelity_perplexity_v1",
+      "display_name": "Quant fidelity perplexity",
+      "description": "Use lower perplexity as a supplemental quant-fidelity signal for nearby quantized variants.",
+      "score_method": "primary_metric_value_v1"
+    }
+  ],
   "benchmark_scopes": [
     {
       "scope_id": "decision",
@@ -165,7 +191,13 @@
       "expected_duration_band": "5-15 min",
       "token_volume_band": "small",
       "resumability_boundary": "benchmark",
-      "execution_pattern": "fast_capability_microcheck"
+      "execution_pattern": "fast_capability_microcheck",
+      "score_dimension": "instruction_following",
+      "primary_score_metric": "prompt_strict_accuracy",
+      "score_floor": 0.0,
+      "primary_score_weight": 1.0,
+      "higher_is_better": true,
+      "score_policy_id": "instruction_following_primary_accuracy_v1"
     },
     {
       "check_id": "evalplus_humaneval",
@@ -180,7 +212,13 @@
       "expected_duration_band": "10-25 min",
       "token_volume_band": "small",
       "resumability_boundary": "benchmark",
-      "execution_pattern": "fast_capability_microcheck"
+      "execution_pattern": "fast_capability_microcheck",
+      "score_dimension": "code_generation_core",
+      "primary_score_metric": "pass_at_1_plus",
+      "score_floor": 0.0,
+      "primary_score_weight": 1.0,
+      "higher_is_better": true,
+      "score_policy_id": "coding_primary_pass_at_1_v1"
     },
     {
       "check_id": "evalplus_mbpp",
@@ -195,7 +233,13 @@
       "expected_duration_band": "25-60 min",
       "token_volume_band": "medium",
       "resumability_boundary": "benchmark",
-      "execution_pattern": "throughput_oriented_offline_suite"
+      "execution_pattern": "throughput_oriented_offline_suite",
+      "score_dimension": "code_generation_breadth",
+      "primary_score_metric": "pass_at_1_plus",
+      "score_floor": 0.0,
+      "primary_score_weight": 1.0,
+      "higher_is_better": true,
+      "score_policy_id": "coding_primary_pass_at_1_v1"
     },
     {
       "check_id": "interactive_chat_v1",
@@ -210,7 +254,14 @@
       "expected_duration_band": "1-5 min",
       "token_volume_band": "tiny",
       "resumability_boundary": "profile",
-      "execution_pattern": "latency_sensitive_interactive"
+      "execution_pattern": "latency_sensitive_interactive",
+      "score_dimension": "interactive_latency",
+      "primary_score_metric": "time_to_first_token_ms",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "higher_is_better": false,
+      "score_policy_id": "deployment_profile_metrics_v1",
+      "score_breakdown_fields": ["time_to_first_token_ms", "tokens_per_second", "load_time_ms"]
     },
     {
       "check_id": "batch_generation_v1",
@@ -225,7 +276,14 @@
       "expected_duration_band": "5-15 min",
       "token_volume_band": "small",
       "resumability_boundary": "profile",
-      "execution_pattern": "throughput_oriented_offline_suite"
+      "execution_pattern": "throughput_oriented_offline_suite",
+      "score_dimension": "batch_throughput",
+      "primary_score_metric": "tokens_per_second",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "higher_is_better": true,
+      "score_policy_id": "deployment_profile_metrics_v1",
+      "score_breakdown_fields": ["tokens_per_second", "requests_per_second"]
     },
     {
       "check_id": "long_context_v1",
@@ -240,7 +298,14 @@
       "expected_duration_band": "10-30 min",
       "token_volume_band": "medium",
       "resumability_boundary": "profile",
-      "execution_pattern": "latency_sensitive_interactive"
+      "execution_pattern": "latency_sensitive_interactive",
+      "score_dimension": "long_context_latency",
+      "primary_score_metric": "time_to_first_token_ms",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "higher_is_better": false,
+      "score_policy_id": "deployment_profile_metrics_v1",
+      "score_breakdown_fields": ["time_to_first_token_ms", "tokens_per_second", "peak_memory_bytes"]
     },
     {
       "check_id": "perplexity_reference_v1",
@@ -255,7 +320,13 @@
       "expected_duration_band": "10-30 min",
       "token_volume_band": "medium",
       "resumability_boundary": "benchmark",
-      "execution_pattern": "throughput_oriented_offline_suite"
+      "execution_pattern": "throughput_oriented_offline_suite",
+      "score_dimension": "quant_fidelity",
+      "primary_score_metric": "perplexity",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "higher_is_better": false,
+      "score_policy_id": "quant_fidelity_perplexity_v1"
     }
   ],
   "shortcuts": [
