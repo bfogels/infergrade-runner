@@ -24,6 +24,21 @@ class _FakeAdapter(object):
         return {"text": "generated:%s:%s" % (prompt[:12], max_tokens), "status": "completed", "error": None}
 
 
+class _MemoryPassingAdapter(object):
+    def generate_text(self, request, prompt, max_tokens):
+        if "HARBOR-17" in prompt:
+            return {"text": "HARBOR-17 uses q4_k_m.", "status": "completed", "error": None}
+        if "READY" in prompt:
+            return {"text": "READY local runner", "status": "completed", "error": None}
+        if "Apple M2 Max" in prompt:
+            return {"text": "Apple M2 Max", "status": "completed", "error": None}
+        if "fast first tokens" in prompt:
+            return {"text": "You prefer fast first tokens and a public model.", "status": "completed", "error": None}
+        if "IGRP-8421" in prompt:
+            return {"text": "IGRP-8421", "status": "completed", "error": None}
+        return {"text": "", "status": "completed", "error": None}
+
+
 class CapabilityTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.mkdtemp(prefix="infergrade-capability-")
@@ -52,6 +67,40 @@ class CapabilityTests(unittest.TestCase):
         )
         images = capability_images_for_request(request)
         self.assertEqual([item["benchmark_id"] for item in images], ["evalplus_humaneval", "evalplus_mbpp"])
+
+    def test_capability_images_skip_native_multiturn_benchmark(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["multiturn_chat_memory_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        self.assertEqual(capability_images_for_request(request), [])
+
+    def test_execute_native_multiturn_benchmark_scores_constraints_without_docker(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["multiturn_chat_memory_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._run_capability_container") as container_mock:
+            execution = execute_capability_suite(_MemoryPassingAdapter(), request)
+        container_mock.assert_not_called()
+        self.assertEqual(execution.status, "completed")
+        self.assertEqual(execution.score, 1.0)
+        self.assertEqual(execution.component_scores["multiturn_chat_memory_v1"], 1.0)
+        result = execution.benchmark_results["multiturn_chat_memory_v1"]
+        self.assertEqual(result["primary_metric"]["name"], "constraint_retention_accuracy")
+        self.assertEqual(result["metrics"]["passed_constraints"], result["metrics"]["total_constraints"])
+        benchmark_dir = os.path.join(self.tempdir, "artifacts", "capability", "multiturn_chat_memory_v1")
+        self.assertTrue(os.path.exists(os.path.join(benchmark_dir, "cases.jsonl")))
+        self.assertTrue(os.path.exists(os.path.join(benchmark_dir, "predictions.jsonl")))
+        self.assertTrue(os.path.exists(os.path.join(benchmark_dir, "summary.json")))
 
     def test_execute_capability_suite_aggregates_primary_scores(self):
         def fake_prepare(spec, benchmark_dir, tier):
@@ -274,13 +323,13 @@ class CapabilityTests(unittest.TestCase):
                 handle.write(json.dumps({"case_id": "case-1", "task_id": "IFEval/1", "prompt": "Follow the instruction"}) + "\n")
 
         def fake_evaluate(spec, benchmark_dir):
-            self.assertEqual(spec.benchmark_id, "ifeval")
+            score = 0.84 if spec.benchmark_id == "ifeval" else 0.9
             return {
                 "benchmark_id": spec.benchmark_id,
                 "display_name": spec.display_name,
                 "status": "completed",
-                "primary_metric": {"name": spec.primary_metric_name, "value": 0.84},
-                "metrics": {spec.primary_metric_name: 0.84},
+                "primary_metric": {"name": spec.primary_metric_name, "value": score},
+                "metrics": {spec.primary_metric_name: score},
             }
 
         request = RunRequest(
@@ -296,7 +345,9 @@ class CapabilityTests(unittest.TestCase):
                 execution = execute_capability_suite(_FakeAdapter(), request)
         self.assertEqual(execution.status, "completed")
         self.assertEqual(execution.component_scores["ifeval"], 0.84)
+        self.assertEqual(execution.component_scores["multiturn_chat_memory_v1"], 0.9)
         self.assertIn("ifeval", execution.benchmark_results)
+        self.assertIn("multiturn_chat_memory_v1", execution.benchmark_results)
 
     def test_execute_capability_suite_marks_all_generation_failures_as_failed(self):
         class _AlwaysFailingAdapter(object):

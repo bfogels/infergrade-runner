@@ -25,6 +25,10 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertTrue(catalog["score_policies"])
         self.assertEqual(catalog["metadata_source_defaults"]["duration"], "estimated")
         self.assertEqual(catalog["benchmark_scopes"][0]["scope_id"], "decision")
+        check_ids = {item["check_id"] for item in catalog["checks"]}
+        planned_ids = {item["check_id"] for item in catalog["planned_benchmark_candidates"]}
+        self.assertIn("multiturn_chat_memory_v1", check_ids)
+        self.assertNotIn("multiturn_chat_memory_v1", planned_ids)
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
             self.assertTrue(check["expected_duration_band"])
@@ -42,8 +46,23 @@ class BenchmarkCatalogTests(unittest.TestCase):
         normalize_request_selection(request)
         self.assertIn("chat_instruction_following", request.capability_suite_ids)
         self.assertIn("instruction_following", request.benchmark_group_ids)
+        self.assertIn("chat_memory", request.benchmark_group_ids)
         self.assertIn("ifeval", request.benchmark_check_ids)
+        self.assertIn("multiturn_chat_memory_v1", request.benchmark_check_ids)
         self.assertIn("interactive_chat_v1", request.deployment_profiles)
+
+    def test_native_multiturn_check_can_be_selected_explicitly(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            benchmark_group_ids=["chat_memory"],
+        )
+        normalize_request_selection(request)
+        self.assertEqual(request.benchmark_group_ids, ["chat_memory"])
+        self.assertEqual(request.benchmark_check_ids, ["multiturn_chat_memory_v1"])
+        self.assertEqual(capability_benchmark_ids_for_request(request), ["multiturn_chat_memory_v1"])
+        self.assertEqual(request.capability, "auto")
 
     def test_capability_and_fidelity_helpers_follow_explicit_check_selection(self):
         request = RunRequest(
@@ -111,6 +130,19 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("time_to_first_token_ms", interactive["score_breakdown_fields"])
         policy_ids = [item["score_policy_id"] for item in metadata["score_policies"]]
         self.assertEqual(policy_ids, ["instruction_following_primary_accuracy_v1", "deployment_profile_metrics_v1"])
+
+    def test_selection_metadata_includes_multiturn_score_policy(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            benchmark_check_ids=["multiturn_chat_memory_v1"],
+        )
+        metadata = selection_metadata_for_request(request)
+        self.assertEqual(metadata["benchmark_checks"][0]["score_dimension"], "multiturn_instruction_retention")
+        self.assertEqual(metadata["benchmark_checks"][0]["primary_score_metric"], "constraint_retention_accuracy")
+        self.assertIn("case_accuracy", metadata["benchmark_checks"][0]["score_breakdown_fields"])
+        self.assertEqual(metadata["score_policies"][0]["score_policy_id"], "multiturn_constraint_retention_v1")
 
     def test_benchmark_scope_summary_empty_selection_uses_computed_confidence(self):
         summary = benchmark_scope_summary_for_selection([])
