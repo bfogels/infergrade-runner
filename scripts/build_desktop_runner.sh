@@ -43,6 +43,23 @@ fi
 
 cd "$APP_DIR"
 MACOS_SIGNING_IDENTITY="${INFERGRADE_MACOS_SIGNING_IDENTITY:-}"
+
+unset_if_empty() {
+  local name="$1"
+  if [ -z "${!name:-}" ]; then
+    unset "$name"
+  fi
+}
+
+unset_if_empty APPLE_CERTIFICATE
+unset_if_empty APPLE_CERTIFICATE_PASSWORD
+unset_if_empty APPLE_ID
+unset_if_empty APPLE_PASSWORD
+unset_if_empty APPLE_TEAM_ID
+unset_if_empty APPLE_API_KEY
+unset_if_empty APPLE_API_ISSUER
+unset_if_empty APPLE_API_KEY_PATH
+
 if [ -z "$MACOS_SIGNING_IDENTITY" ] && [ -z "${APPLE_CERTIFICATE:-}" ]; then
   MACOS_SIGNING_IDENTITY="-"
 fi
