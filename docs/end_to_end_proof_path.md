@@ -1,4 +1,4 @@
-# V0 End-To-End Proof Path
+# End-To-End Proof Path
 
 The Runner proof path is intentionally narrow. It exists to protect the first outside-user promise:
 
@@ -36,7 +36,7 @@ The report is not decorative. It is the standalone human-readable artifact that 
 The locally testable proof is covered by:
 
 ```bash
-PYTHONPATH=python/runner-core/src python3 -m unittest python/runner-core/tests/test_v0_proof_path.py
+PYTHONPATH=python/runner-core/src python3 -m unittest python/runner-core/tests/test_end_to_end_proof_path.py
 ```
 
 That test runs a simulated TinyLlama local-native decision-suite request and asserts that the result, summary, manifest, and report all preserve the same benchmark scope and selected check.

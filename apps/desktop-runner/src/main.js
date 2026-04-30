@@ -3,9 +3,9 @@ import "./styles.css";
 const SIDECAR_NAME = "binaries/infergrade-sidecar";
 const API_URL_STORAGE_KEY = "infergrade.runner.apiUrl";
 const THEME_STORAGE_KEY = "infergrade.runner.theme";
-const APP_VERSION_FALLBACK = "0.1.4";
-const UPDATE_CHANNEL = "dogfood";
-const UPDATE_STATUS = "Updates are disabled until signed Tauri artifacts and rollback policy exist.";
+const APP_VERSION_FALLBACK = "0.1.5";
+const UPDATE_CHANNEL = "preview";
+const UPDATE_STATUS = "Updates are available in the desktop app when signed release artifacts are published.";
 
 const form = document.querySelector("[data-runner-form]");
 const startButton = document.querySelector("[data-start-runner]");

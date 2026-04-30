@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser for release bundle export."""
     parser = argparse.ArgumentParser(prog="export_release_bundle")
     parser.add_argument("--output-dir", help="Optional export root. Defaults to dist/releases under the repo root.")
-    parser.add_argument("--release-version", help="Optional release identifier. Defaults to INFERGRADE_RELEASE_VERSION or the alpha lane.")
+    parser.add_argument("--release-version", help="Optional release identifier. Defaults to INFERGRADE_RELEASE_VERSION or the preview lane.")
     return parser
 
 

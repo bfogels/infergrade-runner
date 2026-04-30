@@ -60,39 +60,39 @@ class ContractExportTests(unittest.TestCase):
             (source_root / "schemas" / "examples" / "example.json").write_text("{}", encoding="utf-8")
             (source_root / "schemas" / "capability_catalog.json").write_text("{}", encoding="utf-8")
             (source_root / "docs" / "contract_ownership.md").write_text("# contract", encoding="utf-8")
-            image_dir = source_root / "dist" / "images" / "1.2.3-alpha"
+            image_dir = source_root / "dist" / "images" / "1.2.3-preview"
             image_dir.mkdir(parents=True)
-            (image_dir / "infergrade-runner-core_1.2.3-alpha.tar").write_text("runner-image", encoding="utf-8")
-            (image_dir / "infergrade-llama-cpp_1.2.3-alpha.tar").write_text("runtime-image", encoding="utf-8")
-            (image_dir / "infergrade-mmlu-pro_1.2.3-alpha.tar").write_text("mmlu-image", encoding="utf-8")
+            (image_dir / "infergrade-runner-core_1.2.3-preview.tar").write_text("runner-image", encoding="utf-8")
+            (image_dir / "infergrade-llama-cpp_1.2.3-preview.tar").write_text("runtime-image", encoding="utf-8")
+            (image_dir / "infergrade-mmlu-pro_1.2.3-preview.tar").write_text("mmlu-image", encoding="utf-8")
 
             bundle_dir = export_release_bundle(
                 output_dir=output_root,
                 root=source_root,
-                release_version="1.2.3-alpha",
+                release_version="1.2.3-preview",
             )
 
             manifest = load_release_manifest(bundle_dir=bundle_dir)
-            self.assertEqual("1.2.3-alpha", manifest["release_version"])
+            self.assertEqual("1.2.3-preview", manifest["release_version"])
             self.assertEqual("1.2.3", manifest["contract_version"])
-            self.assertEqual("0.1.4", manifest["runner_version"])
-            self.assertEqual("alpha", manifest["release_channel"])
+            self.assertEqual("0.1.5", manifest["runner_version"])
+            self.assertEqual("preview", manifest["release_channel"])
             self.assertEqual(
-                "infergrade-runner-core:1.2.3-alpha",
+                "infergrade-runner-core:1.2.3-preview",
                 manifest["golden_paths"]["local_listener_container"]["runner_image"],
             )
             self.assertTrue((bundle_dir / "contract" / "contract_manifest.json").exists())
-            self.assertTrue((bundle_dir / "images" / "infergrade-runner-core_1.2.3-alpha.tar").exists())
+            self.assertTrue((bundle_dir / "images" / "infergrade-runner-core_1.2.3-preview.tar").exists())
             self.assertGreaterEqual(len(manifest["artifacts"]), 3)
             self.assertFalse((source_root / "dist" / "contracts").exists())
             runtime_refs = {item["image_name"]: item for item in manifest["runtime_images"]}
             capability_refs = {item["image_name"]: item for item in manifest["capability_images"]}
             self.assertEqual(
-                "images/infergrade-runner-core_1.2.3-alpha.tar",
+                "images/infergrade-runner-core_1.2.3-preview.tar",
                 runtime_refs["infergrade-runner-core"]["archive_path"],
             )
             self.assertEqual(
-                "images/infergrade-mmlu-pro_1.2.3-alpha.tar",
+                "images/infergrade-mmlu-pro_1.2.3-preview.tar",
                 capability_refs["infergrade-mmlu-pro"]["archive_path"],
             )
 

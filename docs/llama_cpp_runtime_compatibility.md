@@ -1,6 +1,6 @@
 # llama.cpp Runtime Compatibility
 
-InferGrade Runner treats `llama.cpp` as an explicit runtime dependency for real GGUF runs. Sprint 56 makes that dependency more visible before a user spends time on a run that cannot load.
+InferGrade Runner treats `llama.cpp` as an explicit runtime dependency for real GGUF runs. This guide makes that dependency more visible before a user spends time on a run that cannot load.
 
 ## Runtime Selection
 
@@ -18,4 +18,4 @@ Custom native paths are advanced-user runtime choices. Doctor reports them as `c
 
 Runner checks known model/runtime incompatibilities before deployment and capability phases. It uses ontology hints when present and can read `general.architecture` from local GGUF metadata when practical. Known unsupported architectures fail early with an actionable message instead of producing misleading partial benchmark output.
 
-This sprint does not install or upgrade `llama.cpp`. Managed installation is intentionally reserved for Sprint 57 so upgrades remain explicit and inspectable.
+This compatibility check does not install or upgrade `llama.cpp`. Managed installation remains explicit and inspectable.

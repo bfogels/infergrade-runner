@@ -17,12 +17,12 @@ from infergrade.transport import (
 
 class TransportTests(unittest.TestCase):
     def test_request_headers_include_bearer_token(self):
-        headers = _request_headers(api_token="alpha-secret", content_type="application/json")
-        self.assertEqual(headers["Authorization"], "Bearer alpha-secret")
+        headers = _request_headers(api_token="example-secret", content_type="application/json")
+        self.assertEqual(headers["Authorization"], "Bearer example-secret")
         self.assertEqual(headers["Content-Type"], "application/json")
 
     def test_run_token_takes_precedence_over_api_token(self):
-        headers = _request_headers(api_token="alpha-secret", run_token="run-secret")
+        headers = _request_headers(api_token="example-secret", run_token="run-secret")
         self.assertEqual(headers["Authorization"], "Bearer run-secret")
 
     def test_api_token_falls_back_to_environment(self):

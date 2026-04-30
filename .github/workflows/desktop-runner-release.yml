@@ -1,23 +1,26 @@
 name: Desktop Runner Release
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       version:
-        description: "SemVer desktop app version to publish; must be newer than the currently installed alpha"
-        default: "0.1.4"
-        required: true
+        description: "SemVer desktop app version to publish; defaults to VERSION on main"
+        default: "0.1.5"
+        required: false
       notes:
         description: "Short release notes shown in the updater"
-        default: "InferGrade Runner desktop alpha update."
-        required: true
+        default: "InferGrade Runner desktop update."
+        required: false
 
 permissions:
   contents: write
 
 jobs:
-  macos-alpha:
-    name: Build macOS alpha app and updater
+  macos-preview:
+    name: Build and publish macOS desktop app
     runs-on: macos-latest
     environment: release
     env:
@@ -29,9 +32,9 @@ jobs:
       APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       INFERGRADE_MACOS_SIGNING_IDENTITY: ${{ vars.INFERGRADE_MACOS_SIGNING_IDENTITY }}
-      DESKTOP_VERSION: ${{ inputs.version }}
-      RELEASE_TAG: desktop-runner-alpha
-      RELEASE_NOTES: ${{ inputs.notes }}
+      DESKTOP_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+      RELEASE_TAG: desktop-runner-latest
+      RELEASE_NOTES: ${{ github.event_name == 'workflow_dispatch' && inputs.notes || '' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -43,6 +46,17 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Resolve release metadata
+        run: |
+          if [ -z "$DESKTOP_VERSION" ]; then
+            DESKTOP_VERSION="$(cat VERSION)"
+          fi
+          if [ -z "$RELEASE_NOTES" ]; then
+            RELEASE_NOTES="InferGrade Runner desktop update for ${GITHUB_SHA}."
+          fi
+          echo "DESKTOP_VERSION=$DESKTOP_VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_NOTES=$RELEASE_NOTES" >> "$GITHUB_ENV"
 
       - name: Set desktop app version
         run: |
@@ -70,12 +84,13 @@ jobs:
             --notes "$RELEASE_NOTES" \
             --output apps/desktop-runner/src-tauri/target/release/bundle/macos/infergrade-runner-desktop-latest.json
 
-      - name: Publish alpha release artifacts
+      - name: Publish desktop release artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
-            gh release create "$RELEASE_TAG" --title "InferGrade Runner Desktop Alpha" --prerelease --notes "$RELEASE_NOTES"
+            gh release create "$RELEASE_TAG" --title "InferGrade Runner Desktop" --prerelease --notes "$RELEASE_NOTES"
+          gh release edit "$RELEASE_TAG" --title "InferGrade Runner Desktop" --notes "$RELEASE_NOTES" --prerelease
           gh release upload "$RELEASE_TAG" \
             apps/desktop-runner/src-tauri/target/release/bundle/dmg/*.dmg \
             apps/desktop-runner/src-tauri/target/release/bundle/macos/*.tar.gz \

@@ -1,8 +1,8 @@
-# InferGrade v0.1 Architecture
+# InferGrade Architecture Target
 
 ## Purpose
 
-This document turns the current InferGrade strategy into a concrete architecture target for v0.1.
+This document turns the current InferGrade strategy into a concrete architecture target for the next public release.
 
 The key architectural decision is that InferGrade is not one deployable thing.
 
@@ -12,9 +12,9 @@ It is:
 - a hosted `Hub`
 - plus shared schemas and bundle contracts between them
 
-## v0.1 User Promise
+## User Promise
 
-InferGrade v0.1 should let a user do both of these cleanly:
+InferGrade should let a user do both of these cleanly:
 
 1. sign into the hosted hub, connect Hugging Face, generate a run, execute it locally or in cloud, and see the result appear automatically
 2. install the open-source runner directly, execute a benchmark without adopting the hosted hub first, and still produce a standards-compliant bundle
@@ -59,7 +59,7 @@ The hub is the hosted control plane.
 ### Distribution
 
 - canonical hosted product
-- not optimized for broad self-hosting in v0.1
+- not optimized for broad self-hosting in the hosted product lane
 
 ## 3. Shared Contract Layer
 
@@ -72,7 +72,7 @@ The runner and hub should communicate through versioned artifacts:
 
 This is the stable seam in the system.
 
-## v0.1 Core Flows
+## Core Flows
 
 ## Hosted Local Flow
 
@@ -101,7 +101,7 @@ This is the stable seam in the system.
 
 ## Identity and Credential Model
 
-v0.1 should clearly separate identity from execution.
+InferGrade should clearly separate identity from execution.
 
 ## Hub-Owned Identity
 
@@ -125,7 +125,7 @@ The runner should use scoped credentials from the hub where needed, but it shoul
 
 ## Hugging Face Integration
 
-This should be a first-class v0.1 hub capability.
+This should be a first-class Hub capability.
 
 The hub should use Hugging Face metadata and connected credentials to:
 
@@ -136,7 +136,7 @@ The hub should use Hugging Face metadata and connected credentials to:
 
 The runner should then execute the resolved plan.
 
-## v0.1 Runner Scope
+## Runner Scope
 
 The runner should support:
 
@@ -147,7 +147,7 @@ The runner should support:
 - artifact resolution for `hf://`, `http(s)://`, `file://`, and local paths
 - bundle upload
 
-## v0.1 Hub Scope
+## Hub Scope
 
 The hub should support:
 
@@ -175,7 +175,7 @@ But this is a hosted analysis concern, not a limit on what the runner may execut
 
 ## Data Model
 
-The v0.1 data model remains joined and ontology-aware:
+The current data model remains joined and ontology-aware:
 
 - configuration identity
 - artifact identity
@@ -190,7 +190,7 @@ The v0.1 data model remains joined and ontology-aware:
 The hosted hub consumes this contract.
 The runner emits it.
 
-## Non-Goals for v0.1
+## Non-Goals
 
 - broad hub self-hosting
 - making the hub the only way to use InferGrade
@@ -200,7 +200,7 @@ The runner emits it.
 
 ## Practical Repo Interpretation
 
-In the current monorepo:
+In the monorepo:
 
 - [python/runner-core](../python/runner-core) is the open runner
 - [services/api](../services/api) and [apps/web](../apps/web) are hub scaffolding
@@ -208,9 +208,9 @@ In the current monorepo:
 
 That means the repo can continue to evolve in one place while the product boundary stays clear.
 
-## What v0.1 Must Prove
+## What The Public Release Must Prove
 
-v0.1 is successful if it proves:
+The release is successful if it proves:
 
 1. the runner is useful and trustworthy on its own
 2. the hosted hub meaningfully reduces friction through identity, Hugging Face integration, and community evidence

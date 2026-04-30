@@ -51,7 +51,7 @@ _PINNED_LLAMA_CPP_REF = "9f102a140"
 _UNSUPPORTED_ARCHITECTURES = {
     "gemma4": "the pinned llama.cpp runtime predates Gemma 4 GGUF support",
 }
-_PERPLEXITY_CORPUS_ID = "infergrade_alpha_text_v1"
+_PERPLEXITY_CORPUS_ID = "infergrade_preview_text_v1"
 _PERPLEXITY_CONTEXT_SIZE = 128
 _PERPLEXITY_OUTPUT_TYPE = 0
 _PERPLEXITY_STRIDE = 0
