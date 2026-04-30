@@ -27,6 +27,11 @@
               <strong data-runner-status>Idle</strong>
             </div>
           </div>
+          <div class="release-card" aria-label="App release status">
+            <p class="status-label">App build</p>
+            <strong data-app-version>0.1.0</strong>
+            <span data-update-channel>Dogfood channel</span>
+          </div>
         </div>
       </section>
 
@@ -108,10 +113,20 @@
           </div>
           <details class="advanced-token-panel">
             <summary>Update and platform status</summary>
-            <p class="hint">
-              This build is a dogfood desktop app. Automatic updates, Windows/Linux installers, and signed public
-              releases need release signing and platform sidecar artifacts before they are user-ready.
-            </p>
+            <div class="status-list">
+              <div>
+                <strong>Updates</strong>
+                <span data-update-status>Off until signed releases exist.</span>
+              </div>
+              <div>
+                <strong>macOS</strong>
+                <span>Unsigned Apple Silicon dogfood DMG lane.</span>
+              </div>
+              <div>
+                <strong>Windows/Linux</strong>
+                <span>Blocked on platform sidecar artifacts and signing.</span>
+              </div>
+            </div>
           </details>
         </section>
       </section>
