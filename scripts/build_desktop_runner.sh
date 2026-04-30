@@ -65,6 +65,12 @@ if [ -n "${APPLE_CERTIFICATE:-}" ] && [ -z "${APPLE_CERTIFICATE_PASSWORD:-}" ]; 
   unset APPLE_CERTIFICATE
 fi
 
+if [ -n "${APPLE_CERTIFICATE:-}" ] && [ -z "$MACOS_SIGNING_IDENTITY" ]; then
+  echo "APPLE_CERTIFICATE is set but INFERGRADE_MACOS_SIGNING_IDENTITY is not; using ad-hoc macOS signing." >&2
+  unset APPLE_CERTIFICATE
+  unset APPLE_CERTIFICATE_PASSWORD
+fi
+
 if [ -z "$MACOS_SIGNING_IDENTITY" ] && [ -z "${APPLE_CERTIFICATE:-}" ]; then
   MACOS_SIGNING_IDENTITY="-"
 fi
