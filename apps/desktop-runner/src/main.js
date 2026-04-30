@@ -3,7 +3,7 @@ import "./styles.css";
 const SIDECAR_NAME = "binaries/infergrade-sidecar";
 const API_URL_STORAGE_KEY = "infergrade.runner.apiUrl";
 const THEME_STORAGE_KEY = "infergrade.runner.theme";
-const APP_VERSION_FALLBACK = "0.1.7";
+const APP_VERSION_FALLBACK = "0.1.8";
 const UPDATE_CHANNEL = "preview";
 const UPDATE_STATUS = "Updates are available in the desktop app when signed release artifacts are published.";
 
