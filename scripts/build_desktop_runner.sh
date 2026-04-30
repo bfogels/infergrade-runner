@@ -68,6 +68,14 @@ done
 
 if [ "$CREATE_UPDATER_ARTIFACTS" -eq 1 ]; then
   shopt -s nullglob
+  space_named_archives=("$MACOS_BUNDLE_DIR"/*" "*.tar.gz)
+  for artifact in "${space_named_archives[@]}"; do
+    normalized_artifact="${artifact// /.}"
+    mv "$artifact" "$normalized_artifact"
+    if [ -f "$artifact.sig" ]; then
+      mv "$artifact.sig" "$normalized_artifact.sig"
+    fi
+  done
   updater_archives=("$MACOS_BUNDLE_DIR"/*.tar.gz)
   updater_signatures=("$MACOS_BUNDLE_DIR"/*.tar.gz.sig)
   shopt -u nullglob
