@@ -22,6 +22,8 @@ const runtimeSelectExistingButton = document.querySelector("[data-runtime-select
 const appVersion = document.querySelector("[data-app-version]");
 const updateChannel = document.querySelector("[data-update-channel]");
 const updateStatus = document.querySelector("[data-update-status]");
+const runnerCliVersion = document.querySelector("[data-runner-cli-version]");
+const runtimeRunnerVersion = document.querySelector("[data-runtime-runner-version]");
 const statusText = document.querySelector("[data-runner-status]");
 const statusDot = document.querySelector("[data-status-dot]");
 const pairState = document.querySelector("[data-pair-state]");
@@ -69,6 +71,34 @@ function renderReleaseStatus() {
   }
   if (updateStatus) {
     updateStatus.textContent = UPDATE_STATUS;
+  }
+}
+
+function renderRunnerCliVersion(label) {
+  if (runnerCliVersion) {
+    runnerCliVersion.textContent = `Runner CLI: ${label}`;
+  }
+  if (runtimeRunnerVersion) {
+    runtimeRunnerVersion.textContent = label;
+  }
+}
+
+async function refreshRunnerCliVersion() {
+  const Command = await loadTauriShell();
+  if (!Command) {
+    renderRunnerCliVersion("available inside the desktop app");
+    return;
+  }
+
+  try {
+    const output = await Command.sidecar(SIDECAR_NAME, ["--version"]).execute();
+    if (output.code !== 0) {
+      throw new Error(output.stderr || output.stdout || `version command exited with code ${output.code}`);
+    }
+    renderRunnerCliVersion((output.stdout || output.stderr || "version unavailable").trim());
+  } catch (error) {
+    renderRunnerCliVersion("version unavailable");
+    appendLog(`Could not read Runner CLI version: ${error.message || error}`);
   }
 }
 
@@ -405,5 +435,6 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
 
 initTheme();
 renderReleaseStatus();
+refreshRunnerCliVersion().catch((error) => appendLog(`Could not check Runner CLI version: ${error.message || error}`));
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");
