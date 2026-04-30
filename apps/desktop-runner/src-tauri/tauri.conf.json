@@ -27,9 +27,18 @@
   "bundle": {
     "active": true,
     "targets": ["dmg"],
+    "createUpdaterArtifacts": false,
     "externalBin": ["binaries/infergrade-sidecar"],
     "category": "DeveloperTool",
     "shortDescription": "Local companion app for InferGrade Runner jobs",
     "longDescription": "Pairs with InferGrade Hub, keeps the local Runner listening, and surfaces Runner process logs without terminal access."
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhDQ0E5RjlBQUY1NjUyQjEKUldTeFVsYXZtcC9LalAxSkNuY2NGWUl2VnNZMk1lMmtoNXVuWTVMaDBtREF4TFBVc29XNm9yWFoK",
+      "endpoints": [
+        "https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-alpha/infergrade-runner-desktop-latest.json"
+      ]
+    }
   }
 }

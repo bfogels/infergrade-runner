@@ -17,9 +17,15 @@ const clearLogsButton = document.querySelector("[data-clear-logs]");
 const themeChoiceButtons = [...document.querySelectorAll("[data-theme-choice]")];
 const runtimePlanButton = document.querySelector("[data-runtime-plan]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
+const checkUpdateButton = document.querySelector("[data-check-update]");
+const installUpdateButton = document.querySelector("[data-install-update]");
+const relaunchUpdateButton = document.querySelector("[data-relaunch-update]");
 const appVersion = document.querySelector("[data-app-version]");
 const updateChannel = document.querySelector("[data-update-channel]");
 const updateStatus = document.querySelector("[data-update-status]");
+const updateActions = document.querySelector("[data-update-actions]");
+const updateAvailable = document.querySelector("[data-update-available]");
+const updateDetail = document.querySelector("[data-update-detail]");
 const runnerCliVersion = document.querySelector("[data-runner-cli-version]");
 const runtimeRunnerVersion = document.querySelector("[data-runtime-runner-version]");
 const statusText = document.querySelector("[data-runner-status]");
@@ -32,6 +38,7 @@ let childProcess = null;
 let logLines = [];
 let tauriInvoke = null;
 let previewToken = "";
+let pendingUpdate = null;
 
 function systemTheme() {
   if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
@@ -84,7 +91,109 @@ function renderReleaseStatus() {
     updateChannel.textContent = `${UPDATE_CHANNEL} channel`;
   }
   if (updateStatus) {
-    updateStatus.textContent = UPDATE_STATUS;
+    updateStatus.textContent = isTauriRuntime() ? "Signed update checks are available from the app." : UPDATE_STATUS;
+  }
+}
+
+function renderUpdateActions(visible, title = "Update available", detail = "Ready to download.") {
+  if (updateActions) {
+    updateActions.hidden = !visible;
+  }
+  if (updateAvailable) {
+    updateAvailable.textContent = title;
+  }
+  if (updateDetail) {
+    updateDetail.textContent = detail;
+  }
+}
+
+function setUpdateStatus(message) {
+  if (updateStatus) {
+    updateStatus.textContent = message;
+  }
+}
+
+function updateDownloadProgress(event) {
+  if (event.event === "Started") {
+    const size = event.data?.contentLength ? `${Math.round(event.data.contentLength / 1024 / 1024)} MB` : "unknown size";
+    setUpdateStatus(`Downloading update (${size})...`);
+    return;
+  }
+  if (event.event === "Progress") {
+    setUpdateStatus("Downloading update...");
+    return;
+  }
+  if (event.event === "Finished") {
+    setUpdateStatus("Installing update...");
+  }
+}
+
+async function checkForAppUpdate() {
+  if (!isTauriRuntime()) {
+    setUpdateStatus("Open the desktop app to check signed updates.");
+    appendLog("Browser preview cannot check Tauri updates.");
+    return;
+  }
+  checkUpdateButton.disabled = true;
+  setUpdateStatus("Checking for signed updates...");
+  renderUpdateActions(false);
+  try {
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const update = await check();
+    pendingUpdate = update;
+    if (!update) {
+      setUpdateStatus("InferGrade Runner is up to date.");
+      appendLog("No desktop Runner update is available.");
+      return;
+    }
+    const detail = update.body || `Current ${update.currentVersion}; available ${update.version}.`;
+    setUpdateStatus(`Update ${update.version} is available.`);
+    renderUpdateActions(true, `Update ${update.version}`, detail);
+    if (installUpdateButton) {
+      installUpdateButton.disabled = false;
+    }
+    if (relaunchUpdateButton) {
+      relaunchUpdateButton.disabled = true;
+    }
+    appendLog(`Desktop Runner update ${update.version} is available.`);
+  } catch (error) {
+    setUpdateStatus("Could not check updates.");
+    appendLog(`Update check failed: ${error.message || error}`);
+  } finally {
+    checkUpdateButton.disabled = false;
+  }
+}
+
+async function installPendingUpdate() {
+  if (!pendingUpdate) {
+    await checkForAppUpdate();
+  }
+  if (!pendingUpdate) {
+    return;
+  }
+  installUpdateButton.disabled = true;
+  setUpdateStatus(`Installing update ${pendingUpdate.version}...`);
+  try {
+    await pendingUpdate.downloadAndInstall(updateDownloadProgress);
+    setUpdateStatus("Update installed. Relaunch to finish.");
+    appendLog(`Installed desktop Runner update ${pendingUpdate.version}.`);
+    if (relaunchUpdateButton) {
+      relaunchUpdateButton.disabled = false;
+    }
+  } catch (error) {
+    installUpdateButton.disabled = false;
+    setUpdateStatus("Update install failed.");
+    appendLog(`Update install failed: ${error.message || error}`);
+  }
+}
+
+async function relaunchAfterUpdate() {
+  try {
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  } catch (error) {
+    appendLog(`Could not relaunch automatically: ${error.message || error}`);
+    setUpdateStatus("Relaunch failed. Quit and reopen the app.");
   }
 }
 
@@ -451,6 +560,18 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
     setStatus("Runtime selection failed", "error");
     appendLog(`Could not select installed llama.cpp runtime: ${error.message || error}`);
   });
+});
+
+checkUpdateButton?.addEventListener("click", () => {
+  checkForAppUpdate().catch((error) => appendLog(`Could not check updates: ${error.message || error}`));
+});
+
+installUpdateButton?.addEventListener("click", () => {
+  installPendingUpdate().catch((error) => appendLog(`Could not install update: ${error.message || error}`));
+});
+
+relaunchUpdateButton?.addEventListener("click", () => {
+  relaunchAfterUpdate().catch((error) => appendLog(`Could not relaunch: ${error.message || error}`));
 });
 
 initTheme();

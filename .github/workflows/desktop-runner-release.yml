@@ -1,0 +1,78 @@
+name: Desktop Runner Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "SemVer desktop app version to publish; must be newer than the currently installed alpha"
+        default: "0.1.1"
+        required: true
+      notes:
+        description: "Short release notes shown in the updater"
+        default: "InferGrade Runner desktop alpha update."
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  macos-alpha:
+    name: Build macOS alpha app and updater
+    runs-on: macos-latest
+    environment: release
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      DESKTOP_VERSION: ${{ inputs.version }}
+      RELEASE_TAG: desktop-runner-alpha
+      RELEASE_NOTES: ${{ inputs.notes }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set desktop app version
+        run: |
+          node -e "if (!/^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(process.env.DESKTOP_VERSION)) { throw new Error('DESKTOP_VERSION must be SemVer-like'); }"
+          cd apps/desktop-runner
+          npm version "$DESKTOP_VERSION" --no-git-tag-version --allow-same-version
+          node <<'NODE'
+          const fs = require("fs");
+          const path = "src-tauri/tauri.conf.json";
+          const config = JSON.parse(fs.readFileSync(path, "utf8"));
+          config.version = process.env.DESKTOP_VERSION;
+          fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+          NODE
+
+      - name: Build signed updater artifacts
+        run: ./scripts/build_desktop_runner.sh --with-updater
+
+      - name: Write updater manifest
+        run: |
+          BASE_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}"
+          python3 ./scripts/write_desktop_update_manifest.py \
+            --bundle-dir apps/desktop-runner/src-tauri/target/release/bundle/macos \
+            --version "$DESKTOP_VERSION" \
+            --base-url "$BASE_URL" \
+            --notes "$RELEASE_NOTES" \
+            --output apps/desktop-runner/src-tauri/target/release/bundle/macos/infergrade-runner-desktop-latest.json
+
+      - name: Publish alpha release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --title "InferGrade Runner Desktop Alpha" --prerelease --notes "$RELEASE_NOTES"
+          gh release upload "$RELEASE_TAG" \
+            apps/desktop-runner/src-tauri/target/release/bundle/dmg/*.dmg \
+            apps/desktop-runner/src-tauri/target/release/bundle/macos/*.tar.gz \
+            apps/desktop-runner/src-tauri/target/release/bundle/macos/*.tar.gz.sig \
+            apps/desktop-runner/src-tauri/target/release/bundle/macos/infergrade-runner-desktop-latest.json \
+            --clobber

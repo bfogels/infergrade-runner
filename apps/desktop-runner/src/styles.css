@@ -69,6 +69,18 @@ button:disabled {
   opacity: 0.45;
 }
 
+.button-secondary {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.compact-button {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 0.86rem;
+}
+
 input {
   width: 100%;
   border: 1px solid var(--border);
@@ -262,6 +274,14 @@ label {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.compact-actions {
+  margin-top: 8px;
+}
+
+.compact-actions button {
+  min-height: 36px;
 }
 
 .hint {
