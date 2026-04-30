@@ -44,6 +44,10 @@ CHECKS = {
     "apps/desktop-runner/src-tauri/Cargo.toml": lambda: regex_version(
         "apps/desktop-runner/src-tauri/Cargo.toml", r'^version = "([^"]+)"$'
     ),
+    "apps/desktop-runner/src-tauri/Cargo.lock": lambda: regex_version(
+        "apps/desktop-runner/src-tauri/Cargo.lock",
+        r'name = "infergrade_desktop_runner"\nversion = "([^"]+)"',
+    ),
     "apps/desktop-runner/src/main.js": lambda: regex_version(
         "apps/desktop-runner/src/main.js", r'APP_VERSION_FALLBACK = "([^"]+)"'
     ),

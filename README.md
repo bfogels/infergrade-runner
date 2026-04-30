@@ -84,10 +84,10 @@ Lower-level commands like `run-job`, `doctor`, `run-config`, and `upload-bundle`
 
 For the containerized first-user path, the Hub should pin one released Runner artifact set instead of assuming a repo checkout or `:local` tags.
 
-That released lane currently centers on:
+That released lane currently centers on the current `VERSION` plus the `-alpha` channel, for example:
 
-- `infergrade-runner-core:0.1.0-alpha`
-- `infergrade-llama-cpp:0.1.0-alpha`
+- `infergrade-runner-core:$(cat VERSION)-alpha`
+- `infergrade-llama-cpp:$(cat VERSION)-alpha`
 - the matching Runner contract bundle and release manifest
 
 Development-only `:local` images still exist, but they should be treated as a clearly separate workflow.
@@ -186,7 +186,7 @@ docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$PWD/runs:/app/runs" \
   -v "$HOME/.cache/infergrade/artifacts:/root/.cache/infergrade/artifacts" \
-  infergrade-runner-core:0.1.0-alpha start --api-url http://host.docker.internal:8000
+  infergrade-runner-core:$(cat VERSION)-alpha start --api-url http://host.docker.internal:8000
 ```
 
 For security and reproducibility, the recommended way to operate the Runner is inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. The main exception is Apple Silicon local `llama.cpp` benchmarking, where host-native execution is the correct path because that is what enables Metal acceleration.
@@ -275,9 +275,7 @@ That bundle is the artifact the Hub should pin to over time.
 For the current first-user path, the stronger maintainer workflow is the release bundle:
 
 ```bash
-./scripts/build_alpha_images.sh
-./scripts/export_alpha_images.sh
-python3 ./scripts/export_release_bundle.py --release-version 0.1.0-alpha
+./scripts/build_release_bundle.sh
 ```
 
 See [Release Process](docs/release_process.md) for the full pinned-release workflow, including the matching Hub import step.

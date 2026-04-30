@@ -159,7 +159,7 @@ docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$PWD/runs:/app/runs" \
   -v "$HOME/.cache/infergrade/artifacts:/root/.cache/infergrade/artifacts" \
-  infergrade-runner-core:0.1.0-alpha start --api-url http://host.docker.internal:8000
+  "infergrade-runner-core:$(cat VERSION)-alpha" start --api-url http://host.docker.internal:8000
 ```
 
 That is the containerized golden path the Hub should prefer when it has pinned a released Runner snapshot. The repo-based helper script remains the development convenience path.
@@ -212,9 +212,7 @@ If you are talking to a legacy or development API that still expects a shared be
 When you want to prepare the pinned release path instead of a repo-local development flow:
 
 ```bash
-./scripts/build_alpha_images.sh
-./scripts/export_alpha_images.sh
-python3 ./scripts/export_release_bundle.py --release-version 0.1.0-alpha
+./scripts/build_release_bundle.sh
 ```
 
 That release bundle is what the Hub should import and pin. See [docs/release_process.md](../../docs/release_process.md).

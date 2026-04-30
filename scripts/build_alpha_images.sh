@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION_TAG="${INFERGRADE_IMAGE_TAG:-0.1.0-alpha}"
+VERSION_TAG="${INFERGRADE_IMAGE_TAG:-$(<"${ROOT_DIR}/VERSION")-alpha}"
 
 build_image() {
   local name="$1"
