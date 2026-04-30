@@ -8,7 +8,7 @@ on:
     inputs:
       version:
         description: "SemVer desktop app version to publish; defaults to VERSION on main"
-        default: "0.1.7"
+        default: "0.1.8"
         required: false
       notes:
         description: "Short release notes shown in the updater"
