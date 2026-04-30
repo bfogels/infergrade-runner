@@ -53,12 +53,29 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn("data-app-version", html)
         self.assertIn("data-update-channel", html)
         self.assertIn("data-update-status", html)
+        self.assertIn("data-runner-cli-version", html)
+        self.assertIn("data-runtime-runner-version", html)
         self.assertIn("Blocked on platform sidecar artifacts and signing.", html)
         self.assertIn('const UPDATE_CHANNEL = "dogfood";', js)
         self.assertIn("signed Tauri artifacts and rollback policy", js)
         self.assertIn("function renderReleaseStatus()", js)
+        self.assertIn("function refreshRunnerCliVersion()", js)
+        self.assertIn('Command.sidecar(SIDECAR_NAME, ["--version"])', js)
         self.assertIn(".release-card", css)
         self.assertIn(".status-list", css)
+
+    def test_desktop_runner_can_read_sidecar_version(self):
+        root = self._repo_root()
+        path = os.path.join(root, "apps/desktop-runner/src-tauri/capabilities/default.json")
+        with open(path, "r", encoding="utf-8") as handle:
+            capability = json.load(handle)
+        allowed_args = []
+        for permission in capability["permissions"]:
+            if not isinstance(permission, dict) or permission.get("identifier") != "shell:allow-execute":
+                continue
+            for command in permission.get("allow", []):
+                allowed_args.append(command.get("args"))
+        self.assertIn(["--version"], allowed_args)
 
 
 if __name__ == "__main__":
