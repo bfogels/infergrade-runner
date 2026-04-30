@@ -269,6 +269,10 @@ label {
   line-height: 1.45;
 }
 
+.compact-hint {
+  margin: -4px 0 14px;
+}
+
 .advanced-token-panel {
   margin-top: 18px;
   border-top: 1px solid var(--border);
