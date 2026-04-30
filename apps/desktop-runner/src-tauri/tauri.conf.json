@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "InferGrade Runner",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "identifier": "com.infergrade.runner",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -28,6 +28,13 @@
     "active": true,
     "targets": ["dmg"],
     "createUpdaterArtifacts": false,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "externalBin": ["binaries/infergrade-sidecar"],
     "category": "DeveloperTool",
     "shortDescription": "Local companion app for InferGrade Runner jobs",

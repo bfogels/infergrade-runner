@@ -3,7 +3,7 @@ import "./styles.css";
 const SIDECAR_NAME = "binaries/infergrade-sidecar";
 const API_URL_STORAGE_KEY = "infergrade.runner.apiUrl";
 const THEME_STORAGE_KEY = "infergrade.runner.theme";
-const APP_VERSION = "0.1.0";
+const APP_VERSION_FALLBACK = "0.1.2";
 const UPDATE_CHANNEL = "dogfood";
 const UPDATE_STATUS = "Updates are disabled until signed Tauri artifacts and rollback policy exist.";
 
@@ -83,9 +83,23 @@ function initTheme() {
   }
 }
 
-function renderReleaseStatus() {
+async function resolveAppVersion() {
+  if (!isTauriRuntime()) {
+    return APP_VERSION_FALLBACK;
+  }
+  try {
+    const app = await import("@tauri-apps/api/app");
+    return await app.getVersion();
+  } catch (error) {
+    appendLog(`Could not read app version from Tauri: ${error.message || error}`);
+    return APP_VERSION_FALLBACK;
+  }
+}
+
+async function renderReleaseStatus() {
+  const version = await resolveAppVersion();
   if (appVersion) {
-    appVersion.textContent = `v${APP_VERSION}`;
+    appVersion.textContent = `v${version}`;
   }
   if (updateChannel) {
     updateChannel.textContent = `${UPDATE_CHANNEL} channel`;
@@ -575,7 +589,7 @@ relaunchUpdateButton?.addEventListener("click", () => {
 });
 
 initTheme();
-renderReleaseStatus();
+renderReleaseStatus().catch((error) => appendLog(`Could not render release status: ${error.message || error}`));
 refreshRunnerCliVersion().catch((error) => appendLog(`Could not check Runner CLI version: ${error.message || error}`));
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");
