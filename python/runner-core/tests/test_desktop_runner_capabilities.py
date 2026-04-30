@@ -64,6 +64,31 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn(".release-card", css)
         self.assertIn(".status-list", css)
 
+    def test_desktop_runner_has_explicit_system_theme_mode(self):
+        root = self._repo_root()
+        html_path = os.path.join(root, "apps/desktop-runner/index.html")
+        js_path = os.path.join(root, "apps/desktop-runner/src/main.js")
+        css_path = os.path.join(root, "apps/desktop-runner/src/styles.css")
+
+        def read(path):
+            with open(path, "r", encoding="utf-8") as handle:
+                return handle.read()
+
+        html = read(html_path)
+        js = read(js_path)
+        css = read(css_path)
+
+        self.assertIn('data-theme-choice="system"', html)
+        self.assertIn('data-theme-choice="light"', html)
+        self.assertIn('data-theme-choice="dark"', html)
+        self.assertIn("function preferredThemeMode()", js)
+        self.assertIn('return "system";', js)
+        self.assertIn("function applyThemeMode(mode)", js)
+        self.assertIn("document.documentElement.dataset.themeMode", js)
+        self.assertIn("addEventListener(\"change\", refreshSystemTheme)", js)
+        self.assertIn(".theme-control", css)
+        self.assertIn('[aria-pressed="true"]', css)
+
     def test_desktop_runner_can_read_sidecar_version(self):
         root = self._repo_root()
         path = os.path.join(root, "apps/desktop-runner/src-tauri/capabilities/default.json")

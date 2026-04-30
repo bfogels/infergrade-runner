@@ -9,7 +9,7 @@ The app is intentionally small:
 - sidecar wrapper that launches the existing `infergrade` CLI
 - pair-code redemption through the sidecar, then process controls for start, stop, status, and log streaming
 - OS-backed token storage through the Rust `keyring` crate
-- light/dark UI modes that follow the system preference until the user chooses one
+- explicit system/light/dark UI modes, with System following OS changes live
 - explicit managed `llama.cpp` runtime inspection and selection controls for advanced users
 
 The Hub should remain the model, benchmark, recommendation, and result surface. This app should stay focused on pairing, readiness, Runner lifecycle, logs, and recovery.
