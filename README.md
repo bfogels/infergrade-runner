@@ -34,7 +34,13 @@ The Runner-owned catalog now separates benchmark scope from legacy tier names:
 - `decision` checks are the default first-user path: short, local-friendly evidence for choosing a quantized setup on the current hardware.
 - `reference` checks are deeper follow-up evidence: broader throughput, long-context, fidelity, or breadth checks that take longer and should be selected intentionally.
 
-Every catalog check carries effort, duration-band, token-volume, execution-pattern, and resumability metadata. Result bundles preserve the derived scope summary in `configuration.benchmark_selection.benchmark_scope` so the Hub can explain whether a recommendation is backed by first-pass decision evidence or deeper reference evidence.
+Every catalog check also belongs to an evidence lane:
+
+- `decision` evidence can answer "what should I try now?" for one local setup decision.
+- `reference` evidence can support stronger comparisons across nearby variants or families.
+- `gold` evidence is reserved for curated, high-legitimacy claims that need heavier datasets, runtime controls, or cloud/curated execution before becoming a default local path.
+
+Every catalog check carries effort, duration-band, token-volume, execution-pattern, resumability, and claim-boundary metadata. Result bundles preserve the derived scope summary in `configuration.benchmark_selection.benchmark_scope` so the Hub can explain whether a recommendation is backed by first-pass decision evidence, deeper reference evidence, or a future curated lane.
 
 ## Standalone Runner Reports
 
@@ -47,8 +53,9 @@ If a run fails before bundle finalization, the Runner still writes a truthful fa
 InferGrade now treats benchmark scope as a capability-first contract:
 
 - `capability_suite_ids` define the top-level user intent, such as chat/instruction following, coding/code editing, or quant fidelity
-- `benchmark_group_ids` define the main evidence lanes inside those suites
+- `benchmark_group_ids` define the main benchmark groups inside those suites
 - `benchmark_check_ids` define the concrete checks that will actually run
+- `evidence_lane_id` on each catalog check defines the claim lane the check can support, such as `decision`, `reference`, or `gold`
 
 The old `canary / standard / gold` language still exists internally as a compatibility breadth hint, but it is no longer the main product abstraction. The Runner derives that breadth from the selected checks so older flows can remain compatible without forcing new users to think in tier jargon first.
 

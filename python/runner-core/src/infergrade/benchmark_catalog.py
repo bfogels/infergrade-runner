@@ -54,6 +54,12 @@ def shortcut_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[s
     return {str(item["shortcut_id"]): dict(item) for item in list(payload.get("shortcuts") or [])}
 
 
+def evidence_lane_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+    """Return evidence lanes keyed by lane id."""
+    payload = catalog or load_capability_catalog()
+    return {str(item["lane_id"]): dict(item) for item in list(payload.get("evidence_lanes") or [])}
+
+
 def shortcut_selection(shortcut_id: Optional[str], catalog: Optional[Dict[str, Any]] = None) -> Dict[str, List[str]]:
     """Return the suite/group/check selection declared by a benchmark shortcut."""
     payload = catalog or load_capability_catalog()
@@ -259,9 +265,14 @@ def benchmark_scope_summary_for_selection(
     checks = check_index(payload)
     selected = [checks[item] for item in _dedupe_strings(check_ids) if item in checks]
     if not selected:
+        decision_lane = _evidence_lane_payload(payload, "decision")
         return {
             "scope": "decision",
             "scope_label": "Decision suite",
+            "evidence_lane_id": "decision",
+            "evidence_lane": decision_lane,
+            "claim_strength": decision_lane.get("claim_strength"),
+            "claim_boundary": decision_lane.get("claim_boundary"),
             "selection_guidance": "Decision checks are selected. This is the recommended short local path for choosing a quantized setup.",
             "effort_level": "short",
             "expected_duration_band": "1-5 min",
@@ -275,10 +286,16 @@ def benchmark_scope_summary_for_selection(
 
     scopes = _dedupe_strings([item.get("suite_scope") for item in selected])
     scope = "reference" if "reference" in scopes else "decision"
+    evidence_lane_id = _strongest_evidence_lane_id(payload, selected)
+    evidence_lane = _evidence_lane_payload(payload, evidence_lane_id)
     ordering = _metadata_ordering(payload)
     return {
         "scope": scope,
         "scope_label": "Reference suite" if scope == "reference" else "Decision suite",
+        "evidence_lane_id": evidence_lane_id,
+        "evidence_lane": evidence_lane,
+        "claim_strength": evidence_lane.get("claim_strength"),
+        "claim_boundary": evidence_lane.get("claim_boundary"),
         "selection_guidance": (
             "Reference checks are included. Expect deeper evidence, longer runs, and stronger quant-ladder confidence."
             if scope == "reference"
@@ -307,19 +324,27 @@ def capability_coverage_guidance_for_selection(
     selected_kinds = set(_dedupe_strings([item.get("evidence_kind") for item in selected_checks]))
     selected_decision = [item["check_id"] for item in selected_checks if item.get("suite_scope") == "decision"]
     selected_reference = [item["check_id"] for item in selected_checks if item.get("suite_scope") == "reference"]
+    selected_lane_ids = _dedupe_strings([_evidence_lane_id_for_item(payload, item) for item in selected_checks])
     available_reference = [
         check_id
         for check_id, check in checks.items()
         if check.get("suite_scope") == "reference" and check_id not in selected_ids and check.get("status", "available") != "planned"
     ]
-    planned = list(payload.get("planned_benchmark_candidates") or []) + [
-        {
-            "check_id": check_id,
-            "display_name": check.get("display_name"),
-            "value": check.get("planned_value"),
-            "implementation_risk": check.get("implementation_risk"),
-            "suite_placement": check.get("suite_placement") or check.get("group_id"),
-        }
+    planned = [
+        _planned_benchmark_candidate_payload(payload, item)
+        for item in list(payload.get("planned_benchmark_candidates") or [])
+    ] + [
+        _planned_benchmark_candidate_payload(
+            payload,
+            {
+                "check_id": check_id,
+                "display_name": check.get("display_name"),
+                "value": check.get("planned_value"),
+                "implementation_risk": check.get("implementation_risk"),
+                "suite_placement": check.get("suite_placement") or check.get("group_id"),
+                "evidence_lane_id": _evidence_lane_id_for_item(payload, check),
+            },
+        )
         for check_id, check in checks.items()
         if check.get("status") == "planned"
     ]
@@ -339,6 +364,8 @@ def capability_coverage_guidance_for_selection(
                 }
             )
     return {
+        "evidence_lanes": _sorted_evidence_lanes(payload),
+        "selected_evidence_lane_ids": selected_lane_ids,
         "selected_decision_check_ids": selected_decision,
         "selected_reference_check_ids": selected_reference,
         "available_reference_check_ids": available_reference,
@@ -396,28 +423,7 @@ def selection_metadata_for_request(
             if group_id in groups
         ],
         "benchmark_checks": [
-            {
-                "check_id": check_id,
-                "display_name": checks[check_id].get("display_name"),
-                "description": checks[check_id].get("description"),
-                "evidence_kind": checks[check_id].get("evidence_kind"),
-                "group_id": checks[check_id].get("group_id"),
-                "suite_scope": checks[check_id].get("suite_scope"),
-                "effort_level": checks[check_id].get("effort_level"),
-                "expected_duration_band": checks[check_id].get("expected_duration_band"),
-                "token_volume_band": checks[check_id].get("token_volume_band"),
-                "resumability_boundary": checks[check_id].get("resumability_boundary"),
-                "execution_pattern": checks[check_id].get("execution_pattern"),
-                "selection_guidance": checks[check_id].get("selection_guidance"),
-                "status": checks[check_id].get("status", "available"),
-                "score_dimension": checks[check_id].get("score_dimension"),
-                "primary_score_metric": checks[check_id].get("primary_score_metric"),
-                "score_floor": checks[check_id].get("score_floor"),
-                "primary_score_weight": checks[check_id].get("primary_score_weight"),
-                "higher_is_better": checks[check_id].get("higher_is_better"),
-                "score_policy_id": checks[check_id].get("score_policy_id"),
-                "score_breakdown_fields": list(checks[check_id].get("score_breakdown_fields") or []),
-            }
+            _benchmark_check_metadata(payload, check_id, checks[check_id])
             for check_id in normalized["check_ids"]
             if check_id in checks
         ],
@@ -438,6 +444,37 @@ def _selected_score_policies(check_ids: List[str], catalog: Dict[str, Any]) -> L
     return [policies[policy_id] for policy_id in selected_policy_ids if policy_id in policies]
 
 
+def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dict[str, Any]) -> Dict[str, Any]:
+    lane_id = _evidence_lane_id_for_item(catalog, check)
+    lane = _evidence_lane_payload(catalog, lane_id)
+    return {
+        "check_id": check_id,
+        "display_name": check.get("display_name"),
+        "description": check.get("description"),
+        "evidence_kind": check.get("evidence_kind"),
+        "evidence_lane_id": lane_id,
+        "evidence_lane_label": lane.get("display_name"),
+        "claim_strength": lane.get("claim_strength"),
+        "claim_boundary": lane.get("claim_boundary"),
+        "group_id": check.get("group_id"),
+        "suite_scope": check.get("suite_scope"),
+        "effort_level": check.get("effort_level"),
+        "expected_duration_band": check.get("expected_duration_band"),
+        "token_volume_band": check.get("token_volume_band"),
+        "resumability_boundary": check.get("resumability_boundary"),
+        "execution_pattern": check.get("execution_pattern"),
+        "selection_guidance": check.get("selection_guidance"),
+        "status": check.get("status", "available"),
+        "score_dimension": check.get("score_dimension"),
+        "primary_score_metric": check.get("primary_score_metric"),
+        "score_floor": check.get("score_floor"),
+        "primary_score_weight": check.get("primary_score_weight"),
+        "higher_is_better": check.get("higher_is_better"),
+        "score_policy_id": check.get("score_policy_id"),
+        "score_breakdown_fields": list(check.get("score_breakdown_fields") or []),
+    }
+
+
 def _coverage_next_actions(missing_core: List[Dict[str, Any]], available_reference: List[str]) -> List[Dict[str, str]]:
     actions: List[Dict[str, str]] = []
     missing_kinds = {item.get("evidence_kind") for item in missing_core}
@@ -448,6 +485,57 @@ def _coverage_next_actions(missing_core: List[Dict[str, Any]], available_referen
     if "fidelity" in missing_kinds and available_reference:
         actions.append({"action": "add_reference_fidelity", "label": "Add quant fidelity", "detail": "Use reference checks when nearby quant variants need a tie-breaker."})
     return actions
+
+
+def _sorted_evidence_lanes(catalog: Dict[str, Any]) -> List[Dict[str, Any]]:
+    lanes = [dict(item) for item in list((catalog or {}).get("evidence_lanes") or []) if item.get("lane_id")]
+    return sorted(lanes, key=lambda item: int(item.get("sort_order") or 0))
+
+
+def _evidence_lane_payload(catalog: Dict[str, Any], lane_id: str) -> Dict[str, Any]:
+    lanes = evidence_lane_index(catalog)
+    if lane_id in lanes:
+        return dict(lanes[lane_id])
+    if "decision" in lanes:
+        return dict(lanes["decision"])
+    return {
+        "lane_id": "decision",
+        "display_name": "Decision evidence",
+        "short_label": "Decision",
+        "claim_strength": "first_pass_local_decision",
+        "claim_boundary": "Good for choosing a practical next setup. Not enough by itself for leaderboard-style model quality claims.",
+        "sort_order": 10,
+    }
+
+
+def _evidence_lane_id_for_item(catalog: Dict[str, Any], item: Dict[str, Any]) -> str:
+    lanes = evidence_lane_index(catalog)
+    for key in ("evidence_lane_id", "benchmark_tier", "suite_scope"):
+        candidate = str((item or {}).get(key) or "").strip()
+        if candidate in lanes:
+            return candidate
+    return "decision"
+
+
+def _strongest_evidence_lane_id(catalog: Dict[str, Any], selected: List[Dict[str, Any]]) -> str:
+    if not selected:
+        return "decision"
+    lanes = evidence_lane_index(catalog)
+    lane_ids = _dedupe_strings([_evidence_lane_id_for_item(catalog, item) for item in selected])
+    if not lane_ids:
+        return "decision"
+    return max(lane_ids, key=lambda lane_id: int(lanes.get(lane_id, {}).get("sort_order") or 0))
+
+
+def _planned_benchmark_candidate_payload(catalog: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Any]:
+    candidate = dict(item)
+    lane_id = _evidence_lane_id_for_item(catalog, candidate)
+    lane = _evidence_lane_payload(catalog, lane_id)
+    candidate["evidence_lane_id"] = lane_id
+    candidate["evidence_lane_label"] = lane.get("display_name")
+    candidate["claim_strength"] = lane.get("claim_strength")
+    candidate["claim_boundary"] = lane.get("claim_boundary")
+    return candidate
 
 
 def _max_by_order(values: List[Any], order: Dict[str, int], fallback: str) -> str:

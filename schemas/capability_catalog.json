@@ -83,6 +83,41 @@
       "recommended_first": false
     }
   ],
+  "evidence_lanes": [
+    {
+      "lane_id": "decision",
+      "display_name": "Decision evidence",
+      "short_label": "Decision",
+      "description": "Short, local-friendly evidence that can help choose which quantized setup to try on this hardware and use case.",
+      "claim_strength": "first_pass_local_decision",
+      "claim_boundary": "Good for choosing a practical next setup. Not enough by itself for leaderboard-style model quality claims.",
+      "local_feasibility": "default_local",
+      "recommended_first": true,
+      "sort_order": 10
+    },
+    {
+      "lane_id": "reference",
+      "display_name": "Reference evidence",
+      "short_label": "Reference",
+      "description": "Broader or heavier evidence that strengthens comparisons after the first local decision path works.",
+      "claim_strength": "stronger_comparison",
+      "claim_boundary": "Useful for comparing nearby variants and families when decision evidence is too thin.",
+      "local_feasibility": "intentional_local",
+      "recommended_first": false,
+      "sort_order": 20
+    },
+    {
+      "lane_id": "gold",
+      "display_name": "Gold evidence",
+      "short_label": "Gold",
+      "description": "High-legitimacy evidence that needs curated datasets, stronger reproducibility controls, or heavier execution.",
+      "claim_strength": "curated_reference",
+      "claim_boundary": "Best for trusted public claims, but usually too expensive or operationally sensitive for a default laptop run.",
+      "local_feasibility": "curated_or_cloud_first",
+      "recommended_first": false,
+      "sort_order": 30
+    }
+  ],
   "suites": [
     {
       "suite_id": "chat_instruction_following",
@@ -281,6 +316,7 @@
         "vllm"
       ],
       "suite_scope": "decision",
+      "evidence_lane_id": "decision",
       "effort_level": "balanced",
       "expected_duration_band": "5-15 min",
       "token_volume_band": "small",
@@ -305,6 +341,7 @@
         "vllm"
       ],
       "suite_scope": "decision",
+      "evidence_lane_id": "decision",
       "effort_level": "short",
       "expected_duration_band": "1-5 min",
       "token_volume_band": "tiny",
@@ -335,6 +372,7 @@
         "vllm"
       ],
       "suite_scope": "reference",
+      "evidence_lane_id": "reference",
       "effort_level": "deep",
       "expected_duration_band": "25-60 min",
       "token_volume_band": "medium",
@@ -369,6 +407,7 @@
         "vllm"
       ],
       "suite_scope": "decision",
+      "evidence_lane_id": "decision",
       "effort_level": "balanced",
       "expected_duration_band": "10-25 min",
       "token_volume_band": "small",
@@ -393,6 +432,7 @@
         "vllm"
       ],
       "suite_scope": "reference",
+      "evidence_lane_id": "reference",
       "effort_level": "deep",
       "expected_duration_band": "25-60 min",
       "token_volume_band": "medium",
@@ -417,6 +457,7 @@
         "vllm"
       ],
       "suite_scope": "decision",
+      "evidence_lane_id": "decision",
       "effort_level": "short",
       "expected_duration_band": "1-5 min",
       "token_volume_band": "tiny",
@@ -446,6 +487,7 @@
         "vllm"
       ],
       "suite_scope": "reference",
+      "evidence_lane_id": "reference",
       "effort_level": "balanced",
       "expected_duration_band": "5-15 min",
       "token_volume_band": "small",
@@ -474,6 +516,7 @@
         "vllm"
       ],
       "suite_scope": "reference",
+      "evidence_lane_id": "reference",
       "effort_level": "balanced",
       "expected_duration_band": "10-30 min",
       "token_volume_band": "medium",
@@ -502,6 +545,7 @@
         "llama.cpp"
       ],
       "suite_scope": "reference",
+      "evidence_lane_id": "reference",
       "effort_level": "balanced",
       "expected_duration_band": "10-30 min",
       "token_volume_band": "medium",
@@ -623,6 +667,7 @@
       "suite_placement": "chat_instruction_following/reference",
       "primary_use_case": "general_assistant",
       "benchmark_tier": "reference",
+      "evidence_lane_id": "reference",
       "score_dimension": "assistant_preference_quality",
       "planned_score_policy_id": "assistant_preference_win_rate_v1",
       "local_feasibility": "candidate",
@@ -638,6 +683,7 @@
       "suite_placement": "coding_code_editing/decision",
       "primary_use_case": "agentic_coding",
       "benchmark_tier": "decision",
+      "evidence_lane_id": "decision",
       "score_dimension": "repo_editing_smoke",
       "planned_score_policy_id": "repo_edit_task_success_v1",
       "local_feasibility": "good",
@@ -653,6 +699,7 @@
       "suite_placement": "chat_instruction_following/reference",
       "primary_use_case": "general_assistant",
       "benchmark_tier": "reference",
+      "evidence_lane_id": "reference",
       "score_dimension": "expert_reasoning",
       "planned_score_policy_id": "multiple_choice_accuracy_v1",
       "local_feasibility": "reference_only",
@@ -676,6 +723,7 @@
       "suite_placement": "coding_code_editing/reference",
       "primary_use_case": "agentic_coding",
       "benchmark_tier": "reference",
+      "evidence_lane_id": "reference",
       "score_dimension": "contemporary_code_generation",
       "planned_score_policy_id": "code_task_pass_rate_v1",
       "local_feasibility": "reference_only",
@@ -691,6 +739,7 @@
       "suite_placement": "coding_code_editing/reference",
       "primary_use_case": "agentic_coding",
       "benchmark_tier": "gold",
+      "evidence_lane_id": "gold",
       "score_dimension": "software_engineering_task_success",
       "planned_score_policy_id": "repository_issue_resolution_v1",
       "local_feasibility": "curated_reference_first",

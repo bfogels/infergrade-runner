@@ -7,6 +7,7 @@ from infergrade.benchmark_catalog import (
     benchmark_scope_summary_for_selection,
     capability_coverage_guidance_for_selection,
     capability_benchmark_ids_for_request,
+    evidence_lane_index,
     fidelity_enabled_for_request,
     load_capability_catalog,
     normalize_request_selection,
@@ -24,6 +25,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(len(catalog["checks"]), 6)
         self.assertIn("metadata_ordering", catalog)
         self.assertTrue(catalog["score_policies"])
+        self.assertIn("evidence_lanes", catalog)
+        self.assertEqual([item["lane_id"] for item in catalog["evidence_lanes"]], ["decision", "reference", "gold"])
         self.assertEqual(catalog["metadata_source_defaults"]["duration"], "estimated")
         self.assertEqual(catalog["benchmark_scopes"][0]["scope_id"], "decision")
         check_ids = {item["check_id"] for item in catalog["checks"]}
@@ -34,6 +37,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertNotIn("mmlu_pro_reference_v1", planned_ids)
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
+            self.assertIn(check["evidence_lane_id"], {"decision", "reference", "gold"})
             self.assertTrue(check["expected_duration_band"])
             self.assertTrue(check["execution_pattern"])
             self.assertTrue(check["score_dimension"])
@@ -43,6 +47,13 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.assertIn("primary_score_weight", check)
             self.assertTrue(check["score_policy_id"])
         self.assertTrue(catalog["planned_benchmark_candidates"])
+
+    def test_evidence_lane_index_exposes_claim_boundaries(self):
+        lanes = evidence_lane_index()
+        self.assertEqual(lanes["decision"]["claim_strength"], "first_pass_local_decision")
+        self.assertIn("leaderboard-style", lanes["decision"]["claim_boundary"])
+        self.assertEqual(lanes["reference"]["local_feasibility"], "intentional_local")
+        self.assertEqual(lanes["gold"]["local_feasibility"], "curated_or_cloud_first")
 
     def test_normalize_request_selection_derives_breadth_from_legacy_lane(self):
         request = RunRequest(model="Qwen/Qwen2.5-7B-Instruct", backend="llama.cpp", tier="standard", use_case="general_assistant")
@@ -145,6 +156,9 @@ class BenchmarkCatalogTests(unittest.TestCase):
     def test_benchmark_scope_summary_distinguishes_decision_and_reference_sets(self):
         decision = benchmark_scope_summary_for_selection(["ifeval", "interactive_chat_v1"])
         self.assertEqual(decision["scope"], "decision")
+        self.assertEqual(decision["evidence_lane_id"], "decision")
+        self.assertEqual(decision["evidence_lane"]["display_name"], "Decision evidence")
+        self.assertEqual(decision["claim_strength"], "first_pass_local_decision")
         self.assertIn("recommended short local path", decision["selection_guidance"])
         self.assertEqual(decision["effort_level"], "balanced")
         self.assertFalse(decision["reference_checks_included"])
@@ -154,6 +168,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
 
         reference = benchmark_scope_summary_for_selection(["interactive_chat_v1", "perplexity_reference_v1"])
         self.assertEqual(reference["scope"], "reference")
+        self.assertEqual(reference["evidence_lane_id"], "reference")
+        self.assertEqual(reference["claim_strength"], "stronger_comparison")
         self.assertEqual(reference["scope_label"], "Reference suite")
         self.assertIn("deeper evidence", reference["selection_guidance"])
         self.assertTrue(reference["reference_checks_included"])
@@ -161,6 +177,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
 
     def test_capability_coverage_guidance_marks_unselected_evidence_as_gap(self):
         guidance = capability_coverage_guidance_for_selection(["interactive_chat_v1"])
+        self.assertEqual([item["lane_id"] for item in guidance["evidence_lanes"]], ["decision", "reference", "gold"])
+        self.assertEqual(guidance["selected_evidence_lane_ids"], ["decision"])
         missing = {item["evidence_kind"]: item for item in guidance["missing_core_evidence"]}
         self.assertEqual(missing["capability"]["state"], "not_selected")
         self.assertIn("not a failed benchmark", missing["capability"]["message"])
@@ -173,6 +191,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(planned["gpqa_reference_v1"]["access_status"], "gated_contact_share_required")
         self.assertIn("Do not commit", planned["gpqa_reference_v1"]["dataset_handling_policy"])
         self.assertEqual(planned["swe_bench_verified_reference_v1"]["benchmark_tier"], "gold")
+        self.assertEqual(planned["swe_bench_verified_reference_v1"]["evidence_lane_id"], "gold")
+        self.assertEqual(planned["swe_bench_verified_reference_v1"]["claim_strength"], "curated_reference")
         self.assertTrue(planned["swe_bench_verified_reference_v1"]["why_not_default"])
         self.assertTrue(any(action["action"] == "add_capability_check" for action in guidance["next_actions"]))
 
@@ -191,6 +211,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(score_dimensions["ifeval"], "instruction_following")
         self.assertEqual(score_dimensions["interactive_chat_v1"], "interactive_latency")
         interactive = next(item for item in metadata["benchmark_checks"] if item["check_id"] == "interactive_chat_v1")
+        self.assertEqual(interactive["evidence_lane_id"], "decision")
+        self.assertEqual(interactive["claim_strength"], "first_pass_local_decision")
         self.assertFalse(interactive["higher_is_better"])
         self.assertEqual(interactive["primary_score_weight"], 0.0)
         self.assertIn("time_to_first_token_ms", interactive["score_breakdown_fields"])
@@ -219,6 +241,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         )
         metadata = selection_metadata_for_request(request)
         self.assertEqual(metadata["benchmark_scope"]["scope"], "reference")
+        self.assertEqual(metadata["benchmark_scope"]["evidence_lane_id"], "reference")
+        self.assertEqual(metadata["benchmark_checks"][0]["evidence_lane_id"], "reference")
         self.assertEqual(metadata["benchmark_checks"][0]["score_dimension"], "broad_reasoning_knowledge")
         self.assertEqual(metadata["benchmark_checks"][0]["primary_score_metric"], "accuracy")
         self.assertEqual(metadata["score_policies"][0]["score_policy_id"], "multiple_choice_accuracy_v1")
