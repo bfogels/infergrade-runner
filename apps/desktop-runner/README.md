@@ -11,6 +11,7 @@ The app is intentionally small:
 - OS-backed token storage through the Rust `keyring` crate
 - explicit system/light/dark UI modes, with System following OS changes live
 - explicit managed `llama.cpp` runtime inspection and selection controls for advanced users
+- signed Tauri updater wiring for the macOS alpha lane
 
 The Hub should remain the model, benchmark, recommendation, and result surface. This app should stay focused on pairing, readiness, Runner lifecycle, logs, and recovery.
 
@@ -89,8 +90,44 @@ npm run build:linux
 
 Only the macOS Apple Silicon lane currently has a checked-in sidecar. The Windows and Linux commands are
 readiness targets for CI/build-machine work once matching sidecar artifacts and signing credentials exist.
-Automatic app updates should use signed Tauri update artifacts only after OS code signing/notarization and the
-Runner sidecar artifact matrix are in place.
+
+The app is wired for the signed Tauri updater and points at the fixed alpha release manifest:
+
+```text
+https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-alpha/infergrade-runner-desktop-latest.json
+```
+
+The updater public key is committed in `src-tauri/tauri.conf.json`. The private key must never be committed; CI
+expects it in GitHub Actions secrets as:
+
+```text
+TAURI_SIGNING_PRIVATE_KEY
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+```
+
+Those secrets should exist both at the repository level and in the protected `release` environment. The release
+workflow uses the environment-scoped secrets, builds a macOS DMG plus `.tar.gz` updater artifact, signs the
+updater artifact, writes `infergrade-runner-desktop-latest.json`, and uploads all files to the
+`desktop-runner-alpha` GitHub release. Each workflow run requires a SemVer `version` input; it must be newer than
+the installed alpha so the updater will actually offer it.
+
+Local unsigned builds still work with:
+
+```bash
+./scripts/build_desktop_runner.sh
+```
+
+Signed updater artifacts require the private key environment and are built with:
+
+```bash
+TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/infergrade-runner/infergrade-runner-updater.key)" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="..." \
+./scripts/build_desktop_runner.sh --with-updater
+```
+
+macOS code signing and notarization are still separate from Tauri updater signing. The alpha updater proves the
+in-app update loop, but beta distribution still needs Apple Developer ID signing/notarization before nontechnical
+users should install it.
 
 ## Windows And Linux Status
 
@@ -129,3 +166,5 @@ The app does not log the raw `pair` JSON because that response contains the dura
 5. Exercise secure storage in a live Tauri window.
 6. Build a macOS package.
 7. Attempt one Windows or Linux build artifact.
+8. Run the `Desktop Runner Release` workflow and confirm the app can discover, install, and relaunch from the
+   `desktop-runner-alpha` update manifest.

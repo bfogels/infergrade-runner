@@ -33,6 +33,7 @@
             <strong data-app-version>0.1.0</strong>
             <span data-update-channel>Dogfood channel</span>
             <span data-runner-cli-version>Runner CLI: checking...</span>
+            <button type="button" class="button-secondary compact-button" data-check-update>Check for updates</button>
           </div>
         </div>
       </section>
@@ -120,6 +121,14 @@
               <div>
                 <strong>Updates</strong>
                 <span data-update-status>Off until signed releases exist.</span>
+              </div>
+              <div data-update-actions hidden>
+                <strong data-update-available>Update available</strong>
+                <span data-update-detail>Ready to download.</span>
+                <div class="button-row compact-actions">
+                  <button type="button" data-install-update>Install update</button>
+                  <button type="button" data-relaunch-update disabled>Relaunch</button>
+                </div>
               </div>
               <div>
                 <strong>Bundled Runner</strong>
