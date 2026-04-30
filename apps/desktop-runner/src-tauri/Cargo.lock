@@ -1625,7 +1625,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_desktop_runner"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "keyring",
  "serde_json",
