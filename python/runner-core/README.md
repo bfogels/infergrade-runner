@@ -2,7 +2,7 @@
 
 This package contains the Python benchmark runner core for InferGrade.
 
-The v0 product focus is narrow on purpose: benchmark a quantized model setup on the user's hardware for a concrete use case, then produce normalized evidence that can be compared honestly.
+The current product focus is narrow on purpose: benchmark a quantized model setup on the user's hardware for a concrete use case, then produce normalized evidence that can be compared honestly.
 
 ## Responsibilities
 
@@ -14,7 +14,7 @@ The v0 product focus is narrow on purpose: benchmark a quantized model setup on 
 - result record normalization
 - local bundle validation
 
-## V0 Decision Workflow
+## Decision Workflow
 
 For the first outside-user path, prefer:
 
@@ -159,7 +159,7 @@ docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$PWD/runs:/app/runs" \
   -v "$HOME/.cache/infergrade/artifacts:/root/.cache/infergrade/artifacts" \
-  "infergrade-runner-core:$(cat VERSION)-alpha" start --api-url http://host.docker.internal:8000
+  "infergrade-runner-core:$(cat VERSION)-preview" start --api-url http://host.docker.internal:8000
 ```
 
 That is the containerized golden path the Hub should prefer when it has pinned a released Runner snapshot. The repo-based helper script remains the development convenience path.
@@ -244,4 +244,4 @@ For the known-good first-user path, use:
 
 - [docs/first_user_quickstart.md](../../docs/first_user_quickstart.md)
 - [docs/release_process.md](../../docs/release_process.md)
-- [schemas/examples/run_config.alpha_tinyllama_demo.json](../../schemas/examples/run_config.alpha_tinyllama_demo.json)
+- [schemas/examples/run_config.tinyllama_preview_demo.json](../../schemas/examples/run_config.tinyllama_preview_demo.json)

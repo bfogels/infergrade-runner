@@ -12,9 +12,9 @@ from infergrade.models import RunRequest
 from infergrade.runner import run_infergrade
 
 
-class V0ProofPathTests(unittest.TestCase):
+class EndToEndProofPathTests(unittest.TestCase):
     def setUp(self):
-        self.tempdir = tempfile.mkdtemp(prefix="infergrade-v0-proof-")
+        self.tempdir = tempfile.mkdtemp(prefix="infergrade-proof-")
 
     def tearDown(self):
         shutil.rmtree(self.tempdir)

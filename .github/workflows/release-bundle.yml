@@ -12,7 +12,7 @@ on:
         required: false
         type: boolean
       release_version:
-        description: "Optional release version override; defaults to VERSION-alpha"
+        description: "Optional release version override; defaults to VERSION-preview"
         required: false
 
 permissions:

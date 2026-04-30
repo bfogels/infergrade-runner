@@ -38,7 +38,7 @@ Every new third-party evidence lane must land in stacked PRs:
 
 ## Lane Order
 
-### Sprint A: MMLU-Pro Sampled Reference
+### Phase A: MMLU-Pro Sampled Reference
 
 MMLU-Pro is the best first heavier assistant lane because it is broad, recognized, and can be sampled for local use. It should be a reference check, not a quick default.
 
@@ -69,7 +69,7 @@ Non-goals:
 - No leaderboard claim from the sampled lane.
 - No default quick-run inclusion.
 
-### Sprint B: GPQA Sampled Reference
+### Phase B: GPQA Sampled Reference
 
 GPQA is harder and more differentiating, but it should reuse the multiple-choice harness shape from MMLU-Pro.
 
@@ -96,7 +96,7 @@ Acceptance:
 - The Hub explains that GPQA is a hard reasoning reference signal, not a first-run confidence shortcut.
 - Generation failures remain separate from wrong answers.
 
-### Sprint C: LiveCodeBench Reference
+### Phase C: LiveCodeBench Reference
 
 LiveCodeBench is useful, but execution safety and task-window pinning matter more than speed of implementation.
 
@@ -117,7 +117,7 @@ Acceptance:
 - Timeouts and runtime errors are structured benchmark failures or task failures according to the score policy.
 - The Hub warns that it is a heavier reference lane.
 
-### Sprint D: SWE-bench Verified Curated/Gold
+### Phase D: SWE-bench Verified Curated/Gold
 
 SWE-bench Verified should begin as curated or cloud/gold evidence, not as a general laptop default.
 

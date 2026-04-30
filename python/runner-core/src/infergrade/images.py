@@ -63,7 +63,7 @@ def install_image(
         if tag == "local":
             raise RuntimeError(
                 "Docker image %s is not available locally. Build it with `infergrade install-images --image %s` "
-                "or `./scripts/build_alpha_images.sh`. Docker also failed to pull it: %s"
+                "or `./scripts/build_release_images.sh`. Docker also failed to pull it: %s"
                 % (image, image, message or "unknown error")
             )
         raise RuntimeError(

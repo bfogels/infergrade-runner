@@ -22,6 +22,6 @@ It exists to exercise the same result/report shape a real multi-quant run would 
 
 ## Why No Real Ladder Is Committed Yet
 
-Sprint 34 prefers at least one real local canonical ladder when practical. We are not committing one yet because the repo does not currently have a reviewed, reproducible, multi-quant local run bundle with provenance good enough to treat as a canonical example.
+The demo-evidence plan prefers at least one real local canonical ladder when practical. We are not committing one yet because the repo does not currently have a reviewed, reproducible, multi-quant local run bundle with provenance good enough to treat as a canonical example.
 
 Until that exists, demo fixtures are safer: they make report and compare behavior testable while remaining visibly synthetic.

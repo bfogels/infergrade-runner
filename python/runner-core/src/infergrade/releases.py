@@ -50,7 +50,7 @@ KNOWN_RELEASE_IMAGES: List[Dict[str, str]] = [
 
 def default_release_version() -> str:
     """Return the default local release identifier for the current runner version."""
-    return (os.environ.get("INFERGRADE_RELEASE_VERSION") or "%s-alpha" % __version__).strip()
+    return (os.environ.get("INFERGRADE_RELEASE_VERSION") or "%s-preview" % __version__).strip()
 
 
 def release_channel(release_version: str) -> str:

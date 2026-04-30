@@ -13,7 +13,7 @@ from infergrade.images import install_image
 from infergrade.models import CapabilityExecution, RunRequest
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, write_json
 
-CAPABILITY_REGISTRY_VERSION = "2026-04-multiturn-alpha"
+CAPABILITY_REGISTRY_VERSION = "2026-04-multiturn-preview"
 _DOMINANT_GENERATION_FAILURE_RATE = 0.5
 
 DEFAULT_CAPABILITY_IMAGES = {

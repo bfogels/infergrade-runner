@@ -1,8 +1,8 @@
-# InferGrade v0.1 Input / Output Spec
+# InferGrade Input / Output Spec
 
 ## Purpose
 
-This document defines the operator-facing inputs and runner-generated outputs for InferGrade v0.1.
+This document defines the operator-facing inputs and runner-generated outputs for InferGrade Runner.
 
 The core design rule is:
 
@@ -35,7 +35,7 @@ InferGrade should separate model lineage, quantization, artifact identity, runti
 
 ## Product Contract
 
-InferGrade v0.1 has two contracts:
+InferGrade has two contracts:
 
 ### Operator Input Contract
 

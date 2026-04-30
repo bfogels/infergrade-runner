@@ -170,9 +170,9 @@ InferGrade should still combine:
 
 That part of the thesis does not change.
 
-## v0.1 Strategic Focus
+## Strategic Focus
 
-v0.1 should prove four things:
+The next public release should prove four things:
 
 1. the runner can execute real benchmark jobs reproducibly with low friction
 2. the hub can generate and manage those runs for signed-in users

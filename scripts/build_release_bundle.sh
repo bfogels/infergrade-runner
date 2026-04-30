@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION_TAG="${INFERGRADE_RELEASE_VERSION:-$(<"${ROOT_DIR}/VERSION")-alpha}"
+VERSION_TAG="${INFERGRADE_RELEASE_VERSION:-$(<"${ROOT_DIR}/VERSION")-preview}"
 BUNDLE_DIR_RELATIVE="dist/releases/${VERSION_TAG}"
 BUNDLE_DIR="${ROOT_DIR}/${BUNDLE_DIR_RELATIVE}"
 
@@ -11,8 +11,8 @@ cd "${ROOT_DIR}"
 python3 ./scripts/check_versions.py
 
 if [[ "${INFERGRADE_RELEASE_INCLUDE_IMAGES:-0}" == "1" ]]; then
-  INFERGRADE_IMAGE_TAG="${VERSION_TAG}" bash ./scripts/build_alpha_images.sh
-  INFERGRADE_IMAGE_TAG="${VERSION_TAG}" bash ./scripts/export_alpha_images.sh
+  INFERGRADE_IMAGE_TAG="${VERSION_TAG}" bash ./scripts/build_release_images.sh
+  INFERGRADE_IMAGE_TAG="${VERSION_TAG}" bash ./scripts/export_release_images.sh
 fi
 
 python3 ./scripts/export_release_bundle.py --release-version "${VERSION_TAG}"

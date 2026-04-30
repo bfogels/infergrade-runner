@@ -16,7 +16,7 @@ artifacts:
     filename: Qwen2.5-7B-Instruct-Q4_K_M.gguf
 
 runtime:
-  backend_image: infergrade-llama-cpp:0.1.0-alpha
+  backend_image: infergrade-llama-cpp:0.1.5-preview
 
 overrides:
   generation_preset: deterministic_v1

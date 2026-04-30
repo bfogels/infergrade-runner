@@ -15,7 +15,7 @@ If this path does not feel smooth, InferGrade is not ready for first-user testin
 
 ## The Demo Config
 
-Use [schemas/examples/run_config.alpha_tinyllama_demo.json](../schemas/examples/run_config.alpha_tinyllama_demo.json).
+Use [schemas/examples/run_config.tinyllama_preview_demo.json](../schemas/examples/run_config.tinyllama_preview_demo.json).
 
 It targets:
 
@@ -39,7 +39,7 @@ If you are testing on Apple Silicon and want realistic local `llama.cpp` numbers
 brew install llama.cpp
 PYTHONPATH=python/runner-core/src python3 -m infergrade doctor \
   --api-url http://127.0.0.1:8000 \
-  --run-config-id rcfg_tinyllama_alpha_demo \
+  --run-config-id rcfg_tinyllama_preview_demo \
   --execution-mode local_native
 PYTHONPATH=python/runner-core/src python3 -m infergrade run-job \
   --api-url http://127.0.0.1:8000 \
@@ -56,7 +56,7 @@ The important product shift is that InferGrade is now capability-first. Even thi
 Preferred hosted path:
 
 ```bash
-RUNNER_RELEASE_TAG="$(cat VERSION)-alpha"
+RUNNER_RELEASE_TAG="$(cat VERSION)-preview"
 docker pull "ghcr.io/<your-github-owner>/infergrade-llama-cpp:${RUNNER_RELEASE_TAG}"
 docker tag "ghcr.io/<your-github-owner>/infergrade-llama-cpp:${RUNNER_RELEASE_TAG}" "infergrade-llama-cpp:${RUNNER_RELEASE_TAG}"
 ```
@@ -64,14 +64,14 @@ docker tag "ghcr.io/<your-github-owner>/infergrade-llama-cpp:${RUNNER_RELEASE_TA
 Fallback if you received an exported archive from the host:
 
 ```bash
-RUNNER_RELEASE_TAG="$(cat VERSION)-alpha"
+RUNNER_RELEASE_TAG="$(cat VERSION)-preview"
 docker load -i "infergrade-llama-cpp_${RUNNER_RELEASE_TAG}.tar"
 ```
 
 If you want the released paired-listener path instead of a repo-based manual runner invocation, fetch the listener image too:
 
 ```bash
-RUNNER_RELEASE_TAG="$(cat VERSION)-alpha"
+RUNNER_RELEASE_TAG="$(cat VERSION)-preview"
 docker pull "ghcr.io/<your-github-owner>/infergrade-runner-core:${RUNNER_RELEASE_TAG}"
 docker tag "ghcr.io/<your-github-owner>/infergrade-runner-core:${RUNNER_RELEASE_TAG}" "infergrade-runner-core:${RUNNER_RELEASE_TAG}"
 ```
@@ -79,7 +79,7 @@ docker tag "ghcr.io/<your-github-owner>/infergrade-runner-core:${RUNNER_RELEASE_
 Or load the exported archive:
 
 ```bash
-RUNNER_RELEASE_TAG="$(cat VERSION)-alpha"
+RUNNER_RELEASE_TAG="$(cat VERSION)-preview"
 docker load -i "infergrade-runner-core_${RUNNER_RELEASE_TAG}.tar"
 ```
 
@@ -88,7 +88,7 @@ docker load -i "infergrade-runner-core_${RUNNER_RELEASE_TAG}.tar"
 ```bash
 export INFERGRADE_API_TOKEN=replace-with-a-long-random-token
 export INFERGRADE_API_ALLOWED_ORIGINS=http://127.0.0.1:3000
-export INFERGRADE_DEFAULT_IMAGE_TAG="$(cat VERSION)-alpha"
+export INFERGRADE_DEFAULT_IMAGE_TAG="$(cat VERSION)-preview"
 
 cd /path/to/infergrade/services/api
 PYTHONPATH=src python3 -m uvicorn infergrade_api.main:app --host 127.0.0.1 --port 8000
@@ -110,7 +110,7 @@ cd /path/to/infergrade
 curl -X POST http://127.0.0.1:8000/run-configs \
   -H "Authorization: Bearer $INFERGRADE_API_TOKEN" \
   -H "Content-Type: application/json" \
-  --data @schemas/examples/run_config.alpha_tinyllama_demo.json
+  --data @schemas/examples/run_config.tinyllama_preview_demo.json
 ```
 
 ## 4. Create A Local Run
@@ -120,7 +120,7 @@ cd /path/to/infergrade
 curl -X POST http://127.0.0.1:8000/v1/runs \
   -H "Authorization: Bearer $INFERGRADE_API_TOKEN" \
   -H "Content-Type: application/json" \
-  --data '{"run_config_id":"rcfg_tinyllama_alpha_demo","execution_mode":"local_container"}'
+  --data '{"run_config_id":"rcfg_tinyllama_preview_demo","execution_mode":"local_container"}'
 ```
 
 This returns a `run_id` plus a one-command local execution handoff.
@@ -133,7 +133,7 @@ docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$PWD/runs:/app/runs" \
   -v "$HOME/.cache/infergrade/artifacts:/root/.cache/infergrade/artifacts" \
-  "infergrade-runner-core:$(cat VERSION)-alpha" start --api-url http://host.docker.internal:8000
+  "infergrade-runner-core:$(cat VERSION)-preview" start --api-url http://host.docker.internal:8000
 ```
 
 That path does not require a local Runner repo checkout. The manual `run-job` flow below remains the explicit fallback.

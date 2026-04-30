@@ -199,12 +199,12 @@ class TransportHttpTests(unittest.TestCase):
                     "run": {"model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0", "backend": "llama.cpp", "tier": "canary"},
                 },
                 name="TinyLlama publish",
-                api_token="alpha-secret",
+                api_token="example-secret",
             )
-            uploaded = upload_bundle(bundle_dir, server.base_url, api_token="alpha-secret")
+            uploaded = upload_bundle(bundle_dir, server.base_url, api_token="example-secret")
             run_uploaded = upload_run_bundle(bundle_dir, server.base_url, run_id="run-http", api_token="runner-secret")
-            listed = list_run_configs(server.base_url, api_token="alpha-secret")
-            fetched = fetch_run_config(server.base_url, "rcfg_fetch", api_token="alpha-secret")
+            listed = list_run_configs(server.base_url, api_token="example-secret")
+            fetched = fetch_run_config(server.base_url, "rcfg_fetch", api_token="example-secret")
 
         self.assertTrue(published["stored"])
         self.assertEqual(uploaded["bundle_id"], "bundle-http")
@@ -218,9 +218,9 @@ class TransportHttpTests(unittest.TestCase):
         self.assertIn("/v1/runs/run-http/bundle", paths)
         self.assertIn("/run-configs/rcfg_fetch", paths)
         auth_by_path = {item["path"]: item["headers"].get("Authorization") for item in _CaptureHandler.requests}
-        self.assertEqual(auth_by_path["/run-configs"], "Bearer alpha-secret")
-        self.assertEqual(auth_by_path["/bundles"], "Bearer alpha-secret")
-        self.assertEqual(auth_by_path["/run-configs/rcfg_fetch"], "Bearer alpha-secret")
+        self.assertEqual(auth_by_path["/run-configs"], "Bearer example-secret")
+        self.assertEqual(auth_by_path["/bundles"], "Bearer example-secret")
+        self.assertEqual(auth_by_path["/run-configs/rcfg_fetch"], "Bearer example-secret")
         self.assertEqual(auth_by_path["/v1/runs/run-http/bundle"], "Bearer runner-secret")
 
     def test_hub_token_env_is_used_before_legacy_api_token(self):

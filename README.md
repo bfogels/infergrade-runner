@@ -13,7 +13,7 @@ It is responsible for:
 - capturing deployment telemetry and capability evidence
 - writing reproducible run bundles that can be uploaded to InferGrade Hub
 
-## V0 First Path
+## First Path
 
 The clearest first path is:
 
@@ -25,7 +25,7 @@ The clearest first path is:
 6. let the Hub queue the run
 7. inspect the normalized result and compare nearby quants
 
-The broader Runner architecture remains available, but the v0 default is intentionally narrower than a general benchmark platform.
+The broader Runner architecture remains available, but the current default is intentionally narrower than a general benchmark platform.
 
 ## Decision Suite vs Reference Suite
 
@@ -84,10 +84,10 @@ Lower-level commands like `run-job`, `doctor`, `run-config`, and `upload-bundle`
 
 For the containerized first-user path, the Hub should pin one released Runner artifact set instead of assuming a repo checkout or `:local` tags.
 
-That released lane currently centers on the current `VERSION` plus the `-alpha` channel, for example:
+That released lane currently centers on the current `VERSION` plus the `-preview` channel, for example:
 
-- `infergrade-runner-core:$(cat VERSION)-alpha`
-- `infergrade-llama-cpp:$(cat VERSION)-alpha`
+- `infergrade-runner-core:$(cat VERSION)-preview`
+- `infergrade-llama-cpp:$(cat VERSION)-preview`
 - the matching Runner contract bundle and release manifest
 
 Development-only `:local` images still exist, but they should be treated as a clearly separate workflow.
@@ -186,7 +186,7 @@ docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$PWD/runs:/app/runs" \
   -v "$HOME/.cache/infergrade/artifacts:/root/.cache/infergrade/artifacts" \
-  infergrade-runner-core:$(cat VERSION)-alpha start --api-url http://host.docker.internal:8000
+  infergrade-runner-core:$(cat VERSION)-preview start --api-url http://host.docker.internal:8000
 ```
 
 For security and reproducibility, the recommended way to operate the Runner is inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. The main exception is Apple Silicon local `llama.cpp` benchmarking, where host-native execution is the correct path because that is what enables Metal acceleration.
@@ -240,14 +240,14 @@ Run the runner test suite:
 
 ## Key Docs
 
-- [V0 Decision Workflow](docs/v0_decision_workflow.md)
+- [Decision Workflow](docs/decision_workflow.md)
 - [First Outside User Path](docs/first_outside_user_path.md)
 - [Demo Evidence Fixtures](docs/demo_evidence.md)
-- [V0 Release Gate](docs/v0_release_gate.md)
+- [Release Gate](docs/release_gate.md)
 - [Runner vs Hub](docs/runner_vs_hub.md)
 - [Contract Ownership](docs/contract_ownership.md)
 - [Release Process](docs/release_process.md)
-- [Input/Output Spec](docs/input_output_spec_v0.1.md)
+- [Input/Output Spec](docs/input_output_spec.md)
 - [Schema Draft](docs/schema_draft.md)
 - [Capability Benchmarks](docs/capability_benchmarks.md)
 
@@ -255,7 +255,7 @@ Run the runner test suite:
 
 InferGrade Runner is designed to work with the hosted InferGrade Hub, but it remains the open, portable execution surface for the project.
 
-For the v0 product story, the Runner repository is the trust-sensitive source of execution truth: schemas, ontology, benchmark-selection metadata, and standalone reports originate here. The Hub repository consumes that output to guide setup, store evidence, and compare same-family quant ladders against exact or similar hardware slices.
+For the current product story, the Runner repository is the trust-sensitive source of execution truth: schemas, ontology, benchmark-selection metadata, and standalone reports originate here. The Hub repository consumes that output to guide setup, store evidence, and compare same-family quant ladders against exact or similar hardware slices.
 
 The Hub owns identity, recommendations, community evidence, publishing, and hosted run planning.
 The Runner owns the ontology, schemas, and emitted bundle contract.

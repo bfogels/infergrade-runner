@@ -1,6 +1,6 @@
 # Desktop Runner Distribution
 
-Sprint 74 adds a repeatable unsigned local build lane before making the desktop Runner app public.
+The desktop Runner distribution lane defines a repeatable unsigned local build lane before making the desktop Runner app public.
 
 The first release lane should be boring:
 
@@ -36,7 +36,7 @@ with file sizes and SHA-256 digests. The digest identifies the emitted artifact 
 
 ## Current App Surface
 
-The dogfood app now exposes the pieces that a non-terminal user needs first:
+The preview app now exposes the pieces that a non-terminal user needs first:
 
 - pair with a Hub code and start listening
 - inspect process logs without a shell
@@ -86,7 +86,7 @@ Tauri updates should not be enabled until:
 
 The first likely channels are:
 
-- `dogfood`: internal builds for trusted testers
+- `preview`: internal builds for trusted testers
 - `beta`: signed builds for early external users
 - `stable`: later public releases
 
@@ -105,7 +105,7 @@ For each candidate build, record:
 - whether token save/load/clear was exercised
 - whether Runner start/stop left orphaned processes
 
-## Non-Goals For This Sprint
+## Non-Goals
 
 - no signing secrets in the repo
 - no auto-update keys in the repo

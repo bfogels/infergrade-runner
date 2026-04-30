@@ -1,4 +1,4 @@
-# V0 Decision Workflow
+# Decision Workflow
 
 InferGrade Runner is the open execution engine for one focused first-user question:
 
@@ -6,7 +6,7 @@ InferGrade Runner is the open execution engine for one focused first-user questi
 
 The Runner answers the execution side of that question. It resolves artifacts, checks readiness, runs benchmarks, captures environment provenance, and writes normalized bundles the Hub can compare.
 
-## Runner Responsibilities In V0
+## Runner Responsibilities
 
 - resolve a pinned quantized artifact
 - choose the correct local execution path for the hardware
@@ -23,7 +23,7 @@ The Runner answers the execution side of that question. It resolves artifacts, c
 - Container-friendly hosts: `local_container` with explicit runtime images
 - Hub-assisted workflow: pair once, start the runner, then let the Hub queue local work
 
-## Deferred In V0
+## Deferred
 
 - treating every backend as equally supported
 - making cloud required for first value

@@ -6,7 +6,7 @@ on:
       image_tag:
         description: Container tag to publish
         required: true
-        default: 0.1.4-alpha
+        default: 0.1.5-preview
   push:
     tags:
       - "v*"

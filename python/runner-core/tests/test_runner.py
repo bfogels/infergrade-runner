@@ -108,10 +108,10 @@ class RunnerTests(unittest.TestCase):
                             "value": 4.21,
                             "stderr": 0.12,
                             "status": "measured",
-                            "comparability_key": "llama.cpp:infergrade_alpha_text_v1:ctx128:stride0:out0",
+                            "comparability_key": "llama.cpp:infergrade_preview_text_v1:ctx128:stride0:out0",
                         }
                     },
-                    context={"corpus_id": "infergrade_alpha_text_v1"},
+                    context={"corpus_id": "infergrade_preview_text_v1"},
                 )
 
             def run_deployment_profile(self, request, profile_id, progress_callback=None):
@@ -322,7 +322,7 @@ class RunnerTests(unittest.TestCase):
                     state="measured",
                     reason_codes=["perplexity_measured"],
                     metrics={"perplexity": {"value": 5.1, "status": "measured"}},
-                    context={"corpus_id": "infergrade_alpha_text_v1"},
+                    context={"corpus_id": "infergrade_preview_text_v1"},
                 )
 
             def run_deployment_profile(self, request, profile_id, progress_callback=None):
