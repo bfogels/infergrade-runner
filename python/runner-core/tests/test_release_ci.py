@@ -39,6 +39,14 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/dmg/*.dmg", workflow)
         self.assertIn("gh release upload", workflow)
 
+    def test_desktop_build_script_ignores_empty_apple_signing_env(self):
+        script = (ROOT / "scripts" / "build_desktop_runner.sh").read_text(encoding="utf-8")
+
+        self.assertIn("unset_if_empty APPLE_CERTIFICATE", script)
+        self.assertIn("unset_if_empty APPLE_CERTIFICATE_PASSWORD", script)
+        self.assertIn("unset_if_empty APPLE_ID", script)
+        self.assertIn('MACOS_SIGNING_IDENTITY="-"', script)
+
 
 if __name__ == "__main__":
     unittest.main()
