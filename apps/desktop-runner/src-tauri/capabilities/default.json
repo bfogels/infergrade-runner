@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window access for the InferGrade Runner sidecar prototype.",
+  "description": "Main window access for the InferGrade Runner sidecar.",
   "windows": ["main"],
   "permissions": [
     "core:default",
