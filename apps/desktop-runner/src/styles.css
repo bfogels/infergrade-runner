@@ -12,6 +12,7 @@
   --button-text: #f8fbfc;
   --log-text: #d8f3ed;
   --shadow: rgba(24, 36, 49, 0.08);
+  color-scheme: light;
   color: var(--text);
   background: var(--page);
   font-family:
@@ -166,6 +167,25 @@ h2 {
   background: var(--surface-muted);
 }
 
+.release-card {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: var(--surface-muted);
+}
+
+.release-card strong {
+  font-size: 1.1rem;
+}
+
+.release-card span,
+.status-list span {
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
 .status-card strong {
   display: block;
   margin-top: 2px;
@@ -250,6 +270,21 @@ label {
 
 .runtime-advanced-panel {
   margin-bottom: 14px;
+}
+
+.status-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.status-list div {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-muted);
 }
 
 .panel-heading {

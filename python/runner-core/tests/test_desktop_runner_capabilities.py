@@ -5,8 +5,11 @@ import unittest
 
 
 class DesktopRunnerCapabilityTests(unittest.TestCase):
+    def _repo_root(self):
+        return os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+
     def _api_url_validators(self):
-        root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        root = self._repo_root()
         path = os.path.join(root, "apps/desktop-runner/src-tauri/capabilities/default.json")
         with open(path, "r", encoding="utf-8") as handle:
             capability = json.load(handle)
@@ -34,6 +37,28 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
             self.assertNotRegex("http://hub.example.com", pattern)
             self.assertNotRegex("http://192.168.1.25:8000", pattern)
             self.assertNotRegex("http://localhost.example.com", pattern)
+
+    def test_desktop_runner_surfaces_release_and_update_gates(self):
+        root = self._repo_root()
+        html_path = os.path.join(root, "apps/desktop-runner/index.html")
+        js_path = os.path.join(root, "apps/desktop-runner/src/main.js")
+        css_path = os.path.join(root, "apps/desktop-runner/src/styles.css")
+        with open(html_path, "r", encoding="utf-8") as handle:
+            html = handle.read()
+        with open(js_path, "r", encoding="utf-8") as handle:
+            js = handle.read()
+        with open(css_path, "r", encoding="utf-8") as handle:
+            css = handle.read()
+
+        self.assertIn("data-app-version", html)
+        self.assertIn("data-update-channel", html)
+        self.assertIn("data-update-status", html)
+        self.assertIn("Blocked on platform sidecar artifacts and signing.", html)
+        self.assertIn('const UPDATE_CHANNEL = "dogfood";', js)
+        self.assertIn("signed Tauri artifacts and rollback policy", js)
+        self.assertIn("function renderReleaseStatus()", js)
+        self.assertIn(".release-card", css)
+        self.assertIn(".status-list", css)
 
 
 if __name__ == "__main__":

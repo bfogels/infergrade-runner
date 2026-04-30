@@ -3,6 +3,9 @@ import "./styles.css";
 const SIDECAR_NAME = "binaries/infergrade-sidecar";
 const API_URL_STORAGE_KEY = "infergrade.runner.apiUrl";
 const THEME_STORAGE_KEY = "infergrade.runner.theme";
+const APP_VERSION = "0.1.0";
+const UPDATE_CHANNEL = "dogfood";
+const UPDATE_STATUS = "Updates are disabled until signed Tauri artifacts and rollback policy exist.";
 
 const form = document.querySelector("[data-runner-form]");
 const startButton = document.querySelector("[data-start-runner]");
@@ -16,6 +19,9 @@ const themeIcon = document.querySelector("[data-theme-icon]");
 const themeLabel = document.querySelector("[data-theme-label]");
 const runtimePlanButton = document.querySelector("[data-runtime-plan]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
+const appVersion = document.querySelector("[data-app-version]");
+const updateChannel = document.querySelector("[data-update-channel]");
+const updateStatus = document.querySelector("[data-update-status]");
 const statusText = document.querySelector("[data-runner-status]");
 const statusDot = document.querySelector("[data-status-dot]");
 const pairState = document.querySelector("[data-pair-state]");
@@ -52,6 +58,18 @@ function applyTheme(theme) {
 
 function initTheme() {
   applyTheme(preferredTheme());
+}
+
+function renderReleaseStatus() {
+  if (appVersion) {
+    appVersion.textContent = `v${APP_VERSION}`;
+  }
+  if (updateChannel) {
+    updateChannel.textContent = `${UPDATE_CHANNEL} channel`;
+  }
+  if (updateStatus) {
+    updateStatus.textContent = UPDATE_STATUS;
+  }
 }
 
 function toggleTheme() {
@@ -386,5 +404,6 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
 });
 
 initTheme();
+renderReleaseStatus();
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");
