@@ -34,7 +34,13 @@ The Runner-owned catalog now separates benchmark scope from legacy tier names:
 - `decision` checks are the default first-user path: short, local-friendly evidence for choosing a quantized setup on the current hardware.
 - `reference` checks are deeper follow-up evidence: broader throughput, long-context, fidelity, or breadth checks that take longer and should be selected intentionally.
 
-Every catalog check carries effort, duration-band, token-volume, execution-pattern, and resumability metadata. Result bundles preserve the derived scope summary in `configuration.benchmark_selection.benchmark_scope` so the Hub can explain whether a recommendation is backed by first-pass decision evidence or deeper reference evidence.
+Every catalog check also belongs to an evidence lane:
+
+- `decision` evidence can answer "what should I try now?" for one local setup decision.
+- `reference` evidence can support stronger comparisons across nearby variants or families.
+- `gold` evidence is reserved for curated, high-legitimacy claims that need heavier datasets, runtime controls, or cloud/curated execution before becoming a default local path.
+
+Every catalog check carries effort, duration-band, token-volume, execution-pattern, resumability, and claim-boundary metadata. Result bundles preserve the derived scope summary in `configuration.benchmark_selection.benchmark_scope` so the Hub can explain whether a recommendation is backed by first-pass decision evidence, deeper reference evidence, or a future curated lane.
 
 ## Standalone Runner Reports
 
