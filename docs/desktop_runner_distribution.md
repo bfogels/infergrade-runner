@@ -1,15 +1,16 @@
 # Desktop Runner Distribution
 
-The desktop Runner distribution lane defines a repeatable unsigned local build lane before making the desktop Runner app public.
+The desktop Runner distribution lane defines how the local companion app is built, signed, published, and updated.
 
-The first release lane should be boring:
+The current release lane is intentionally narrow:
 
-1. build a macOS Apple Silicon DMG locally
-2. record the artifact path, size, and SHA-256 digest
-3. sign and notarize only after the unsigned build lane is stable
-4. add update manifests only after signing keys and rollback policy are settled
+1. build a macOS Apple Silicon DMG
+2. publish the DMG, updater archive, updater signature, and updater manifest from GitHub Actions
+3. use Tauri updater signing for app-update integrity
+4. use ad-hoc macOS signing only as a development fallback
+5. require Developer ID signing and notarization before treating the DMG as public-user-ready
 
-## Current Build Lane
+## Local Build Lane
 
 From the Runner repo root:
 
@@ -36,7 +37,7 @@ with file sizes and SHA-256 digests. The digest identifies the emitted artifact 
 
 ## Current App Surface
 
-The preview app now exposes the pieces that a non-terminal user needs first:
+The desktop app exposes the pieces that a non-terminal user needs first:
 
 - pair with a Hub code and start listening
 - inspect process logs without a shell
@@ -74,21 +75,15 @@ Before a public beta:
 
 Windows needs a separate Authenticode signing path and SmartScreen reputation plan. Linux needs a packaging decision before update behavior is promised.
 
-## Update Channel Gates
+## Update Channel
 
-Tauri updates should not be enabled until:
+The macOS app reads the latest updater manifest from:
 
-- release artifacts are signed
-- update signing keys are generated and stored outside the repo
-- release channels are named and documented
-- rollback behavior is tested
-- the app can report its current version and update channel in the UI
+```text
+https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-latest/infergrade-runner-desktop-latest.json
+```
 
-The first likely channels are:
-
-- `preview`: internal builds for trusted testers
-- `beta`: signed builds for early external users
-- `stable`: later public releases
+The GitHub Actions workflow publishes the latest DMG and updater artifacts on each push to `main`. That makes release artifacts available quickly, but it does not replace the signing gates above: public distribution still needs Developer ID signing, notarization, clean-machine Gatekeeper verification, and a rollback policy.
 
 ## Release Candidate Checklist
 

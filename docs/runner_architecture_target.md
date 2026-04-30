@@ -200,13 +200,13 @@ The runner emits it.
 
 ## Practical Repo Interpretation
 
-In the monorepo:
+In the current workspace:
 
-- [python/runner-core](../python/runner-core) is the open runner
-- [services/api](../services/api) and [apps/web](../apps/web) are hub scaffolding
-- [schemas](../schemas) is the shared contract layer
+- `python/runner-core` is the open runner
+- `infergrade-hub/services/api` and `infergrade-hub/apps/web` are the hosted Hub API and browser app
+- `schemas` is the Runner-owned contract layer exported for Hub consumption
 
-That means the repo can continue to evolve in one place while the product boundary stays clear.
+That means the workspace can continue to evolve as two repositories while the product boundary stays clear.
 
 ## What The Public Release Must Prove
 
