@@ -56,7 +56,7 @@ New request payloads should prefer:
 
 The Runner will still derive compatibility metadata like `tier`, `use_case`, deployment profiles, and capability enablement from that explicit selection when needed.
 
-The catalog also labels each concrete check as either `decision` or `reference` scope. Decision-suite checks are the short first path for choosing a quantized setup locally. Reference-suite checks are heavier follow-up evidence for stronger comparison. The normalized result metadata includes `benchmark_scope` with effort, expected duration, token-volume, execution-pattern, and resumability hints so downstream tools do not infer those claims from old tier names.
+The catalog also labels each concrete check with both a benchmark scope and an evidence lane. Decision-scope checks are the short first path for choosing a quantized setup locally. Reference-scope checks are heavier follow-up evidence for stronger comparison. Evidence lanes (`decision`, `reference`, `gold`) describe the strength and boundary of claims that a check can support. The normalized result metadata includes `benchmark_scope`, per-check lane metadata, effort, expected duration, token-volume, execution-pattern, and resumability hints so downstream tools do not infer those claims from old tier names.
 
 ## Standalone Report Artifact
 

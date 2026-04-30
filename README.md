@@ -53,8 +53,9 @@ If a run fails before bundle finalization, the Runner still writes a truthful fa
 InferGrade now treats benchmark scope as a capability-first contract:
 
 - `capability_suite_ids` define the top-level user intent, such as chat/instruction following, coding/code editing, or quant fidelity
-- `benchmark_group_ids` define the main evidence lanes inside those suites
+- `benchmark_group_ids` define the main benchmark groups inside those suites
 - `benchmark_check_ids` define the concrete checks that will actually run
+- `evidence_lane_id` on each catalog check defines the claim lane the check can support, such as `decision`, `reference`, or `gold`
 
 The old `canary / standard / gold` language still exists internally as a compatibility breadth hint, but it is no longer the main product abstraction. The Runner derives that breadth from the selected checks so older flows can remain compatible without forcing new users to think in tier jargon first.
 
