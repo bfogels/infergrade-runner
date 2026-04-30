@@ -1,0 +1,50 @@
+name: Build Release Bundle
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      include_image_archives:
+        description: "Build and include Docker image archives in the uploaded bundle"
+        default: false
+        required: false
+        type: boolean
+      release_version:
+        description: "Optional release version override; defaults to VERSION-alpha"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    env:
+      INFERGRADE_RELEASE_INCLUDE_IMAGES: ${{ github.event_name == 'workflow_dispatch' && inputs.include_image_archives && '1' || '0' }}
+      INFERGRADE_RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.release_version || '' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Runner package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./python/runner-core
+
+      - name: Build release bundle
+        id: release_bundle
+        run: ./scripts/build_release_bundle.sh
+
+      - name: Upload release bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: infergrade-runner-release-${{ steps.release_bundle.outputs.release_version }}
+          path: ${{ steps.release_bundle.outputs.bundle_dir }}/**
+          if-no-files-found: error

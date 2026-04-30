@@ -56,27 +56,31 @@ The important product shift is that InferGrade is now capability-first. Even thi
 Preferred hosted path:
 
 ```bash
-docker pull ghcr.io/<your-github-owner>/infergrade-llama-cpp:0.1.0-alpha
-docker tag ghcr.io/<your-github-owner>/infergrade-llama-cpp:0.1.0-alpha infergrade-llama-cpp:0.1.0-alpha
+RUNNER_RELEASE_TAG="$(cat VERSION)-alpha"
+docker pull "ghcr.io/<your-github-owner>/infergrade-llama-cpp:${RUNNER_RELEASE_TAG}"
+docker tag "ghcr.io/<your-github-owner>/infergrade-llama-cpp:${RUNNER_RELEASE_TAG}" "infergrade-llama-cpp:${RUNNER_RELEASE_TAG}"
 ```
 
 Fallback if you received an exported archive from the host:
 
 ```bash
-docker load -i infergrade-llama-cpp_0.1.0-alpha.tar
+RUNNER_RELEASE_TAG="$(cat VERSION)-alpha"
+docker load -i "infergrade-llama-cpp_${RUNNER_RELEASE_TAG}.tar"
 ```
 
 If you want the released paired-listener path instead of a repo-based manual runner invocation, fetch the listener image too:
 
 ```bash
-docker pull ghcr.io/<your-github-owner>/infergrade-runner-core:0.1.0-alpha
-docker tag ghcr.io/<your-github-owner>/infergrade-runner-core:0.1.0-alpha infergrade-runner-core:0.1.0-alpha
+RUNNER_RELEASE_TAG="$(cat VERSION)-alpha"
+docker pull "ghcr.io/<your-github-owner>/infergrade-runner-core:${RUNNER_RELEASE_TAG}"
+docker tag "ghcr.io/<your-github-owner>/infergrade-runner-core:${RUNNER_RELEASE_TAG}" "infergrade-runner-core:${RUNNER_RELEASE_TAG}"
 ```
 
 Or load the exported archive:
 
 ```bash
-docker load -i infergrade-runner-core_0.1.0-alpha.tar
+RUNNER_RELEASE_TAG="$(cat VERSION)-alpha"
+docker load -i "infergrade-runner-core_${RUNNER_RELEASE_TAG}.tar"
 ```
 
 ## 2. Start The Protected API
@@ -84,7 +88,7 @@ docker load -i infergrade-runner-core_0.1.0-alpha.tar
 ```bash
 export INFERGRADE_API_TOKEN=replace-with-a-long-random-token
 export INFERGRADE_API_ALLOWED_ORIGINS=http://127.0.0.1:3000
-export INFERGRADE_DEFAULT_IMAGE_TAG=0.1.0-alpha
+export INFERGRADE_DEFAULT_IMAGE_TAG="$(cat VERSION)-alpha"
 
 cd /path/to/infergrade/services/api
 PYTHONPATH=src python3 -m uvicorn infergrade_api.main:app --host 127.0.0.1 --port 8000
@@ -129,7 +133,7 @@ docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$PWD/runs:/app/runs" \
   -v "$HOME/.cache/infergrade/artifacts:/root/.cache/infergrade/artifacts" \
-  infergrade-runner-core:0.1.0-alpha start --api-url http://host.docker.internal:8000
+  "infergrade-runner-core:$(cat VERSION)-alpha" start --api-url http://host.docker.internal:8000
 ```
 
 That path does not require a local Runner repo checkout. The manual `run-job` flow below remains the explicit fallback.

@@ -1,6 +1,6 @@
 # Runner Release Process
 
-This is the current local, reproducible release-prep workflow for the InferGrade Runner pinned first-user path.
+This is the current reproducible release-prep workflow for the InferGrade Runner pinned first-user path.
 
 The goal is to produce one versioned bundle that the Hub can pin to explicitly:
 
@@ -8,34 +8,57 @@ The goal is to produce one versioned bundle that the Hub can pin to explicitly:
 - a release manifest with checksums
 - the Runner-owned contract bundle
 
+## CI Bundle On Main
+
+Every push to `main` runs `.github/workflows/release-bundle.yml`. That workflow:
+
+1. installs the Runner package
+2. checks all version declarations against `VERSION`
+3. exports the Runner release bundle for `$(cat VERSION)-alpha`
+4. uploads `dist/releases/$(cat VERSION)-alpha/` as a GitHub Actions artifact
+
+The default main-branch artifact includes the contract bundle and release manifest with image references. It does not build or upload Docker image archives on every commit, which keeps main CI fast and avoids very large per-commit artifacts. Maintainers can run the same workflow manually with `include_image_archives=true` when they need a fully portable archive bundle.
+
+Local equivalent:
+
+```bash
+./scripts/build_release_bundle.sh
+```
+
 ## Prepare The Release Images
 
 Build the release-tagged local images:
 
 ```bash
-./scripts/build_alpha_images.sh
+bash ./scripts/build_alpha_images.sh
 ```
 
 Export the resulting OCI archives:
 
 ```bash
-./scripts/export_alpha_images.sh
+bash ./scripts/export_alpha_images.sh
 ```
 
-This writes archives under `dist/images/0.1.0-alpha/`.
+By default this uses `$(cat VERSION)-alpha`; set `INFERGRADE_IMAGE_TAG` to override it.
+
+This writes archives under:
+
+```text
+dist/images/$(cat VERSION)-alpha/
+```
 
 ## Export The Release Bundle
 
 Generate the local release bundle:
 
 ```bash
-python3 ./scripts/export_release_bundle.py --release-version 0.1.0-alpha
+./scripts/build_release_bundle.sh
 ```
 
 This writes the pinned bundle under:
 
 ```text
-dist/releases/0.1.0-alpha/
+dist/releases/$(cat VERSION)-alpha/
 ```
 
 The release bundle includes:
@@ -53,7 +76,7 @@ From the Hub repo, import that exact release:
 ```bash
 cd /Users/brianfogelson/Desktop/Code/infergrade/infergrade-hub
 PYTHONPATH=services/api/src python3 ./scripts/import_runner_release.py \
-  --release-dir /Users/brianfogelson/Desktop/Code/infergrade/infergrade-runner/dist/releases/0.1.0-alpha
+  --release-dir /Users/brianfogelson/Desktop/Code/infergrade/infergrade-runner/dist/releases/$(cat /Users/brianfogelson/Desktop/Code/infergrade/infergrade-runner/VERSION)-alpha
 ```
 
 That updates the Hub snapshot to include:

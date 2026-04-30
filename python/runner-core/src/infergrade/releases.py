@@ -39,6 +39,12 @@ KNOWN_RELEASE_IMAGES: List[Dict[str, str]] = [
         "benchmark_id": "evalplus",
         "archive_name": "infergrade-evalplus_{release_version}.tar",
     },
+    {
+        "image_name": "infergrade-mmlu-pro",
+        "role": "capability_runtime",
+        "benchmark_id": "mmlu_pro",
+        "archive_name": "infergrade-mmlu-pro_{release_version}.tar",
+    },
 ]
 
 
