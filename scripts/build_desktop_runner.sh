@@ -42,11 +42,28 @@ if [ "$CREATE_UPDATER_ARTIFACTS" -eq 1 ]; then
 fi
 
 cd "$APP_DIR"
-if [ "$CREATE_UPDATER_ARTIFACTS" -eq 1 ]; then
-  npm run tauri -- build --config '{"bundle":{"targets":["app","dmg"],"createUpdaterArtifacts":true}}' -- --locked
-else
-  npm run tauri -- build -- --locked
+MACOS_SIGNING_IDENTITY="${INFERGRADE_MACOS_SIGNING_IDENTITY:-}"
+if [ -z "$MACOS_SIGNING_IDENTITY" ] && [ -z "${APPLE_CERTIFICATE:-}" ]; then
+  MACOS_SIGNING_IDENTITY="-"
 fi
+export CREATE_UPDATER_ARTIFACTS MACOS_SIGNING_IDENTITY
+build_config="$(python3 - <<'PY'
+import json
+import os
+
+config = {"bundle": {"macOS": {}}}
+if os.environ.get("CREATE_UPDATER_ARTIFACTS") == "1":
+    config["bundle"]["targets"] = ["app", "dmg"]
+    config["bundle"]["createUpdaterArtifacts"] = True
+identity = os.environ.get("MACOS_SIGNING_IDENTITY", "")
+if identity:
+    config["bundle"]["macOS"]["signingIdentity"] = identity
+if not config["bundle"]["macOS"]:
+    del config["bundle"]["macOS"]
+print(json.dumps(config, separators=(",", ":")))
+PY
+)"
+npm run tauri -- build --config "$build_config" -- --locked
 
 if [ ! -d "$DMG_DIR" ]; then
   echo "No DMG output directory found at $DMG_DIR" >&2

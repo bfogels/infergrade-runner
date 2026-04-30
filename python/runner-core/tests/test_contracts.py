@@ -74,7 +74,7 @@ class ContractExportTests(unittest.TestCase):
             manifest = load_release_manifest(bundle_dir=bundle_dir)
             self.assertEqual("1.2.3-alpha", manifest["release_version"])
             self.assertEqual("1.2.3", manifest["contract_version"])
-            self.assertEqual("0.1.0", manifest["runner_version"])
+            self.assertEqual("0.1.2", manifest["runner_version"])
             self.assertEqual("alpha", manifest["release_channel"])
             self.assertEqual(
                 "infergrade-runner-core:1.2.3-alpha",

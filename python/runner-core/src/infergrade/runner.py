@@ -3,6 +3,7 @@
 import os
 from typing import Any, Callable, Dict, List, Optional
 
+from infergrade import __version__
 from infergrade.adapters import get_adapter
 from infergrade.artifacts import resolve_quant_artifact
 from infergrade.benchmark_catalog import normalize_request_selection, selection_metadata_for_request
@@ -208,7 +209,7 @@ def _build_result_record(
             "submission_channel": "infergrade_cli",
             "source_bundle_origin": "infergrade_simulated_runner" if request.simulate else "infergrade_runner",
             "normalized_at": completed_at,
-            "normalizer_version": "0.1.0",
+            "normalizer_version": __version__,
             "notes": request.notes,
             "run_config_id": request.run_config_id,
             "run_config_name": request.run_config_name,
@@ -662,7 +663,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             "result_spec_version": "0.1-draft",
             "bundle_id": bundle_id,
             "created_at": utcnow_iso(),
-            "runner": {"name": "infergrade", "version": "0.1.0"},
+            "runner": {"name": "infergrade", "version": __version__},
             "status": {
                 "execution_status": "simulated" if request.simulate else "completed",
                 "deployment_status": "simulated" if request.simulate else "completed",
