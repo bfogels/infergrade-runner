@@ -105,15 +105,32 @@ input {
   gap: 12px;
 }
 
-.theme-toggle {
+.theme-control {
   justify-self: end;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 0 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  width: min(100%, 260px);
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   background: var(--surface-muted);
+}
+
+.theme-control button {
+  min-height: 34px;
+  border-color: transparent;
+  padding: 0 10px;
+  background: transparent;
   color: var(--text);
+  box-shadow: none;
+}
+
+.theme-control button[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 8px 18px var(--shadow);
 }
 
 .eyebrow,
@@ -325,9 +342,9 @@ label {
     grid-template-columns: 1fr;
   }
 
-  .theme-toggle {
+  .theme-control {
     justify-self: stretch;
-    justify-content: center;
+    width: 100%;
   }
 
   .hero-panel,

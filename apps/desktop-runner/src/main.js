@@ -14,9 +14,7 @@ const pairButton = document.querySelector("[data-pair-runner]");
 const saveTokenButton = document.querySelector("[data-save-token]");
 const clearTokenButton = document.querySelector("[data-clear-token]");
 const clearLogsButton = document.querySelector("[data-clear-logs]");
-const themeToggle = document.querySelector("[data-theme-toggle]");
-const themeIcon = document.querySelector("[data-theme-icon]");
-const themeLabel = document.querySelector("[data-theme-label]");
+const themeChoiceButtons = [...document.querySelectorAll("[data-theme-choice]")];
 const runtimePlanButton = document.querySelector("[data-runtime-plan]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
 const appVersion = document.querySelector("[data-app-version]");
@@ -35,31 +33,47 @@ let logLines = [];
 let tauriInvoke = null;
 let previewToken = "";
 
-function preferredTheme() {
-  const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-  if (savedTheme === "dark" || savedTheme === "light") {
-    return savedTheme;
-  }
+function systemTheme() {
   if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
     return "dark";
   }
   return "light";
 }
 
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  if (themeIcon) {
-    themeIcon.textContent = theme === "dark" ? "☀" : "☾";
+function preferredThemeMode() {
+  const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (savedTheme === "dark" || savedTheme === "light" || savedTheme === "system") {
+    return savedTheme;
   }
-  if (themeLabel) {
-    themeLabel.textContent = theme === "dark" ? "Light" : "Dark";
-  }
-  themeToggle?.setAttribute("aria-label", theme === "dark" ? "Switch to light mode" : "Switch to dark mode");
-  themeToggle?.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
+  return "system";
+}
+
+function applyThemeMode(mode) {
+  const themeMode = mode === "dark" || mode === "light" || mode === "system" ? mode : "system";
+  const effectiveTheme = themeMode === "system" ? systemTheme() : themeMode;
+  document.documentElement.dataset.theme = effectiveTheme;
+  document.documentElement.dataset.themeMode = themeMode;
+  themeChoiceButtons.forEach((button) => {
+    button.setAttribute("aria-pressed", button.dataset.themeChoice === themeMode ? "true" : "false");
+  });
 }
 
 function initTheme() {
-  applyTheme(preferredTheme());
+  applyThemeMode(preferredThemeMode());
+  if (typeof window.matchMedia !== "function") {
+    return;
+  }
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  const refreshSystemTheme = () => {
+    if (preferredThemeMode() === "system") {
+      applyThemeMode("system");
+    }
+  };
+  if (typeof media.addEventListener === "function") {
+    media.addEventListener("change", refreshSystemTheme);
+  } else if (typeof media.addListener === "function") {
+    media.addListener(refreshSystemTheme);
+  }
 }
 
 function renderReleaseStatus() {
@@ -102,11 +116,10 @@ async function refreshRunnerCliVersion() {
   }
 }
 
-function toggleTheme() {
-  const currentTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
-  const nextTheme = currentTheme === "dark" ? "light" : "dark";
-  window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
-  applyTheme(nextTheme);
+function chooseThemeMode(mode) {
+  const themeMode = mode === "dark" || mode === "light" || mode === "system" ? mode : "system";
+  window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+  applyThemeMode(themeMode);
 }
 
 function isTauriRuntime() {
@@ -417,7 +430,9 @@ clearLogsButton.addEventListener("click", () => {
   logOutput.textContent = "Waiting for Runner output...";
 });
 
-themeToggle?.addEventListener("click", toggleTheme);
+themeChoiceButtons.forEach((button) => {
+  button.addEventListener("click", () => chooseThemeMode(button.dataset.themeChoice));
+});
 
 runtimePlanButton?.addEventListener("click", () => {
   executeSidecar(runtimeCommandArgs()).catch((error) => {

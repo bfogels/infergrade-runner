@@ -16,10 +16,11 @@
           </p>
         </div>
         <div class="hero-side">
-          <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch color theme">
-            <span data-theme-icon>☾</span>
-            <span data-theme-label>Dark</span>
-          </button>
+          <div class="theme-control" role="group" aria-label="Color theme">
+            <button type="button" data-theme-choice="system" aria-pressed="true">System</button>
+            <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+            <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+          </div>
           <div class="status-card" aria-live="polite">
             <span class="status-dot" data-status-dot></span>
             <div>
