@@ -60,6 +60,11 @@ unset_if_empty APPLE_API_KEY
 unset_if_empty APPLE_API_ISSUER
 unset_if_empty APPLE_API_KEY_PATH
 
+if [ -n "${APPLE_CERTIFICATE:-}" ] && [ -z "${APPLE_CERTIFICATE_PASSWORD:-}" ]; then
+  echo "APPLE_CERTIFICATE is set without APPLE_CERTIFICATE_PASSWORD; using ad-hoc macOS signing." >&2
+  unset APPLE_CERTIFICATE
+fi
+
 if [ -z "$MACOS_SIGNING_IDENTITY" ] && [ -z "${APPLE_CERTIFICATE:-}" ]; then
   MACOS_SIGNING_IDENTITY="-"
 fi
