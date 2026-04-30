@@ -267,8 +267,13 @@ async function runnerEnvironment() {
 function readApiUrl() {
   const rawApiUrl = form.elements.apiUrl.value.trim() || "http://127.0.0.1:8000";
   const parsed = new URL(rawApiUrl);
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new Error("Hub URL must start with http:// or https://.");
+  const host = parsed.hostname.toLowerCase();
+  const ipv4Octet = "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
+  const isLocalHttp =
+    parsed.protocol === "http:" &&
+    (host === "localhost" || host === "::1" || host === "[::1]" || new RegExp(`^127(?:\\.${ipv4Octet}){3}$`).test(host));
+  if (parsed.protocol !== "https:" && !isLocalHttp) {
+    throw new Error("Hub URL must use HTTPS, except local development URLs on localhost or 127.x.x.x.");
   }
   return parsed.href;
 }

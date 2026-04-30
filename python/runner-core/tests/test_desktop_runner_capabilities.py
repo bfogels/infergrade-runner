@@ -64,6 +64,24 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn(".release-card", css)
         self.assertIn(".status-list", css)
 
+    def test_desktop_runner_validates_hub_url_like_sidecar_permissions(self):
+        root = self._repo_root()
+        html_path = os.path.join(root, "apps/desktop-runner/index.html")
+        js_path = os.path.join(root, "apps/desktop-runner/src/main.js")
+
+        with open(html_path, "r", encoding="utf-8") as handle:
+            html = handle.read()
+        with open(js_path, "r", encoding="utf-8") as handle:
+            js = handle.read()
+
+        self.assertIn("Use HTTPS for hosted Hubs", html)
+        self.assertIn("function readApiUrl()", js)
+        self.assertIn('parsed.protocol !== "https:" && !isLocalHttp', js)
+        self.assertIn("localhost", js)
+        self.assertIn("ipv4Octet", js)
+        self.assertIn("^127", js)
+        self.assertIn("Hub URL must use HTTPS", js)
+
     def test_desktop_runner_has_explicit_system_theme_mode(self):
         root = self._repo_root()
         html_path = os.path.join(root, "apps/desktop-runner/index.html")
