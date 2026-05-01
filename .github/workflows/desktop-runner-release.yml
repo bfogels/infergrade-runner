@@ -8,7 +8,7 @@ on:
     inputs:
       version:
         description: "SemVer desktop app version to publish; defaults to VERSION on main"
-        default: "0.1.11"
+        default: "0.1.12"
         required: false
       notes:
         description: "Short release notes shown in the updater"
@@ -84,6 +84,15 @@ jobs:
             --notes "$RELEASE_NOTES" \
             --output apps/desktop-runner/src-tauri/target/release/bundle/macos/infergrade-runner-desktop-latest.json
 
+      - name: Write release checksums
+        run: |
+          python3 ./scripts/write_desktop_release_checksums.py \
+            --output apps/desktop-runner/src-tauri/target/release/bundle/macos/SHA256SUMS \
+            apps/desktop-runner/src-tauri/target/release/bundle/dmg/*.dmg \
+            apps/desktop-runner/src-tauri/target/release/bundle/macos/*.tar.gz \
+            apps/desktop-runner/src-tauri/target/release/bundle/macos/*.tar.gz.sig \
+            apps/desktop-runner/src-tauri/target/release/bundle/macos/infergrade-runner-desktop-latest.json
+
       - name: Publish desktop release artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -96,4 +105,5 @@ jobs:
             apps/desktop-runner/src-tauri/target/release/bundle/macos/*.tar.gz \
             apps/desktop-runner/src-tauri/target/release/bundle/macos/*.tar.gz.sig \
             apps/desktop-runner/src-tauri/target/release/bundle/macos/infergrade-runner-desktop-latest.json \
+            apps/desktop-runner/src-tauri/target/release/bundle/macos/SHA256SUMS \
             --clobber

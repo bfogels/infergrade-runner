@@ -1,5 +1,11 @@
+import contextlib
+import io
+import sys
 import unittest
+from tempfile import TemporaryDirectory
 from pathlib import Path
+
+from scripts.write_desktop_release_checksums import main as write_desktop_release_checksums
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -37,6 +43,8 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("RELEASE_TAG: desktop-runner-latest", workflow)
         self.assertIn("./scripts/build_desktop_runner.sh --with-updater", workflow)
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/dmg/*.dmg", workflow)
+        self.assertIn("./scripts/write_desktop_release_checksums.py", workflow)
+        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/macos/SHA256SUMS", workflow)
         self.assertIn("gh release upload", workflow)
 
     def test_desktop_build_script_ignores_empty_apple_signing_env(self):
@@ -46,6 +54,66 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("unset_if_empty APPLE_CERTIFICATE_PASSWORD", script)
         self.assertIn("unset_if_empty APPLE_ID", script)
         self.assertIn('MACOS_SIGNING_IDENTITY="-"', script)
+
+    def test_desktop_release_checksums_manifest_is_deterministic(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dmg = root / "InferGrade Runner_0.1.12_aarch64.dmg"
+            archive = root / "InferGrade.Runner.app.tar.gz"
+            signature = root / "InferGrade.Runner.app.tar.gz.sig"
+            manifest = root / "infergrade-runner-desktop-latest.json"
+            output = root / "SHA256SUMS"
+            dmg.write_bytes(b"dmg")
+            archive.write_bytes(b"archive")
+            signature.write_bytes(b"signature")
+            manifest.write_text('{"version":"0.1.12"}\n', encoding="utf-8")
+
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "write_desktop_release_checksums",
+                    "--output",
+                    str(output),
+                    str(signature),
+                    str(dmg),
+                    str(manifest),
+                    str(archive),
+                ]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(write_desktop_release_checksums(), 0)
+            finally:
+                sys.argv = old_argv
+
+            lines = output.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(
+                [line.split("  ", 1)[1] for line in lines],
+                [
+                    "InferGrade Runner_0.1.12_aarch64.dmg",
+                    "InferGrade.Runner.app.tar.gz",
+                    "InferGrade.Runner.app.tar.gz.sig",
+                    "infergrade-runner-desktop-latest.json",
+                ],
+            )
+            self.assertTrue(all(len(line.split("  ", 1)[0]) == 64 for line in lines))
+
+    def test_desktop_release_checksums_fails_for_missing_artifacts(self):
+        with TemporaryDirectory() as tmp:
+            output = Path(tmp) / "SHA256SUMS"
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "write_desktop_release_checksums",
+                    "--output",
+                    str(output),
+                    str(Path(tmp) / "missing.dmg"),
+                ]
+                with self.assertRaises(SystemExit) as raised:
+                    write_desktop_release_checksums()
+            finally:
+                sys.argv = old_argv
+
+            self.assertIn("Missing release artifact", str(raised.exception))
+            self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":
