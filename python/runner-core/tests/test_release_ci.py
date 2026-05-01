@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from pathlib import Path
 
 from scripts.write_desktop_release_checksums import main as write_desktop_release_checksums
+from scripts.write_desktop_update_manifest import main as write_desktop_update_manifest
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -58,7 +59,7 @@ class ReleaseCiTests(unittest.TestCase):
     def test_desktop_release_checksums_manifest_is_deterministic(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
-            dmg = root / "InferGrade Runner_0.1.12_aarch64.dmg"
+            dmg = root / "InferGrade Runner_0.1.13_aarch64.dmg"
             archive = root / "InferGrade.Runner.app.tar.gz"
             signature = root / "InferGrade.Runner.app.tar.gz.sig"
             manifest = root / "infergrade-runner-desktop-latest.json"
@@ -66,7 +67,7 @@ class ReleaseCiTests(unittest.TestCase):
             dmg.write_bytes(b"dmg")
             archive.write_bytes(b"archive")
             signature.write_bytes(b"signature")
-            manifest.write_text('{"version":"0.1.12"}\n', encoding="utf-8")
+            manifest.write_text('{"version":"0.1.13"}\n', encoding="utf-8")
 
             old_argv = sys.argv
             try:
@@ -88,7 +89,7 @@ class ReleaseCiTests(unittest.TestCase):
             self.assertEqual(
                 [line.split("  ", 1)[1] for line in lines],
                 [
-                    "InferGrade Runner_0.1.12_aarch64.dmg",
+                    "InferGrade Runner_0.1.13_aarch64.dmg",
                     "InferGrade.Runner.app.tar.gz",
                     "InferGrade.Runner.app.tar.gz.sig",
                     "infergrade-runner-desktop-latest.json",
@@ -113,6 +114,100 @@ class ReleaseCiTests(unittest.TestCase):
                 sys.argv = old_argv
 
             self.assertIn("Missing release artifact", str(raised.exception))
+            self.assertFalse(output.exists())
+
+    def test_desktop_update_manifest_quotes_archive_url_and_preserves_metadata(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bundle_dir = root / "bundle"
+            bundle_dir.mkdir()
+            archive = bundle_dir / "InferGrade Runner.app.tar.gz"
+            signature = bundle_dir / "InferGrade Runner.app.tar.gz.sig"
+            output = root / "latest.json"
+            archive.write_bytes(b"archive")
+            signature.write_text("trusted-signature\n", encoding="utf-8")
+
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "write_desktop_update_manifest",
+                    "--bundle-dir",
+                    str(bundle_dir),
+                    "--version",
+                    "0.1.13",
+                    "--base-url",
+                    "https://example.test/releases/",
+                    "--notes",
+                    "Desktop update notes.",
+                    "--platform",
+                    "darwin-aarch64",
+                    "--output",
+                    str(output),
+                ]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(write_desktop_update_manifest(), 0)
+            finally:
+                sys.argv = old_argv
+
+            manifest = __import__("json").loads(output.read_text(encoding="utf-8"))
+            platform = manifest["platforms"]["darwin-aarch64"]
+            self.assertEqual("0.1.13", manifest["version"])
+            self.assertEqual("Desktop update notes.", manifest["notes"])
+            self.assertEqual("trusted-signature", platform["signature"])
+            self.assertEqual("https://example.test/releases/InferGrade%20Runner.app.tar.gz", platform["url"])
+            self.assertRegex(manifest["pub_date"], r"Z$")
+
+    def test_desktop_update_manifest_requires_exactly_one_archive(self):
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "bundle"
+            bundle_dir.mkdir()
+            output = Path(tmp) / "latest.json"
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "write_desktop_update_manifest",
+                    "--bundle-dir",
+                    str(bundle_dir),
+                    "--version",
+                    "0.1.13",
+                    "--base-url",
+                    "https://example.test/releases",
+                    "--output",
+                    str(output),
+                ]
+                with self.assertRaises(SystemExit) as raised:
+                    write_desktop_update_manifest()
+            finally:
+                sys.argv = old_argv
+
+            self.assertIn("Expected exactly one updater .tar.gz archive", str(raised.exception))
+            self.assertFalse(output.exists())
+
+    def test_desktop_update_manifest_requires_signature(self):
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "bundle"
+            bundle_dir.mkdir()
+            (bundle_dir / "InferGrade.Runner.app.tar.gz").write_bytes(b"archive")
+            output = Path(tmp) / "latest.json"
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "write_desktop_update_manifest",
+                    "--bundle-dir",
+                    str(bundle_dir),
+                    "--version",
+                    "0.1.13",
+                    "--base-url",
+                    "https://example.test/releases",
+                    "--output",
+                    str(output),
+                ]
+                with self.assertRaises(SystemExit) as raised:
+                    write_desktop_update_manifest()
+            finally:
+                sys.argv = old_argv
+
+            self.assertIn("No signature file found", str(raised.exception))
             self.assertFalse(output.exists())
 
 
