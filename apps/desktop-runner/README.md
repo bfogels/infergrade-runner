@@ -77,7 +77,9 @@ Tauri updater signing is separate from Apple code signing:
 
 - `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` sign the updater archive.
 - `INFERGRADE_MACOS_SIGNING_IDENTITY=-` creates a local ad-hoc macOS signature.
-- `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` allow CI to use Developer ID signing and notarization when available.
+- `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, and `APPLE_TEAM_ID` allow CI to use Developer ID signing.
+- Either `APPLE_ID` plus `APPLE_PASSWORD` or `APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_PRIVATE_KEY` allow CI to notarize protected release artifacts.
+- `INFERGRADE_MACOS_SIGNING_IDENTITY` can be configured as a release environment variable; CI also accepts the `APPLE_SIGNING_IDENTITY` secret for the same value.
 
 The release workflow publishes the latest desktop release manifest at:
 

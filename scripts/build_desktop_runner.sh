@@ -7,14 +7,30 @@ TAURI_DIR="$APP_DIR/src-tauri"
 DMG_DIR="$TAURI_DIR/target/release/bundle/dmg"
 MACOS_BUNDLE_DIR="$TAURI_DIR/target/release/bundle/macos"
 CREATE_UPDATER_ARTIFACTS=0
+CHECK_ONLY=0
+SKIP_CHECKS=0
 
-if [ "${1:-}" = "--with-updater" ]; then
-  CREATE_UPDATER_ARTIFACTS=1
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --with-updater)
+      CREATE_UPDATER_ARTIFACTS=1
+      ;;
+    --check-only)
+      CHECK_ONLY=1
+      ;;
+    --skip-checks)
+      SKIP_CHECKS=1
+      ;;
+    *)
+      echo "Usage: $0 [--with-updater] [--check-only] [--skip-checks]" >&2
+      exit 2
+      ;;
+  esac
   shift
-fi
+done
 
-if [ "$#" -ne 0 ]; then
-  echo "Usage: $0 [--with-updater]" >&2
+if [ "$CHECK_ONLY" -eq 1 ] && [ "$SKIP_CHECKS" -eq 1 ]; then
+  echo "--check-only and --skip-checks cannot be used together." >&2
   exit 2
 fi
 
@@ -28,13 +44,19 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
-cd "$APP_DIR"
-npm ci
-npm run build
-npm audit --audit-level=moderate
+if [ "$SKIP_CHECKS" -eq 0 ]; then
+  cd "$APP_DIR"
+  npm ci
+  npm run build
+  npm audit --audit-level=moderate
 
-cd "$TAURI_DIR"
-cargo check --locked
+  cd "$TAURI_DIR"
+  cargo check --locked
+fi
+
+if [ "$CHECK_ONLY" -eq 1 ]; then
+  exit 0
+fi
 
 rm -rf "$DMG_DIR"
 if [ "$CREATE_UPDATER_ARTIFACTS" -eq 1 ]; then
@@ -59,6 +81,11 @@ unset_if_empty APPLE_TEAM_ID
 unset_if_empty APPLE_API_KEY
 unset_if_empty APPLE_API_ISSUER
 unset_if_empty APPLE_API_KEY_PATH
+
+if [ -n "${APPLE_API_KEY_PATH:-}" ]; then
+  unset APPLE_ID
+  unset APPLE_PASSWORD
+fi
 
 if [ -n "${APPLE_CERTIFICATE:-}" ] && [ -z "${APPLE_CERTIFICATE_PASSWORD:-}" ]; then
   echo "APPLE_CERTIFICATE is set without APPLE_CERTIFICATE_PASSWORD; using ad-hoc macOS signing." >&2
