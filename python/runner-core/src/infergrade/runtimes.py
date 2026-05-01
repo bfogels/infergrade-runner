@@ -43,7 +43,7 @@ def known_llama_cpp_runtimes() -> List[Dict[str, Any]]:
             },
             "checksum": None,
             "notes": [
-                "Recommended v0 managed path for Apple Silicon native benchmarking.",
+                "Recommended managed path for Apple Silicon native benchmarking.",
                 "No command is run unless the operator passes --execute.",
             ],
         }
@@ -152,4 +152,3 @@ def install_llama_cpp_runtime(runtime_id: Optional[str] = None, execute: bool = 
     payload["install_stderr"] = completed.stderr
     payload["selected"] = select_llama_cpp_runtime(runtime["runtime_id"])
     return payload
-

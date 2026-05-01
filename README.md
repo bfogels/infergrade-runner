@@ -31,7 +31,7 @@ The broader Runner architecture remains available, but the current default is in
 
 The Runner-owned catalog now separates benchmark scope from legacy tier names:
 
-- `decision` checks are the default first-user path: short, local-friendly evidence for choosing a quantized setup on the current hardware.
+- `decision` checks are the default setup path: short, local-friendly evidence for choosing a quantized setup on the current hardware.
 - `reference` checks are deeper follow-up evidence: broader throughput, long-context, fidelity, or breadth checks that take longer and should be selected intentionally.
 
 Every catalog check also belongs to an evidence lane:
@@ -82,7 +82,7 @@ Lower-level commands like `run-job`, `doctor`, `run-config`, and `upload-bundle`
 
 ## Pinned Release Golden Path
 
-For the containerized first-user path, the Hub should pin one released Runner artifact set instead of assuming a repo checkout or `:local` tags.
+For the containerized setup path, the Hub should pin one released Runner artifact set instead of assuming a repo checkout or `:local` tags.
 
 That released lane currently centers on the current `VERSION` plus the `-preview` channel, for example:
 
@@ -272,7 +272,7 @@ python ./scripts/export_contract_bundle.py
 
 That bundle is the artifact the Hub should pin to over time.
 
-For the current first-user path, the stronger maintainer workflow is the release bundle:
+For the current setup path, the stronger maintainer workflow is the release bundle:
 
 ```bash
 ./scripts/build_release_bundle.sh

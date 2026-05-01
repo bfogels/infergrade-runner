@@ -137,7 +137,7 @@ def export_release_bundle(
                 "runner_image": listener_image["image_ref"] if listener_image else None,
                 "image_archive_path": listener_image.get("archive_path") if listener_image else None,
                 "requires_repo_checkout": False,
-                "notes": "Recommended first-user path for paired local execution.",
+                "notes": "Recommended setup path for paired local execution.",
             },
             "apple_silicon_local_native": {
                 "supported": True,
