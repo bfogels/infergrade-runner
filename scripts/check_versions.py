@@ -64,6 +64,12 @@ def main() -> int:
         normalized = actual[1:] if actual.startswith("v") else actual
         if normalized != EXPECTED:
             failures.append(f"{label}: {actual!r} != VERSION {EXPECTED!r}")
+    cargo_lock = read("apps/desktop-runner/src-tauri/Cargo.lock")
+    third_party_lock_match = re.search(r'name = "winapi-util"\nversion = "([^"]+)"', cargo_lock)
+    if third_party_lock_match and third_party_lock_match.group(1) == EXPECTED:
+        failures.append(
+            "apps/desktop-runner/src-tauri/Cargo.lock: third-party winapi-util version was changed to VERSION"
+        )
     if failures:
         print("Version declarations are out of sync:", file=sys.stderr)
         for failure in failures:
