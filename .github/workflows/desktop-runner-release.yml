@@ -8,7 +8,7 @@ on:
     inputs:
       version:
         description: "SemVer desktop app version to publish; defaults to VERSION on main"
-        default: "0.1.18"
+        default: "0.1.19"
         required: false
       notes:
         description: "Short release notes shown in the updater"
@@ -100,6 +100,9 @@ jobs:
 
       - name: Build signed updater artifacts
         run: ./scripts/build_desktop_runner.sh --with-updater
+
+      - name: Verify macOS signing and notarization
+        run: ./scripts/verify_desktop_macos_release.sh
 
       - name: Write updater manifest
         run: |
