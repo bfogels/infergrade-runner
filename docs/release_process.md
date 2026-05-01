@@ -40,6 +40,8 @@ The protected GitHub workflow must not fall back to ad-hoc macOS signing or skip
 
 The release workflow accepts either Apple ID app-specific password notarization credentials or App Store Connect API-key credentials. The API-key lane uses `APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_PRIVATE_KEY`; the workflow writes the private key into the runner temp directory as `APPLE_API_KEY_PATH` before invoking Tauri. The signing identity can come from `INFERGRADE_MACOS_SIGNING_IDENTITY` as a release environment variable or from the `APPLE_SIGNING_IDENTITY` secret.
 
+Before the full Tauri build starts, CI decodes `APPLE_CERTIFICATE` as a `.p12` file and verifies that it opens with `APPLE_CERTIFICATE_PASSWORD`. If that preflight fails, re-export the Developer ID Application certificate and update both GitHub release-environment secrets together.
+
 If a downloaded DMG produces the macOS "`InferGrade Runner.app` is damaged and can't be opened" dialog, discard that artifact. Do not ask users to bypass Gatekeeper. Rebuild through the protected release workflow, confirm Developer ID signing and notarization completed, and re-test the DMG on a clean macOS machine.
 
 ## Prepare The Release Images
