@@ -56,7 +56,7 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn("data-runner-cli-version", html)
         self.assertIn("data-runtime-runner-version", html)
         self.assertIn("Blocked on platform sidecar artifacts and signing.", html)
-        self.assertIn('const UPDATE_CHANNEL = "preview";', js)
+        self.assertIn('const UPDATE_CHANNEL = "release";', js)
         self.assertIn("signed release artifacts", js)
         self.assertIn("function renderReleaseStatus()", js)
         self.assertIn("function refreshRunnerCliVersion()", js)
