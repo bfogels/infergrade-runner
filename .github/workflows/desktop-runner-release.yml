@@ -58,6 +58,29 @@ jobs:
           echo "DESKTOP_VERSION=$DESKTOP_VERSION" >> "$GITHUB_ENV"
           echo "RELEASE_NOTES=$RELEASE_NOTES" >> "$GITHUB_ENV"
 
+      - name: Verify signing inputs
+        run: |
+          missing=()
+          for name in \
+            TAURI_SIGNING_PRIVATE_KEY \
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            INFERGRADE_MACOS_SIGNING_IDENTITY
+          do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf '::error::Missing desktop release signing input(s): %s\n' "${missing[*]}"
+            echo "The desktop release workflow publishes user-downloadable artifacts, so it must not fall back to ad-hoc signing."
+            exit 1
+          fi
+          if [ -z "${APPLE_ID:-}" ] && [ -z "${APPLE_API_KEY:-}" ]; then
+            echo "::warning::No Apple notarization credential was provided. The DMG may still fail Gatekeeper on downloaded installs."
+          fi
+
       - name: Set desktop app version
         run: |
           node -e "if (!/^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(process.env.DESKTOP_VERSION)) { throw new Error('DESKTOP_VERSION must be SemVer-like'); }"
