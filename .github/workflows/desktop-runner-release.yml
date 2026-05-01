@@ -8,7 +8,7 @@ on:
     inputs:
       version:
         description: "SemVer desktop app version to publish; defaults to VERSION on main"
-        default: "0.1.14"
+        default: "0.1.15"
         required: false
       notes:
         description: "Short release notes shown in the updater"
@@ -75,6 +75,10 @@ jobs:
           if [ "${#missing[@]}" -ne 0 ]; then
             printf '::error::Missing desktop release signing input(s): %s\n' "${missing[*]}"
             echo "The desktop release workflow publishes user-downloadable artifacts, so it must not fall back to ad-hoc signing."
+            exit 1
+          fi
+          if [ "$INFERGRADE_MACOS_SIGNING_IDENTITY" = "-" ]; then
+            echo "::error::INFERGRADE_MACOS_SIGNING_IDENTITY must be a Developer ID signing identity for protected desktop releases, not ad-hoc '-'."
             exit 1
           fi
           if [ -z "${APPLE_ID:-}" ] && [ -z "${APPLE_API_KEY:-}" ]; then
