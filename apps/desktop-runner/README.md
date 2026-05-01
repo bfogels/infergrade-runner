@@ -13,7 +13,7 @@ The Hub remains the model selection, benchmark planning, recommendation, and res
 - OS-backed token storage through the Rust `keyring` crate
 - System, light, and dark UI modes
 - Advanced `llama.cpp` runtime inspection and selection controls
-- Signed Tauri updater wiring for the macOS preview lane
+- Signed Tauri updater wiring for the macOS release lane
 
 ## Local Development
 
@@ -79,7 +79,7 @@ Tauri updater signing is separate from Apple code signing:
 - `INFERGRADE_MACOS_SIGNING_IDENTITY=-` creates a local ad-hoc macOS signature.
 - `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` allow CI to use Developer ID signing and notarization when available.
 
-The release workflow publishes the latest preview release manifest at:
+The release workflow publishes the latest desktop release manifest at:
 
 ```text
 https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-latest/infergrade-runner-desktop-latest.json

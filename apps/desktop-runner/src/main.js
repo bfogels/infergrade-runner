@@ -3,8 +3,8 @@ import "./styles.css";
 const SIDECAR_NAME = "binaries/infergrade-sidecar";
 const API_URL_STORAGE_KEY = "infergrade.runner.apiUrl";
 const THEME_STORAGE_KEY = "infergrade.runner.theme";
-const APP_VERSION_FALLBACK = "0.1.14";
-const UPDATE_CHANNEL = "preview";
+const APP_VERSION_FALLBACK = "0.1.15";
+const UPDATE_CHANNEL = "release";
 const UPDATE_STATUS = "Updates are available in the desktop app when signed release artifacts are published.";
 
 const form = document.querySelector("[data-runner-form]");
@@ -145,7 +145,7 @@ function updateDownloadProgress(event) {
 async function checkForAppUpdate() {
   if (!isTauriRuntime()) {
     setUpdateStatus("Open the desktop app to check signed updates.");
-    appendLog("Browser preview cannot check Tauri updates.");
+    appendLog("Browser development view cannot check Tauri updates.");
     return;
   }
   checkUpdateButton.disabled = true;
@@ -306,8 +306,8 @@ async function updateTokenState() {
   }
 
   tokenState.textContent = hasToken
-    ? "Preview token held in memory until this page is closed."
-    : "Preview mode does not persist tokens; the app uses the OS credential store.";
+    ? "Development token held in memory until this page is closed."
+    : "Development view does not persist tokens; the app uses the OS credential store.";
 }
 
 function setStatus(status, tone = "idle") {
@@ -359,8 +359,8 @@ async function loadTauriShell() {
 async function executeSidecar(args) {
   const Command = await loadTauriShell();
   if (!Command) {
-    appendLog(`Preview mode cannot run: infergrade ${args.join(" ")}`);
-    setStatus("Preview mode", "warning");
+    appendLog(`Development view cannot run: infergrade ${args.join(" ")}`);
+    setStatus("Development view", "warning");
     return null;
   }
   appendLog(`Running: infergrade ${args.join(" ")}`);
@@ -424,8 +424,8 @@ async function startRunner() {
 
   const Command = await loadTauriShell();
   if (!Command) {
-    setStatus("Preview mode", "warning");
-    appendLog("Tauri runtime not detected. Browser preview cannot start the Runner sidecar.");
+    setStatus("Development view", "warning");
+    appendLog("Tauri runtime not detected. Browser development view cannot start the Runner sidecar.");
     startButton.disabled = false;
     return;
   }
@@ -468,8 +468,8 @@ async function pairRunner() {
 
   const Command = await loadTauriShell();
   if (!Command) {
-    setStatus("Preview mode", "warning");
-    pairState.textContent = "Browser preview cannot redeem pairing codes. Open the desktop app to pair this machine.";
+    setStatus("Development view", "warning");
+    pairState.textContent = "Browser development view cannot redeem pairing codes. Open the desktop app to pair this machine.";
     appendLog("Tauri runtime not detected. Desktop pairing needs the Runner sidecar.");
     return;
   }
