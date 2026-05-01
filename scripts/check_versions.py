@@ -26,6 +26,11 @@ def regex_version(path: str, pattern: str) -> str:
     return match.group(1)
 
 
+def preview_default_version(path: str) -> str:
+    value = regex_version(path, r"^\s+default: ([^\s]+-preview)$")
+    return value[: -len("-preview")]
+
+
 CHECKS = {
     "python/runner-core/pyproject.toml": lambda: regex_version(
         "python/runner-core/pyproject.toml", r'^version = "([^"]+)"$'
@@ -56,6 +61,9 @@ CHECKS = {
     ),
     ".github/workflows/desktop-runner-release.yml": lambda: regex_version(
         ".github/workflows/desktop-runner-release.yml", r'^\s+default: "([^"]+)"$'
+    ),
+    ".github/workflows/publish-containers.yml": lambda: preview_default_version(
+        ".github/workflows/publish-containers.yml"
     ),
 }
 
