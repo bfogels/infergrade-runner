@@ -31,11 +31,11 @@ Every push to `main` also runs `.github/workflows/desktop-runner-release.yml`. T
 
 1. resolves the desktop app version from `VERSION`
 2. builds the macOS Apple Silicon desktop app
-3. signs the Tauri updater archive when updater signing secrets are configured
-4. falls back to ad-hoc macOS signing only when Apple Developer ID credentials are absent
+3. verifies the protected release signing inputs before building user-downloadable artifacts
+4. signs the Tauri updater archive and macOS bundle with the configured release credentials
 5. publishes the DMG, updater archive, updater signature, and updater manifest to the `desktop-runner-latest` GitHub release
 
-The published DMG is not public-user-ready unless it is Developer ID signed and notarized. Use the workflow output and release assets as distribution candidates until Gatekeeper has been verified on a clean macOS machine.
+The protected GitHub workflow must not fall back to ad-hoc macOS signing. Local developer builds can still use ad-hoc signing, but any DMG published for users must be Developer ID signed, notarized, and verified on a clean macOS machine before external distribution.
 
 ## Prepare The Release Images
 
