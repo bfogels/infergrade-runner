@@ -68,11 +68,16 @@ def main() -> int:
         if normalized != EXPECTED:
             failures.append(f"{label}: {actual!r} != VERSION {EXPECTED!r}")
     cargo_lock = read("apps/desktop-runner/src-tauri/Cargo.lock")
-    third_party_lock_match = re.search(r'name = "winapi-util"\nversion = "([^"]+)"', cargo_lock)
-    if third_party_lock_match and third_party_lock_match.group(1) == EXPECTED:
-        failures.append(
-            "apps/desktop-runner/src-tauri/Cargo.lock: third-party winapi-util version was changed to VERSION"
+    for package_name in ("libredox", "winapi-util"):
+        third_party_lock_match = re.search(
+            r'name = "%s"\nversion = "([^"]+)"' % re.escape(package_name),
+            cargo_lock,
         )
+        if third_party_lock_match and third_party_lock_match.group(1) == EXPECTED:
+            failures.append(
+                "apps/desktop-runner/src-tauri/Cargo.lock: third-party %s version was changed to VERSION"
+                % package_name
+            )
     if failures:
         print("Version declarations are out of sync:", file=sys.stderr)
         for failure in failures:
