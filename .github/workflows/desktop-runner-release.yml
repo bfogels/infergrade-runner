@@ -8,7 +8,7 @@ on:
     inputs:
       version:
         description: "SemVer desktop app version to publish; defaults to VERSION on main"
-        default: "0.1.19"
+        default: "0.1.20"
         required: false
       notes:
         description: "Short release notes shown in the updater"
@@ -24,14 +24,6 @@ jobs:
     runs-on: macos-latest
     environment: release
     env:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      INFERGRADE_MACOS_SIGNING_IDENTITY: ${{ vars.INFERGRADE_MACOS_SIGNING_IDENTITY }}
       DESKTOP_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
       RELEASE_TAG: desktop-runner-latest
       RELEASE_NOTES: ${{ github.event_name == 'workflow_dispatch' && inputs.notes || '' }}
@@ -58,7 +50,22 @@ jobs:
           echo "DESKTOP_VERSION=$DESKTOP_VERSION" >> "$GITHUB_ENV"
           echo "RELEASE_NOTES=$RELEASE_NOTES" >> "$GITHUB_ENV"
 
+      - name: Check desktop app dependencies
+        run: ./scripts/build_desktop_runner.sh --check-only
+
       - name: Verify signing and notarization inputs
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          INFERGRADE_MACOS_SIGNING_IDENTITY: ${{ vars.INFERGRADE_MACOS_SIGNING_IDENTITY || secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           missing=()
           for name in \
@@ -66,8 +73,6 @@ jobs:
             TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
             APPLE_CERTIFICATE \
             APPLE_CERTIFICATE_PASSWORD \
-            APPLE_ID \
-            APPLE_PASSWORD \
             APPLE_TEAM_ID \
             INFERGRADE_MACOS_SIGNING_IDENTITY
           do
@@ -75,6 +80,21 @@ jobs:
               missing+=("$name")
             fi
           done
+          use_api_key=0
+          if [ -n "${APPLE_API_KEY:-}" ] || [ -n "${APPLE_API_ISSUER:-}" ] || [ -n "${APPLE_API_PRIVATE_KEY:-}" ]; then
+            use_api_key=1
+            for name in APPLE_API_KEY APPLE_API_ISSUER APPLE_API_PRIVATE_KEY; do
+              if [ -z "${!name:-}" ]; then
+                missing+=("$name")
+              fi
+            done
+          elif [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_PASSWORD:-}" ]; then
+            for name in APPLE_ID APPLE_PASSWORD; do
+              if [ -z "${!name:-}" ]; then
+                missing+=("$name")
+              fi
+            done
+          fi
           if [ "${#missing[@]}" -ne 0 ]; then
             printf '::error::Missing desktop release signing/notarization input(s): %s\n' "${missing[*]}"
             echo "The desktop release workflow publishes user-downloadable artifacts, so it must not fall back to ad-hoc signing or skip notarization."
@@ -84,6 +104,24 @@ jobs:
             echo "::error::INFERGRADE_MACOS_SIGNING_IDENTITY must be a Developer ID signing identity for protected desktop releases, not ad-hoc '-'."
             exit 1
           fi
+          if [ "$use_api_key" -eq 1 ]; then
+            echo "APPLE_NOTARIZATION_MODE=api_key" >> "$GITHUB_ENV"
+          else
+            echo "APPLE_NOTARIZATION_MODE=apple_id" >> "$GITHUB_ENV"
+          fi
+
+      - name: Prepare App Store Connect API key
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          if [ "$APPLE_NOTARIZATION_MODE" != "api_key" ]; then
+            exit 0
+          fi
+          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
       - name: Set desktop app version
         run: |
@@ -99,7 +137,18 @@ jobs:
           NODE
 
       - name: Build signed updater artifacts
-        run: ./scripts/build_desktop_runner.sh --with-updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          INFERGRADE_MACOS_SIGNING_IDENTITY: ${{ vars.INFERGRADE_MACOS_SIGNING_IDENTITY || secrets.APPLE_SIGNING_IDENTITY }}
+        run: ./scripts/build_desktop_runner.sh --with-updater --skip-checks
 
       - name: Verify macOS signing and notarization
         run: ./scripts/verify_desktop_macos_release.sh
