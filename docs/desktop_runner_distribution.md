@@ -91,6 +91,8 @@ https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-la
 
 The GitHub Actions workflow publishes the latest DMG and updater artifacts on each push to `main`. That makes release artifacts available quickly, but it does not replace the signing gates above: public distribution still needs Developer ID signing, notarization, clean-machine Gatekeeper verification, and a rollback policy.
 
+The protected workflow also runs `scripts/verify_desktop_macos_release.sh` before upload. That script verifies the built app bundle with `codesign`, assesses the app and DMG with Gatekeeper, and validates stapled notarization tickets for both artifacts. If any of those checks fail, the workflow must stop before updating the downloadable release.
+
 ## Release Candidate Checklist
 
 For each candidate build, record:

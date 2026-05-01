@@ -43,6 +43,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("- main", workflow)
         self.assertIn("RELEASE_TAG: desktop-runner-latest", workflow)
         self.assertIn("./scripts/build_desktop_runner.sh --with-updater", workflow)
+        self.assertIn("./scripts/verify_desktop_macos_release.sh", workflow)
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/dmg/*.dmg", workflow)
         self.assertIn("./scripts/write_desktop_release_checksums.py", workflow)
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/macos/SHA256SUMS", workflow)
@@ -66,6 +67,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("must not fall back to ad-hoc signing or skip notarization", workflow)
         self.assertGreaterEqual(workflow.count("exit 1"), 2)
         self.assertIn("must not fall back to ad-hoc macOS signing or skip notarization", docs)
+        self.assertIn("Gatekeeper assessment", docs)
         self.assertIn("Local developer builds can still use ad-hoc signing", docs)
         distribution_docs = (ROOT / "docs" / "desktop_runner_distribution.md").read_text(encoding="utf-8")
         app_readme = (ROOT / "apps" / "desktop-runner" / "README.md").read_text(encoding="utf-8")
@@ -74,6 +76,17 @@ class ReleaseCiTests(unittest.TestCase):
             self.assertIn("Do not ask users to bypass Gatekeeper", release_doc)
         self.assertNotIn("falls back to ad-hoc macOS signing only when Apple Developer ID credentials are absent", docs)
         self.assertNotIn("No Apple notarization credential was provided", workflow)
+
+    def test_desktop_release_verification_checks_gatekeeper_and_stapled_tickets(self):
+        script = (ROOT / "scripts" / "verify_desktop_macos_release.sh").read_text(encoding="utf-8")
+
+        self.assertIn('if [ "$(uname -s)" != "Darwin" ]', script)
+        self.assertIn("codesign --verify --deep --strict --verbose=2", script)
+        self.assertIn("spctl --assess --type execute --verbose=4", script)
+        self.assertIn("spctl --assess --type open --context context:primary-signature --verbose=4", script)
+        self.assertEqual(script.count("xcrun stapler validate"), 2)
+        self.assertIn("Expected exactly one macOS app bundle", script)
+        self.assertIn("Expected exactly one macOS DMG", script)
 
     def test_desktop_build_script_ignores_empty_apple_signing_env(self):
         script = (ROOT / "scripts" / "build_desktop_runner.sh").read_text(encoding="utf-8")
