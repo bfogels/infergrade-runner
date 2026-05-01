@@ -41,6 +41,10 @@ class ReleaseCiTests(unittest.TestCase):
 
         self.assertIn("branches:", workflow)
         self.assertIn("- main", workflow)
+        self.assertIn('description: "SemVer desktop app version to publish; defaults to VERSION on main"', workflow)
+        self.assertIn('default: ""', workflow)
+        self.assertIn('DESKTOP_VERSION="$(cat VERSION)"', workflow)
+        self.assertNotIn('default: "0.1.', workflow)
         self.assertIn("RELEASE_TAG: desktop-runner-latest", workflow)
         self.assertIn("./scripts/build_desktop_runner.sh --check-only", workflow)
         self.assertIn("./scripts/build_desktop_runner.sh --with-updater --skip-checks", workflow)

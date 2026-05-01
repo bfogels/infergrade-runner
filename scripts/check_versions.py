@@ -59,9 +59,6 @@ CHECKS = {
     "apps/desktop-runner/index.html": lambda: regex_version(
         "apps/desktop-runner/index.html", r"<strong data-app-version>([^<]+)</strong>"
     ),
-    ".github/workflows/desktop-runner-release.yml": lambda: regex_version(
-        ".github/workflows/desktop-runner-release.yml", r'^\s+default: "([^"]+)"$'
-    ),
     ".github/workflows/publish-containers.yml": lambda: preview_default_version(
         ".github/workflows/publish-containers.yml"
     ),
