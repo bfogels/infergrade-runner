@@ -48,23 +48,27 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/macos/SHA256SUMS", workflow)
         self.assertIn("gh release upload", workflow)
 
-    def test_desktop_release_docs_match_protected_signing_gate(self):
+    def test_desktop_release_docs_match_protected_signing_and_notarization_gate(self):
         docs = (ROOT / "docs" / "release_process.md").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")
 
-        self.assertIn("Verify signing inputs", workflow)
+        self.assertIn("Verify signing and notarization inputs", workflow)
         self.assertIn("TAURI_SIGNING_PRIVATE_KEY", workflow)
         self.assertIn("TAURI_SIGNING_PRIVATE_KEY_PASSWORD", workflow)
         self.assertIn("APPLE_CERTIFICATE", workflow)
         self.assertIn("APPLE_CERTIFICATE_PASSWORD", workflow)
+        self.assertIn("APPLE_ID", workflow)
+        self.assertIn("APPLE_PASSWORD", workflow)
+        self.assertIn("APPLE_TEAM_ID", workflow)
         self.assertIn("INFERGRADE_MACOS_SIGNING_IDENTITY", workflow)
-        self.assertIn("Missing desktop release signing input(s)", workflow)
+        self.assertIn("Missing desktop release signing/notarization input(s)", workflow)
         self.assertIn('INFERGRADE_MACOS_SIGNING_IDENTITY" = "-"', workflow)
-        self.assertIn("must not fall back to ad-hoc signing", workflow)
+        self.assertIn("must not fall back to ad-hoc signing or skip notarization", workflow)
         self.assertGreaterEqual(workflow.count("exit 1"), 2)
-        self.assertIn("must not fall back to ad-hoc macOS signing", docs)
+        self.assertIn("must not fall back to ad-hoc macOS signing or skip notarization", docs)
         self.assertIn("Local developer builds can still use ad-hoc signing", docs)
         self.assertNotIn("falls back to ad-hoc macOS signing only when Apple Developer ID credentials are absent", docs)
+        self.assertNotIn("No Apple notarization credential was provided", workflow)
 
     def test_desktop_build_script_ignores_empty_apple_signing_env(self):
         script = (ROOT / "scripts" / "build_desktop_runner.sh").read_text(encoding="utf-8")

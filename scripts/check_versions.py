@@ -26,6 +26,11 @@ def regex_version(path: str, pattern: str) -> str:
     return match.group(1)
 
 
+def preview_default_version(path: str) -> str:
+    value = regex_version(path, r"^\s+default: ([^\s]+-preview)$")
+    return value[: -len("-preview")]
+
+
 CHECKS = {
     "python/runner-core/pyproject.toml": lambda: regex_version(
         "python/runner-core/pyproject.toml", r'^version = "([^"]+)"$'
@@ -57,6 +62,9 @@ CHECKS = {
     ".github/workflows/desktop-runner-release.yml": lambda: regex_version(
         ".github/workflows/desktop-runner-release.yml", r'^\s+default: "([^"]+)"$'
     ),
+    ".github/workflows/publish-containers.yml": lambda: preview_default_version(
+        ".github/workflows/publish-containers.yml"
+    ),
 }
 
 
@@ -68,11 +76,16 @@ def main() -> int:
         if normalized != EXPECTED:
             failures.append(f"{label}: {actual!r} != VERSION {EXPECTED!r}")
     cargo_lock = read("apps/desktop-runner/src-tauri/Cargo.lock")
-    third_party_lock_match = re.search(r'name = "winapi-util"\nversion = "([^"]+)"', cargo_lock)
-    if third_party_lock_match and third_party_lock_match.group(1) == EXPECTED:
-        failures.append(
-            "apps/desktop-runner/src-tauri/Cargo.lock: third-party winapi-util version was changed to VERSION"
+    for package_name in ("libredox", "winapi-util"):
+        third_party_lock_match = re.search(
+            r'name = "%s"\nversion = "([^"]+)"' % re.escape(package_name),
+            cargo_lock,
         )
+        if third_party_lock_match and third_party_lock_match.group(1) == EXPECTED:
+            failures.append(
+                "apps/desktop-runner/src-tauri/Cargo.lock: third-party %s version was changed to VERSION"
+                % package_name
+            )
     if failures:
         print("Version declarations are out of sync:", file=sys.stderr)
         for failure in failures:
