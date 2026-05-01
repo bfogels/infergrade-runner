@@ -67,6 +67,11 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertGreaterEqual(workflow.count("exit 1"), 2)
         self.assertIn("must not fall back to ad-hoc macOS signing or skip notarization", docs)
         self.assertIn("Local developer builds can still use ad-hoc signing", docs)
+        distribution_docs = (ROOT / "docs" / "desktop_runner_distribution.md").read_text(encoding="utf-8")
+        app_readme = (ROOT / "apps" / "desktop-runner" / "README.md").read_text(encoding="utf-8")
+        for release_doc in (docs, distribution_docs, app_readme):
+            self.assertIn("damaged and can't be opened", release_doc)
+            self.assertIn("Do not ask users to bypass Gatekeeper", release_doc)
         self.assertNotIn("falls back to ad-hoc macOS signing only when Apple Developer ID credentials are absent", docs)
         self.assertNotIn("No Apple notarization credential was provided", workflow)
 

@@ -87,6 +87,8 @@ https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-la
 
 For nontechnical beta users, the macOS DMG should be Developer ID signed and notarized. Ad-hoc signed DMGs are appropriate for local development and internal smoke testing only.
 
+If a downloaded DMG opens with the macOS "`InferGrade Runner.app` is damaged and can't be opened" dialog, discard that artifact and rebuild it through the protected release workflow. Do not ask users to bypass Gatekeeper; the release candidate must be Developer ID signed, notarized, and verified on a clean macOS machine.
+
 ## Windows And Linux
 
 The current checked-in sidecar is macOS Apple Silicon only:
