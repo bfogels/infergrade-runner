@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from infergrade import __version__
 from infergrade.contracts import export_contract_bundle, load_contract_manifest, repo_root
 from infergrade.releases import export_release_bundle, load_release_manifest
 
@@ -75,7 +76,7 @@ class ContractExportTests(unittest.TestCase):
             manifest = load_release_manifest(bundle_dir=bundle_dir)
             self.assertEqual("1.2.3-preview", manifest["release_version"])
             self.assertEqual("1.2.3", manifest["contract_version"])
-            self.assertEqual("0.1.13", manifest["runner_version"])
+            self.assertEqual(__version__, manifest["runner_version"])
             self.assertEqual("preview", manifest["release_channel"])
             self.assertEqual(
                 "infergrade-runner-core:1.2.3-preview",

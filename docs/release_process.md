@@ -1,6 +1,6 @@
 # Runner Release Process
 
-This is the current reproducible release-prep workflow for the InferGrade Runner pinned first-user path.
+This is the current reproducible release-prep workflow for the InferGrade Runner pinned setup path.
 
 The goal is to produce one versioned bundle that the Hub can pin to explicitly:
 
