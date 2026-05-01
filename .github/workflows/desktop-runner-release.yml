@@ -8,7 +8,7 @@ on:
     inputs:
       version:
         description: "SemVer desktop app version to publish; defaults to VERSION on main"
-        default: "0.1.20"
+        default: "0.1.21"
         required: false
       notes:
         description: "Short release notes shown in the updater"
@@ -108,6 +108,26 @@ jobs:
             echo "APPLE_NOTARIZATION_MODE=api_key" >> "$GITHUB_ENV"
           else
             echo "APPLE_NOTARIZATION_MODE=apple_id" >> "$GITHUB_ENV"
+          fi
+
+      - name: Validate Apple signing certificate password
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          cert_path="$RUNNER_TEMP/infergrade-release-certificate.p12"
+          trap 'rm -f "$cert_path"' EXIT
+          if ! printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$cert_path" 2>/dev/null; then
+            printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$cert_path"
+          fi
+          if ! openssl pkcs12 \
+            -in "$cert_path" \
+            -passin env:APPLE_CERTIFICATE_PASSWORD \
+            -nokeys \
+            -clcerts \
+            -out /dev/null >/dev/null 2>&1; then
+            echo "::error::APPLE_CERTIFICATE could not be opened with APPLE_CERTIFICATE_PASSWORD. Re-export the Developer ID Application certificate as a .p12 and update both GitHub release-environment secrets together."
+            exit 1
           fi
 
       - name: Prepare App Store Connect API key
