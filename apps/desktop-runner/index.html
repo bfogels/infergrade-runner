@@ -10,7 +10,7 @@
       <section class="hero-panel" aria-labelledby="app-title">
         <div>
           <p class="eyebrow">InferGrade Runner</p>
-          <h1 id="app-title">Keep your machine ready for Hub jobs.</h1>
+          <h1 id="app-title">Keep your machine ready for Hub runs.</h1>
           <p class="lede">
             Pair once, leave the Runner listening, and inspect local logs without opening a terminal.
           </p>
@@ -30,7 +30,7 @@
           </div>
           <div class="release-card" aria-label="App release status">
             <p class="status-label">App version</p>
-            <strong data-app-version>0.1.24</strong>
+            <strong data-app-version>0.1.25</strong>
             <span data-update-channel>Current release</span>
             <span data-runner-cli-version>Runner CLI: checking...</span>
             <button type="button" class="button-secondary compact-button" data-check-update>Check for updates</button>
@@ -68,14 +68,14 @@
             <button type="button" data-save-token>Save token</button>
             <button type="button" data-clear-token>Clear</button>
           </div>
-          <p class="hint" data-token-state>Token storage is local to this development view.</p>
+          <p class="hint" data-token-state>Token storage is local to this window.</p>
           </details>
         </form>
 
         <section class="panel">
           <h2>Listener</h2>
           <p>
-            Start the Runner sidecar when you want this machine to claim queued Hub jobs.
+            Start the local Runner when you want this machine to claim queued Hub runs.
           </p>
           <div class="button-row">
             <button type="button" data-start-runner>Start listening</button>
@@ -132,15 +132,15 @@
               </div>
               <div>
                 <strong>Bundled Runner</strong>
-                <span data-runtime-runner-version>Checking bundled sidecar version...</span>
+                <span data-runtime-runner-version>Checking bundled Runner version...</span>
               </div>
               <div>
                 <strong>macOS</strong>
-                <span>Apple Silicon download is published only after signing and notarization checks pass.</span>
+                <span>Apple Silicon downloads are published after signing and notarization checks pass.</span>
               </div>
               <div>
                 <strong>Windows/Linux</strong>
-                <span>Installers are not published yet.</span>
+                <span>Installers are planned after the macOS lane is verified.</span>
               </div>
             </div>
           </details>

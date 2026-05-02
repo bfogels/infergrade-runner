@@ -43,12 +43,15 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         html_path = os.path.join(root, "apps/desktop-runner/index.html")
         js_path = os.path.join(root, "apps/desktop-runner/src/main.js")
         css_path = os.path.join(root, "apps/desktop-runner/src/styles.css")
+        tauri_config_path = os.path.join(root, "apps/desktop-runner/src-tauri/tauri.conf.json")
         with open(html_path, "r", encoding="utf-8") as handle:
             html = handle.read()
         with open(js_path, "r", encoding="utf-8") as handle:
             js = handle.read()
         with open(css_path, "r", encoding="utf-8") as handle:
             css = handle.read()
+        with open(tauri_config_path, "r", encoding="utf-8") as handle:
+            tauri_config = handle.read()
 
         self.assertIn("data-app-version", html)
         self.assertIn("data-update-channel", html)
@@ -56,9 +59,14 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn("data-runner-cli-version", html)
         self.assertIn("data-runtime-runner-version", html)
         self.assertIn("Current release", html)
-        self.assertIn("Installers are not published yet.", html)
+        self.assertIn("Keep your machine ready for Hub runs.", html)
+        self.assertIn("Installers are planned after the macOS lane is verified.", html)
+        self.assertIn("Local companion app for InferGrade Hub runs", tauri_config)
         self.assertIn('const UPDATE_CHANNEL = "release";', js)
         self.assertIn("verified updates", js)
+        self.assertIn("Paired and listening for Hub runs.", js)
+        self.assertNotIn("listening for Hub jobs", js)
+        self.assertNotIn("Runner sidecar error", js)
         self.assertIn("function renderReleaseStatus()", js)
         self.assertIn("function refreshRunnerCliVersion()", js)
         self.assertIn('Command.sidecar(SIDECAR_NAME, ["--version"])', js)
