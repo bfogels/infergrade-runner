@@ -3,9 +3,9 @@ import "./styles.css";
 const SIDECAR_NAME = "binaries/infergrade-sidecar";
 const API_URL_STORAGE_KEY = "infergrade.runner.apiUrl";
 const THEME_STORAGE_KEY = "infergrade.runner.theme";
-const APP_VERSION_FALLBACK = "0.1.23";
+const APP_VERSION_FALLBACK = "0.1.24";
 const UPDATE_CHANNEL = "release";
-const UPDATE_STATUS = "Updates are available in the desktop app when signed release artifacts are published.";
+const UPDATE_STATUS = "Open the signed desktop app to check for verified updates.";
 
 const form = document.querySelector("[data-runner-form]");
 const startButton = document.querySelector("[data-start-runner]");
@@ -102,10 +102,10 @@ async function renderReleaseStatus() {
     appVersion.textContent = `v${version}`;
   }
   if (updateChannel) {
-    updateChannel.textContent = `${UPDATE_CHANNEL} channel`;
+    updateChannel.textContent = UPDATE_CHANNEL === "release" ? "Current release" : `${UPDATE_CHANNEL} channel`;
   }
   if (updateStatus) {
-    updateStatus.textContent = isTauriRuntime() ? "Signed update checks are available from the app." : UPDATE_STATUS;
+    updateStatus.textContent = isTauriRuntime() ? "Ready to check for verified updates." : UPDATE_STATUS;
   }
 }
 
