@@ -58,6 +58,7 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn("Current release", html)
         self.assertIn("Keep your machine ready for Hub runs.", html)
         self.assertIn("Installers are planned after the macOS lane is verified.", html)
+        self.assertIn("Local companion app for InferGrade Hub runs", open(os.path.join(root, "apps/desktop-runner/src-tauri/tauri.conf.json"), "r", encoding="utf-8").read())
         self.assertIn('const UPDATE_CHANNEL = "release";', js)
         self.assertIn("verified updates", js)
         self.assertIn("Paired and listening for Hub runs.", js)

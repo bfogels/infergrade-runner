@@ -37,7 +37,7 @@
     ],
     "externalBin": ["binaries/infergrade-sidecar"],
     "category": "DeveloperTool",
-    "shortDescription": "Local companion app for InferGrade Runner jobs",
+    "shortDescription": "Local companion app for InferGrade Hub runs",
     "longDescription": "Pairs with InferGrade Hub, keeps the local Runner listening, and surfaces Runner process logs without terminal access."
   },
   "plugins": {
