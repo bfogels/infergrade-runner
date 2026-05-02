@@ -81,6 +81,8 @@ Tauri updater signing is separate from Apple code signing:
 - Either `APPLE_ID` plus `APPLE_PASSWORD` or `APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_PRIVATE_KEY` allow CI to notarize protected release artifacts.
 - `INFERGRADE_MACOS_SIGNING_IDENTITY` can be configured as a release environment variable; CI also accepts the `APPLE_SIGNING_IDENTITY` secret for the same value.
 
+If CI reports that `APPLE_CERTIFICATE` could not be opened with `APPLE_CERTIFICATE_PASSWORD`, re-export the Developer ID Application certificate as a password-protected `.p12`, verify it locally with `openssl pkcs12 -passin env:APPLE_CERTIFICATE_PASSWORD`, then update the certificate and password secrets together in the protected GitHub release environment.
+
 The release workflow publishes the latest desktop release manifest at:
 
 ```text

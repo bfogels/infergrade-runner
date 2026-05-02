@@ -44,6 +44,32 @@ Before the full Tauri build starts, CI decodes `APPLE_CERTIFICATE` as a `.p12` f
 
 If a downloaded DMG produces the macOS "`InferGrade Runner.app` is damaged and can't be opened" dialog, discard that artifact. Do not ask users to bypass Gatekeeper. Rebuild through the protected release workflow, confirm Developer ID signing and notarization completed, and re-test the DMG on a clean macOS machine.
 
+### Recover A Certificate Secret Failure
+
+When the workflow fails at `Validate Apple signing certificate password`, fix the certificate and password as a pair. Do not rotate only one of the two secrets.
+
+1. Export the Developer ID Application certificate from Keychain Access as a password-protected `.p12`.
+2. Verify that the exported file opens locally with the same password you will store in GitHub:
+
+   ```bash
+   APPLE_CERTIFICATE_PASSWORD='the-p12-password' \
+     openssl pkcs12 -in ~/Desktop/infergrade-developer-id-application.p12 \
+       -nokeys -passin env:APPLE_CERTIFICATE_PASSWORD >/dev/null
+   ```
+
+3. Base64-encode the verified `.p12` without line wrapping:
+
+   ```bash
+   base64 -i ~/Desktop/infergrade-developer-id-application.p12 | tr -d '\n' > ~/Desktop/infergrade-developer-id-application.p12.b64
+   ```
+
+4. Update the protected GitHub release environment secrets together:
+
+   - `APPLE_CERTIFICATE`: contents of the `.p12.b64` file
+   - `APPLE_CERTIFICATE_PASSWORD`: the password used by the local `openssl pkcs12` check
+
+After you update the certificate and password secrets together, rerun the `Desktop Runner Release` workflow from `main`. A passing preflight only proves the certificate opens; the workflow must still complete signing, notarization, Gatekeeper assessment, and stapled-ticket checks before the DMG is user-ready.
+
 ## Prepare The Release Images
 
 Build the release-tagged local images:
