@@ -3,7 +3,7 @@ import "./styles.css";
 const SIDECAR_NAME = "binaries/infergrade-sidecar";
 const API_URL_STORAGE_KEY = "infergrade.runner.apiUrl";
 const THEME_STORAGE_KEY = "infergrade.runner.theme";
-const APP_VERSION_FALLBACK = "0.1.24";
+const APP_VERSION_FALLBACK = "0.1.25";
 const UPDATE_CHANNEL = "release";
 const UPDATE_STATUS = "Open the signed desktop app to check for verified updates.";
 
@@ -145,7 +145,7 @@ function updateDownloadProgress(event) {
 async function checkForAppUpdate() {
   if (!isTauriRuntime()) {
     setUpdateStatus("Open the desktop app to check signed updates.");
-    appendLog("Browser development view cannot check Tauri updates.");
+    appendLog("Open the desktop app to check signed updates.");
     return;
   }
   checkUpdateButton.disabled = true;
@@ -301,7 +301,7 @@ async function updateTokenState() {
   if (isTauriRuntime()) {
     tokenState.textContent = hasToken
       ? "Runner token saved in the OS credential store."
-      : "No token saved. Paste a paired runner token before listening for Hub jobs.";
+      : "No token saved. Paste a paired runner token before listening for Hub runs.";
     return;
   }
 
@@ -425,7 +425,7 @@ async function startRunner() {
   const Command = await loadTauriShell();
   if (!Command) {
     setStatus("Development view", "warning");
-    appendLog("Tauri runtime not detected. Browser development view cannot start the Runner sidecar.");
+    appendLog("Open the desktop app to start the local Runner.");
     startButton.disabled = false;
     return;
   }
@@ -444,7 +444,7 @@ async function startRunner() {
     setStatus("Stopped", event.code === 0 ? "idle" : "error");
   });
   command.on("error", (error) => {
-    appendLog(`Runner sidecar error: ${error}`);
+    appendLog(`Runner process error: ${error}`);
     childProcess = null;
     startButton.disabled = false;
     stopButton.disabled = true;
@@ -469,8 +469,8 @@ async function pairRunner() {
   const Command = await loadTauriShell();
   if (!Command) {
     setStatus("Development view", "warning");
-    pairState.textContent = "Browser development view cannot redeem pairing codes. Open the desktop app to pair this machine.";
-    appendLog("Tauri runtime not detected. Desktop pairing needs the Runner sidecar.");
+    pairState.textContent = "Open the desktop app to redeem pairing codes and pair this machine.";
+    appendLog("Open the desktop app to pair this machine.");
     return;
   }
 
@@ -494,7 +494,7 @@ async function pairRunner() {
     pairState.textContent = "Paired. Starting the local Runner listener...";
     setStatus("Paired", "good");
     await startRunner();
-    pairState.textContent = "Paired and listening for Hub jobs.";
+    pairState.textContent = "Paired and listening for Hub runs.";
   } finally {
     pairButton.disabled = false;
     if (!childProcess) {
