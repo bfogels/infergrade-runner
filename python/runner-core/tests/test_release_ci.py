@@ -78,6 +78,19 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("target/release/bundle/appimage/*", workflow)
         self.assertNotIn("target/release/bundle/rpm/*", workflow)
 
+    def test_desktop_package_smokes_upload_checksums_with_artifacts(self):
+        workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")
+
+        self.assertEqual(workflow.count("./scripts/write_desktop_release_checksums.py"), 3)
+        self.assertIn("target/release/bundle/windows/SHA256SUMS", workflow)
+        self.assertIn("target/release/bundle/linux/SHA256SUMS", workflow)
+        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/nsis/*", workflow)
+        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/msi/*", workflow)
+        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/deb/*", workflow)
+        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/appimage/*", workflow)
+        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/windows/SHA256SUMS", workflow)
+        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/linux/SHA256SUMS", workflow)
+
     def test_desktop_release_docs_match_protected_signing_and_notarization_gate(self):
         docs = (ROOT / "docs" / "release_process.md").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")

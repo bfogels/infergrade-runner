@@ -60,7 +60,7 @@ apps/desktop-runner/sidecar/
 apps/desktop-runner/src-tauri/binaries/infergrade-sidecar-<target-triple>[.exe]
 ```
 
-The desktop release workflow now runs non-publishing package smoke jobs for Windows and Linux. Those jobs upload Actions artifacts for inspection, but they are not public release artifacts and they do not imply signed-user-ready support.
+The desktop release workflow now runs non-publishing package smoke jobs for Windows and Linux. Those jobs upload Actions artifacts plus `SHA256SUMS` manifests for inspection, but they are not public release artifacts and they do not imply signed-user-ready support.
 
 - Windows: build on `x86_64-pc-windows-msvc` and produce NSIS/MSI artifacts, then add an Authenticode signing path before public beta.
 - Linux: build on `x86_64-unknown-linux-gnu` and produce AppImage/`.deb` artifacts, then validate install and launch behavior on a clean Linux desktop before public beta.

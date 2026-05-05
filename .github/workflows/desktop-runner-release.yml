@@ -243,6 +243,14 @@ jobs:
           cd apps/desktop-runner
           npm run build:windows
 
+      - name: Write Windows package checksums
+        shell: bash
+        run: |
+          python3 ./scripts/write_desktop_release_checksums.py \
+            --output apps/desktop-runner/src-tauri/target/release/bundle/windows/SHA256SUMS \
+            apps/desktop-runner/src-tauri/target/release/bundle/nsis/* \
+            apps/desktop-runner/src-tauri/target/release/bundle/msi/*
+
       - name: Upload Windows package artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -251,6 +259,7 @@ jobs:
           path: |
             apps/desktop-runner/src-tauri/target/release/bundle/nsis/*
             apps/desktop-runner/src-tauri/target/release/bundle/msi/*
+            apps/desktop-runner/src-tauri/target/release/bundle/windows/SHA256SUMS
 
   linux-package-smoke:
     name: Build Linux desktop packages
@@ -297,6 +306,13 @@ jobs:
           cd apps/desktop-runner
           npm run build:linux
 
+      - name: Write Linux package checksums
+        run: |
+          python3 ./scripts/write_desktop_release_checksums.py \
+            --output apps/desktop-runner/src-tauri/target/release/bundle/linux/SHA256SUMS \
+            apps/desktop-runner/src-tauri/target/release/bundle/deb/* \
+            apps/desktop-runner/src-tauri/target/release/bundle/appimage/*
+
       - name: Upload Linux package artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -305,3 +321,4 @@ jobs:
           path: |
             apps/desktop-runner/src-tauri/target/release/bundle/deb/*
             apps/desktop-runner/src-tauri/target/release/bundle/appimage/*
+            apps/desktop-runner/src-tauri/target/release/bundle/linux/SHA256SUMS
