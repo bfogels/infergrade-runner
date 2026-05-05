@@ -54,6 +54,30 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/macos/SHA256SUMS", workflow)
         self.assertIn("gh release upload", workflow)
 
+    def test_desktop_release_workflow_smokes_windows_and_linux_packages(self):
+        workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")
+
+        self.assertIn("permissions:\n  contents: read\n\njobs:", workflow)
+        self.assertIn("macos-preview:\n    name: Build and publish macOS desktop app\n    runs-on: macos-latest\n    permissions:\n      contents: write", workflow)
+        self.assertIn("windows-package-smoke:", workflow)
+        self.assertIn("linux-package-smoke:", workflow)
+        self.assertIn("runs-on: windows-latest", workflow)
+        self.assertIn("runs-on: ubuntu-22.04", workflow)
+        self.assertIn("windows-package-smoke:\n    name: Build Windows desktop packages\n    runs-on: windows-latest\n    permissions:\n      contents: read", workflow)
+        self.assertIn("linux-package-smoke:\n    name: Build Linux desktop packages\n    runs-on: ubuntu-22.04\n    permissions:\n      contents: read", workflow)
+        self.assertIn("npm run build:windows", workflow)
+        self.assertIn("npm run build:linux", workflow)
+        self.assertIn("libwebkit2gtk-4.1-dev", workflow)
+        self.assertIn("libayatana-appindicator3-dev", workflow)
+        self.assertIn("actions/upload-artifact@v4", workflow)
+        self.assertIn("infergrade-runner-desktop-windows-${{ github.sha }}", workflow)
+        self.assertIn("infergrade-runner-desktop-linux-${{ github.sha }}", workflow)
+        self.assertIn("target/release/bundle/nsis/*", workflow)
+        self.assertIn("target/release/bundle/msi/*", workflow)
+        self.assertIn("target/release/bundle/deb/*", workflow)
+        self.assertIn("target/release/bundle/appimage/*", workflow)
+        self.assertNotIn("target/release/bundle/rpm/*", workflow)
+
     def test_desktop_release_docs_match_protected_signing_and_notarization_gate(self):
         docs = (ROOT / "docs" / "release_process.md").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")

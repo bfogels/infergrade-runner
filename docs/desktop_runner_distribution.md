@@ -60,10 +60,10 @@ apps/desktop-runner/sidecar/
 apps/desktop-runner/src-tauri/binaries/infergrade-sidecar-<target-triple>[.exe]
 ```
 
-Before claiming Windows or Linux support, run at least one package attempt per platform. The first expected additions are:
+The desktop release workflow now runs non-publishing package smoke jobs for Windows and Linux. Those jobs upload Actions artifacts for inspection, but they are not public release artifacts and they do not imply signed-user-ready support.
 
-- Windows: build on `x86_64-pc-windows-msvc` or `aarch64-pc-windows-msvc`, then choose NSIS/MSI and an Authenticode signing path.
-- Linux: build on `x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu`, then choose AppImage or `.deb` as the beta lane.
+- Windows: build on `x86_64-pc-windows-msvc` and produce NSIS/MSI artifacts, then add an Authenticode signing path before public beta.
+- Linux: build on `x86_64-unknown-linux-gnu` and produce AppImage/`.deb` artifacts, then validate install and launch behavior on a clean Linux desktop before public beta.
 
 The sidecar contract should remain the same: call the existing `infergrade` CLI when available, otherwise resolve the bundled or repo-local Runner core.
 
