@@ -84,6 +84,8 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertEqual(workflow.count("./scripts/write_desktop_release_checksums.py"), 3)
         self.assertIn("target/release/bundle/windows/SHA256SUMS", workflow)
         self.assertIn("target/release/bundle/linux/SHA256SUMS", workflow)
+        self.assertIn("actions/setup-python@v5", workflow)
+        self.assertIn('python-version: "3.12"', workflow)
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/nsis/*", workflow)
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/msi/*", workflow)
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/deb/*", workflow)
