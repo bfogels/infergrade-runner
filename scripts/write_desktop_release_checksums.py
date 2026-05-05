@@ -26,10 +26,14 @@ def sha256_file(path: Path) -> str:
 def main() -> int:
     args = build_parser().parse_args()
     output = Path(args.output)
-    artifacts = [Path(item) for item in args.artifacts]
-    missing = [str(path) for path in artifacts if not path.is_file()]
+    candidates = [Path(item) for item in args.artifacts]
+    missing = [str(path) for path in candidates if not path.exists()]
     if missing:
         raise SystemExit("Missing release artifact(s): %s" % ", ".join(missing))
+
+    artifacts = [path for path in candidates if path.is_file()]
+    if not artifacts:
+        raise SystemExit("No release artifacts were provided.")
 
     deduped = sorted({path.resolve() for path in artifacts}, key=lambda path: path.name)
     lines = ["%s  %s" % (sha256_file(path), path.name) for path in deduped]

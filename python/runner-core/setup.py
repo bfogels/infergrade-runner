@@ -5,7 +5,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="infergrade-runner-core",
-    version="0.1.30",
+    version="0.1.31",
     description="Portable benchmarking runner core for InferGrade.",
     author="Brian Fogelson",
     package_dir={"": "src"},

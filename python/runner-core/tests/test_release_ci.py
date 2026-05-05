@@ -72,10 +72,10 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("actions/upload-artifact@v4", workflow)
         self.assertIn("infergrade-runner-desktop-windows-${{ github.sha }}", workflow)
         self.assertIn("infergrade-runner-desktop-linux-${{ github.sha }}", workflow)
-        self.assertIn("target/release/bundle/nsis/*", workflow)
-        self.assertIn("target/release/bundle/msi/*", workflow)
-        self.assertIn("target/release/bundle/deb/*", workflow)
-        self.assertIn("target/release/bundle/appimage/*", workflow)
+        self.assertIn("target/release/bundle/nsis/*.exe", workflow)
+        self.assertIn("target/release/bundle/msi/*.msi", workflow)
+        self.assertIn("target/release/bundle/deb/*.deb", workflow)
+        self.assertIn("target/release/bundle/appimage/*.AppImage", workflow)
         self.assertNotIn("target/release/bundle/rpm/*", workflow)
 
     def test_desktop_package_smokes_upload_checksums_with_artifacts(self):
@@ -86,10 +86,10 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("target/release/bundle/linux/SHA256SUMS", workflow)
         self.assertIn("actions/setup-python@v5", workflow)
         self.assertIn('python-version: "3.12"', workflow)
-        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/nsis/*", workflow)
-        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/msi/*", workflow)
-        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/deb/*", workflow)
-        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/appimage/*", workflow)
+        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/nsis/*.exe", workflow)
+        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/msi/*.msi", workflow)
+        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/deb/*.deb", workflow)
+        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/appimage/*.AppImage", workflow)
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/windows/SHA256SUMS", workflow)
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/linux/SHA256SUMS", workflow)
 
@@ -229,6 +229,61 @@ class ReleaseCiTests(unittest.TestCase):
                 ],
             )
             self.assertTrue(all(len(line.split("  ", 1)[0]) == 64 for line in lines))
+
+    def test_desktop_release_checksums_ignore_packager_staging_directories(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            deb = root / "InferGrade Runner_0.1.30_amd64.deb"
+            appimage = root / "InferGrade Runner_0.1.30_amd64.AppImage"
+            deb_staging = root / "InferGrade Runner_0.1.30_amd64"
+            appimage_staging = root / "InferGrade Runner.AppDir"
+            output = root / "SHA256SUMS"
+            deb.write_bytes(b"deb")
+            appimage.write_bytes(b"appimage")
+            deb_staging.mkdir()
+            appimage_staging.mkdir()
+
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "write_desktop_release_checksums",
+                    "--output",
+                    str(output),
+                    str(deb_staging),
+                    str(appimage_staging),
+                    str(deb),
+                    str(appimage),
+                ]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(write_desktop_release_checksums(), 0)
+            finally:
+                sys.argv = old_argv
+
+            names = [line.split("  ", 1)[1] for line in output.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(names, [appimage.name, deb.name])
+
+    def test_desktop_release_checksums_fails_when_only_directories_are_provided(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging = root / "InferGrade Runner.AppDir"
+            staging.mkdir()
+            output = root / "SHA256SUMS"
+
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "write_desktop_release_checksums",
+                    "--output",
+                    str(output),
+                    str(staging),
+                ]
+                with self.assertRaises(SystemExit) as raised:
+                    write_desktop_release_checksums()
+            finally:
+                sys.argv = old_argv
+
+            self.assertIn("No release artifacts", str(raised.exception))
+            self.assertFalse(output.exists())
 
     def test_desktop_release_checksums_fails_for_missing_artifacts(self):
         with TemporaryDirectory() as tmp:

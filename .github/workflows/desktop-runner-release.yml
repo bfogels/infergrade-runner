@@ -253,8 +253,8 @@ jobs:
         run: |
           python3 ./scripts/write_desktop_release_checksums.py \
             --output apps/desktop-runner/src-tauri/target/release/bundle/windows/SHA256SUMS \
-            apps/desktop-runner/src-tauri/target/release/bundle/nsis/* \
-            apps/desktop-runner/src-tauri/target/release/bundle/msi/*
+            apps/desktop-runner/src-tauri/target/release/bundle/nsis/*.exe \
+            apps/desktop-runner/src-tauri/target/release/bundle/msi/*.msi
 
       - name: Upload Windows package artifacts
         uses: actions/upload-artifact@v4
@@ -262,8 +262,8 @@ jobs:
           name: infergrade-runner-desktop-windows-${{ github.sha }}
           if-no-files-found: error
           path: |
-            apps/desktop-runner/src-tauri/target/release/bundle/nsis/*
-            apps/desktop-runner/src-tauri/target/release/bundle/msi/*
+            apps/desktop-runner/src-tauri/target/release/bundle/nsis/*.exe
+            apps/desktop-runner/src-tauri/target/release/bundle/msi/*.msi
             apps/desktop-runner/src-tauri/target/release/bundle/windows/SHA256SUMS
 
   linux-package-smoke:
@@ -315,8 +315,8 @@ jobs:
         run: |
           python3 ./scripts/write_desktop_release_checksums.py \
             --output apps/desktop-runner/src-tauri/target/release/bundle/linux/SHA256SUMS \
-            apps/desktop-runner/src-tauri/target/release/bundle/deb/* \
-            apps/desktop-runner/src-tauri/target/release/bundle/appimage/*
+            apps/desktop-runner/src-tauri/target/release/bundle/deb/*.deb \
+            apps/desktop-runner/src-tauri/target/release/bundle/appimage/*.AppImage
 
       - name: Upload Linux package artifacts
         uses: actions/upload-artifact@v4
@@ -324,6 +324,6 @@ jobs:
           name: infergrade-runner-desktop-linux-${{ github.sha }}
           if-no-files-found: error
           path: |
-            apps/desktop-runner/src-tauri/target/release/bundle/deb/*
-            apps/desktop-runner/src-tauri/target/release/bundle/appimage/*
+            apps/desktop-runner/src-tauri/target/release/bundle/deb/*.deb
+            apps/desktop-runner/src-tauri/target/release/bundle/appimage/*.AppImage
             apps/desktop-runner/src-tauri/target/release/bundle/linux/SHA256SUMS
