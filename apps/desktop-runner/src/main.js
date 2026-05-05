@@ -447,7 +447,7 @@ function runtimeCommandArgs(extraArgs = []) {
   return [...args, ...extraArgs];
 }
 
-async function startRunner() {
+async function startRunner({ confirmStarted = false } = {}) {
   const apiUrl = readApiUrl();
   window.localStorage.setItem(API_URL_STORAGE_KEY, apiUrl);
 
@@ -471,14 +471,36 @@ async function startRunner() {
     env: await runnerEnvironment()
   });
 
-  command.stdout.on("data", (line) => appendLog(line));
-  command.stderr.on("data", (line) => appendLog(line));
+  const startupOutput = [];
+  const rememberStartupLine = (line) => {
+    startupOutput.push(String(line || "").trim());
+    if (startupOutput.length > 8) {
+      startupOutput.shift();
+    }
+  };
+  let startupFailure = null;
+  let markStartupFailure = null;
+  const startupFailurePromise = new Promise((resolve) => {
+    markStartupFailure = resolve;
+  });
+
+  command.stdout.on("data", (line) => {
+    rememberStartupLine(line);
+    appendLog(line);
+  });
+  command.stderr.on("data", (line) => {
+    rememberStartupLine(line);
+    appendLog(line);
+  });
   command.on("close", (event) => {
     appendLog(`Runner exited with code ${event.code ?? "unknown"}.`);
     childProcess = null;
     startButton.disabled = false;
     stopButton.disabled = true;
     setStatus("Stopped", event.code === 0 ? "idle" : "error");
+    const detail = startupOutput.filter(Boolean).join("\n");
+    startupFailure = new Error(detail || `Runner exited with code ${event.code ?? "unknown"} before listening.`);
+    markStartupFailure(startupFailure);
   });
   command.on("error", (error) => {
     appendLog(`Runner process error: ${error}`);
@@ -486,12 +508,23 @@ async function startRunner() {
     startButton.disabled = false;
     stopButton.disabled = true;
     setStatus("Failed", "error");
+    startupFailure = new Error(String(error || "Runner process error."));
+    markStartupFailure(startupFailure);
   });
 
   childProcess = await command.spawn();
   stopButton.disabled = false;
   setStatus("Listening", "good");
   appendLog(`Started infergrade listener for ${apiUrl}.`);
+  if (confirmStarted) {
+    const earlyFailure = await Promise.race([
+      startupFailurePromise,
+      new Promise((resolve) => setTimeout(() => resolve(null), 900)),
+    ]);
+    if (earlyFailure || startupFailure) {
+      throw earlyFailure || startupFailure;
+    }
+  }
 }
 
 async function pairRunner() {
@@ -531,7 +564,7 @@ async function pairRunner() {
     pairState.textContent = "Paired. Starting the local Runner listener...";
     setStatus("Paired", "good");
     try {
-      await startRunner();
+      await startRunner({ confirmStarted: true });
       pairState.textContent = "Paired and listening for Hub runs.";
     } catch (startError) {
       const safeMessage = userSafeStartFailure(startError.message || startError);
