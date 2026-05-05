@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   normalizeDesktopApiUrl,
+  userSafeStartFailure,
   userSafeUpdateFailure,
   userSafeTokenFailure,
 } from "./desktopHelpers.js";
@@ -39,5 +40,20 @@ test("maps noisy update and token storage failures to recoverable UI copy", () =
   assert.equal(
     userSafeTokenFailure("keychain item already exists"),
     "Credential storage needs to replace the saved token. Try Reset Pairing, then pair again."
+  );
+});
+
+test("maps auto-start failures to paired-but-recoverable UI copy", () => {
+  assert.equal(
+    userSafeStartFailure("Packaged Runner core is unavailable"),
+    "Pairing is saved. Runner core is not available yet; run the startup self-test or runtime check, then start listening again."
+  );
+  assert.equal(
+    userSafeStartFailure("llama.cpp runtime missing"),
+    "Pairing is saved. A local runtime is missing; inspect the Runtime panel, then start listening again."
+  );
+  assert.equal(
+    userSafeStartFailure("something else"),
+    "Pairing is saved. Runner could not start automatically; inspect Logs, then start listening again."
   );
 });

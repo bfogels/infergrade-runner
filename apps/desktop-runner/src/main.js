@@ -2,6 +2,7 @@ import "./styles.css";
 import packageInfo from "../package.json";
 import {
   normalizeDesktopApiUrl,
+  userSafeStartFailure,
   userSafeTokenFailure,
   userSafeUpdateFailure,
 } from "./desktopHelpers.js";
@@ -244,6 +245,35 @@ async function refreshRunnerCliVersion() {
   } catch (error) {
     renderRunnerCliVersion("version unavailable");
     appendLog(`Could not read Runner CLI version: ${error.message || error}`);
+  }
+}
+
+async function checkRunnerStartupSelfTest() {
+  if (runtimeRunnerVersion) {
+    runtimeRunnerVersion.textContent = "Checking Runner startup self-test...";
+  }
+  const Command = await loadTauriShell();
+  if (!Command) {
+    if (runtimeRunnerVersion) {
+      runtimeRunnerVersion.textContent = "Startup self-test runs inside the desktop app.";
+    }
+    return;
+  }
+  try {
+    const output = await Command.sidecar(SIDECAR_NAME, ["desktop-self-test"]).execute();
+    if (output.code !== 0) {
+      throw new Error(output.stderr || output.stdout || `self-test exited with code ${output.code}`);
+    }
+    const detail = output.stdout?.trim() || "Runner core is available.";
+    if (runtimeRunnerVersion) {
+      runtimeRunnerVersion.textContent = "Runner core available.";
+    }
+    appendLog(`Startup self-test passed: ${detail}`);
+  } catch (error) {
+    if (runtimeRunnerVersion) {
+      runtimeRunnerVersion.textContent = "Runner core unavailable. Run startup self-test for details.";
+    }
+    appendLog(`Startup self-test failed: ${error.message || error}`);
   }
 }
 
@@ -500,8 +530,16 @@ async function pairRunner() {
     form.elements.pairCode.value = "";
     pairState.textContent = "Paired. Starting the local Runner listener...";
     setStatus("Paired", "good");
-    await startRunner();
-    pairState.textContent = "Paired and listening for Hub runs.";
+    try {
+      await startRunner();
+      pairState.textContent = "Paired and listening for Hub runs.";
+    } catch (startError) {
+      const safeMessage = userSafeStartFailure(startError.message || startError);
+      pairState.textContent = `Paired. Runner could not start automatically. ${safeMessage}`;
+      setStatus("Paired; start blocked", "warning");
+      appendLog(`Could not start Runner after pairing: ${startError.message || startError}`);
+      await checkRunnerStartupSelfTest();
+    }
   } finally {
     pairButton.disabled = false;
     if (!childProcess) {
@@ -540,7 +578,7 @@ async function stopRunner() {
 pairButton.addEventListener("click", () => {
   pairRunner().catch((error) => {
     setStatus("Pairing failed", "error");
-    pairState.textContent = "Pairing failed. Check that the code has not expired, then try again.";
+    pairState.textContent = "Pairing failed before this machine was saved. Check that the code has not expired, then try again.";
     appendLog(`Could not pair Runner: ${error.message || error}`);
   });
 });
@@ -636,5 +674,6 @@ relaunchUpdateButton?.addEventListener("click", () => {
 initTheme();
 renderReleaseStatus().catch((error) => appendLog(`Could not render release status: ${error.message || error}`));
 refreshRunnerCliVersion().catch((error) => appendLog(`Could not check Runner CLI version: ${error.message || error}`));
+checkRunnerStartupSelfTest().catch((error) => appendLog(`Could not run startup self-test: ${error.message || error}`));
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");

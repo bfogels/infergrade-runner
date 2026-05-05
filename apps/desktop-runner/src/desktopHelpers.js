@@ -56,3 +56,14 @@ export function userSafeTokenFailure(message = "") {
   }
   return "Credential storage is unavailable. You can retry, reset pairing, or paste a fresh code.";
 }
+
+export function userSafeStartFailure(message = "") {
+  const text = String(message || "");
+  if (/runner core|runner-core|packaged runner|infergrade.*not found|not found on PATH/i.test(text)) {
+    return "Pairing is saved. Runner core is not available yet; run the startup self-test or runtime check, then start listening again.";
+  }
+  if (/runtime|llama|docker|container|metal|backend/i.test(text)) {
+    return "Pairing is saved. A local runtime is missing; inspect the Runtime panel, then start listening again.";
+  }
+  return "Pairing is saved. Runner could not start automatically; inspect Logs, then start listening again.";
+}
