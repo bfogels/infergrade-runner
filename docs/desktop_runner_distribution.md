@@ -48,16 +48,22 @@ The runtime controls are deliberately conservative. They run the same inspect/se
 
 ## Windows And Linux Build Prerequisites
 
-The repository currently contains a macOS Apple Silicon sidecar wrapper only:
+The desktop sidecar is source-built from:
 
 ```text
-apps/desktop-runner/src-tauri/binaries/infergrade-sidecar-aarch64-apple-darwin
+apps/desktop-runner/sidecar/
 ```
 
-Before claiming Windows or Linux support, add matching sidecar binaries for the target triples and run at least one package attempt per platform. The first expected additions are:
+`scripts/build_desktop_sidecar.sh` builds the wrapper for the current Rust host and copies it to Tauri's expected platform filename under:
 
-- Windows: sidecar wrapper for `x86_64-pc-windows-msvc` or `aarch64-pc-windows-msvc`, then choose NSIS/MSI and an Authenticode signing path.
-- Linux: sidecar wrapper for `x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu`, then choose AppImage or `.deb` as the beta lane.
+```text
+apps/desktop-runner/src-tauri/binaries/infergrade-sidecar-<target-triple>[.exe]
+```
+
+Before claiming Windows or Linux support, run at least one package attempt per platform. The first expected additions are:
+
+- Windows: build on `x86_64-pc-windows-msvc` or `aarch64-pc-windows-msvc`, then choose NSIS/MSI and an Authenticode signing path.
+- Linux: build on `x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu`, then choose AppImage or `.deb` as the beta lane.
 
 The sidecar contract should remain the same: call the existing `infergrade` CLI when available, otherwise resolve the bundled or repo-local Runner core.
 

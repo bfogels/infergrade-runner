@@ -14,4 +14,6 @@ data/
 memory/reference_runs/
 apps/desktop-runner/src-tauri/gen/
 apps/desktop-runner/src-tauri/target/
+apps/desktop-runner/src-tauri/binaries/infergrade-sidecar-*
+apps/desktop-runner/sidecar/target/
 ~/

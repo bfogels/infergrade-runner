@@ -14,6 +14,7 @@ The Hub remains the model selection, benchmark planning, recommendation, and res
 - System, light, and dark UI modes
 - Advanced `llama.cpp` runtime inspection and selection controls
 - Signed Tauri updater wiring for the macOS release lane
+- Source-built sidecar wrapper that can emit Tauri platform-specific binaries for macOS, Windows, and Linux build hosts
 
 ## Local Development
 
@@ -35,13 +36,13 @@ Run the Tauri shell after installing Rust and platform prerequisites:
 npm run tauri dev
 ```
 
-The macOS Apple Silicon sidecar wrapper lives at:
+Build the platform-specific sidecar wrapper for the current Rust host with:
 
-```text
-src-tauri/binaries/infergrade-sidecar-aarch64-apple-darwin
+```bash
+../../scripts/build_desktop_sidecar.sh
 ```
 
-The sidecar first tries `infergrade` from `PATH`. If that is unavailable, it uses `INFERGRADE_RUNNER_REPO` or walks back to the Runner repo root and runs `python3 -m infergrade` with `python/runner-core/src` on `PYTHONPATH`.
+Tauri expects the generated file to use the target-triple suffix, for example `src-tauri/binaries/infergrade-sidecar-aarch64-apple-darwin` on Apple Silicon macOS or `src-tauri/binaries/infergrade-sidecar-x86_64-pc-windows-msvc.exe` on 64-bit Windows. The sidecar first tries `infergrade` from `PATH`. If that is unavailable, it uses `INFERGRADE_RUNNER_REPO` or walks back to the Runner repo root and runs the Python Runner core with `python/runner-core/src` on `PYTHONPATH`.
 
 ## Runtime Selection
 
@@ -95,13 +96,7 @@ If a downloaded DMG opens with the macOS "`InferGrade Runner.app` is damaged and
 
 ## Windows And Linux
 
-The current checked-in sidecar is macOS Apple Silicon only:
-
-```text
-src-tauri/binaries/infergrade-sidecar-aarch64-apple-darwin
-```
-
-Windows and Linux packaging need matching platform sidecars before those builds can be shipped. Tauri expects the same logical sidecar name with platform-specific suffixes. Once those sidecars exist, the next distribution decision is whether MSI/NSIS, AppImage, or `.deb` is the first beta lane.
+The sidecar source can now generate matching platform sidecars on Windows and Linux build hosts. Windows and Linux packaging still need successful package attempts before those builds can be shipped. The next distribution decision is whether MSI/NSIS, AppImage, or `.deb` is the first beta lane, plus the matching signing and launch-smoke gate for each platform.
 
 ## Sidecar Contract
 

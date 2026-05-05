@@ -50,6 +50,8 @@ if [ "$SKIP_CHECKS" -eq 0 ]; then
   npm run build
   npm audit --audit-level=moderate
 
+  "$ROOT_DIR/scripts/build_desktop_sidecar.sh"
+
   cd "$TAURI_DIR"
   cargo check --locked
 fi
@@ -64,6 +66,7 @@ if [ "$CREATE_UPDATER_ARTIFACTS" -eq 1 ]; then
 fi
 
 cd "$APP_DIR"
+"$ROOT_DIR/scripts/build_desktop_sidecar.sh"
 MACOS_SIGNING_IDENTITY="${INFERGRADE_MACOS_SIGNING_IDENTITY:-}"
 
 unset_if_empty() {

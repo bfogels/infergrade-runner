@@ -30,11 +30,12 @@ Local equivalent:
 Every push to `main` also runs `.github/workflows/desktop-runner-release.yml`. That workflow:
 
 1. resolves the desktop app version from `VERSION`
-2. builds the macOS Apple Silicon desktop app
-3. verifies the protected release signing and notarization inputs before building user-downloadable artifacts
-4. signs and notarizes the Tauri updater archive and macOS bundle with the configured release credentials
-5. verifies the app bundle and DMG with `codesign`, Gatekeeper assessment, and stapled notarization-ticket checks
-6. publishes the DMG, updater archive, updater signature, and updater manifest to the `desktop-runner-latest` GitHub release
+2. builds the source sidecar wrapper for the CI host's Rust target triple
+3. builds the macOS Apple Silicon desktop app
+4. verifies the protected release signing and notarization inputs before building user-downloadable artifacts
+5. signs and notarizes the Tauri updater archive and macOS bundle with the configured release credentials
+6. verifies the app bundle and DMG with `codesign`, Gatekeeper assessment, and stapled notarization-ticket checks
+7. publishes the DMG, updater archive, updater signature, and updater manifest to the `desktop-runner-latest` GitHub release
 
 The protected GitHub workflow must not fall back to ad-hoc macOS signing or skip notarization. Local developer builds can still use ad-hoc signing, but any DMG published for users must be Developer ID signed, notarized, and verified on a clean macOS machine before external distribution.
 
