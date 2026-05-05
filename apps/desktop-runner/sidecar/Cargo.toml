@@ -1,0 +1,8 @@
+[package]
+name = "infergrade-desktop-sidecar"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "infergrade-sidecar"
+path = "src/main.rs"

@@ -132,6 +132,24 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("--skip-checks", script)
         self.assertIn('MACOS_SIGNING_IDENTITY="-"', script)
 
+    def test_desktop_build_generates_platform_sidecar_from_source(self):
+        build_script = (ROOT / "scripts" / "build_desktop_runner.sh").read_text(encoding="utf-8")
+        sidecar_script_path = ROOT / "scripts" / "build_desktop_sidecar.sh"
+        sidecar_manifest_path = ROOT / "apps" / "desktop-runner" / "sidecar" / "Cargo.toml"
+        sidecar_source_path = ROOT / "apps" / "desktop-runner" / "sidecar" / "src" / "main.rs"
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+
+        self.assertTrue(sidecar_script_path.exists())
+        sidecar_script = sidecar_script_path.read_text(encoding="utf-8")
+        self.assertTrue(sidecar_manifest_path.exists())
+        self.assertTrue(sidecar_source_path.exists())
+        self.assertIn("build_desktop_sidecar.sh", build_script)
+        self.assertIn("rustc -Vv", sidecar_script)
+        self.assertIn("host:", sidecar_script)
+        self.assertIn("infergrade-sidecar-${TARGET_TRIPLE}${EXE_SUFFIX}", sidecar_script)
+        self.assertIn("x86_64-pc-windows-msvc", sidecar_script)
+        self.assertIn("apps/desktop-runner/src-tauri/binaries/infergrade-sidecar-*", gitignore)
+
     def test_desktop_release_checksums_manifest_is_deterministic(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
