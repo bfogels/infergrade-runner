@@ -58,11 +58,18 @@ fn run_command(program: &str, args: &[OsString], pythonpath: Option<OsString>) -
     command.status()
 }
 
+fn repo_python_args(args: &[OsString]) -> Vec<OsString> {
+    let mut python_args = vec![OsString::from("-m"), OsString::from("infergrade")];
+    python_args.extend(args.iter().cloned());
+    python_args
+}
+
 fn run_repo_python(repo_root: &Path, args: &[OsString]) -> Result<ExitStatus, String> {
     let pythonpath = pythonpath_with_runner(repo_root, env::var_os("PYTHONPATH"))?;
+    let python_args = repo_python_args(args);
     let mut last_not_found = None;
     for program in python_programs() {
-        match run_command(program, args, Some(pythonpath.clone())) {
+        match run_command(program, &python_args, Some(pythonpath.clone())) {
             Ok(status) => return Ok(status),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 last_not_found = Some(error);
@@ -149,6 +156,16 @@ mod tests {
 
         assert_eq!(paths[0], runner_core_src(&root));
         assert_eq!(paths[1], PathBuf::from("existing"));
+    }
+
+    #[test]
+    fn repo_python_invocation_runs_infergrade_module() {
+        let args = vec![OsString::from("--version")];
+        let python_args = repo_python_args(&args);
+
+        assert_eq!(python_args[0], OsString::from("-m"));
+        assert_eq!(python_args[1], OsString::from("infergrade"));
+        assert_eq!(python_args[2], OsString::from("--version"));
     }
 
     #[test]
