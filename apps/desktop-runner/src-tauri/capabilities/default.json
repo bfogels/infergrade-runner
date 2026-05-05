@@ -82,6 +82,11 @@
         {
           "name": "binaries/infergrade-sidecar",
           "sidecar": true,
+          "args": ["desktop-self-test"]
+        },
+        {
+          "name": "binaries/infergrade-sidecar",
+          "sidecar": true,
           "args": [
             "install-runtime",
             "--runtime",

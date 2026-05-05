@@ -43,12 +43,12 @@
           <h2>Pairing</h2>
           <label>
             <span>Hub URL</span>
-            <input name="apiUrl" type="url" value="http://127.0.0.1:8000" autocomplete="url" />
+            <input name="apiUrl" type="url" value="https://api.infergrade.com" autocomplete="url" />
           </label>
           <p class="hint compact-hint">Use HTTPS for hosted Hubs. Local development can use localhost or 127.x.x.x.</p>
           <label>
             <span>Pairing code</span>
-            <input name="pairCode" type="text" autocomplete="off" placeholder="igrp_..." />
+            <input name="pairCode" type="text" autocomplete="off" placeholder="Paste the one-time code from Hub" />
           </label>
           <label>
             <span>Runner label</span>
@@ -56,6 +56,7 @@
           </label>
           <div class="button-row">
             <button type="button" data-pair-runner>Pair and start</button>
+            <button type="button" class="button-secondary" data-reset-pairing>Reset Pairing</button>
           </div>
           <p class="hint" data-pair-state>Click Pair Local Runner in the Hub, then paste the one-time code here.</p>
           <details class="advanced-token-panel">
@@ -133,6 +134,9 @@
               <div>
                 <strong>Bundled Runner</strong>
                 <span data-runtime-runner-version>Checking bundled Runner version...</span>
+                <div class="button-row compact-actions">
+                  <button type="button" class="button-secondary compact-button" data-runner-self-test>Run startup self-test</button>
+                </div>
               </div>
               <div>
                 <strong>macOS</strong>

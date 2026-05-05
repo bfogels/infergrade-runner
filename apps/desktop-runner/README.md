@@ -42,7 +42,7 @@ Build the platform-specific sidecar wrapper for the current Rust host with:
 ../../scripts/build_desktop_sidecar.sh
 ```
 
-Tauri expects the generated file to use the target-triple suffix, for example `src-tauri/binaries/infergrade-sidecar-aarch64-apple-darwin` on Apple Silicon macOS or `src-tauri/binaries/infergrade-sidecar-x86_64-pc-windows-msvc.exe` on 64-bit Windows. The sidecar first tries `infergrade` from `PATH`. If that is unavailable, it uses `INFERGRADE_RUNNER_REPO` or walks back to the Runner repo root and runs the Python Runner core with `python/runner-core/src` on `PYTHONPATH`.
+Tauri expects the generated file to use the target-triple suffix, for example `src-tauri/binaries/infergrade-sidecar-aarch64-apple-darwin` on Apple Silicon macOS or `src-tauri/binaries/infergrade-sidecar-x86_64-pc-windows-msvc.exe` on 64-bit Windows. Packaged builds include the Runner core source as a Tauri resource and the sidecar prefers that bundled/app-managed path. Development builds can still fall back to `INFERGRADE_RUNNER_REPO`, walking back to the Runner repo root, or finally `infergrade` from `PATH`.
 
 ## Runtime Selection
 
@@ -113,3 +113,11 @@ infergrade start --api-url <hub url>
 ```
 
 The app does not log the raw `pair` JSON because that response contains the durable runner token. The browser preview does not persist tokens; the live app stores fallback tokens in the OS credential store and can pass `INFERGRADE_HUB_TOKEN` through the process environment.
+
+Run the startup self-test from the Runtime status panel, or directly with:
+
+```text
+infergrade-sidecar desktop-self-test
+```
+
+The self-test reports whether the desktop app can find its bundled/app-managed Runner core without relying on a globally installed `infergrade` command.
