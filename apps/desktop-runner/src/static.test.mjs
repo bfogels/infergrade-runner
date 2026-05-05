@@ -40,3 +40,17 @@ test("desktop pairing keeps successful pairing when automatic start fails", () =
   assert.ok(js.includes("checkRunnerStartupSelfTest"));
   assert.ok(js.includes("Checking Runner startup self-test"));
 });
+
+test("desktop runtime panel shows local readiness without owning model selection", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+
+  assert.ok(html.includes("Local readiness checklist"));
+  assert.ok(html.includes("data-hub-connection-status"));
+  assert.ok(html.includes("data-pairing-readiness-status"));
+  assert.ok(html.includes("data-runtime-llama-status"));
+  assert.ok(html.includes("data-model-path-status"));
+  assert.ok(html.includes("Chosen in Hub run plans"));
+  assert.ok(js.includes("renderLocalReadinessChecklist"));
+  assert.ok(js.includes("await stopRunner()"));
+});
