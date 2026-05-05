@@ -37,7 +37,7 @@ Every push to `main` also runs `.github/workflows/desktop-runner-release.yml`. T
 6. verifies the app bundle and DMG with `codesign`, Gatekeeper assessment, and stapled notarization-ticket checks
 7. publishes the DMG, updater archive, updater signature, and updater manifest to the `desktop-runner-latest` GitHub release
 
-The same workflow also runs unsigned Windows and Linux package smoke jobs. Those jobs build NSIS/MSI artifacts on `windows-latest` and AppImage/`.deb` artifacts on `ubuntu-22.04`, then upload them as GitHub Actions artifacts for maintainer inspection. They are package-readiness gates only; they do not publish to the desktop release tag and they do not replace Windows Authenticode signing, Linux install/launch validation, or platform-specific support notes.
+The same workflow also runs unsigned Windows and Linux package smoke jobs. Those jobs build NSIS/MSI artifacts on `windows-latest` and AppImage/`.deb` artifacts on `ubuntu-22.04`, write `SHA256SUMS` manifests for the emitted packages, then upload them as GitHub Actions artifacts for maintainer inspection. They are package-readiness gates only; they do not publish to the desktop release tag and they do not replace Windows Authenticode signing, Linux install/launch validation, or platform-specific support notes.
 
 The protected GitHub workflow must not fall back to ad-hoc macOS signing or skip notarization. Local developer builds can still use ad-hoc signing, but any DMG published for users must be Developer ID signed, notarized, and verified on a clean macOS machine before external distribution.
 
