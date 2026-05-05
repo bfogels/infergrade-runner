@@ -85,7 +85,7 @@ class ReleaseCiTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "apps/desktop-runner/src-tauri/tauri.conf.json").write_text(
-                '{"version":"0.0.1"}\n', encoding="utf-8"
+                '{"productName":"InferGrade Runner","version":"0.0.1"}\n', encoding="utf-8"
             )
             (root / "apps/desktop-runner/src-tauri/Cargo.toml").write_text(
                 '[package]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n',
@@ -118,6 +118,48 @@ class ReleaseCiTests(unittest.TestCase):
             self.assertIn('name = "infergrade_desktop_runner"\nversion = "1.2.3"', cargo_lock)
             self.assertIn('name = "schannel"\nversion = "0.1.29"', cargo_lock)
 
+    def test_sync_versions_fails_instead_of_rewriting_dependency_lock_versions(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = [
+                root / "python/runner-core",
+                root / "python/runner-core/src/infergrade",
+                root / "apps/desktop-runner/src-tauri",
+            ]
+            for path in paths:
+                path.mkdir(parents=True)
+            (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+            (root / "python/runner-core/pyproject.toml").write_text('version = "0.0.1"\n', encoding="utf-8")
+            (root / "python/runner-core/setup.py").write_text('version="0.0.1",\n', encoding="utf-8")
+            (root / "python/runner-core/src/infergrade/__init__.py").write_text(
+                '__version__ = "0.0.1"\n', encoding="utf-8"
+            )
+            (root / "apps/desktop-runner/package.json").write_text(
+                '{"name":"infergrade-desktop-runner","version":"0.0.1"}\n', encoding="utf-8"
+            )
+            lockfile = (
+                '{"name":"infergrade-desktop-runner","version":"0.0.1","packages":{'
+                '"node_modules/dependency":{"version":"9.9.9"}}}\n'
+            )
+            lock_path = root / "apps/desktop-runner/package-lock.json"
+            lock_path.write_text(lockfile, encoding="utf-8")
+            (root / "apps/desktop-runner/src-tauri/tauri.conf.json").write_text(
+                '{"$schema":"https://schema.tauri.app/config/2","productName":"InferGrade Runner","version":"0.0.1"}\n',
+                encoding="utf-8",
+            )
+            (root / "apps/desktop-runner/src-tauri/Cargo.toml").write_text(
+                '[package]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n',
+                encoding="utf-8",
+            )
+            (root / "apps/desktop-runner/src-tauri/Cargo.lock").write_text(
+                '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "root package entry"):
+                sync_versions(root)
+            self.assertEqual(lockfile, lock_path.read_text(encoding="utf-8"))
+
     def test_sync_versions_dry_run_reports_changes_without_writing(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -142,7 +184,7 @@ class ReleaseCiTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "apps/desktop-runner/src-tauri/tauri.conf.json").write_text(
-                '{"version":"0.0.1"}\n', encoding="utf-8"
+                '{"productName":"InferGrade Runner","version":"0.0.1"}\n', encoding="utf-8"
             )
             (root / "apps/desktop-runner/src-tauri/Cargo.toml").write_text(
                 '[package]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n',

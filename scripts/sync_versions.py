@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import re
 
@@ -38,6 +39,54 @@ def replace_text(
     return True
 
 
+def replace_named_json_version(
+    root: pathlib.Path,
+    path: str,
+    pattern: str,
+    replacement: str,
+    dry_run: bool = False,
+    expected_name: str | None = None,
+) -> bool:
+    full_path = root / path
+    data = json.loads(full_path.read_text(encoding="utf-8"))
+    if expected_name is not None and data.get("name", data.get("productName")) != expected_name:
+        raise ValueError(f"{path}: expected manifest name {expected_name!r}")
+    return replace_text(root, path, pattern, replacement, dry_run=dry_run)
+
+
+def replace_package_lock_versions(root: pathlib.Path, version: str, dry_run: bool = False) -> bool:
+    path = "apps/desktop-runner/package-lock.json"
+    full_path = root / path
+    original = full_path.read_text(encoding="utf-8")
+    data = json.loads(original)
+    if data.get("name") != "infergrade-desktop-runner":
+        raise ValueError(f"{path}: top-level package name is not infergrade-desktop-runner")
+    root_package = data.get("packages", {}).get("")
+    if not isinstance(root_package, dict):
+        raise ValueError(f"{path}: root package entry for infergrade-desktop-runner not found")
+    if root_package.get("name", "infergrade-desktop-runner") != "infergrade-desktop-runner":
+        raise ValueError(f"{path}: root package entry is not infergrade-desktop-runner")
+
+    top_pattern = r'(\{\s*"name"\s*:\s*"infergrade-desktop-runner",\s*"version"\s*:\s*)"[^"]+"'
+    if not re.search(top_pattern, original):
+        raise ValueError(f"{path}: top-level version pattern not found")
+    root_package_patterns = (
+        r'("packages"\s*:\s*\{\s*""\s*:\s*\{\s*"name"\s*:\s*"infergrade-desktop-runner",\s*"version"\s*:\s*)"[^"]+"',
+        r'("packages"\s*:\s*\{\s*""\s*:\s*\{\s*"version"\s*:\s*)"[^"]+"',
+    )
+    root_pattern = next((pattern for pattern in root_package_patterns if re.search(pattern, original)), None)
+    if root_pattern is None:
+        raise ValueError(f"{path}: root package version pattern not found")
+
+    updated = re.sub(top_pattern, rf'\1"{version}"', original, count=1)
+    updated = re.sub(root_pattern, rf'\1"{version}"', updated, count=1)
+    if updated == original:
+        return False
+    if not dry_run:
+        full_path.write_text(updated, encoding="utf-8")
+    return True
+
+
 def sync_versions(root: pathlib.Path = ROOT, dry_run: bool = False) -> list[str]:
     version = read_version(root)
     changed: list[str] = []
@@ -59,14 +108,6 @@ def sync_versions(root: pathlib.Path = ROOT, dry_run: bool = False) -> list[str]
             r'^version = "[^"]+"$',
             f'version = "{version}"',
         ),
-        "apps/desktop-runner/package.json": (
-            r'("version"\s*:\s*)"[^"]+"',
-            rf'\1"{version}"',
-        ),
-        "apps/desktop-runner/src-tauri/tauri.conf.json": (
-            r'("version"\s*:\s*)"[^"]+"',
-            rf'\1"{version}"',
-        ),
         "apps/desktop-runner/src-tauri/Cargo.lock": (
             r'(name = "infergrade_desktop_runner"\nversion = )"[^"]+"',
             rf'\1"{version}"',
@@ -76,14 +117,22 @@ def sync_versions(root: pathlib.Path = ROOT, dry_run: bool = False) -> list[str]
         if replace_text(root, path, pattern, replacement, dry_run=dry_run):
             changed.append(path)
 
-    if replace_text(
-        root,
-        "apps/desktop-runner/package-lock.json",
-        r'("version"\s*:\s*)"[^"]+"',
-        rf'\1"{version}"',
-        dry_run=dry_run,
-        count=2,
-    ):
+    json_replacements = {
+        "apps/desktop-runner/package.json": (
+            r'(\{\s*"name"\s*:\s*"infergrade-desktop-runner",\s*"version"\s*:\s*)"[^"]+"',
+            rf'\1"{version}"',
+        ),
+        "apps/desktop-runner/src-tauri/tauri.conf.json": (
+            r'("version"\s*:\s*)"[^"]+"',
+            rf'\1"{version}"',
+        ),
+    }
+    for path, (pattern, replacement) in json_replacements.items():
+        expected_name = "InferGrade Runner" if path.endswith("tauri.conf.json") else "infergrade-desktop-runner"
+        if replace_named_json_version(root, path, pattern, replacement, dry_run=dry_run, expected_name=expected_name):
+            changed.append(path)
+
+    if replace_package_lock_versions(root, version, dry_run=dry_run):
         changed.append("apps/desktop-runner/package-lock.json")
 
     return changed
