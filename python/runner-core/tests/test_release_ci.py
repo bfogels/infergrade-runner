@@ -233,6 +233,53 @@ class ReleaseCiTests(unittest.TestCase):
             self.assertEqual("https://example.test/releases/InferGrade%20Runner.app.tar.gz", platform["url"])
             self.assertRegex(manifest["pub_date"], r"Z$")
 
+    def test_desktop_update_manifest_can_include_multiple_platform_artifacts(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mac_archive = root / "InferGrade Runner.app.tar.gz"
+            mac_signature = root / "InferGrade Runner.app.tar.gz.sig"
+            windows_archive = root / "InferGrade Runner_0.1.13_x64-setup.exe.zip"
+            windows_signature = root / "InferGrade Runner_0.1.13_x64-setup.exe.zip.sig"
+            output = root / "latest.json"
+            mac_archive.write_bytes(b"mac archive")
+            mac_signature.write_text("mac-signature\n", encoding="utf-8")
+            windows_archive.write_bytes(b"windows archive")
+            windows_signature.write_text("windows-signature\n", encoding="utf-8")
+
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "write_desktop_update_manifest",
+                    "--version",
+                    "0.1.13",
+                    "--base-url",
+                    "https://example.test/releases",
+                    "--notes",
+                    "Desktop update notes.",
+                    "--artifact",
+                    f"darwin-aarch64={mac_archive}",
+                    "--artifact",
+                    f"windows-x86_64={windows_archive}",
+                    "--output",
+                    str(output),
+                ]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(write_desktop_update_manifest(), 0)
+            finally:
+                sys.argv = old_argv
+
+            manifest = __import__("json").loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(
+                sorted(manifest["platforms"].keys()),
+                ["darwin-aarch64", "windows-x86_64"],
+            )
+            self.assertEqual("mac-signature", manifest["platforms"]["darwin-aarch64"]["signature"])
+            self.assertEqual("windows-signature", manifest["platforms"]["windows-x86_64"]["signature"])
+            self.assertEqual(
+                "https://example.test/releases/InferGrade%20Runner_0.1.13_x64-setup.exe.zip",
+                manifest["platforms"]["windows-x86_64"]["url"],
+            )
+
     def test_desktop_update_manifest_requires_exactly_one_archive(self):
         with TemporaryDirectory() as tmp:
             bundle_dir = Path(tmp) / "bundle"

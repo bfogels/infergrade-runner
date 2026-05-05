@@ -93,6 +93,20 @@ The GitHub Actions workflow publishes the latest DMG and updater artifacts on ea
 
 The protected workflow also runs `scripts/verify_desktop_macos_release.sh` before upload. That script verifies the built app bundle with `codesign`, assesses the app and DMG with Gatekeeper, and validates stapled notarization tickets for both artifacts. If any of those checks fail, the workflow must stop before updating the downloadable release.
 
+The updater manifest writer can already emit a multi-platform Tauri manifest when separate signed updater archives exist:
+
+```bash
+python3 ./scripts/write_desktop_update_manifest.py \
+  --version "$(cat VERSION)" \
+  --base-url "https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-latest" \
+  --artifact darwin-aarch64=/path/to/InferGrade.Runner.app.tar.gz \
+  --artifact windows-x86_64=/path/to/InferGrade.Runner.setup.zip \
+  --artifact linux-x86_64=/path/to/infergrade-runner.AppImage.tar.gz \
+  --output /path/to/infergrade-runner-desktop-latest.json
+```
+
+Each archive must have a sibling `.sig` file produced by Tauri updater signing. Adding Windows or Linux entries to the public manifest still requires a successful package attempt, platform-specific signing decision, and launch smoke on that platform.
+
 ## Release Candidate Checklist
 
 For each candidate build, record:
