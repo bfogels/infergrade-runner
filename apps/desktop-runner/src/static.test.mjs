@@ -27,3 +27,16 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(js.includes("normalizeDesktopApiUrl"));
   assert.ok(js.includes("desktop-self-test"));
 });
+
+test("desktop pairing keeps successful pairing when automatic start fails", () => {
+  const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+
+  assert.ok(js.includes("userSafeStartFailure"));
+  assert.ok(js.includes("Paired. Runner could not start automatically."));
+  assert.ok(js.includes("await startRunner({ confirmStarted: true });"));
+  assert.ok(js.includes("Runner exited with code"));
+  assert.ok(js.includes("before listening"));
+  assert.equal(js.includes("pairState.textContent = \"Pairing failed. Check that the code has not expired, then try again.\";"), false);
+  assert.ok(js.includes("checkRunnerStartupSelfTest"));
+  assert.ok(js.includes("Checking Runner startup self-test"));
+});

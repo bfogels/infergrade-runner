@@ -2,6 +2,7 @@ import "./styles.css";
 import packageInfo from "../package.json";
 import {
   normalizeDesktopApiUrl,
+  userSafeStartFailure,
   userSafeTokenFailure,
   userSafeUpdateFailure,
 } from "./desktopHelpers.js";
@@ -247,6 +248,35 @@ async function refreshRunnerCliVersion() {
   }
 }
 
+async function checkRunnerStartupSelfTest() {
+  if (runtimeRunnerVersion) {
+    runtimeRunnerVersion.textContent = "Checking Runner startup self-test...";
+  }
+  const Command = await loadTauriShell();
+  if (!Command) {
+    if (runtimeRunnerVersion) {
+      runtimeRunnerVersion.textContent = "Startup self-test runs inside the desktop app.";
+    }
+    return;
+  }
+  try {
+    const output = await Command.sidecar(SIDECAR_NAME, ["desktop-self-test"]).execute();
+    if (output.code !== 0) {
+      throw new Error(output.stderr || output.stdout || `self-test exited with code ${output.code}`);
+    }
+    const detail = output.stdout?.trim() || "Runner core is available.";
+    if (runtimeRunnerVersion) {
+      runtimeRunnerVersion.textContent = "Runner core available.";
+    }
+    appendLog(`Startup self-test passed: ${detail}`);
+  } catch (error) {
+    if (runtimeRunnerVersion) {
+      runtimeRunnerVersion.textContent = "Runner core unavailable. Run startup self-test for details.";
+    }
+    appendLog(`Startup self-test failed: ${error.message || error}`);
+  }
+}
+
 function chooseThemeMode(mode) {
   const themeMode = mode === "dark" || mode === "light" || mode === "system" ? mode : "system";
   window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
@@ -417,7 +447,7 @@ function runtimeCommandArgs(extraArgs = []) {
   return [...args, ...extraArgs];
 }
 
-async function startRunner() {
+async function startRunner({ confirmStarted = false } = {}) {
   const apiUrl = readApiUrl();
   window.localStorage.setItem(API_URL_STORAGE_KEY, apiUrl);
 
@@ -441,14 +471,36 @@ async function startRunner() {
     env: await runnerEnvironment()
   });
 
-  command.stdout.on("data", (line) => appendLog(line));
-  command.stderr.on("data", (line) => appendLog(line));
+  const startupOutput = [];
+  const rememberStartupLine = (line) => {
+    startupOutput.push(String(line || "").trim());
+    if (startupOutput.length > 8) {
+      startupOutput.shift();
+    }
+  };
+  let startupFailure = null;
+  let markStartupFailure = null;
+  const startupFailurePromise = new Promise((resolve) => {
+    markStartupFailure = resolve;
+  });
+
+  command.stdout.on("data", (line) => {
+    rememberStartupLine(line);
+    appendLog(line);
+  });
+  command.stderr.on("data", (line) => {
+    rememberStartupLine(line);
+    appendLog(line);
+  });
   command.on("close", (event) => {
     appendLog(`Runner exited with code ${event.code ?? "unknown"}.`);
     childProcess = null;
     startButton.disabled = false;
     stopButton.disabled = true;
     setStatus("Stopped", event.code === 0 ? "idle" : "error");
+    const detail = startupOutput.filter(Boolean).join("\n");
+    startupFailure = new Error(detail || `Runner exited with code ${event.code ?? "unknown"} before listening.`);
+    markStartupFailure(startupFailure);
   });
   command.on("error", (error) => {
     appendLog(`Runner process error: ${error}`);
@@ -456,12 +508,23 @@ async function startRunner() {
     startButton.disabled = false;
     stopButton.disabled = true;
     setStatus("Failed", "error");
+    startupFailure = new Error(String(error || "Runner process error."));
+    markStartupFailure(startupFailure);
   });
 
   childProcess = await command.spawn();
   stopButton.disabled = false;
   setStatus("Listening", "good");
   appendLog(`Started infergrade listener for ${apiUrl}.`);
+  if (confirmStarted) {
+    const earlyFailure = await Promise.race([
+      startupFailurePromise,
+      new Promise((resolve) => setTimeout(() => resolve(null), 900)),
+    ]);
+    if (earlyFailure || startupFailure) {
+      throw earlyFailure || startupFailure;
+    }
+  }
 }
 
 async function pairRunner() {
@@ -500,8 +563,16 @@ async function pairRunner() {
     form.elements.pairCode.value = "";
     pairState.textContent = "Paired. Starting the local Runner listener...";
     setStatus("Paired", "good");
-    await startRunner();
-    pairState.textContent = "Paired and listening for Hub runs.";
+    try {
+      await startRunner({ confirmStarted: true });
+      pairState.textContent = "Paired and listening for Hub runs.";
+    } catch (startError) {
+      const safeMessage = userSafeStartFailure(startError.message || startError);
+      pairState.textContent = `Paired. Runner could not start automatically. ${safeMessage}`;
+      setStatus("Paired; start blocked", "warning");
+      appendLog(`Could not start Runner after pairing: ${startError.message || startError}`);
+      await checkRunnerStartupSelfTest();
+    }
   } finally {
     pairButton.disabled = false;
     if (!childProcess) {
@@ -540,7 +611,7 @@ async function stopRunner() {
 pairButton.addEventListener("click", () => {
   pairRunner().catch((error) => {
     setStatus("Pairing failed", "error");
-    pairState.textContent = "Pairing failed. Check that the code has not expired, then try again.";
+    pairState.textContent = "Pairing failed before this machine was saved. Check that the code has not expired, then try again.";
     appendLog(`Could not pair Runner: ${error.message || error}`);
   });
 });
@@ -636,5 +707,6 @@ relaunchUpdateButton?.addEventListener("click", () => {
 initTheme();
 renderReleaseStatus().catch((error) => appendLog(`Could not render release status: ${error.message || error}`));
 refreshRunnerCliVersion().catch((error) => appendLog(`Could not check Runner CLI version: ${error.message || error}`));
+checkRunnerStartupSelfTest().catch((error) => appendLog(`Could not run startup self-test: ${error.message || error}`));
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");
