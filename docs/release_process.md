@@ -19,6 +19,15 @@ Every push to `main` runs `.github/workflows/release-bundle.yml`. That workflow:
 
 The default main-branch artifact includes the contract bundle and release manifest with image references. It does not build or upload Docker image archives on every commit, which keeps main CI fast and avoids very large per-commit artifacts. Maintainers can run the same workflow manually with `include_image_archives=true` when they need a fully portable archive bundle.
 
+`VERSION` is the human-edited release version. Some package managers still require static manifest versions, so after changing `VERSION`, run:
+
+```bash
+python3 ./scripts/sync_versions.py
+python3 ./scripts/sync_versions.py --check
+```
+
+CI runs the same check and fails if any required package manifest copy is stale.
+
 Local equivalent:
 
 ```bash

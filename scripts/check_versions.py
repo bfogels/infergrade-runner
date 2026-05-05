@@ -26,11 +26,6 @@ def regex_version(path: str, pattern: str) -> str:
     return match.group(1)
 
 
-def preview_default_version(path: str) -> str:
-    value = regex_version(path, r"^\s+default: ([^\s]+-preview)$")
-    return value[: -len("-preview")]
-
-
 CHECKS = {
     "python/runner-core/pyproject.toml": lambda: regex_version(
         "python/runner-core/pyproject.toml", r'^version = "([^"]+)"$'
@@ -52,15 +47,6 @@ CHECKS = {
     "apps/desktop-runner/src-tauri/Cargo.lock": lambda: regex_version(
         "apps/desktop-runner/src-tauri/Cargo.lock",
         r'name = "infergrade_desktop_runner"\nversion = "([^"]+)"',
-    ),
-    "apps/desktop-runner/src/main.js": lambda: regex_version(
-        "apps/desktop-runner/src/main.js", r'APP_VERSION_FALLBACK = "([^"]+)"'
-    ),
-    "apps/desktop-runner/index.html": lambda: regex_version(
-        "apps/desktop-runner/index.html", r"<strong data-app-version>([^<]+)</strong>"
-    ),
-    ".github/workflows/publish-containers.yml": lambda: preview_default_version(
-        ".github/workflows/publish-containers.yml"
     ),
 }
 
