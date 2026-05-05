@@ -57,10 +57,14 @@ class ReleaseCiTests(unittest.TestCase):
     def test_desktop_release_workflow_smokes_windows_and_linux_packages(self):
         workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")
 
+        self.assertIn("permissions:\n  contents: read\n\njobs:", workflow)
+        self.assertIn("macos-preview:\n    name: Build and publish macOS desktop app\n    runs-on: macos-latest\n    permissions:\n      contents: write", workflow)
         self.assertIn("windows-package-smoke:", workflow)
         self.assertIn("linux-package-smoke:", workflow)
         self.assertIn("runs-on: windows-latest", workflow)
         self.assertIn("runs-on: ubuntu-22.04", workflow)
+        self.assertIn("windows-package-smoke:\n    name: Build Windows desktop packages\n    runs-on: windows-latest\n    permissions:\n      contents: read", workflow)
+        self.assertIn("linux-package-smoke:\n    name: Build Linux desktop packages\n    runs-on: ubuntu-22.04\n    permissions:\n      contents: read", workflow)
         self.assertIn("npm run build:windows", workflow)
         self.assertIn("npm run build:linux", workflow)
         self.assertIn("libwebkit2gtk-4.1-dev", workflow)

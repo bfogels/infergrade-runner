@@ -16,12 +16,14 @@ on:
         required: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   macos-preview:
     name: Build and publish macOS desktop app
     runs-on: macos-latest
+    permissions:
+      contents: write
     environment: release
     env:
       DESKTOP_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
@@ -210,6 +212,8 @@ jobs:
   windows-package-smoke:
     name: Build Windows desktop packages
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -251,6 +255,8 @@ jobs:
   linux-package-smoke:
     name: Build Linux desktop packages
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
