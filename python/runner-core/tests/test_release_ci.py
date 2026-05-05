@@ -283,6 +283,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("infergrade-release-certificate.p12", workflow)
         self.assertIn("openssl pkcs12", workflow)
         self.assertIn("-passin env:APPLE_CERTIFICATE_PASSWORD", workflow)
+        self.assertIn("openssl pkcs12 -legacy", workflow)
         self.assertNotIn("-passin \"pass:$APPLE_CERTIFICATE_PASSWORD\"", workflow)
         self.assertIn("APPLE_CERTIFICATE could not be opened with APPLE_CERTIFICATE_PASSWORD", workflow)
         self.assertIn("Prepare App Store Connect API key", workflow)
