@@ -127,7 +127,13 @@ jobs:
             -passin env:APPLE_CERTIFICATE_PASSWORD \
             -nokeys \
             -clcerts \
-            -out /dev/null >/dev/null 2>&1; then
+            -out /dev/null >/dev/null 2>&1 && \
+            ! openssl pkcs12 -legacy \
+              -in "$cert_path" \
+              -passin env:APPLE_CERTIFICATE_PASSWORD \
+              -nokeys \
+              -clcerts \
+              -out /dev/null >/dev/null 2>&1; then
             echo "::error::APPLE_CERTIFICATE could not be opened with APPLE_CERTIFICATE_PASSWORD. Re-export the Developer ID Application certificate as a .p12 and update both GitHub release-environment secrets together."
             exit 1
           fi
