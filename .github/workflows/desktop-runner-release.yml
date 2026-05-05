@@ -178,6 +178,15 @@ jobs:
           INFERGRADE_MACOS_SIGNING_IDENTITY: ${{ vars.INFERGRADE_MACOS_SIGNING_IDENTITY || secrets.APPLE_SIGNING_IDENTITY }}
         run: ./scripts/build_desktop_runner.sh --with-updater --skip-checks
 
+      - name: Notarize macOS DMG
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: ./scripts/notarize_desktop_dmg.sh
+
       - name: Verify macOS signing and notarization
         run: ./scripts/verify_desktop_macos_release.sh
 

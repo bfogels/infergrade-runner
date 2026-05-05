@@ -214,6 +214,11 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("./scripts/build_desktop_runner.sh --with-updater --skip-checks", workflow)
         self.assertIn("./scripts/verify_desktop_macos_release.sh", workflow)
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/dmg/*.dmg", workflow)
+        self.assertIn("./scripts/notarize_desktop_dmg.sh", workflow)
+        self.assertLess(
+            workflow.index("./scripts/notarize_desktop_dmg.sh"),
+            workflow.index("./scripts/verify_desktop_macos_release.sh"),
+        )
         self.assertIn("./scripts/write_desktop_release_checksums.py", workflow)
         self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/macos/SHA256SUMS", workflow)
         self.assertIn("gh release upload", workflow)
@@ -323,6 +328,23 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertEqual(script.count("xcrun stapler validate"), 2)
         self.assertIn("Expected exactly one macOS app bundle", script)
         self.assertIn("Expected exactly one macOS DMG", script)
+
+    def test_desktop_dmg_notarization_script_submits_and_staples_dmg(self):
+        script_path = ROOT / "scripts" / "notarize_desktop_dmg.sh"
+
+        self.assertTrue(script_path.exists())
+        script = script_path.read_text(encoding="utf-8")
+        self.assertIn('if [ "$(uname -s)" != "Darwin" ]', script)
+        self.assertIn("Expected exactly one macOS DMG", script)
+        self.assertIn("xcrun notarytool submit", script)
+        self.assertIn("--wait", script)
+        self.assertIn("--key \"$APPLE_API_KEY_PATH\"", script)
+        self.assertIn("--key-id \"$APPLE_API_KEY\"", script)
+        self.assertIn("--issuer \"$APPLE_API_ISSUER\"", script)
+        self.assertIn("--apple-id \"$APPLE_ID\"", script)
+        self.assertIn("--password \"$APPLE_PASSWORD\"", script)
+        self.assertIn("--team-id \"$APPLE_TEAM_ID\"", script)
+        self.assertIn("xcrun stapler staple \"$dmg\"", script)
 
     def test_desktop_build_script_ignores_empty_apple_signing_env(self):
         script = (ROOT / "scripts" / "build_desktop_runner.sh").read_text(encoding="utf-8")
