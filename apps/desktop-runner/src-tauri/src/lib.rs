@@ -23,12 +23,14 @@ fn save_runner_token(token: String) -> Result<(), String> {
     let entry = runner_token_entry()?;
     match entry.set_password(token) {
         Ok(()) => Ok(()),
-        Err(first_error) if is_user_canceled(&first_error) => Err(format!("credential storage was canceled: {first_error}")),
+        Err(first_error) if is_user_canceled(&first_error) => {
+            Err(format!("credential storage was canceled: {first_error}"))
+        }
         Err(first_error) => {
             let _ = entry.delete_credential();
-            entry
-                .set_password(token)
-                .map_err(|second_error| format!("could not replace runner token after {first_error}: {second_error}"))
+            entry.set_password(token).map_err(|second_error| {
+                format!("could not replace runner token after {first_error}: {second_error}")
+            })
         }
     }
 }

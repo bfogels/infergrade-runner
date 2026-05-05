@@ -37,6 +37,10 @@ const updateAvailable = document.querySelector("[data-update-available]");
 const updateDetail = document.querySelector("[data-update-detail]");
 const runnerCliVersion = document.querySelector("[data-runner-cli-version]");
 const runtimeRunnerVersion = document.querySelector("[data-runtime-runner-version]");
+const hubConnectionStatus = document.querySelector("[data-hub-connection-status]");
+const pairingReadinessStatus = document.querySelector("[data-pairing-readiness-status]");
+const runtimeLlamaStatus = document.querySelector("[data-runtime-llama-status]");
+const modelPathStatus = document.querySelector("[data-model-path-status]");
 const statusText = document.querySelector("[data-runner-status]");
 const statusDot = document.querySelector("[data-status-dot]");
 const pairState = document.querySelector("[data-pair-state]");
@@ -48,6 +52,9 @@ let logLines = [];
 let tauriInvoke = null;
 let previewToken = "";
 let pendingUpdate = null;
+let lastNormalizedApiUrl = "https://api.infergrade.com/";
+let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp jobs.";
+let savedTokenAvailable = false;
 
 function systemTheme() {
   if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
@@ -229,6 +236,27 @@ function renderRunnerCliVersion(label) {
   }
 }
 
+function renderLocalReadinessChecklist() {
+  if (hubConnectionStatus) {
+    hubConnectionStatus.textContent = `Hub API: ${lastNormalizedApiUrl}`;
+  }
+  if (pairingReadinessStatus) {
+    if (childProcess) {
+      pairingReadinessStatus.textContent = "Paired and listening for Hub runs.";
+    } else if (savedTokenAvailable || previewToken || form.elements.hubToken.value.trim()) {
+      pairingReadinessStatus.textContent = "Pairing token is available. Start listening when ready.";
+    } else {
+      pairingReadinessStatus.textContent = "Paste a Hub pairing code to save this machine.";
+    }
+  }
+  if (runtimeLlamaStatus) {
+    runtimeLlamaStatus.textContent = llamaRuntimeReadiness;
+  }
+  if (modelPathStatus) {
+    modelPathStatus.textContent = "Chosen in Hub run plans; Desktop validates runtime and listener readiness.";
+  }
+}
+
 async function refreshRunnerCliVersion() {
   const Command = await loadTauriShell();
   if (!Command) {
@@ -292,9 +320,11 @@ async function restoreFormState() {
 
   if (savedApiUrl) {
     form.elements.apiUrl.value = normalizeDesktopApiUrl(savedApiUrl);
+    lastNormalizedApiUrl = form.elements.apiUrl.value;
   }
 
   await updateTokenState();
+  renderLocalReadinessChecklist();
 }
 
 async function loadTauriInvoke() {
@@ -339,14 +369,19 @@ async function updateTokenState() {
   try {
     hasToken = Boolean(await loadStoredToken());
   } catch (error) {
+    savedTokenAvailable = false;
     tokenState.textContent = userSafeTokenFailure(error.message || error);
     appendLog(`Could not read saved token: ${error.message || error}`);
     return;
   }
+  savedTokenAvailable = hasToken;
   if (isTauriRuntime()) {
     tokenState.textContent = hasToken
       ? "Runner token saved in the OS credential store."
       : "No token saved. Paste a paired runner token before listening for Hub runs.";
+    if (hasToken && pairingReadinessStatus) {
+      pairingReadinessStatus.textContent = "Pairing token is saved. Start listening when ready.";
+    }
     return;
   }
 
@@ -435,6 +470,8 @@ async function runnerEnvironment() {
 function readApiUrl() {
   const normalized = normalizeDesktopApiUrl(form.elements.apiUrl.value);
   form.elements.apiUrl.value = normalized;
+  lastNormalizedApiUrl = normalized;
+  renderLocalReadinessChecklist();
   return normalized;
 }
 
@@ -498,6 +535,7 @@ async function startRunner({ confirmStarted = false } = {}) {
     startButton.disabled = false;
     stopButton.disabled = true;
     setStatus("Stopped", event.code === 0 ? "idle" : "error");
+    renderLocalReadinessChecklist();
     const detail = startupOutput.filter(Boolean).join("\n");
     startupFailure = new Error(detail || `Runner exited with code ${event.code ?? "unknown"} before listening.`);
     markStartupFailure(startupFailure);
@@ -508,6 +546,7 @@ async function startRunner({ confirmStarted = false } = {}) {
     startButton.disabled = false;
     stopButton.disabled = true;
     setStatus("Failed", "error");
+    renderLocalReadinessChecklist();
     startupFailure = new Error(String(error || "Runner process error."));
     markStartupFailure(startupFailure);
   });
@@ -515,6 +554,7 @@ async function startRunner({ confirmStarted = false } = {}) {
   childProcess = await command.spawn();
   stopButton.disabled = false;
   setStatus("Listening", "good");
+  renderLocalReadinessChecklist();
   appendLog(`Started infergrade listener for ${apiUrl}.`);
   if (confirmStarted) {
     const earlyFailure = await Promise.race([
@@ -563,6 +603,9 @@ async function pairRunner() {
     form.elements.pairCode.value = "";
     pairState.textContent = "Paired. Starting the local Runner listener...";
     setStatus("Paired", "good");
+    if (pairingReadinessStatus) {
+      pairingReadinessStatus.textContent = "Pairing saved. Starting the listener...";
+    }
     try {
       await startRunner({ confirmStarted: true });
       pairState.textContent = "Paired and listening for Hub runs.";
@@ -582,13 +625,23 @@ async function pairRunner() {
 }
 
 async function resetPairing() {
+  const wasListening = Boolean(childProcess);
+  if (wasListening) {
+    await stopRunner();
+    childProcess = null;
+    startButton.disabled = false;
+    stopButton.disabled = true;
+  }
   form.elements.pairCode.value = "";
   form.elements.hubToken.value = "";
   await clearStoredToken().catch((error) => appendLog(`Reset pairing could not clear stored token: ${error.message || error}`));
   window.localStorage.setItem(API_URL_STORAGE_KEY, readApiUrl());
-  pairState.textContent = "Pairing reset. Paste a fresh one-time code from Hub.";
-  setStatus(childProcess ? "Listening" : "Idle", childProcess ? "good" : "idle");
+  pairState.textContent = wasListening
+    ? "Pairing reset. Listener stop requested. Paste a fresh one-time code from Hub."
+    : "Pairing reset. Paste a fresh one-time code from Hub.";
+  setStatus("Idle", "idle");
   await updateTokenState();
+  renderLocalReadinessChecklist();
 }
 
 async function runDesktopSelfTest() {
@@ -672,17 +725,35 @@ themeChoiceButtons.forEach((button) => {
 });
 
 runtimePlanButton?.addEventListener("click", () => {
-  executeSidecar(runtimeCommandArgs()).catch((error) => {
-    setStatus("Runtime check failed", "error");
-    appendLog(`Could not inspect llama.cpp runtime plan: ${error.message || error}`);
-  });
+  llamaRuntimeReadiness = "Checking the llama.cpp runtime plan...";
+  renderLocalReadinessChecklist();
+  executeSidecar(runtimeCommandArgs())
+    .then(() => {
+      llamaRuntimeReadiness = "Runtime plan checked. Review logs before explicitly installing or selecting a runtime.";
+      renderLocalReadinessChecklist();
+    })
+    .catch((error) => {
+      llamaRuntimeReadiness = "Runtime plan unavailable. See logs for the technical detail.";
+      renderLocalReadinessChecklist();
+      setStatus("Runtime check failed", "error");
+      appendLog(`Could not inspect llama.cpp runtime plan: ${error.message || error}`);
+    });
 });
 
 runtimeSelectExistingButton?.addEventListener("click", () => {
-  executeSidecar(runtimeCommandArgs(["--select-existing"])).catch((error) => {
-    setStatus("Runtime selection failed", "error");
-    appendLog(`Could not select installed llama.cpp runtime: ${error.message || error}`);
-  });
+  llamaRuntimeReadiness = "Looking for an installed llama.cpp runtime...";
+  renderLocalReadinessChecklist();
+  executeSidecar(runtimeCommandArgs(["--select-existing"]))
+    .then(() => {
+      llamaRuntimeReadiness = "Installed llama.cpp runtime selected. Start listening when paired.";
+      renderLocalReadinessChecklist();
+    })
+    .catch((error) => {
+      llamaRuntimeReadiness = "No installed llama.cpp runtime selected. See logs for the technical detail.";
+      renderLocalReadinessChecklist();
+      setStatus("Runtime selection failed", "error");
+      appendLog(`Could not select installed llama.cpp runtime: ${error.message || error}`);
+    });
 });
 
 runnerSelfTestButton?.addEventListener("click", () => {
@@ -710,3 +781,4 @@ refreshRunnerCliVersion().catch((error) => appendLog(`Could not check Runner CLI
 checkRunnerStartupSelfTest().catch((error) => appendLog(`Could not run startup self-test: ${error.message || error}`));
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");
+renderLocalReadinessChecklist();
