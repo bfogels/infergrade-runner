@@ -545,6 +545,15 @@ function runtimeCommandArgs(extraArgs = []) {
   return [...args, ...extraArgs];
 }
 
+function runtimePlanSummary(plan = {}) {
+  const recommended = plan.recommended_runtime || {};
+  const selected = plan.selected_runtime || {};
+  const selectedText = selected.status === "selected" ? "Selected runtime is recorded." : "No managed runtime is selected yet.";
+  const runtimeText = plan.message || "No install command was run. Review the runtime plan before selecting a runtime.";
+  const lane = recommended.platform || recommended.accelerator || "this machine";
+  return `${runtimeText} Recommended lane: ${lane}. ${selectedText}`;
+}
+
 async function startRunner({ confirmStarted = false } = {}) {
   const apiUrl = readApiUrl();
   window.localStorage.setItem(API_URL_STORAGE_KEY, apiUrl);
@@ -637,8 +646,8 @@ async function pairRunner() {
   }
   window.localStorage.setItem(API_URL_STORAGE_KEY, apiUrl);
 
-  const Command = await loadTauriShell();
-  if (!Command) {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
     setStatus("Development view", "warning");
     pairState.textContent = "Open the desktop app to redeem pairing codes and pair this machine.";
     appendLog("Open the desktop app to pair this machine.");
@@ -648,20 +657,15 @@ async function pairRunner() {
   pairButton.disabled = true;
   startButton.disabled = true;
   pairState.textContent = "Redeeming pairing code...";
-  const args = ["pair", "--api-url", apiUrl, "--pair-code", pairCode];
-  if (runnerLabel) {
-    args.push("--label", runnerLabel);
-  }
   try {
-    const output = await Command.sidecar(SIDECAR_NAME, args).execute();
-    if (output.code !== 0) {
-      throw new Error(redactSecrets(output.stderr || output.stdout || `Pairing command exited with code ${output.code}.`));
-    }
-    if (output.stderr) {
-      appendLog(output.stderr);
-    }
-    appendLog(pairingSummary(output.stdout));
+    const output = await invoke("redeem_runner_pairing", {
+      apiUrl,
+      pairCode,
+      label: runnerLabel || null,
+    });
+    appendLog(pairingSummary(JSON.stringify(output || {})));
     form.elements.pairCode.value = "";
+    await updateTokenState();
     pairState.textContent = "Paired. Starting the local Runner listener...";
     setStatus("Paired", "good");
     if (pairingReadinessStatus) {
@@ -695,7 +699,13 @@ async function resetPairing() {
   }
   form.elements.pairCode.value = "";
   form.elements.hubToken.value = "";
-  await clearStoredToken().catch((error) => appendLog(`Reset pairing could not clear stored token: ${error.message || error}`));
+  const invoke = await loadTauriInvoke();
+  if (invoke) {
+    const payload = await invoke("reset_runner_pairing");
+    appendLog(`Reset pairing state: ${JSON.stringify(payload || {})}`);
+  } else {
+    await clearStoredToken().catch((error) => appendLog(`Reset pairing could not clear stored token: ${error.message || error}`));
+  }
   window.localStorage.setItem(API_URL_STORAGE_KEY, readApiUrl());
   pairState.textContent = wasListening
     ? "Pairing reset. Listener stop requested. Paste a fresh one-time code from Hub."
@@ -788,10 +798,22 @@ themeChoiceButtons.forEach((button) => {
 runtimePlanButton?.addEventListener("click", () => {
   llamaRuntimeReadiness = "Checking the llama.cpp runtime plan...";
   renderLocalReadinessChecklist();
-  executeSidecar(runtimeCommandArgs())
-    .then(() => {
-      llamaRuntimeReadiness = "Runtime plan checked. Review logs before explicitly installing or selecting a runtime.";
+  loadTauriInvoke()
+    .then((invoke) => {
+      if (!invoke) {
+        appendLog("Open the desktop app to inspect the native llama.cpp runtime plan.");
+        llamaRuntimeReadiness = "Runtime plan is available inside the desktop app.";
+        return null;
+      }
+      return invoke("llama_cpp_runtime_plan");
+    })
+    .then((plan) => {
+      if (!plan) {
+        return;
+      }
+      llamaRuntimeReadiness = runtimePlanSummary(plan);
       renderLocalReadinessChecklist();
+      appendLog(`llama.cpp runtime plan: ${JSON.stringify(plan)}`);
     })
     .catch((error) => {
       llamaRuntimeReadiness = "Runtime plan unavailable. See logs for the technical detail.";

@@ -12,13 +12,15 @@ test("desktop shell permission shapes keep version separate from URL-scoped comm
   assert.ok(shapes.includes(JSON.stringify(["--version"])));
   assert.ok(shapes.includes(JSON.stringify(["desktop-self-test"])));
   assert.ok(shapes.some((shape) => shape.includes('"start"') && shape.includes('"--api-url"')));
-  assert.ok(shapes.some((shape) => shape.includes('"pair"') && shape.includes('"--api-url"')));
-  assert.ok(shapes.some((shape) => shape.includes('"install-runtime"') && !shape.includes('"--api-url"')));
+  assert.equal(shapes.some((shape) => shape.includes('"pair"') && shape.includes('"--api-url"')), false);
+  assert.equal(shapes.includes(JSON.stringify(["install-runtime", "--runtime", "llama.cpp"])), false);
+  assert.ok(shapes.some((shape) => shape.includes('"install-runtime"') && shape.includes('"--select-existing"')));
 });
 
 test("desktop onboarding exposes paste-code pairing, reset, and bundled runner self-test", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 
   assert.ok(html.includes('value="https://api.infergrade.com"'));
   assert.ok(html.includes("Paste the one-time code from Hub"));
@@ -26,6 +28,12 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(html.includes("data-runner-self-test"));
   assert.ok(js.includes("normalizeDesktopApiUrl"));
   assert.ok(js.includes("desktop-self-test"));
+  assert.ok(js.includes('invoke("redeem_runner_pairing"'));
+  assert.ok(js.includes('invoke("reset_runner_pairing"'));
+  assert.ok(rust.includes("fn redeem_runner_pairing"));
+  assert.ok(rust.includes("fn reset_runner_pairing"));
+  assert.ok(rust.includes("save_runner_profile"));
+  assert.ok(rust.includes("clear_runner_profile"));
 });
 
 test("desktop pairing keeps successful pairing when automatic start fails", () => {
@@ -44,6 +52,7 @@ test("desktop pairing keeps successful pairing when automatic start fails", () =
 test("desktop runtime panel shows local readiness without owning model selection", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 
   assert.ok(html.includes("Local readiness checklist"));
   assert.ok(html.includes("data-hub-connection-status"));
@@ -53,6 +62,12 @@ test("desktop runtime panel shows local readiness without owning model selection
   assert.ok(html.includes("Chosen in Hub run plans"));
   assert.ok(js.includes("renderLocalReadinessChecklist"));
   assert.ok(js.includes("await stopRunner()"));
+  assert.ok(js.includes('invoke("llama_cpp_runtime_plan"'));
+  assert.ok(rust.includes("fn llama_cpp_runtime_plan"));
+  assert.ok(rust.includes("No install command was run"));
+  assert.ok(rust.includes("fn verify_runtime_download_manifest"));
+  assert.ok(rust.includes("signature_url"));
+  assert.ok(rust.includes("rollback_runtime_id"));
 });
 
 test("desktop runtime panel makes native first-run readiness primary and Docker optional", () => {

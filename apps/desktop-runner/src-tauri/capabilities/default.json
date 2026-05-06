@@ -38,45 +38,6 @@
         {
           "name": "binaries/infergrade-sidecar",
           "sidecar": true,
-          "args": [
-            "pair",
-            "--api-url",
-            {
-              "validator": "^(?:https://\\S+|http://(?:localhost|127(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}|\\[::1\\])(?::\\d+)?(?:/\\S*)?)$"
-            },
-            "--pair-code",
-            {
-              "validator": "igrp_\\S+"
-            }
-          ]
-        },
-        {
-          "name": "binaries/infergrade-sidecar",
-          "sidecar": true,
-          "args": [
-            "pair",
-            "--api-url",
-            {
-              "validator": "^(?:https://\\S+|http://(?:localhost|127(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}|\\[::1\\])(?::\\d+)?(?:/\\S*)?)$"
-            },
-            "--pair-code",
-            {
-              "validator": "igrp_\\S+"
-            },
-            "--label",
-            {
-              "validator": ".{1,120}"
-            }
-          ]
-        },
-        {
-          "name": "binaries/infergrade-sidecar",
-          "sidecar": true,
-          "args": ["install-runtime", "--runtime", "llama.cpp"]
-        },
-        {
-          "name": "binaries/infergrade-sidecar",
-          "sidecar": true,
           "args": ["--version"]
         },
         {
@@ -88,19 +49,6 @@
           "name": "binaries/infergrade-sidecar",
           "sidecar": true,
           "args": ["desktop-readiness"]
-        },
-        {
-          "name": "binaries/infergrade-sidecar",
-          "sidecar": true,
-          "args": [
-            "install-runtime",
-            "--runtime",
-            "llama.cpp",
-            "--runtime-id",
-            {
-              "validator": "[A-Za-z0-9._-]{1,120}"
-            }
-          ]
         },
         {
           "name": "binaries/infergrade-sidecar",
