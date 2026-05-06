@@ -857,8 +857,7 @@ pub fn native_first_run_bundle_payload(
     .take(160)
     .collect::<String>();
     let runtime_id = result.runtime_id.trim();
-    let backend_version_pinned =
-        !runtime_id.is_empty() && runtime_id != LLAMA_CPP_AUTO_RUNTIME_ID && runtime_id != "auto";
+    let backend_version_pinned = false;
     let runtime_binding_id = if runtime_id.is_empty() {
         "llama.cpp-native-first-run"
     } else {
@@ -915,7 +914,7 @@ pub fn native_first_run_bundle_payload(
             "quant_artifact_sha256": Value::Null,
             "backend_engine": "llama.cpp",
             "backend_wrapper": "infergrade_runner_engine",
-            "backend_version": if backend_version_pinned { runtime_id } else { "unverified" },
+            "backend_version": "unverified",
             "backend_execution": "native",
             "backend_flags": [],
             "tokenizer_id": Value::Null,
