@@ -9,7 +9,7 @@ The Runner owns execution truth. It resolves quantized artifacts, runs the bench
 It is responsible for:
 
 - resolving deployable model artifacts
-- executing container-backed benchmark runs locally or in cloud-hosted worker environments
+- executing native or container-backed benchmark runs locally or in cloud-hosted worker environments
 - capturing deployment telemetry and capability evidence
 - writing reproducible run bundles that can be uploaded to InferGrade Hub
 
@@ -26,6 +26,8 @@ The clearest first path is:
 7. inspect the normalized result and compare nearby quants
 
 The broader Runner architecture remains available, but the current default is intentionally narrower than a general benchmark platform.
+
+For the Desktop Runner product path, Docker is not required for your first local benchmark. Native `llama.cpp` readiness is the first onboarding gate; Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
 
 ## Decision Suite vs Reference Suite
 
@@ -70,6 +72,8 @@ InferGrade aims to benchmark the best realistic execution path on each platform,
 
 The most important implication is that Apple Silicon local benchmarking is a separate path. Dockerized local `llama.cpp` runs on macOS benchmark Docker Desktop's Linux VM and do not represent Metal performance.
 
+The desktop app should keep this split user-visible: native first-run readiness can be ready while Docker is missing, and Docker/Podman availability should unlock optional sandboxed capability lanes rather than block pairing or the first local speed-oriented run.
+
 ## Canonical Hub Handoff
 
 The current preferred hosted flow is:
@@ -80,7 +84,7 @@ The current preferred hosted flow is:
 
 Lower-level commands like `run-job`, `doctor`, `run-config`, and `upload-bundle` still exist, but they are now the manual fallback path.
 
-## Pinned Release Golden Path
+## Pinned Container Release Path
 
 For the containerized setup path, the Hub should pin one released Runner artifact set instead of assuming a repo checkout or `:local` tags.
 
@@ -189,7 +193,7 @@ docker run --rm \
   infergrade-runner-core:$(cat VERSION)-preview start --api-url http://host.docker.internal:8000
 ```
 
-For security and reproducibility, the recommended way to operate the Runner is inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. The main exception is Apple Silicon local `llama.cpp` benchmarking, where host-native execution is the correct path because that is what enables Metal acceleration.
+For security and reproducibility on container-friendly hosts, the recommended container path runs the Runner inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. The desktop first-run path is intentionally different: it should run native local benchmarks without making Docker, a globally installed CLI, or a local repo checkout part of onboarding.
 
 When that listener container talks to a Hub running on your Mac host, use `http://host.docker.internal:8000` inside the container rather than `http://localhost:8000`.
 
