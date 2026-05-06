@@ -261,8 +261,8 @@ pub fn pairing_error_detail(payload: &Value) -> Option<&str> {
         .or_else(|| payload.get("error").and_then(Value::as_str))
 }
 
-pub fn command_version(program: &str) -> Value {
-    match StdCommand::new(program).arg("--version").output() {
+fn command_probe(program: &str, args: &[&str]) -> Value {
+    match StdCommand::new(program).args(args).output() {
         Ok(output) if output.status.success() => {
             let text = String::from_utf8_lossy(if output.stdout.is_empty() {
                 &output.stderr
@@ -274,7 +274,7 @@ pub fn command_version(program: &str) -> Value {
             .next()
             .unwrap_or("")
             .to_string();
-            json!({"status": "found", "program": program, "version": text})
+            json!({"status": "found", "program": program, "output": text})
         }
         Ok(output) => json!({
             "status": "error",
@@ -286,6 +286,82 @@ pub fn command_version(program: &str) -> Value {
         }
         Err(error) => json!({"status": "error", "program": program, "detail": error.to_string()}),
     }
+}
+
+pub fn command_version(program: &str) -> Value {
+    let probed = command_probe(program, &["--version"]);
+    if probed.get("status").and_then(Value::as_str) == Some("found") {
+        json!({
+            "status": "found",
+            "program": program,
+            "version": probed.get("output").and_then(Value::as_str).unwrap_or(""),
+        })
+    } else {
+        probed
+    }
+}
+
+pub fn container_runtime_check(program: &str) -> Value {
+    let cli = command_version(program);
+    let cli_status = cli
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("error");
+    let daemon = if cli_status == "found" {
+        command_probe(program, &["info"])
+    } else {
+        json!({"status": cli_status, "program": program})
+    };
+    let daemon_status = daemon
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("error");
+    let available = cli_status == "found" && daemon_status == "found";
+    json!({
+        "provider": program,
+        "status": if available {
+            "available"
+        } else if cli_status == "found" {
+            "daemon_unreachable"
+        } else {
+            cli_status
+        },
+        "available": available,
+        "cli": cli,
+        "daemon": daemon,
+        "first_run_required": false,
+        "capability": "advanced_sandboxed_benchmarks",
+        "message": if available {
+            format!("{program} detected. Advanced sandboxed benchmarks can be enabled.")
+        } else if cli_status == "found" {
+            format!("{program} CLI detected, but the container daemon is not reachable. Native runtime setup can continue; advanced sandboxed benchmarks are disabled.")
+        } else {
+            format!("{program} not found. Native runtime setup can continue; advanced sandboxed benchmarks are disabled.")
+        },
+    })
+}
+
+pub fn container_runtime_readiness() -> Value {
+    let docker = container_runtime_check("docker");
+    let podman = container_runtime_check("podman");
+    let any_available = docker
+        .get("available")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || podman
+            .get("available")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+    json!({
+        "status": if any_available { "available" } else { "not_found" },
+        "docker_required_for_first_run": false,
+        "first_run_message": "Docker and Podman are optional advanced sandbox providers; they do not gate native first-run setup.",
+        "advanced_sandboxed_benchmarks": if any_available { "available" } else { "disabled" },
+        "runtimes": {
+            "docker": docker,
+            "podman": podman,
+        },
+    })
 }
 
 pub fn verified_runtime_download_policy() -> Value {
@@ -728,5 +804,22 @@ mod tests {
         assert_eq!(response["capabilities"]["run_token_supported"], true);
         assert!(!combined.contains("qbhr_secret_token"));
         assert!(!combined.contains("Authorization"));
+    }
+
+    #[test]
+    fn container_runtime_readiness_keeps_sandboxes_optional() {
+        let readiness = container_runtime_readiness();
+
+        assert_eq!(readiness["docker_required_for_first_run"], false);
+        assert!(readiness["runtimes"]["docker"].get("cli").is_some());
+        assert!(readiness["runtimes"]["docker"].get("daemon").is_some());
+        assert_eq!(
+            readiness["runtimes"]["docker"]["capability"],
+            "advanced_sandboxed_benchmarks"
+        );
+        assert_eq!(
+            readiness["runtimes"]["podman"]["first_run_required"],
+            false
+        );
     }
 }
