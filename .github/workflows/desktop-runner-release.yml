@@ -194,20 +194,20 @@ jobs:
         run: |
           BASE_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}"
           python3 ./scripts/write_desktop_update_manifest.py \
-            --bundle-dir apps/desktop-runner/src-tauri/target/release/bundle/macos \
+            --bundle-dir target/release/bundle/macos \
             --version "$DESKTOP_VERSION" \
             --base-url "$BASE_URL" \
             --notes "$RELEASE_NOTES" \
-            --output apps/desktop-runner/src-tauri/target/release/bundle/macos/infergrade-runner-desktop-latest.json
+            --output target/release/bundle/macos/infergrade-runner-desktop-latest.json
 
       - name: Write release checksums
         run: |
           python3 ./scripts/write_desktop_release_checksums.py \
-            --output apps/desktop-runner/src-tauri/target/release/bundle/macos/SHA256SUMS \
-            apps/desktop-runner/src-tauri/target/release/bundle/dmg/*.dmg \
-            apps/desktop-runner/src-tauri/target/release/bundle/macos/*.tar.gz \
-            apps/desktop-runner/src-tauri/target/release/bundle/macos/*.tar.gz.sig \
-            apps/desktop-runner/src-tauri/target/release/bundle/macos/infergrade-runner-desktop-latest.json
+            --output target/release/bundle/macos/SHA256SUMS \
+            target/release/bundle/dmg/*.dmg \
+            target/release/bundle/macos/*.tar.gz \
+            target/release/bundle/macos/*.tar.gz.sig \
+            target/release/bundle/macos/infergrade-runner-desktop-latest.json
 
       - name: Publish desktop release artifacts
         env:
@@ -217,11 +217,11 @@ jobs:
             gh release create "$RELEASE_TAG" --title "InferGrade Runner Desktop" --prerelease --notes "$RELEASE_NOTES"
           gh release edit "$RELEASE_TAG" --title "InferGrade Runner Desktop" --notes "$RELEASE_NOTES" --prerelease
           gh release upload "$RELEASE_TAG" \
-            apps/desktop-runner/src-tauri/target/release/bundle/dmg/*.dmg \
-            apps/desktop-runner/src-tauri/target/release/bundle/macos/*.tar.gz \
-            apps/desktop-runner/src-tauri/target/release/bundle/macos/*.tar.gz.sig \
-            apps/desktop-runner/src-tauri/target/release/bundle/macos/infergrade-runner-desktop-latest.json \
-            apps/desktop-runner/src-tauri/target/release/bundle/macos/SHA256SUMS \
+            target/release/bundle/dmg/*.dmg \
+            target/release/bundle/macos/*.tar.gz \
+            target/release/bundle/macos/*.tar.gz.sig \
+            target/release/bundle/macos/infergrade-runner-desktop-latest.json \
+            target/release/bundle/macos/SHA256SUMS \
             --clobber
 
   windows-package-smoke:
@@ -267,9 +267,9 @@ jobs:
         shell: bash
         run: |
           python3 ./scripts/write_desktop_release_checksums.py \
-            --output apps/desktop-runner/src-tauri/target/release/bundle/windows/SHA256SUMS \
-            apps/desktop-runner/src-tauri/target/release/bundle/nsis/*.exe \
-            apps/desktop-runner/src-tauri/target/release/bundle/msi/*.msi
+            --output target/release/bundle/windows/SHA256SUMS \
+            target/release/bundle/nsis/*.exe \
+            target/release/bundle/msi/*.msi
 
       - name: Upload Windows package artifacts
         uses: actions/upload-artifact@v4
@@ -277,9 +277,9 @@ jobs:
           name: infergrade-runner-desktop-windows-${{ github.sha }}
           if-no-files-found: error
           path: |
-            apps/desktop-runner/src-tauri/target/release/bundle/nsis/*.exe
-            apps/desktop-runner/src-tauri/target/release/bundle/msi/*.msi
-            apps/desktop-runner/src-tauri/target/release/bundle/windows/SHA256SUMS
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/msi/*.msi
+            target/release/bundle/windows/SHA256SUMS
 
   linux-package-smoke:
     name: Build Linux desktop packages
@@ -329,9 +329,9 @@ jobs:
       - name: Write Linux package checksums
         run: |
           python3 ./scripts/write_desktop_release_checksums.py \
-            --output apps/desktop-runner/src-tauri/target/release/bundle/linux/SHA256SUMS \
-            apps/desktop-runner/src-tauri/target/release/bundle/deb/*.deb \
-            apps/desktop-runner/src-tauri/target/release/bundle/appimage/*.AppImage
+            --output target/release/bundle/linux/SHA256SUMS \
+            target/release/bundle/deb/*.deb \
+            target/release/bundle/appimage/*.AppImage
 
       - name: Upload Linux package artifacts
         uses: actions/upload-artifact@v4
@@ -339,6 +339,6 @@ jobs:
           name: infergrade-runner-desktop-linux-${{ github.sha }}
           if-no-files-found: error
           path: |
-            apps/desktop-runner/src-tauri/target/release/bundle/deb/*.deb
-            apps/desktop-runner/src-tauri/target/release/bundle/appimage/*.AppImage
-            apps/desktop-runner/src-tauri/target/release/bundle/linux/SHA256SUMS
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/linux/SHA256SUMS

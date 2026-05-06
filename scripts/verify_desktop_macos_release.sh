@@ -2,9 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAURI_DIR="$ROOT_DIR/apps/desktop-runner/src-tauri"
-DMG_DIR="$TAURI_DIR/target/release/bundle/dmg"
-MACOS_BUNDLE_DIR="$TAURI_DIR/target/release/bundle/macos"
+DMG_DIR="$ROOT_DIR/target/release/bundle/dmg"
+MACOS_BUNDLE_DIR="$ROOT_DIR/target/release/bundle/macos"
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "macOS release verification must run on macOS." >&2
