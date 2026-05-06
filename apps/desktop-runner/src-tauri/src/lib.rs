@@ -179,6 +179,14 @@ fn sanitized_runner_profile(profile: &Value) -> Value {
     })
 }
 
+fn ui_pairing_response(mut body: Value, profile: &Value, profile_path: PathBuf) -> Value {
+    body["runner_profile"] = sanitized_runner_profile(profile);
+    body["profile_path"] = Value::String(profile_path.display().to_string());
+    body["next_action"] = Value::String("start_runner".to_string());
+    body["commands"] = json!({ "start": "infergrade start" });
+    body
+}
+
 fn profile_string(profile: Option<&Value>, key: &str) -> Option<String> {
     profile
         .and_then(|value| value.get(key))
@@ -577,7 +585,7 @@ async fn redeem_runner_pairing(
             status.as_u16()
         ));
     }
-    let mut body = parsed.ok_or_else(|| "Hub pairing response was not valid JSON.".to_string())?;
+    let body = parsed.ok_or_else(|| "Hub pairing response was not valid JSON.".to_string())?;
     let profile = body
         .get("runner_profile")
         .cloned()
@@ -588,10 +596,7 @@ async fn redeem_runner_pairing(
         .ok_or_else(|| "Hub pairing response did not include a runner token.".to_string())?;
     let profile_path = save_runner_profile(&profile)?;
     save_runner_token_value(access_token)?;
-    body["profile_path"] = Value::String(profile_path.display().to_string());
-    body["next_action"] = Value::String("start_runner".to_string());
-    body["commands"] = json!({ "start": "infergrade start" });
-    Ok(body)
+    Ok(ui_pairing_response(body, &profile, profile_path))
 }
 
 fn pairing_error_detail(payload: &Value) -> Option<&str> {
@@ -758,6 +763,30 @@ mod tests {
         assert_eq!(sanitized["runner_id"], "runner_123");
         assert_eq!(sanitized["has_access_token"], true);
         assert_eq!(sanitized.get("access_token"), None);
+    }
+
+    #[test]
+    fn pairing_response_does_not_return_runner_token_to_ui() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "access_token": "qbhr_secret",
+            "runner_id": "runner_123",
+            "label": "Test runner",
+        });
+        let response = ui_pairing_response(
+            json!({
+                "runner_profile": profile.clone(),
+                "other": "unchanged",
+            }),
+            &profile,
+            PathBuf::from("/tmp/infergrade/runner_profile.json"),
+        );
+
+        assert_eq!(response["runner_profile"]["runner_id"], "runner_123");
+        assert_eq!(response["runner_profile"]["has_access_token"], true);
+        assert_eq!(response["other"], "unchanged");
+        assert!(!response.to_string().contains("qbhr_secret"));
+        assert_eq!(response["runner_profile"].get("access_token"), None);
     }
 
     #[test]
