@@ -16,7 +16,10 @@ pub use benchmark::{
 };
 pub use errors::RunnerError;
 pub use events::{RunnerEvent, RuntimeInfo};
-pub use hub_client::{build_hub_json_request, hub_api_url, HubJsonRequest, HubMethod};
+pub use hub_client::{
+    build_hub_json_request, build_run_bundle_upload_request, build_run_completion_request,
+    hub_api_url, HubJsonRequest, HubMethod,
+};
 pub use pairing::{
     build_pairing_redeem_request, complete_pairing_response, pairing_status_payload,
     reset_pairing_state, PairingCompletion, PairingInput, PairingRedeemRequest,
