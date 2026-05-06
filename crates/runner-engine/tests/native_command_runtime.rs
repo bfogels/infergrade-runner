@@ -1,4 +1,6 @@
-use infergrade_runner_engine::{run_native_first_run, NativeCommandRuntime, NativeFirstRunInput};
+use infergrade_runner_engine::{
+    run_native_first_run, LlamaCppRuntime, NativeCommandRuntime, NativeFirstRunInput,
+};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -110,6 +112,100 @@ fn native_command_runtime_drains_chatty_success_before_metric_envelope() {
 
     let _ = std::fs::remove_file(runtime_path);
     let _ = std::fs::remove_file(model_path);
+}
+
+#[test]
+fn llama_cpp_runtime_executes_cli_and_parses_timings() {
+    let extension = if cfg!(windows) { "cmd" } else { "sh" };
+    let runtime_path = temp_path("llama-cli-ok", extension);
+    let model_path = temp_path("llama-model", "gguf");
+    std::fs::write(&model_path, b"fake model").expect("model file");
+
+    if cfg!(windows) {
+        write_executable(
+            &runtime_path,
+            "@echo off\r\necho hello from llama\r\necho llama_print_timings:        load time =     617.57 ms 1>&2\r\necho llama_print_timings:        eval time =    1285.25 ms /    9 runs   (40.16 ms per token, 24.90 tokens per second) 1>&2\r\necho llama_print_timings:       total time =    1901.48 ms /    12 tokens 1>&2\r\n",
+        );
+    } else {
+        write_executable(
+            &runtime_path,
+            "#!/bin/sh\necho 'hello from llama'\necho 'llama_print_timings:        load time =     617.57 ms' >&2\necho 'llama_print_timings:        eval time =    1285.25 ms /    9 runs   (40.16 ms per token, 24.90 tokens per second)' >&2\necho 'llama_print_timings:       total time =    1901.48 ms /    12 tokens' >&2\n",
+        );
+    }
+
+    let result = run_native_first_run(
+        NativeFirstRunInput {
+            model_path: model_path.clone(),
+            runtime_hint: Some("auto".to_string()),
+            prompt: "hello".to_string(),
+            max_tokens: 9,
+            upload: false,
+        },
+        &LlamaCppRuntime::new(runtime_path.clone(), "llama.cpp-test")
+            .with_timeout(Duration::from_secs(5)),
+    )
+    .expect("llama.cpp runtime result");
+
+    assert_eq!(result.runtime_id, "llama.cpp-test");
+    assert_eq!(result.metrics.load_time_ms, 618);
+    assert_eq!(result.metrics.generated_tokens, 9);
+    assert_eq!(result.metrics.decode_tokens_per_second, 24.9);
+    assert!(result.metrics.time_to_first_token_ms <= result.metrics.load_time_ms);
+    assert!(result.stdout_preview.contains("hello from llama"));
+
+    let _ = std::fs::remove_file(runtime_path);
+    let _ = std::fs::remove_file(model_path);
+}
+
+#[test]
+fn llama_cpp_runtime_disables_prompt_echo_before_measuring_ttft() {
+    let extension = if cfg!(windows) { "cmd" } else { "sh" };
+    let runtime_path = temp_path("llama-cli-no-prompt", extension);
+    let model_path = temp_path("llama-model-no-prompt", "gguf");
+    let args_path = temp_path("llama-args-no-prompt", "txt");
+    std::fs::write(&model_path, b"fake model").expect("model file");
+
+    if cfg!(windows) {
+        write_executable(
+            &runtime_path,
+            &format!(
+                "@echo off\r\necho %* > \"{}\"\r\ntimeout /t 1 /nobreak > nul\r\necho generated token\r\necho llama_print_timings:        load time =     1500.00 ms 1>&2\r\necho llama_print_timings:        eval time =    1000.00 ms /    4 runs   (250.00 ms per token, 4.00 tokens per second) 1>&2\r\n",
+                args_path.display()
+            ),
+        );
+    } else {
+        write_executable(
+            &runtime_path,
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" > '{}'\nsleep 1\necho 'generated token'\necho 'llama_print_timings:        load time =     1500.00 ms' >&2\necho 'llama_print_timings:        eval time =    1000.00 ms /    4 runs   (250.00 ms per token, 4.00 tokens per second)' >&2\n",
+                args_path.display()
+            ),
+        );
+    }
+
+    let result = run_native_first_run(
+        NativeFirstRunInput {
+            model_path: model_path.clone(),
+            runtime_hint: Some("auto".to_string()),
+            prompt: "prompt that must not be echoed".to_string(),
+            max_tokens: 4,
+            upload: false,
+        },
+        &LlamaCppRuntime::new(runtime_path.clone(), "llama.cpp-test")
+            .with_timeout(Duration::from_secs(5)),
+    )
+    .expect("llama.cpp no-display-prompt result");
+
+    let args = std::fs::read_to_string(&args_path).expect("runtime args");
+    assert!(args.contains("--no-display-prompt"));
+    assert!(!result
+        .stdout_preview
+        .contains("prompt that must not be echoed"));
+    assert!(result.metrics.time_to_first_token_ms >= 900);
+
+    let _ = std::fs::remove_file(runtime_path);
+    let _ = std::fs::remove_file(model_path);
+    let _ = std::fs::remove_file(args_path);
 }
 
 #[test]
