@@ -109,12 +109,15 @@ def sync_versions(root: pathlib.Path = ROOT, dry_run: bool = False) -> list[str]
             f'version = "{version}"',
         ),
         "apps/desktop-runner/src-tauri/Cargo.lock": (
-            r'(name = "infergrade_desktop_runner"\nversion = )"[^"]+"',
+            r'(name = "(?:infergrade_desktop_runner|infergrade_runner_engine)"\nversion = )"[^"]+"',
             rf'\1"{version}"',
+            2,
         ),
     }
-    for path, (pattern, replacement) in text_replacements.items():
-        if replace_text(root, path, pattern, replacement, dry_run=dry_run):
+    for path, replacement_args in text_replacements.items():
+        pattern, replacement, *rest = replacement_args
+        count = rest[0] if rest else 1
+        if replace_text(root, path, pattern, replacement, dry_run=dry_run, count=count):
             changed.append(path)
 
     json_replacements = {

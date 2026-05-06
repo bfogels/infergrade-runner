@@ -93,6 +93,7 @@ class ReleaseCiTests(unittest.TestCase):
             )
             (root / "apps/desktop-runner/src-tauri/Cargo.lock").write_text(
                 '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
+                '[[package]]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n'
                 '[[package]]\nname = "schannel"\nversion = "0.1.29"\n',
                 encoding="utf-8",
             )
@@ -116,6 +117,7 @@ class ReleaseCiTests(unittest.TestCase):
             self.assertIn('version = "1.2.3"', (root / "apps/desktop-runner/src-tauri/Cargo.toml").read_text())
             cargo_lock = (root / "apps/desktop-runner/src-tauri/Cargo.lock").read_text()
             self.assertIn('name = "infergrade_desktop_runner"\nversion = "1.2.3"', cargo_lock)
+            self.assertIn('name = "infergrade_runner_engine"\nversion = "1.2.3"', cargo_lock)
             self.assertIn('name = "schannel"\nversion = "0.1.29"', cargo_lock)
 
     def test_sync_versions_fails_instead_of_rewriting_dependency_lock_versions(self):
@@ -152,7 +154,8 @@ class ReleaseCiTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "apps/desktop-runner/src-tauri/Cargo.lock").write_text(
-                '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n',
+                '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
+                '[[package]]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
                 encoding="utf-8",
             )
 
@@ -191,7 +194,8 @@ class ReleaseCiTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "apps/desktop-runner/src-tauri/Cargo.lock").write_text(
-                '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n',
+                '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
+                '[[package]]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
                 encoding="utf-8",
             )
 
