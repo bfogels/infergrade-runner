@@ -5,9 +5,10 @@ use infergrade_runner_engine::{
     pairing_error_detail, pairing_status_payload, preferred_execution_mode, profile_string,
     redact_listener_text, redact_worker_response, reset_pairing_state,
     run_native_first_run_with_events as engine_run_native_first_run_with_events,
-    runner_id_from_profile, selected_llama_cpp_runtime_path, worker_request_url, HubMethod,
-    LlamaCppRuntime, NativeFirstRunInput, PairingInput, ProfileStore, RunnerError, RunnerEvent,
-    RunnerProfile, RunnerProtocolPingInput, RunnerProtocolPreviewInput, TokenStore,
+    runner_id_from_profile, selected_llama_cpp_runtime_path, worker_request_url,
+    write_native_first_run_artifact, HubMethod, LlamaCppRuntime, NativeFirstRunInput, PairingInput,
+    ProfileStore, RunnerError, RunnerEvent, RunnerProfile, RunnerProtocolPingInput,
+    RunnerProtocolPreviewInput, TokenStore,
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
@@ -130,6 +131,12 @@ fn runner_config_dir() -> Result<PathBuf, String> {
 
 fn runner_profile_path() -> Result<PathBuf, String> {
     Ok(runner_config_dir()?.join("runner_profile.json"))
+}
+
+fn desktop_first_run_artifact_dir() -> Result<PathBuf, String> {
+    Ok(runner_config_dir()?
+        .join("first-run-artifacts")
+        .join("native-first-run"))
 }
 
 fn selected_llama_cpp_runtime() -> Value {
@@ -527,13 +534,22 @@ fn native_first_run_input(model_path: &str) -> NativeFirstRunInput {
 fn desktop_native_first_run_response(
     input: NativeFirstRunInput,
     runtime: &dyn infergrade_runner_engine::NativeFirstRunRuntime,
+    artifact_dir: &PathBuf,
     mut emit: impl FnMut(RunnerEvent),
 ) -> Result<Value, String> {
     let result = engine_run_native_first_run_with_events(input, runtime, &mut emit)
         .map_err(|error| error.message().to_string())?;
-    serde_json::to_value(result)
-        .map(|result| json!({"status": "completed", "uploaded": false, "result": result}))
-        .map_err(|error| format!("Could not serialize native first-run result: {error}"))
+    let mut payload = json!({
+        "status": "completed",
+        "uploaded": false,
+        "result": result,
+    });
+    let artifact = write_native_first_run_artifact(artifact_dir, &payload)
+        .map_err(|error| error.message().to_string())?;
+    payload["artifact"] = serde_json::to_value(artifact).map_err(|error| {
+        format!("Could not serialize native first-run artifact metadata: {error}")
+    })?;
+    Ok(payload)
 }
 
 #[tauri::command]
@@ -547,6 +563,7 @@ async fn run_desktop_native_first_run(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
+    let artifact_dir = desktop_first_run_artifact_dir()?;
     let event_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         emit_first_run_event(
@@ -570,7 +587,7 @@ async fn run_desktop_native_first_run(
                 return Err(message);
             }
         };
-        desktop_native_first_run_response(input, &runtime, |event| {
+        desktop_native_first_run_response(input, &runtime, &artifact_dir, |event| {
             emit_first_run_event(&event_app, event);
         })
     })
@@ -743,19 +760,41 @@ mod tests {
             max_tokens: 8,
             upload: false,
         };
+        let artifact_dir = env::temp_dir().join(format!(
+            "infergrade-desktop-first-run-artifact-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&artifact_dir);
         let mut events = Vec::new();
 
-        let response =
-            desktop_native_first_run_response(input, &DesktopFirstRunFakeRuntime, |event| {
+        let response = desktop_native_first_run_response(
+            input,
+            &DesktopFirstRunFakeRuntime,
+            &artifact_dir,
+            |event| {
                 events.push(event);
-            })
-            .expect("desktop response");
+            },
+        )
+        .expect("desktop response");
 
         assert_eq!(response["status"], "completed");
         assert_eq!(response["uploaded"], false);
         assert_eq!(response["result"]["uploaded"], false);
         assert_eq!(response["result"]["evidence_kind"], "native_first_run");
         assert_eq!(response["result"]["runtime_id"], "llama.cpp-desktop-test");
+        assert_eq!(response["artifact"]["uploaded"], false);
+        assert_eq!(
+            response["artifact"]["format"],
+            "infergrade.native_first_run.v1"
+        );
+        let artifact_path = response["artifact"]["path"]
+            .as_str()
+            .expect("artifact path");
+        let artifact_text = fs::read_to_string(artifact_path).expect("artifact text");
+        let artifact_json: Value = serde_json::from_str(&artifact_text).expect("artifact JSON");
+        assert_eq!(artifact_json["result"]["evidence_kind"], "native_first_run");
+        assert_eq!(artifact_json["result"]["uploaded"], false);
+        assert_eq!(artifact_json.get("artifact"), None);
         assert!(events.iter().any(|event| matches!(
             event,
             RunnerEvent::BenchmarkStarted { benchmark_id } if benchmark_id == "native_first_run"
@@ -766,6 +805,7 @@ mod tests {
         )));
 
         let _ = fs::remove_file(model_path);
+        let _ = fs::remove_dir_all(artifact_dir);
     }
 
     #[test]
