@@ -54,3 +54,29 @@ test("desktop runtime panel shows local readiness without owning model selection
   assert.ok(js.includes("renderLocalReadinessChecklist"));
   assert.ok(js.includes("await stopRunner()"));
 });
+
+test("desktop runtime panel makes native first-run readiness primary and Docker optional", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const capability = JSON.parse(
+    readFileSync(new URL("../src-tauri/capabilities/default.json", import.meta.url), "utf8")
+  );
+  const permissions = capability.permissions.flatMap((permission) => permission.allow || []);
+  const shapes = permissions.map((entry) => JSON.stringify(entry.args || []));
+
+  assert.ok(html.includes("Native benchmark suite"));
+  assert.ok(html.includes("Docker is not required for your first local benchmark."));
+  assert.ok(html.includes("data-native-suite-status"));
+  assert.ok(html.includes("data-container-runtime-status"));
+  assert.ok(js.includes("desktop-readiness"));
+  assert.ok(js.includes("renderDesktopReadiness"));
+  assert.ok(shapes.includes(JSON.stringify(["desktop-readiness"])));
+});
+
+test("desktop readiness copy does not overclaim when native runtime is missing", () => {
+  const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+
+  assert.ok(js.includes("runtime === \"available\""));
+  assert.ok(js.includes("Select a native runtime for first-run benchmarks"));
+  assert.equal(js.includes("Docker not found. Native benchmarks are available; advanced sandboxed benchmarks are disabled.\";"), false);
+});

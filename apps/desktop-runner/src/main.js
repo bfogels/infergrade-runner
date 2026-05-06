@@ -37,9 +37,11 @@ const updateAvailable = document.querySelector("[data-update-available]");
 const updateDetail = document.querySelector("[data-update-detail]");
 const runnerCliVersion = document.querySelector("[data-runner-cli-version]");
 const runtimeRunnerVersion = document.querySelector("[data-runtime-runner-version]");
+const nativeSuiteStatus = document.querySelector("[data-native-suite-status]");
 const hubConnectionStatus = document.querySelector("[data-hub-connection-status]");
 const pairingReadinessStatus = document.querySelector("[data-pairing-readiness-status]");
 const runtimeLlamaStatus = document.querySelector("[data-runtime-llama-status]");
+const containerRuntimeStatus = document.querySelector("[data-container-runtime-status]");
 const modelPathStatus = document.querySelector("[data-model-path-status]");
 const statusText = document.querySelector("[data-runner-status]");
 const statusDot = document.querySelector("[data-status-dot]");
@@ -54,6 +56,8 @@ let previewToken = "";
 let pendingUpdate = null;
 let lastNormalizedApiUrl = "https://api.infergrade.com/";
 let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp jobs.";
+let nativeSuiteReadiness = "Docker is not required for your first local benchmark.";
+let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxed benchmarks.";
 let savedTokenAvailable = false;
 
 function systemTheme() {
@@ -237,6 +241,9 @@ function renderRunnerCliVersion(label) {
 }
 
 function renderLocalReadinessChecklist() {
+  if (nativeSuiteStatus) {
+    nativeSuiteStatus.textContent = nativeSuiteReadiness;
+  }
   if (hubConnectionStatus) {
     hubConnectionStatus.textContent = `Hub API: ${lastNormalizedApiUrl}`;
   }
@@ -252,9 +259,42 @@ function renderLocalReadinessChecklist() {
   if (runtimeLlamaStatus) {
     runtimeLlamaStatus.textContent = llamaRuntimeReadiness;
   }
+  if (containerRuntimeStatus) {
+    containerRuntimeStatus.textContent = containerRuntimeReadiness;
+  }
   if (modelPathStatus) {
     modelPathStatus.textContent = "Chosen in Hub run plans; Desktop validates runtime and listener readiness.";
   }
+}
+
+function renderDesktopReadiness(payload = {}) {
+  if (!payload.status) {
+    nativeSuiteReadiness = "Docker is not required for your first local benchmark.";
+    containerRuntimeReadiness = "Open the desktop app to check Docker/Podman. Native benchmarks do not require them.";
+    renderLocalReadinessChecklist();
+    return;
+  }
+  nativeSuiteReadiness = payload.native_benchmark_message || "Docker is not required for your first local benchmark.";
+  const runtime = payload.llama_cpp_runtime || "";
+  const runtimeMessage = payload.llama_cpp_message || "";
+  if (runtime === "available") {
+    llamaRuntimeReadiness = runtimeMessage || "Native llama.cpp runtime is available.";
+  } else if (runtime === "missing") {
+    llamaRuntimeReadiness = runtimeMessage || "Select or install a native llama.cpp runtime before the first local benchmark.";
+  }
+  const docker = payload.docker || {};
+  const podman = payload.podman || {};
+  if (docker.status === "found") {
+    containerRuntimeReadiness = "Docker detected. Advanced sandboxed benchmarks are available.";
+  } else if (podman.status === "found") {
+    containerRuntimeReadiness = "Podman detected. Advanced sandboxed benchmark support may be available.";
+  } else {
+    containerRuntimeReadiness =
+      runtime === "available"
+        ? "Docker not found. Native benchmarks are available; advanced sandboxed benchmarks are disabled."
+        : "Docker not found. Select a native runtime for first-run benchmarks; advanced sandboxed benchmarks are disabled.";
+  }
+  renderLocalReadinessChecklist();
 }
 
 async function refreshRunnerCliVersion() {
@@ -302,6 +342,27 @@ async function checkRunnerStartupSelfTest() {
       runtimeRunnerVersion.textContent = "Runner core unavailable. Run startup self-test for details.";
     }
     appendLog(`Startup self-test failed: ${error.message || error}`);
+  }
+}
+
+async function checkDesktopReadiness() {
+  const Command = await loadTauriShell();
+  if (!Command) {
+    renderDesktopReadiness({});
+    return;
+  }
+  try {
+    const output = await Command.sidecar(SIDECAR_NAME, ["desktop-readiness"]).execute();
+    if (output.code !== 0) {
+      throw new Error(output.stderr || output.stdout || `readiness command exited with code ${output.code}`);
+    }
+    const payload = JSON.parse(output.stdout || "{}");
+    renderDesktopReadiness(payload);
+    appendLog(`Desktop readiness: ${output.stdout.trim()}`);
+  } catch (error) {
+    containerRuntimeReadiness = "Could not check optional Docker/Podman support. Native benchmark setup can continue.";
+    appendLog(`Desktop readiness check failed: ${error.message || error}`);
+    renderLocalReadinessChecklist();
   }
 }
 
@@ -779,6 +840,7 @@ initTheme();
 renderReleaseStatus().catch((error) => appendLog(`Could not render release status: ${error.message || error}`));
 refreshRunnerCliVersion().catch((error) => appendLog(`Could not check Runner CLI version: ${error.message || error}`));
 checkRunnerStartupSelfTest().catch((error) => appendLog(`Could not run startup self-test: ${error.message || error}`));
+checkDesktopReadiness().catch((error) => appendLog(`Could not check desktop readiness: ${error.message || error}`));
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");
 renderLocalReadinessChecklist();

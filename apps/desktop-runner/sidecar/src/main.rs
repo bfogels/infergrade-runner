@@ -135,6 +135,11 @@ fn command_exists(program: &str) -> bool {
     matches!(run_command(program, &args, None), Ok(status) if status.success())
 }
 
+fn command_exists_quiet(program: &str, args: &[&str]) -> bool {
+    let args = args.iter().map(OsString::from).collect::<Vec<_>>();
+    matches!(run_command_output(program, &args, None), Ok(output) if output.status.success())
+}
+
 fn json_escape(value: &str) -> String {
     value
         .replace('\\', "\\\\")
@@ -185,6 +190,110 @@ fn verify_repo_python_invocation(repo_root: &Path) -> Result<String, String> {
             .map(|error| error.to_string())
             .unwrap_or_else(|| "no interpreter candidates were tried".to_string())
     ))
+}
+
+fn desktop_hardware_hint() -> (&'static str, &'static str) {
+    if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        return ("apple_silicon", "metal");
+    }
+    if command_exists_quiet("nvidia-smi", &["--query-gpu=name", "--format=csv,noheader"]) {
+        return ("nvidia_gpu", "cuda");
+    }
+    if command_exists_quiet("rocm-smi", &["--showproductname"]) {
+        return ("amd_gpu", "rocm");
+    }
+    ("cpu_only", "cpu")
+}
+
+fn llama_runtime_status(accelerator_api: &str) -> (&'static str, &'static str, &'static str) {
+    let cli = command_exists_quiet("llama-cli", &["--version"]);
+    let server = command_exists_quiet("llama-server", &["--version"]);
+    if cli && server {
+        return (
+            "available",
+            match accelerator_api {
+                "metal" => "llama.cpp detected. Metal should be used when this build supports it.",
+                "cuda" => "llama.cpp detected. CUDA runtime support depends on the selected build.",
+                "rocm" => "llama.cpp detected. AMD runtime support depends on the selected build.",
+                _ => "llama.cpp detected. CPU/Vulkan fallback may be available depending on the selected build.",
+            },
+            "ready",
+        );
+    }
+    (
+        "missing",
+        "No app-managed or selected llama.cpp runtime is available yet.",
+        "blocked",
+    )
+}
+
+fn optional_container_status(program: &str) -> (&'static str, String) {
+    if command_exists_quiet(program, &["--version"]) {
+        (
+            "found",
+            format!("{program} detected; advanced sandboxed benchmarks can be enabled."),
+        )
+    } else {
+        (
+            "not_found",
+            format!("{program} not found; advanced sandboxed benchmarks are disabled."),
+        )
+    }
+}
+
+fn native_suite_status(first_run: &str) -> (&'static str, &'static str) {
+    if first_run == "ready" {
+        (
+            "ready",
+            "Native benchmark suite is ready. Docker is not required for your first local benchmark.",
+        )
+    } else {
+        (
+            "setup_needed",
+            "Native benchmark suite is available after selecting a local llama.cpp runtime. Docker is not required.",
+        )
+    }
+}
+
+fn desktop_readiness() -> String {
+    let (hardware_class, accelerator_api) = desktop_hardware_hint();
+    let (runtime_status, runtime_message, first_run) = llama_runtime_status(accelerator_api);
+    let (native_suite, native_message) = native_suite_status(first_run);
+    let (docker_status, docker_message) = optional_container_status("docker");
+    let (podman_status, podman_message) = optional_container_status("podman");
+    format!(
+        concat!(
+            "{{",
+            "\"status\":\"ok\",",
+            "\"hardware_class\":\"{}\",",
+            "\"accelerator_api\":\"{}\",",
+            "\"native_benchmark_suite\":\"{}\",",
+            "\"native_benchmark_message\":\"{}\",",
+            "\"llama_cpp_runtime\":\"{}\",",
+            "\"llama_cpp_message\":\"{}\",",
+            "\"first_run\":\"{}\",",
+            "\"first_run_message\":\"{}\",",
+            "\"docker\":{{\"status\":\"{}\",\"message\":\"{}\"}},",
+            "\"podman\":{{\"status\":\"{}\",\"message\":\"{}\"}}",
+            "}}"
+        ),
+        json_escape(hardware_class),
+        json_escape(accelerator_api),
+        json_escape(native_suite),
+        json_escape(native_message),
+        json_escape(runtime_status),
+        json_escape(runtime_message),
+        json_escape(first_run),
+        if first_run == "ready" {
+            "Native first-run benchmark is ready."
+        } else {
+            "Select or install a native llama.cpp runtime before the first local benchmark."
+        },
+        json_escape(docker_status),
+        json_escape(&docker_message),
+        json_escape(podman_status),
+        json_escape(&podman_message),
+    )
 }
 
 fn desktop_self_test() -> Result<String, String> {
@@ -251,6 +360,10 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+    if args == [OsString::from("desktop-readiness")] {
+        println!("{}", desktop_readiness());
+        std::process::exit(0);
     }
 
     if let Some(repo_root) = fallback_repo_root() {
@@ -373,5 +486,22 @@ mod tests {
 
         assert!(payload.contains("\"runner_core\":\"bundled_or_repo\""));
         assert!(payload.contains("\"invocation\":\"ok\""));
+    }
+
+    #[test]
+    fn desktop_readiness_reports_native_first_and_optional_containers() {
+        let payload = desktop_readiness();
+
+        assert!(payload.contains("\"native_benchmark_suite\""));
+        assert!(payload.contains("\"first_run\""));
+        assert!(payload.contains("\"docker\""));
+        assert!(payload.contains("Docker is not required"));
+        assert!(payload.contains("\"podman\""));
+    }
+
+    #[test]
+    fn native_suite_status_requires_first_run_runtime_readiness() {
+        assert_eq!(native_suite_status("ready").0, "ready");
+        assert_eq!(native_suite_status("blocked").0, "setup_needed");
     }
 }
