@@ -4,12 +4,12 @@ use infergrade_runner_engine::{
 };
 use serde_json::{json, Value};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 fn print_help() {
     println!(
-        "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --no-upload --dry-run\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path>\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration."
+        "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration."
     );
 }
 
@@ -89,6 +89,17 @@ impl NativeFirstRunRuntime for DryRunRuntime {
     }
 }
 
+fn write_first_run_artifact(output_dir: &Path, payload: &Value) -> Result<String, String> {
+    std::fs::create_dir_all(output_dir)
+        .map_err(|error| format!("could not create output directory: {error}"))?;
+    let artifact_path = output_dir.join("native-first-run-result.json");
+    let rendered = serde_json::to_string_pretty(payload)
+        .map_err(|error| format!("could not render first-run artifact: {error}"))?;
+    std::fs::write(&artifact_path, rendered)
+        .map_err(|error| format!("could not write first-run artifact: {error}"))?;
+    Ok(artifact_path.display().to_string())
+}
+
 fn command_first_run(args: &[String]) -> Result<Value, String> {
     let mut model_path: Option<PathBuf> = None;
     let mut runtime_hint = Some("auto".to_string());
@@ -97,6 +108,7 @@ fn command_first_run(args: &[String]) -> Result<Value, String> {
     let mut dry_run = false;
     let mut no_upload = false;
     let mut runtime_command: Option<PathBuf> = None;
+    let mut output_dir: Option<PathBuf> = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -136,6 +148,13 @@ fn command_first_run(args: &[String]) -> Result<Value, String> {
                     Some(PathBuf::from(args.get(index).ok_or_else(|| {
                         "--runtime-command requires a path".to_string()
                     })?));
+            }
+            "--output-dir" => {
+                index += 1;
+                output_dir = Some(PathBuf::from(
+                    args.get(index)
+                        .ok_or_else(|| "--output-dir requires a path".to_string())?,
+                ));
             }
             "--dry-run" => dry_run = true,
             "--no-upload" => no_upload = true,
@@ -183,13 +202,21 @@ fn command_first_run(args: &[String]) -> Result<Value, String> {
             run_native_first_run(input, &DryRunRuntime).map_err(|error| error.to_string())?,
         )
     };
-    serde_json::to_value(json!({
+    let mut payload = json!({
         "mode": mode,
         "execution": execution,
         "message": message,
         "result": result,
-    }))
-    .map_err(|error| error.to_string())
+    });
+    if let Some(output_dir) = output_dir {
+        let artifact_path = write_first_run_artifact(&output_dir, &payload)?;
+        payload["artifact"] = json!({
+            "path": artifact_path,
+            "format": "infergrade.native_first_run.v1",
+            "uploaded": false,
+        });
+    }
+    Ok(payload)
 }
 
 fn run(args: &[String]) -> Result<Option<Value>, String> {
@@ -348,5 +375,46 @@ mod tests {
 
         let _ = std::fs::remove_file(model_path);
         let _ = std::fs::remove_file(runtime_path);
+    }
+
+    #[test]
+    fn first_run_output_dir_writes_local_no_upload_artifact() {
+        let model_path = env::temp_dir().join(format!(
+            "infergrade-runner-cli-artifact-model-{}.gguf",
+            std::process::id()
+        ));
+        let output_dir = env::temp_dir().join(format!(
+            "infergrade-runner-cli-artifact-dir-{}",
+            std::process::id()
+        ));
+        std::fs::write(&model_path, b"fake gguf path validation only").expect("model file");
+        let _ = std::fs::remove_dir_all(&output_dir);
+
+        let output = command_first_run(&[
+            "--model".to_string(),
+            model_path.display().to_string(),
+            "--runtime".to_string(),
+            "auto".to_string(),
+            "--no-upload".to_string(),
+            "--dry-run".to_string(),
+            "--output-dir".to_string(),
+            output_dir.display().to_string(),
+        ])
+        .expect("first-run artifact output");
+
+        assert_eq!(output["artifact"]["uploaded"], false);
+        assert_eq!(
+            output["artifact"]["format"],
+            "infergrade.native_first_run.v1"
+        );
+        let artifact_path = output["artifact"]["path"].as_str().expect("artifact path");
+        let artifact = std::fs::read_to_string(artifact_path).expect("artifact JSON");
+        let artifact_json: Value = serde_json::from_str(&artifact).expect("artifact parses");
+        assert_eq!(artifact_json["mode"], "dry_run");
+        assert_eq!(artifact_json["result"]["uploaded"], false);
+        assert_eq!(artifact_json.get("artifact"), None);
+
+        let _ = std::fs::remove_file(model_path);
+        let _ = std::fs::remove_dir_all(output_dir);
     }
 }
