@@ -32,6 +32,10 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(js.includes('invoke("reset_runner_pairing"'));
   assert.ok(js.includes('invoke("runner_pairing_status"'));
   assert.ok(js.includes('invoke("listener_start_plan"'));
+  assert.ok(js.includes('invoke("start_runner_listener"'));
+  assert.ok(js.includes('invoke("stop_runner_listener"'));
+  assert.ok(js.includes('listen("runner-listener-event"'));
+  assert.equal(js.includes('Command.sidecar(SIDECAR_NAME, ["start"'), false);
   assert.equal(js.includes('invoke("load_runner_token"'), false);
   assert.ok(js.includes("Runner profile and OS token saved"));
   assert.ok(js.includes("Runner profile is saved, but the token is unavailable. Pair again or reset pairing."));
@@ -40,7 +44,10 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(rust.includes("fn reset_runner_pairing"));
   assert.ok(rust.includes("fn runner_pairing_status"));
   assert.ok(rust.includes("fn listener_start_plan"));
-  assert.equal(rust.includes("fn load_runner_token"), false);
+  assert.ok(rust.includes("fn start_runner_listener"));
+  assert.ok(rust.includes("fn stop_runner_listener"));
+  assert.ok(rust.includes("runner-listener-event"));
+  assert.equal(rust.includes("fn load_runner_token("), false);
   assert.ok(rust.includes("save_runner_profile"));
   assert.ok(rust.includes("clear_runner_profile"));
   assert.ok(rust.includes("load_runner_profile"));

@@ -5,12 +5,23 @@ use std::env;
 use std::fs;
 use std::net::IpAddr;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::Command as StdCommand;
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_shell::{
+    process::{CommandChild, CommandEvent},
+    ShellExt,
+};
 
 const KEYRING_SERVICE: &str = "com.infergrade.runner";
 const KEYRING_USER: &str = "hub-runner-token";
 const LLAMA_CPP_RUNTIME_ID: &str = "llama-cpp-homebrew-stable-2026-04";
 const RUNTIME_MANIFEST_VERSION: &str = "2026-04-22";
+
+#[derive(Default)]
+struct ListenerProcess {
+    child: Mutex<Option<CommandChild>>,
+}
 
 fn runner_token_entry() -> Result<Entry, String> {
     Entry::new(KEYRING_SERVICE, KEYRING_USER)
@@ -211,7 +222,7 @@ fn build_listener_start_plan(
     let profile_has_token = profile_token_available(profile);
     let credential_source = if typed_token_present {
         "typed_input"
-    } else if profile_available && profile_has_token && os_token_available {
+    } else if profile_available && os_token_available {
         "saved_pairing"
     } else {
         "missing"
@@ -229,7 +240,7 @@ fn build_listener_start_plan(
 }
 
 fn command_version(program: &str) -> Value {
-    match Command::new(program).arg("--version").output() {
+    match StdCommand::new(program).arg("--version").output() {
         Ok(output) if output.status.success() => {
             let text = String::from_utf8_lossy(if output.stdout.is_empty() {
                 &output.stderr
@@ -429,10 +440,17 @@ fn save_runner_token(token: String) -> Result<(), String> {
 }
 
 fn runner_token_available() -> Result<bool, String> {
+    Ok(load_runner_token_value()?.is_some())
+}
+
+fn load_runner_token_value() -> Result<Option<String>, String> {
     match runner_token_entry()?.get_password() {
-        Ok(token) => Ok(!token.trim().is_empty()),
-        Err(KeyringError::NoEntry) => Ok(false),
-        Err(error) if is_user_canceled(&error) => Ok(false),
+        Ok(token) => {
+            let token = token.trim().to_string();
+            Ok(if token.is_empty() { None } else { Some(token) })
+        }
+        Err(KeyringError::NoEntry) => Ok(None),
+        Err(error) if is_user_canceled(&error) => Ok(None),
         Err(error) => Err(format!("could not load runner token: {error}")),
     }
 }
@@ -495,6 +513,144 @@ fn listener_start_plan(api_url: String, typed_token_present: bool) -> Result<Val
         profile.as_ref(),
         token_available,
     )
+}
+
+fn emit_listener_event(app: &AppHandle, payload: Value) {
+    let _ = app.emit("runner-listener-event", payload);
+}
+
+fn redact_listener_text(text: &str, sensitive_values: &[String]) -> String {
+    sensitive_values
+        .iter()
+        .filter(|value| !value.trim().is_empty())
+        .fold(text.to_string(), |redacted, value| {
+            redacted.replace(value, "[redacted]")
+        })
+}
+
+#[tauri::command]
+fn start_runner_listener(
+    app: AppHandle,
+    state: State<ListenerProcess>,
+    api_url: String,
+    typed_token: Option<String>,
+) -> Result<Value, String> {
+    if state
+        .child
+        .lock()
+        .map_err(|_| "listener state is unavailable".to_string())?
+        .is_some()
+    {
+        return Ok(json!({"status": "already_running"}));
+    }
+
+    let typed_token = typed_token.unwrap_or_default().trim().to_string();
+    let typed_token_present = !typed_token.is_empty();
+    let profile = load_runner_profile()?;
+    let stored_token = load_runner_token_value()?;
+    let plan = build_listener_start_plan(
+        &api_url,
+        typed_token_present,
+        profile.as_ref(),
+        stored_token.is_some(),
+    )?;
+    if plan["can_start"] != true {
+        return Err("Pair this machine before starting the local Runner listener.".to_string());
+    }
+    let normalized_api_url = plan
+        .get("api_url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "listener start plan did not include a Hub API URL".to_string())?
+        .to_string();
+    let token_for_child = if typed_token_present {
+        Some(typed_token)
+    } else {
+        stored_token
+    };
+    let sensitive_values = token_for_child
+        .as_ref()
+        .map(|token| vec![token.clone()])
+        .unwrap_or_default();
+
+    let mut command = app
+        .shell()
+        .sidecar("binaries/infergrade-sidecar")
+        .map_err(|error| format!("could not prepare Runner sidecar: {error}"))?
+        .args(["start", "--api-url", &normalized_api_url]);
+    if let Some(token) = token_for_child {
+        command = command.env("INFERGRADE_HUB_TOKEN", token);
+    }
+    let (mut events, child) = command
+        .spawn()
+        .map_err(|error| format!("could not start Runner listener: {error}"))?;
+    let pid = child.pid();
+    *state
+        .child
+        .lock()
+        .map_err(|_| "listener state is unavailable".to_string())? = Some(child);
+
+    let event_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = events.recv().await {
+            match event {
+                CommandEvent::Stdout(bytes) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    emit_listener_event(
+                        &event_app,
+                        json!({"type": "stdout", "line": redact_listener_text(line.trim_end(), &sensitive_values)}),
+                    );
+                }
+                CommandEvent::Stderr(bytes) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    emit_listener_event(
+                        &event_app,
+                        json!({"type": "stderr", "line": redact_listener_text(line.trim_end(), &sensitive_values)}),
+                    );
+                }
+                CommandEvent::Error(error) => emit_listener_event(
+                    &event_app,
+                    json!({"type": "error", "detail": redact_listener_text(&error, &sensitive_values)}),
+                ),
+                CommandEvent::Terminated(payload) => {
+                    let listener_state = event_app.state::<ListenerProcess>();
+                    if let Ok(mut child) = listener_state.child.lock() {
+                        *child = None;
+                    }
+                    emit_listener_event(
+                        &event_app,
+                        json!({"type": "terminated", "code": payload.code}),
+                    );
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    Ok(json!({
+        "status": "started",
+        "pid": pid,
+        "plan": plan,
+    }))
+}
+
+#[tauri::command]
+fn stop_runner_listener(state: State<ListenerProcess>) -> Result<Value, String> {
+    let child = state
+        .child
+        .lock()
+        .map_err(|_| "listener state is unavailable".to_string())?
+        .take();
+    match child {
+        Some(child) => {
+            let pid = child.pid();
+            child
+                .kill()
+                .map_err(|error| format!("could not stop Runner listener: {error}"))?;
+            Ok(json!({"status": "stop_requested", "pid": pid}))
+        }
+        None => Ok(json!({"status": "not_running"})),
+    }
 }
 
 #[tauri::command]
@@ -609,6 +765,7 @@ fn pairing_error_detail(payload: &Value) -> Option<&str> {
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(ListenerProcess::default())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -617,6 +774,8 @@ pub fn run() {
             clear_runner_token,
             runner_pairing_status,
             listener_start_plan,
+            start_runner_listener,
+            stop_runner_listener,
             reset_runner_pairing,
             llama_cpp_runtime_plan,
             redeem_runner_pairing
@@ -850,5 +1009,30 @@ mod tests {
             .expect("typed token plan");
         assert_eq!(typed["credential_source"], "typed_input");
         assert_eq!(typed["can_start"], true);
+    }
+
+    #[test]
+    fn listener_start_plan_allows_profile_without_embedded_token_when_os_token_exists() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "runner_id": "runner_123",
+        });
+        let plan = build_listener_start_plan("api.infergrade.com", false, Some(&profile), true)
+            .expect("listener plan");
+        assert_eq!(plan["credential_source"], "saved_pairing");
+        assert_eq!(plan["profile_token_status"], "missing");
+        assert_eq!(plan["token_status"], "present");
+        assert_eq!(plan["can_start"], true);
+    }
+
+    #[test]
+    fn listener_output_redacts_child_env_token_before_browser_event() {
+        let redacted = redact_listener_text(
+            "starting with qbhr_secret_token in stderr",
+            &[String::from("qbhr_secret_token")],
+        );
+
+        assert_eq!(redacted, "starting with [redacted] in stderr");
+        assert!(!redacted.contains("qbhr_secret_token"));
     }
 }
