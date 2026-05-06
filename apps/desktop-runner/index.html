@@ -100,7 +100,7 @@
             <h3>First local benchmark</h3>
             <p class="hint compact-hint">
               Run a short native llama.cpp smoke benchmark on a local GGUF model and write local result
-              artifacts. Upload is not wired yet.
+              artifacts. Upload is optional and uses the saved pairing token inside the desktop app.
             </p>
             <label>
               <span>Model path</span>
@@ -122,6 +122,30 @@
                   placeholder="Leave blank to use the selected llama.cpp runtime"
                 />
               </label>
+            </details>
+            <details class="advanced-token-panel runtime-advanced-panel">
+              <summary>Upload to Hub run</summary>
+              <label>
+                <span>Run ID</span>
+                <input
+                  name="firstRunUploadRunId"
+                  type="text"
+                  autocomplete="off"
+                  placeholder="Run ID from Hub"
+                />
+              </label>
+              <label>
+                <span>Worker ID</span>
+                <input
+                  name="firstRunUploadWorkerId"
+                  type="text"
+                  autocomplete="off"
+                  placeholder="Leave blank to use this paired runner"
+                />
+              </label>
+              <p class="hint">
+                The app reads the saved runner token from secure storage. Tokens are not shown in this browser UI.
+              </p>
             </details>
             <div class="button-row">
               <button type="button" data-first-run-start>Run native first benchmark</button>

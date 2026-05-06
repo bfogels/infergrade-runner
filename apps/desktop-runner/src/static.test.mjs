@@ -119,11 +119,11 @@ test("desktop readiness copy does not overclaim when native runtime is missing",
 
   assert.ok(js.includes("runtime === \"available\""));
   assert.ok(js.includes("Select a native runtime before first-run benchmark support"));
-  assert.ok(js.includes("Upload is not wired yet"));
+  assert.ok(js.includes("Not uploaded; enter a Hub run ID"));
   assert.equal(js.includes("Docker not found. Native benchmarks are available; advanced sandboxed benchmarks are disabled.\";"), false);
 });
 
-test("desktop first-run UI calls runner-engine through Tauri and keeps upload disabled", () => {
+test("desktop first-run UI calls runner-engine through Tauri and keeps upload token out of browser state", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
   const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
@@ -131,16 +131,21 @@ test("desktop first-run UI calls runner-engine through Tauri and keeps upload di
   assert.ok(html.includes("First local benchmark"));
   assert.ok(html.includes("name=\"firstRunModelPath\""));
   assert.ok(html.includes("name=\"firstRunRuntimePath\""));
+  assert.ok(html.includes("name=\"firstRunUploadRunId\""));
+  assert.ok(html.includes("name=\"firstRunUploadWorkerId\""));
   assert.ok(html.includes("Run native first benchmark"));
   assert.ok(html.includes("write local result"));
-  assert.ok(html.includes("Upload is not wired yet."));
+  assert.ok(html.includes("Tokens are not shown in this browser UI."));
   assert.ok(js.includes('listen("runner-first-run-event"'));
   assert.ok(js.includes('invoke("run_desktop_native_first_run"'));
   assert.ok(js.includes("readFirstRunModelPath"));
+  assert.ok(js.includes("readFirstRunUploadRunId"));
   assert.ok(js.includes(".endsWith(\".gguf\")"));
   assert.ok(js.includes("native_first_run evidence"));
   assert.ok(js.includes("payload?.artifact?.path"));
   assert.ok(js.includes("payload?.bundle_artifact?.path"));
+  assert.equal(html.includes("firstRunUploadToken"), false);
+  assert.equal(js.includes("firstRunUploadToken"), false);
   assert.ok(rust.includes("fn native_first_run_input"));
   assert.ok(rust.includes("async fn run_desktop_native_first_run"));
   assert.ok(rust.includes("fn desktop_first_run_artifact_dir"));
@@ -149,6 +154,9 @@ test("desktop first-run UI calls runner-engine through Tauri and keeps upload di
   assert.ok(rust.includes("native_first_run_bundle_payload"));
   assert.ok(rust.includes("LlamaCppRuntime::resolve"));
   assert.ok(rust.includes("engine_run_native_first_run_with_events"));
+  assert.ok(rust.includes("build_run_bundle_upload_request"));
+  assert.ok(rust.includes("execute_hub_json_request"));
+  assert.ok(rust.includes("DesktopTokenStore"));
   assert.ok(rust.includes("RunnerEvent::Error"));
   assert.ok(rust.includes("upload: false"));
 });
