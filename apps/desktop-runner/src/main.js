@@ -914,14 +914,20 @@ async function runNativeFirstRun() {
     const bundlePath = payload?.bundle_artifact?.path ? ` Bundle payload: ${payload.bundle_artifact.path}.` : "";
     const uploadStatus = payload?.upload?.uploaded
       ? ` Uploaded bundle ${payload.upload.bundle_id} to Hub run ${payload.upload.run_id}.`
-      : " Not uploaded; enter a Hub run ID to attach this evidence to a run.";
+      : payload?.upload?.error
+        ? ` Upload failed: ${payload.upload.error}`
+        : " Not uploaded; enter a Hub run ID to attach this evidence to a run.";
     firstRunStatus.textContent = `Completed native first-run (${speed}, ${ttft}).${artifactPath}${bundlePath}${uploadStatus}`;
     modelPathReadiness = payload?.upload?.uploaded
       ? "Native first-run completed and uploaded to Hub with native_first_run evidence."
-      : "Native first-run completed locally with result and bundle artifacts.";
+      : payload?.upload?.error
+        ? "Native first-run completed locally, but Hub upload failed. Keep the local artifacts and retry upload after fixing pairing or run access."
+        : "Native first-run completed locally with result and bundle artifacts.";
     nativeSuiteReadiness = payload?.upload?.uploaded
       ? "Native first-run completed and uploaded through the paired desktop runner."
-      : "Native first-run completed locally with native_first_run evidence and a Hub-compatible bundle preview.";
+      : payload?.upload?.error
+        ? "Native first-run evidence exists locally; Hub upload still needs a valid paired runner and run ID."
+        : "Native first-run completed locally with native_first_run evidence and a Hub-compatible bundle preview.";
     setStatus("First benchmark complete", "good");
     renderLocalReadinessChecklist();
     appendLog(`Native first-run result: ${JSON.stringify(payload)}`);

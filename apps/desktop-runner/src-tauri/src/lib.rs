@@ -644,6 +644,16 @@ async fn upload_desktop_native_first_run(
     Ok(())
 }
 
+fn mark_desktop_native_first_run_upload_failed(payload: &mut Value, run_id: &str, error: String) {
+    payload["uploaded"] = Value::Bool(false);
+    payload["result"]["uploaded"] = Value::Bool(false);
+    payload["upload"] = json!({
+        "uploaded": false,
+        "run_id": run_id,
+        "error": error,
+    });
+}
+
 #[tauri::command]
 async fn run_desktop_native_first_run(
     app: AppHandle,
@@ -692,13 +702,16 @@ async fn run_desktop_native_first_run(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
     {
-        upload_desktop_native_first_run(
+        if let Err(error) = upload_desktop_native_first_run(
             &mut result,
             &artifact_dir,
             &run_id,
             upload_worker_id.as_deref(),
         )
-        .await?;
+        .await
+        {
+            mark_desktop_native_first_run_upload_failed(&mut result, &run_id, error);
+        }
     }
     Ok(result)
 }
@@ -935,6 +948,38 @@ mod tests {
 
         let _ = fs::remove_file(model_path);
         let _ = fs::remove_dir_all(artifact_dir);
+    }
+
+    #[test]
+    fn desktop_first_run_upload_failure_keeps_local_result_successful() {
+        let mut response = json!({
+            "status": "completed",
+            "uploaded": false,
+            "result": {
+                "uploaded": false,
+                "evidence_kind": "native_first_run"
+            },
+            "artifact": {
+                "path": "/tmp/native-first-run-result.json"
+            }
+        });
+
+        mark_desktop_native_first_run_upload_failed(
+            &mut response,
+            "run_upload_failed_123",
+            "Hub request failed with HTTP 403: run is not owned by this paired runner".to_string(),
+        );
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["uploaded"], false);
+        assert_eq!(response["result"]["uploaded"], false);
+        assert_eq!(response["result"]["evidence_kind"], "native_first_run");
+        assert_eq!(response["upload"]["uploaded"], false);
+        assert_eq!(response["upload"]["run_id"], "run_upload_failed_123");
+        assert!(response["upload"]["error"]
+            .as_str()
+            .expect("upload error")
+            .contains("paired runner"));
     }
 
     #[test]
