@@ -21,6 +21,14 @@ impl NativeFirstRunRuntime for FakeRuntime {
     }
 }
 
+struct PanicRuntime;
+
+impl NativeFirstRunRuntime for PanicRuntime {
+    fn run(&self, _input: &NativeFirstRunInput) -> Result<NativeRuntimeOutput, String> {
+        panic!("runtime should not execute when input validation fails")
+    }
+}
+
 fn temp_model_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "infergrade-runner-engine-test-{name}-{}-{}.gguf",
@@ -69,7 +77,7 @@ fn native_first_run_rejects_missing_model_before_runtime_execution() {
             max_tokens: 16,
             upload: false,
         },
-        &FakeRuntime,
+        &PanicRuntime,
     )
     .expect_err("missing model is rejected");
 

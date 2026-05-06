@@ -96,7 +96,10 @@ pub fn run_native_first_run(
     if output.exit_code != 0 {
         return Err(RunnerError::new(
             "native_runtime_failed",
-            format!("Native first-run runtime exited with code {}.", output.exit_code),
+            format!(
+                "Native first-run runtime exited with code {}.",
+                output.exit_code
+            ),
         ));
     }
 
