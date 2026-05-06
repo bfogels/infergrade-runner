@@ -1579,7 +1579,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_desktop_runner"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "infergrade_runner_engine",
  "keyring",

@@ -241,24 +241,28 @@ fn optional_container_status(program: &str) -> (&'static str, String) {
     }
 }
 
-fn native_suite_status(first_run: &str) -> (&'static str, &'static str) {
-    if first_run == "ready" {
+fn native_suite_status(runtime_first_run: &str) -> (&'static str, &'static str, &'static str, &'static str) {
+    if runtime_first_run == "ready" {
         (
-            "ready",
-            "Native benchmark suite is ready. Docker is not required for your first local benchmark.",
+            "executor_missing",
+            "Native llama.cpp runtime is available, but the app-managed first-run benchmark executor is still in progress. Docker remains optional for advanced sandboxed benchmarks.",
+            "not_implemented",
+            "The native first-run benchmark executor is not implemented yet.",
         )
     } else {
         (
             "setup_needed",
-            "Native benchmark suite is available after selecting a local llama.cpp runtime. Docker is not required.",
+            "Select or install a native llama.cpp runtime first. The app-managed first-run benchmark executor is still in progress.",
+            "blocked",
+            "Select or install a native llama.cpp runtime; first-run executor support is still in progress.",
         )
     }
 }
 
 fn desktop_readiness() -> String {
     let (hardware_class, accelerator_api) = desktop_hardware_hint();
-    let (runtime_status, runtime_message, first_run) = llama_runtime_status(accelerator_api);
-    let (native_suite, native_message) = native_suite_status(first_run);
+    let (runtime_status, runtime_message, runtime_first_run) = llama_runtime_status(accelerator_api);
+    let (native_suite, native_message, first_run, first_run_message) = native_suite_status(runtime_first_run);
     let (docker_status, docker_message) = optional_container_status("docker");
     let (podman_status, podman_message) = optional_container_status("podman");
     format!(
@@ -284,11 +288,7 @@ fn desktop_readiness() -> String {
         json_escape(runtime_status),
         json_escape(runtime_message),
         json_escape(first_run),
-        if first_run == "ready" {
-            "Native first-run benchmark is ready."
-        } else {
-            "Select or install a native llama.cpp runtime before the first local benchmark."
-        },
+        json_escape(first_run_message),
         json_escape(docker_status),
         json_escape(&docker_message),
         json_escape(podman_status),
@@ -494,14 +494,18 @@ mod tests {
 
         assert!(payload.contains("\"native_benchmark_suite\""));
         assert!(payload.contains("\"first_run\""));
+        assert!(payload.contains("first-run benchmark executor is still in progress"));
+        assert!(!payload.contains("Native first-run benchmark is ready"));
         assert!(payload.contains("\"docker\""));
-        assert!(payload.contains("Docker is not required"));
+        assert!(payload.contains("Docker remains optional"));
         assert!(payload.contains("\"podman\""));
     }
 
     #[test]
-    fn native_suite_status_requires_first_run_runtime_readiness() {
-        assert_eq!(native_suite_status("ready").0, "ready");
+    fn native_suite_status_distinguishes_runtime_from_executor_readiness() {
+        assert_eq!(native_suite_status("ready").0, "executor_missing");
+        assert_eq!(native_suite_status("ready").2, "not_implemented");
         assert_eq!(native_suite_status("blocked").0, "setup_needed");
+        assert_eq!(native_suite_status("blocked").2, "blocked");
     }
 }

@@ -60,7 +60,7 @@ let previewToken = "";
 let pendingUpdate = null;
 let lastNormalizedApiUrl = "https://api.infergrade.com/";
 let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp jobs.";
-let nativeSuiteReadiness = "Docker is not required for your first local benchmark.";
+let nativeSuiteReadiness = "Native first-run executor is still in progress; Docker is optional for advanced sandboxed benchmarks.";
 let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxed benchmarks.";
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
@@ -280,12 +280,14 @@ function renderLocalReadinessChecklist() {
 
 function renderDesktopReadiness(payload = {}) {
   if (!payload.status) {
-    nativeSuiteReadiness = "Docker is not required for your first local benchmark.";
-    containerRuntimeReadiness = "Open the desktop app to check Docker/Podman. Native benchmarks do not require them.";
+    nativeSuiteReadiness = "Native first-run executor is still in progress; Docker is optional for advanced sandboxed benchmarks.";
+    containerRuntimeReadiness = "Open the desktop app to check Docker/Podman. Docker is optional advanced support.";
     renderLocalReadinessChecklist();
     return;
   }
-  nativeSuiteReadiness = payload.native_benchmark_message || "Docker is not required for your first local benchmark.";
+  nativeSuiteReadiness =
+    payload.native_benchmark_message ||
+    "Native first-run executor is still in progress; Docker is optional for advanced sandboxed benchmarks.";
   const runtime = payload.llama_cpp_runtime || "";
   const runtimeMessage = payload.llama_cpp_message || "";
   if (runtime === "available") {
@@ -302,8 +304,8 @@ function renderDesktopReadiness(payload = {}) {
   } else {
     containerRuntimeReadiness =
       runtime === "available"
-        ? "Docker not found. Native benchmarks are available; advanced sandboxed benchmarks are disabled."
-        : "Docker not found. Select a native runtime for first-run benchmarks; advanced sandboxed benchmarks are disabled.";
+        ? "Docker not found. Native runtime checks can continue; advanced sandboxed benchmarks are disabled."
+        : "Docker not found. Select a native runtime before first-run benchmark support; advanced sandboxed benchmarks are disabled.";
   }
   renderLocalReadinessChecklist();
 }
