@@ -5,9 +5,12 @@ use std::env;
 use std::fs;
 use std::net::IpAddr;
 use std::path::PathBuf;
+use std::process::Command;
 
 const KEYRING_SERVICE: &str = "com.infergrade.runner";
 const KEYRING_USER: &str = "hub-runner-token";
+const LLAMA_CPP_RUNTIME_ID: &str = "llama-cpp-homebrew-stable-2026-04";
+const RUNTIME_MANIFEST_VERSION: &str = "2026-04-22";
 
 fn runner_token_entry() -> Result<Entry, String> {
     Entry::new(KEYRING_SERVICE, KEYRING_USER)
@@ -119,6 +122,102 @@ fn runner_profile_path() -> Result<PathBuf, String> {
     Ok(runner_config_dir()?.join("runner_profile.json"))
 }
 
+fn runtime_cache_root() -> Result<PathBuf, String> {
+    if let Ok(value) = env::var("INFERGRADE_RUNTIME_CACHE_DIR") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .map_err(|_| "Could not resolve a home directory for the runtime cache.".to_string())?;
+    Ok(PathBuf::from(home)
+        .join(".cache")
+        .join("infergrade")
+        .join("runtimes"))
+}
+
+fn selected_llama_cpp_runtime_path() -> Result<PathBuf, String> {
+    Ok(runtime_cache_root()?
+        .join("llama.cpp")
+        .join("selected_runtime.json"))
+}
+
+fn selected_llama_cpp_runtime() -> Value {
+    match selected_llama_cpp_runtime_path()
+        .ok()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+    {
+        Some(selection) => json!({"status": "selected", "selection": selection}),
+        None => json!({"status": "not_selected", "selection": Value::Null}),
+    }
+}
+
+fn command_version(program: &str) -> Value {
+    match Command::new(program).arg("--version").output() {
+        Ok(output) if output.status.success() => {
+            let text = String::from_utf8_lossy(if output.stdout.is_empty() {
+                &output.stderr
+            } else {
+                &output.stdout
+            })
+            .trim()
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string();
+            json!({"status": "found", "program": program, "version": text})
+        }
+        Ok(output) => json!({
+            "status": "error",
+            "program": program,
+            "detail": String::from_utf8_lossy(&output.stderr).trim().chars().take(300).collect::<String>(),
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            json!({"status": "not_found", "program": program})
+        }
+        Err(error) => json!({"status": "error", "program": program, "detail": error.to_string()}),
+    }
+}
+
+fn recommended_llama_cpp_runtime() -> Value {
+    if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        json!({
+            "runtime_id": LLAMA_CPP_RUNTIME_ID,
+            "backend": "llama.cpp",
+            "accelerator": "metal",
+            "platform": "macOS Apple Silicon",
+            "source": "homebrew",
+            "provenance": "Homebrew formula `llama.cpp`; inspect with `brew info llama.cpp` before executing.",
+            "install_command": ["brew", "install", "llama.cpp"],
+            "download_required": false,
+            "supported_on_this_platform": true,
+            "notes": [
+                "Recommended managed path for Apple Silicon native benchmarking.",
+                "No install command was run. Installation remains explicit."
+            ],
+        })
+    } else {
+        json!({
+            "runtime_id": "llama-cpp-native-manual",
+            "backend": "llama.cpp",
+            "accelerator": preferred_execution_mode(),
+            "platform": format!("{} {}", env::consts::OS, env::consts::ARCH),
+            "source": "manual",
+            "provenance": "Use an explicit llama.cpp build for this platform until InferGrade ships a verified runtime lane.",
+            "install_command": Value::Null,
+            "download_required": false,
+            "supported_on_this_platform": false,
+            "notes": [
+                "Verified GPU-specific runtime downloads are not implemented yet.",
+                "No install command was run. Installation remains explicit."
+            ],
+        })
+    }
+}
+
 fn save_runner_profile(profile: &Value) -> Result<PathBuf, String> {
     let path = runner_profile_path()?;
     let parent = path
@@ -181,6 +280,31 @@ fn clear_runner_token() -> Result<(), String> {
         Err(error) if is_user_canceled(&error) => Ok(()),
         Err(error) => Err(format!("could not clear runner token: {error}")),
     }
+}
+
+#[tauri::command]
+fn llama_cpp_runtime_plan() -> Value {
+    let cli = command_version("llama-cli");
+    let server = command_version("llama-server");
+    let runtime_available = cli.get("status").and_then(Value::as_str) == Some("found")
+        && server.get("status").and_then(Value::as_str) == Some("found");
+    json!({
+        "manifest_version": RUNTIME_MANIFEST_VERSION,
+        "runtime_family": "llama.cpp",
+        "recommended_runtime": recommended_llama_cpp_runtime(),
+        "selected_runtime": selected_llama_cpp_runtime(),
+        "detected_binaries": {
+            "cli": cli,
+            "server": server,
+            "perplexity": command_version("llama-perplexity"),
+        },
+        "native_runtime_status": if runtime_available { "available" } else { "missing" },
+        "message": if runtime_available {
+            "llama.cpp binaries are available. Review provenance before running benchmark jobs."
+        } else {
+            "No install command was run. Select or install a native llama.cpp runtime before the first local benchmark."
+        },
+    })
 }
 
 #[tauri::command]
@@ -265,6 +389,7 @@ pub fn run() {
             save_runner_token,
             load_runner_token,
             clear_runner_token,
+            llama_cpp_runtime_plan,
             redeem_runner_pairing
         ])
         .run(tauri::generate_context!())
@@ -322,5 +447,25 @@ mod tests {
             pairing_error_detail(&json!({"detail": "pair_code is required"})),
             Some("pair_code is required")
         );
+    }
+
+    #[test]
+    fn runtime_plan_is_inspection_only_and_recommends_platform_lane() {
+        let plan = llama_cpp_runtime_plan();
+        assert_eq!(plan["runtime_family"], "llama.cpp");
+        assert!(
+            plan["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("install command")
+                || plan["native_runtime_status"] == "available"
+        );
+        if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+            assert_eq!(
+                plan["recommended_runtime"]["runtime_id"],
+                LLAMA_CPP_RUNTIME_ID
+            );
+            assert_eq!(plan["recommended_runtime"]["accelerator"], "metal");
+        }
     }
 }
