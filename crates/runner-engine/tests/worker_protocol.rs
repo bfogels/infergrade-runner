@@ -119,11 +119,19 @@ fn worker_protocol_preview_uses_typed_protocol_and_stays_secret_free() {
     let serialized = serde_json::to_value(&preview).expect("preview json");
 
     assert_eq!(serialized["api_url"], "https://api.infergrade.com/");
+    assert_eq!(serialized["runner_id"], "runner_123");
+    assert_eq!(serialized["execution_mode"], "local_native");
+    assert_eq!(serialized["endpoints"]["register"], "/v1/runners/register");
     assert_eq!(
         serialized["endpoints"]["heartbeat"],
         "/v1/runners/runner_123/heartbeat"
     );
+    assert_eq!(serialized["endpoints"]["claim"], "/v1/runs/claim");
     assert_eq!(serialized["register"]["runner_id"], "runner_123");
+    assert_eq!(
+        serialized["register"]["execution_modes"],
+        json!(["local_native"])
+    );
     assert_eq!(serialized["heartbeat"]["status"], "listening");
     assert_eq!(serialized["claim"]["worker_id"], "runner_123");
     assert_eq!(
@@ -134,4 +142,57 @@ fn worker_protocol_preview_uses_typed_protocol_and_stays_secret_free() {
     let combined = serialized.to_string();
     assert!(!combined.contains("qbhr_"));
     assert!(!combined.contains("Authorization"));
+}
+
+#[test]
+fn worker_protocol_preview_trims_identity_fields_and_rejects_bad_hub_urls() {
+    let preview = RunnerProtocolPreviewInput {
+        api_url: " localhost:8000 ".to_string(),
+        runner_id: " runner_123 ".to_string(),
+        execution_mode: " local_native ".to_string(),
+        hostname: None,
+    }
+    .build()
+    .expect("preview");
+
+    assert_eq!(preview.api_url, "http://localhost:8000/");
+    assert_eq!(preview.runner_id, "runner_123");
+    assert_eq!(preview.execution_mode, "local_native");
+    assert_eq!(
+        preview.endpoints.heartbeat,
+        "/v1/runners/runner_123/heartbeat"
+    );
+    assert_eq!(preview.register.execution_modes, vec!["local_native"]);
+    assert_eq!(preview.claim.execution_mode, "local_native");
+
+    let invalid_url = RunnerProtocolPreviewInput {
+        api_url: "http://api.infergrade.com".to_string(),
+        runner_id: "runner_123".to_string(),
+        execution_mode: "local_native".to_string(),
+        hostname: None,
+    }
+    .build()
+    .expect_err("cleartext hosted URL rejected");
+    assert_eq!(invalid_url.code(), "hub_url_invalid");
+    assert!(invalid_url.message().contains("HTTPS"));
+
+    let missing_runner = RunnerProtocolPreviewInput {
+        api_url: "api.infergrade.com".to_string(),
+        runner_id: "   ".to_string(),
+        execution_mode: "local_native".to_string(),
+        hostname: None,
+    }
+    .build()
+    .expect_err("runner id required");
+    assert_eq!(missing_runner.code(), "runner_id_missing");
+
+    let missing_mode = RunnerProtocolPreviewInput {
+        api_url: "api.infergrade.com".to_string(),
+        runner_id: "runner_123".to_string(),
+        execution_mode: "   ".to_string(),
+        hostname: None,
+    }
+    .build()
+    .expect_err("execution mode required");
+    assert_eq!(missing_mode.code(), "execution_mode_missing");
 }
