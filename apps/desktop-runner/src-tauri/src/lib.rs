@@ -3,10 +3,9 @@ use infergrade_runner_engine::{
     complete_pairing_response, desktop_environment, hostname,
     llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, normalize_api_url,
     pairing_error_detail, pairing_status_payload, preferred_execution_mode, profile_string,
-    redact_listener_text, redact_worker_response, reset_pairing_state, runner_heartbeat_payload,
-    runner_id_from_profile, runner_register_payload, selected_llama_cpp_runtime_path,
-    worker_request_url, HubMethod, PairingInput, ProfileStore, RunnerError, RunnerProfile,
-    RunnerProtocolPreviewInput, TokenStore,
+    redact_listener_text, redact_worker_response, reset_pairing_state, runner_id_from_profile,
+    selected_llama_cpp_runtime_path, worker_request_url, HubMethod, PairingInput, ProfileStore,
+    RunnerError, RunnerProfile, RunnerProtocolPingInput, RunnerProtocolPreviewInput, TokenStore,
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
@@ -319,7 +318,6 @@ fn worker_protocol_preview(api_url: String) -> Result<Value, String> {
 
 #[tauri::command]
 async fn worker_protocol_ping(api_url: String) -> Result<Value, String> {
-    let normalized_api_url = normalize_api_url(&api_url)?;
     let profile = load_runner_profile()?
         .ok_or_else(|| "Pair this machine before sending Runner register/heartbeat.".to_string())?;
     let token = load_runner_token_value()?
@@ -327,32 +325,36 @@ async fn worker_protocol_ping(api_url: String) -> Result<Value, String> {
     let execution_mode = profile_string(Some(&profile), "preferred_execution_mode")
         .unwrap_or_else(|| preferred_execution_mode().to_string());
     let runner_id = runner_id_from_profile(Some(&profile));
-    let host = hostname();
-    let register_payload = runner_register_payload(&runner_id, &execution_mode, host.clone());
-    let heartbeat_payload = runner_heartbeat_payload(
-        "listening",
-        None,
-        host,
-        Some("Runner registered and is listening for jobs."),
-    );
+    let plan = RunnerProtocolPingInput {
+        api_url,
+        runner_id,
+        execution_mode,
+        hostname: hostname(),
+    }
+    .build()
+    .map_err(|error| error.message().to_string())?;
+    let register_payload = serde_json::to_value(&plan.register)
+        .map_err(|error| format!("Could not serialize runner register payload: {error}"))?;
+    let heartbeat_payload = serde_json::to_value(&plan.heartbeat)
+        .map_err(|error| format!("Could not serialize runner heartbeat payload: {error}"))?;
     let register = send_worker_json_request(
-        &normalized_api_url,
-        "/v1/runners/register",
+        &plan.api_url,
+        &plan.register_endpoint,
         &register_payload,
         &token,
     )
     .await?;
     let heartbeat = send_worker_json_request(
-        &normalized_api_url,
-        &format!("/v1/runners/{runner_id}/heartbeat"),
+        &plan.api_url,
+        &plan.heartbeat_endpoint,
         &heartbeat_payload,
         &token,
     )
     .await?;
     Ok(json!({
         "status": "sent",
-        "runner_id": runner_id,
-        "execution_mode": execution_mode,
+        "runner_id": plan.runner_id,
+        "execution_mode": plan.execution_mode,
         "register": register,
         "heartbeat": heartbeat,
     }))
@@ -592,8 +594,9 @@ pub fn run() {
 mod tests {
     use super::*;
     use infergrade_runner_engine::{
-        claim_run_job_payload, sanitized_runner_profile, ui_pairing_response,
-        verify_runtime_download_manifest, worker_request_preview, LLAMA_CPP_RUNTIME_ID,
+        claim_run_job_payload, runner_heartbeat_payload, runner_register_payload,
+        sanitized_runner_profile, ui_pairing_response, verify_runtime_download_manifest,
+        worker_request_preview, LLAMA_CPP_RUNTIME_ID,
     };
     use std::sync::{Mutex as TestMutex, OnceLock};
 

@@ -200,6 +200,47 @@ impl RunnerProtocolPreviewInput {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RunnerProtocolPingPlan {
+    pub api_url: String,
+    pub runner_id: String,
+    pub execution_mode: String,
+    pub register_endpoint: String,
+    pub heartbeat_endpoint: String,
+    pub register: RunnerRegisterRequest,
+    pub heartbeat: RunnerHeartbeatRequest,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunnerProtocolPingInput {
+    pub api_url: String,
+    pub runner_id: String,
+    pub execution_mode: String,
+    pub hostname: Option<String>,
+}
+
+impl RunnerProtocolPingInput {
+    pub fn build(self) -> Result<RunnerProtocolPingPlan, RunnerError> {
+        let preview = RunnerProtocolPreviewInput {
+            api_url: self.api_url,
+            runner_id: self.runner_id,
+            execution_mode: self.execution_mode,
+            hostname: self.hostname,
+        }
+        .build()?;
+
+        Ok(RunnerProtocolPingPlan {
+            api_url: preview.api_url,
+            runner_id: preview.runner_id,
+            execution_mode: preview.execution_mode,
+            register_endpoint: preview.endpoints.register,
+            heartbeat_endpoint: preview.endpoints.heartbeat,
+            register: preview.register,
+            heartbeat: preview.heartbeat,
+        })
+    }
+}
+
 pub fn runner_register_payload(
     runner_id: &str,
     execution_mode: &str,
