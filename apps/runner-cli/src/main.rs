@@ -1,8 +1,10 @@
 use infergrade_runner_engine::{
-    container_runtime_readiness, llama_cpp_runtime_plan, normalize_api_url,
-    run_native_first_run_with_events, write_native_first_run_artifact, LlamaCppRuntime,
-    NativeCommandRuntime, NativeFirstRunInput, NativeFirstRunRuntime, NativeRuntimeOutput,
-    RunnerEvent,
+    build_run_bundle_upload_request, build_run_completion_request, container_runtime_readiness,
+    execute_hub_json_request, llama_cpp_runtime_plan, native_first_run_bundle_payload,
+    normalize_api_url, run_native_first_run_with_events, write_native_first_run_artifact,
+    write_native_first_run_bundle_payload, LlamaCppRuntime, NativeCommandRuntime,
+    NativeFirstRunBundleOptions, NativeFirstRunInput, NativeFirstRunResult, NativeFirstRunRuntime,
+    NativeRuntimeOutput, RunnerEvent,
 };
 use serde_json::{json, Value};
 use std::env;
@@ -12,7 +14,7 @@ use std::process::ExitCode;
 
 fn print_help() {
     println!(
-        "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration."
+        "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> --run-token <token> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence through a Hub run-scoped token\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration."
     );
 }
 
@@ -111,6 +113,11 @@ where
     let mut max_tokens = 32_u32;
     let mut dry_run = false;
     let mut no_upload = false;
+    let mut upload = false;
+    let mut api_url = "https://api.infergrade.com".to_string();
+    let mut run_id: Option<String> = None;
+    let mut run_token: Option<String> = None;
+    let mut worker_id = "infergrade-runner-cli".to_string();
     let mut runtime_command: Option<PathBuf> = None;
     let mut runtime_path: Option<PathBuf> = None;
     let mut output_dir: Option<PathBuf> = None;
@@ -169,18 +176,58 @@ where
                         .ok_or_else(|| "--output-dir requires a path".to_string())?,
                 ));
             }
+            "--api-url" => {
+                index += 1;
+                api_url = args
+                    .get(index)
+                    .ok_or_else(|| "--api-url requires a value".to_string())?
+                    .to_string();
+            }
+            "--run-id" => {
+                index += 1;
+                run_id = Some(
+                    args.get(index)
+                        .ok_or_else(|| "--run-id requires a value".to_string())?
+                        .to_string(),
+                );
+            }
+            "--run-token" => {
+                index += 1;
+                run_token = Some(
+                    args.get(index)
+                        .ok_or_else(|| "--run-token requires a value".to_string())?
+                        .to_string(),
+                );
+            }
+            "--worker-id" => {
+                index += 1;
+                worker_id = args
+                    .get(index)
+                    .ok_or_else(|| "--worker-id requires a value".to_string())?
+                    .to_string();
+            }
             "--dry-run" => dry_run = true,
             "--no-upload" => no_upload = true,
+            "--upload" => upload = true,
             "--json" => {}
             "--jsonl" => jsonl = true,
             unknown => return Err(format!("unknown first-run option: {unknown}")),
         }
         index += 1;
     }
-    if !no_upload {
+    if no_upload && upload {
+        return Err("first-run accepts either --no-upload or --upload, not both".to_string());
+    }
+    if !no_upload && !upload {
+        return Err("first-run requires either --no-upload or explicit --upload".to_string());
+    }
+    if upload && dry_run {
         return Err(
-            "first-run currently requires --no-upload; upload is not implemented yet".to_string(),
+            "first-run upload requires a real native run; dry-run cannot upload".to_string(),
         );
+    }
+    if upload && jsonl {
+        return Err("first-run upload does not support --jsonl yet".to_string());
     }
     if dry_run && runtime_command.is_some() {
         return Err(
@@ -260,8 +307,101 @@ where
             .map_err(|error| error.to_string())?;
         payload["artifact"] = serde_json::to_value(artifact).map_err(|error| error.to_string())?;
     }
+    if upload {
+        let run_id = run_id.ok_or_else(|| "--upload requires --run-id".to_string())?;
+        let run_token = run_token.ok_or_else(|| "--upload requires --run-token".to_string())?;
+        let result: NativeFirstRunResult = serde_json::from_value(payload["result"].clone())
+            .map_err(|error| format!("Could not rebuild native first-run result: {error}"))?;
+        let bundle_payload = native_first_run_bundle_payload(
+            &result,
+            NativeFirstRunBundleOptions {
+                submission_channel: "infergrade_runner_cli".to_string(),
+                ..NativeFirstRunBundleOptions::default()
+            },
+        );
+        if let Some(output_dir) = payload
+            .get("artifact")
+            .and_then(|artifact| artifact.get("path"))
+            .and_then(Value::as_str)
+            .and_then(|path| PathBuf::from(path).parent().map(PathBuf::from))
+        {
+            let bundle_artifact =
+                write_native_first_run_bundle_payload(&output_dir, &bundle_payload)
+                    .map_err(|error| error.to_string())?;
+            payload["bundle_artifact"] =
+                serde_json::to_value(bundle_artifact).map_err(|error| error.to_string())?;
+        }
+        let upload_request =
+            build_run_bundle_upload_request(&api_url, &run_id, bundle_payload, Some(&run_token))
+                .map_err(|error| error.to_string())?;
+        let upload_response = block_on_hub_request(&upload_request)?;
+        let bundle_id = upload_response
+            .body
+            .get("bundle_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Hub upload response did not include bundle_id".to_string())?
+            .to_string();
+        let redacted_upload_body = redact_value_token(upload_response.body.clone(), &run_token);
+        let completion_request = build_run_completion_request(
+            &api_url,
+            &run_id,
+            &worker_id,
+            &bundle_id,
+            Some(redacted_upload_body.clone()),
+            Some(&run_token),
+        )
+        .map_err(|error| error.to_string())?;
+        let completion_response = block_on_hub_request(&completion_request)?;
+        let redacted_completion_body =
+            redact_value_token(completion_response.body.clone(), &run_token);
+        payload["upload"] = json!({
+            "uploaded": true,
+            "run_id": run_id,
+            "bundle_id": bundle_id,
+            "server": redacted_upload_body,
+            "completion": redacted_completion_body,
+        });
+    } else {
+        payload["upload"] = json!({
+            "uploaded": false,
+            "reason": "explicit_no_upload",
+        });
+    }
     payload["events"] = serde_json::to_value(&events).map_err(|error| error.to_string())?;
     Ok((payload, events, jsonl))
+}
+
+fn block_on_hub_request(
+    request: &infergrade_runner_engine::HubJsonRequest,
+) -> Result<infergrade_runner_engine::HubJsonResponse, String> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("Could not start native Hub transport: {error}"))?
+        .block_on(execute_hub_json_request(request))
+        .map_err(|error| error.to_string())
+}
+
+fn redact_value_token(value: Value, token: &str) -> Value {
+    let token = token.trim();
+    if token.is_empty() {
+        return value;
+    }
+    match value {
+        Value::String(text) => Value::String(text.replace(token, "[redacted]")),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| redact_value_token(item, token))
+                .collect(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, item)| (key, redact_value_token(item, token)))
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 fn command_first_run(args: &[String]) -> Result<Value, String> {
@@ -336,6 +476,10 @@ fn print_json_line(value: &Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::thread;
 
     #[test]
     fn doctor_normalizes_default_api_url_and_keeps_docker_optional() {
@@ -651,5 +795,182 @@ mod tests {
 
         let _ = std::fs::remove_file(model_path);
         let _ = std::fs::remove_dir_all(output_dir);
+    }
+
+    #[test]
+    fn first_run_upload_posts_bundle_and_completion_to_run_scope() {
+        let model_path = env::temp_dir().join(format!(
+            "infergrade-runner-cli-upload-model-{}.gguf",
+            std::process::id()
+        ));
+        let extension = if cfg!(windows) { "cmd" } else { "sh" };
+        let runtime_path = env::temp_dir().join(format!(
+            "infergrade-runner-cli-upload-runtime-{}.{}",
+            std::process::id(),
+            extension
+        ));
+        let output_dir = env::temp_dir().join(format!(
+            "infergrade-runner-cli-upload-dir-{}",
+            std::process::id()
+        ));
+        let (api_url, received) = spawn_cli_hub_server();
+        std::fs::write(&model_path, b"fake gguf path validation only").expect("model file");
+        if cfg!(windows) {
+            std::fs::write(
+                &runtime_path,
+                "@echo off\r\necho hello from upload runtime\r\necho llama_print_timings:        load time =      10.00 ms 1>&2\r\necho llama_print_timings:        eval time =     100.00 ms /    5 runs   (20.00 ms per token, 50.00 tokens per second) 1>&2\r\n",
+            )
+            .expect("runtime script");
+        } else {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(
+                &runtime_path,
+                "#!/bin/sh\necho 'hello from upload runtime'\necho 'llama_print_timings:        load time =      10.00 ms' >&2\necho 'llama_print_timings:        eval time =     100.00 ms /    5 runs   (20.00 ms per token, 50.00 tokens per second)' >&2\n",
+            )
+            .expect("runtime script");
+            let mut permissions = std::fs::metadata(&runtime_path)
+                .expect("runtime metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&runtime_path, permissions).expect("runtime executable");
+        }
+        let _ = std::fs::remove_dir_all(&output_dir);
+
+        let output = command_first_run(&[
+            "--model".to_string(),
+            model_path.display().to_string(),
+            "--runtime".to_string(),
+            "auto".to_string(),
+            "--upload".to_string(),
+            "--api-url".to_string(),
+            api_url,
+            "--run-id".to_string(),
+            "run_cli_upload_123".to_string(),
+            "--run-token".to_string(),
+            "rtok_cli_secret".to_string(),
+            "--worker-id".to_string(),
+            "worker-cli-upload".to_string(),
+            "--runtime-path".to_string(),
+            runtime_path.display().to_string(),
+            "--output-dir".to_string(),
+            output_dir.display().to_string(),
+        ])
+        .expect("uploaded first-run output");
+
+        assert_eq!(output["upload"]["uploaded"], true);
+        assert_eq!(output["upload"]["run_id"], "run_cli_upload_123");
+        assert_eq!(output["upload"]["bundle_id"], "nfr_cli_bundle");
+        assert_eq!(output["upload"]["server"]["stored"], true);
+        assert_eq!(output["upload"]["server"]["echo"], "[redacted]");
+        assert_eq!(output["upload"]["completion"]["run"]["status"], "completed");
+        assert_eq!(
+            output["bundle_artifact"]["format"],
+            "infergrade.bundle_upload.v1"
+        );
+        let rendered = serde_json::to_string(&output).expect("output JSON");
+        assert!(!rendered.contains("rtok_cli_secret"));
+
+        let first_request = received.recv().expect("bundle request");
+        let second_request = received.recv().expect("complete request");
+        assert!(first_request.starts_with("POST /v1/runs/run_cli_upload_123/bundle HTTP/1.1"));
+        assert!(first_request.contains("authorization: Bearer rtok_cli_secret"));
+        assert!(first_request.contains("\"source_bundle_origin\":\"infergrade_native_first_run\""));
+        assert!(!first_request.contains(model_path.display().to_string().as_str()));
+        assert!(second_request.starts_with("POST /v1/runs/run_cli_upload_123/complete HTTP/1.1"));
+        assert!(second_request.contains("\"worker_id\":\"worker-cli-upload\""));
+        assert!(second_request.contains("\"bundle_id\":\"nfr_cli_bundle\""));
+
+        let _ = std::fs::remove_file(model_path);
+        let _ = std::fs::remove_file(runtime_path);
+        let _ = std::fs::remove_dir_all(output_dir);
+    }
+
+    #[test]
+    fn first_run_upload_requires_run_scope_and_rejects_dry_run() {
+        let model_path = env::temp_dir().join(format!(
+            "infergrade-runner-cli-upload-validation-model-{}.gguf",
+            std::process::id()
+        ));
+        std::fs::write(&model_path, b"fake gguf path validation only").expect("model file");
+
+        let missing_token = command_first_run(&[
+            "--model".to_string(),
+            model_path.display().to_string(),
+            "--runtime".to_string(),
+            "auto".to_string(),
+            "--upload".to_string(),
+            "--run-id".to_string(),
+            "run_cli_upload_123".to_string(),
+            "--dry-run".to_string(),
+        ])
+        .expect_err("dry-run upload rejected first");
+        assert!(missing_token.contains("dry-run cannot upload"));
+
+        let missing_upload_choice = command_first_run(&[
+            "--model".to_string(),
+            model_path.display().to_string(),
+            "--runtime".to_string(),
+            "auto".to_string(),
+            "--dry-run".to_string(),
+        ])
+        .expect_err("upload mode required");
+        assert!(missing_upload_choice.contains("requires either --no-upload or explicit --upload"));
+
+        let _ = std::fs::remove_file(model_path);
+    }
+
+    fn spawn_cli_hub_server() -> (String, mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let address = listener.local_addr().expect("server address");
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            for index in 0..2 {
+                let (mut stream, _) = listener.accept().expect("accept request");
+                let request = read_http_request(&mut stream);
+                sender.send(request).expect("send request");
+                let body = if index == 0 {
+                    r#"{"stored":true,"bundle_id":"nfr_cli_bundle","echo":"rtok_cli_secret","server_validation":{"verification_levels":["experimental"],"comparison_grades":["informational_only"]}}"#
+                } else {
+                    r#"{"run":{"run_id":"run_cli_upload_123","status":"completed"}}"#
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+            }
+        });
+        (format!("http://{address}"), receiver)
+    }
+
+    fn read_http_request(stream: &mut impl Read) -> String {
+        let mut bytes = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        let header_end = loop {
+            let bytes_read = stream.read(&mut buffer).expect("read request");
+            assert!(bytes_read > 0, "connection closed before headers");
+            bytes.extend_from_slice(&buffer[..bytes_read]);
+            if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                break index + 4;
+            }
+        };
+        let headers = String::from_utf8_lossy(&bytes[..header_end]).to_string();
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().ok())
+                    .flatten()
+            })
+            .unwrap_or(0);
+        while bytes.len().saturating_sub(header_end) < content_length {
+            let bytes_read = stream.read(&mut buffer).expect("read body");
+            assert!(bytes_read > 0, "connection closed before body");
+            bytes.extend_from_slice(&buffer[..bytes_read]);
+        }
+        String::from_utf8_lossy(&bytes).to_string()
     }
 }
