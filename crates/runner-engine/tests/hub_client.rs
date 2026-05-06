@@ -100,6 +100,15 @@ fn run_bundle_upload_request_rejects_path_injection_and_bad_payloads() {
     .expect_err("path injection rejected");
     assert_eq!(bad_id.code(), "hub_path_id_invalid");
 
+    let whitespace_id = build_run_bundle_upload_request(
+        "api.infergrade.com",
+        " run_cfg_abc_123 ",
+        payload.clone(),
+        Some("rtok_secret_for_run"),
+    )
+    .expect_err("whitespace id rejected");
+    assert_eq!(whitespace_id.code(), "hub_path_id_invalid");
+
     let bad_payload = build_run_bundle_upload_request(
         "api.infergrade.com",
         "run_cfg_abc_123",

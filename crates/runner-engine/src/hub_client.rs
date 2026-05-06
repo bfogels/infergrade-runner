@@ -93,7 +93,7 @@ pub fn build_run_bundle_upload_request(
     bundle_payload: Value,
     bearer_token: Option<&str>,
 ) -> Result<HubJsonRequest, RunnerError> {
-    validate_hub_path_id(run_id, "run_id")?;
+    let run_id = validate_hub_path_id(run_id, "run_id")?;
     validate_bundle_upload_payload(&bundle_payload)?;
     build_hub_json_request(
         HubMethod::Post,
@@ -112,9 +112,9 @@ pub fn build_run_completion_request(
     upload_response: Option<Value>,
     bearer_token: Option<&str>,
 ) -> Result<HubJsonRequest, RunnerError> {
-    validate_hub_path_id(run_id, "run_id")?;
-    validate_hub_path_id(worker_id, "worker_id")?;
-    validate_hub_path_id(bundle_id, "bundle_id")?;
+    let run_id = validate_hub_path_id(run_id, "run_id")?;
+    let worker_id = validate_hub_path_id(worker_id, "worker_id")?;
+    let bundle_id = validate_hub_path_id(bundle_id, "bundle_id")?;
     build_hub_json_request(
         HubMethod::Post,
         api_url,
@@ -150,9 +150,10 @@ fn validate_bundle_upload_payload(payload: &Value) -> Result<(), RunnerError> {
     Ok(())
 }
 
-fn validate_hub_path_id(value: &str, field_name: &str) -> Result<(), RunnerError> {
+fn validate_hub_path_id<'a>(value: &'a str, field_name: &str) -> Result<&'a str, RunnerError> {
     let trimmed = value.trim();
-    if trimmed.is_empty()
+    if value != trimmed
+        || trimmed.is_empty()
         || trimmed.len() > 160
         || !trimmed
             .chars()
@@ -165,5 +166,5 @@ fn validate_hub_path_id(value: &str, field_name: &str) -> Result<(), RunnerError
             format!("{field_name} must be a safe Hub identifier."),
         ));
     }
-    Ok(())
+    Ok(trimmed)
 }
