@@ -39,6 +39,44 @@ export function normalizeDesktopApiUrl(value = "") {
   return parsed.href;
 }
 
+export function firstRunHandoffFromParams(params, onRejected = () => {}) {
+  const searchParams = params instanceof URLSearchParams ? params : new URLSearchParams(params || "");
+  const sensitiveKeys = [...searchParams.keys()].filter((key) => /token|secret|authorization/i.test(key));
+  if (sensitiveKeys.length) {
+    onRejected("sensitive handoff parameter");
+    return { runId: "", workerId: "" };
+  }
+  const runId =
+    searchParams.get("first_run_run_id") ||
+    searchParams.get("firstRunRunId") ||
+    searchParams.get("run_id") ||
+    searchParams.get("runId") ||
+    "";
+  const workerId = searchParams.get("first_run_worker_id") || searchParams.get("worker_id") || searchParams.get("workerId") || "";
+  return {
+    runId: runId.trim(),
+    workerId: workerId.trim(),
+  };
+}
+
+export function firstRunHandoffFromDeepLink(value, onRejected = () => {}) {
+  if (!value || typeof value !== "string") {
+    return { runId: "", workerId: "" };
+  }
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch (_error) {
+    onRejected("invalid first-run handoff URL");
+    return { runId: "", workerId: "" };
+  }
+  if (parsed.protocol !== "infergrade-runner:") {
+    onRejected("unexpected first-run handoff URL scheme");
+    return { runId: "", workerId: "" };
+  }
+  return firstRunHandoffFromParams(parsed.searchParams, onRejected);
+}
+
 export function userSafeUpdateFailure(_message = "") {
   return "Update status is unavailable. You can still pair and start the Runner.";
 }

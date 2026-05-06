@@ -19,6 +19,7 @@ keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "li
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1.0.149"
 tauri = { version = "2", features = [] }
+tauri-plugin-deep-link = "2"
 tauri-plugin-process = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
