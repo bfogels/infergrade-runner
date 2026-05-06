@@ -3,9 +3,11 @@ use infergrade_runner_engine::{
     complete_pairing_response, desktop_environment, hostname,
     llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, normalize_api_url,
     pairing_error_detail, pairing_status_payload, preferred_execution_mode, profile_string,
-    redact_listener_text, redact_worker_response, reset_pairing_state, runner_id_from_profile,
-    selected_llama_cpp_runtime_path, worker_request_url, HubMethod, PairingInput, ProfileStore,
-    RunnerError, RunnerProfile, RunnerProtocolPingInput, RunnerProtocolPreviewInput, TokenStore,
+    redact_listener_text, redact_worker_response, reset_pairing_state,
+    run_native_first_run_with_events as engine_run_native_first_run_with_events,
+    runner_id_from_profile, selected_llama_cpp_runtime_path, worker_request_url, HubMethod,
+    LlamaCppRuntime, NativeFirstRunInput, PairingInput, ProfileStore, RunnerError, RunnerEvent,
+    RunnerProfile, RunnerProtocolPingInput, RunnerProtocolPreviewInput, TokenStore,
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
@@ -364,6 +366,12 @@ fn emit_listener_event(app: &AppHandle, payload: Value) {
     let _ = app.emit("runner-listener-event", payload);
 }
 
+fn emit_first_run_event(app: &AppHandle, event: RunnerEvent) {
+    if let Ok(payload) = serde_json::to_value(event) {
+        let _ = app.emit("runner-first-run-event", payload);
+    }
+}
+
 #[tauri::command]
 fn start_runner_listener(
     app: AppHandle,
@@ -505,6 +513,63 @@ fn llama_cpp_runtime_plan() -> Value {
     engine_llama_cpp_runtime_plan(selected_llama_cpp_runtime())
 }
 
+fn native_first_run_input(model_path: &str) -> NativeFirstRunInput {
+    NativeFirstRunInput {
+        model_path: PathBuf::from(model_path.trim()),
+        runtime_hint: Some("auto".to_string()),
+        prompt: "Write one short sentence that says the local InferGrade runner is ready."
+            .to_string(),
+        max_tokens: 32,
+        upload: false,
+    }
+}
+
+#[tauri::command]
+async fn run_desktop_native_first_run(
+    app: AppHandle,
+    model_path: String,
+    runtime_path: Option<String>,
+) -> Result<Value, String> {
+    let input = native_first_run_input(&model_path);
+    let runtime_path = runtime_path
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    let event_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        emit_first_run_event(
+            &event_app,
+            RunnerEvent::BenchmarkProgress {
+                benchmark_id: "native_first_run".to_string(),
+                message: "Resolving selected llama.cpp runtime.".to_string(),
+                progress_percent: Some(1.0),
+            },
+        );
+        let runtime = match LlamaCppRuntime::resolve(runtime_path) {
+            Ok(runtime) => runtime,
+            Err(message) => {
+                emit_first_run_event(
+                    &event_app,
+                    RunnerEvent::Error {
+                        code: "llama_cpp_runtime_unavailable".to_string(),
+                        message: message.clone(),
+                    },
+                );
+                return Err(message);
+            }
+        };
+        engine_run_native_first_run_with_events(input, &runtime, |event| {
+            emit_first_run_event(&event_app, event);
+        })
+        .map_err(|error| error.message().to_string())
+    })
+    .await
+    .map_err(|error| format!("Native first-run task failed: {error}"))??;
+    serde_json::to_value(result)
+        .map(|result| json!({"status": "completed", "uploaded": false, "result": result}))
+        .map_err(|error| format!("Could not serialize native first-run result: {error}"))
+}
+
 #[tauri::command]
 async fn redeem_runner_pairing(
     api_url: String,
@@ -584,6 +649,7 @@ pub fn run() {
             stop_runner_listener,
             reset_runner_pairing,
             llama_cpp_runtime_plan,
+            run_desktop_native_first_run,
             redeem_runner_pairing
         ])
         .run(tauri::generate_context!())
@@ -623,6 +689,17 @@ mod tests {
             normalize_api_url("127.0.0.1:8000").expect("loopback shorthand"),
             "http://127.0.0.1:8000/"
         );
+    }
+
+    #[test]
+    fn desktop_first_run_input_is_local_native_and_upload_disabled() {
+        let input = native_first_run_input(" /tmp/model.gguf ");
+
+        assert_eq!(input.model_path, PathBuf::from("/tmp/model.gguf"));
+        assert_eq!(input.runtime_hint.as_deref(), Some("auto"));
+        assert_eq!(input.max_tokens, 32);
+        assert_eq!(input.upload, false);
+        assert!(input.prompt.contains("InferGrade runner"));
     }
 
     #[test]

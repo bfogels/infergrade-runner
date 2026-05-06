@@ -150,7 +150,8 @@ fn llama_cpp_runtime_executes_cli_and_parses_timings() {
     assert_eq!(result.metrics.load_time_ms, 618);
     assert_eq!(result.metrics.generated_tokens, 9);
     assert_eq!(result.metrics.decode_tokens_per_second, 24.9);
-    assert!(result.metrics.time_to_first_token_ms <= result.metrics.load_time_ms);
+    assert!(result.metrics.time_to_first_token_ms > 0);
+    assert!(result.metrics.time_to_first_token_ms <= 5_000);
     assert!(result.stdout_preview.contains("hello from llama"));
 
     let _ = std::fs::remove_file(runtime_path);

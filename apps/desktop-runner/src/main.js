@@ -25,6 +25,8 @@ const clearLogsButton = document.querySelector("[data-clear-logs]");
 const themeChoiceButtons = [...document.querySelectorAll("[data-theme-choice]")];
 const runtimePlanButton = document.querySelector("[data-runtime-plan]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
+const firstRunStartButton = document.querySelector("[data-first-run-start]");
+const firstRunStatus = document.querySelector("[data-first-run-status]");
 const runnerSelfTestButton = document.querySelector("[data-runner-self-test]");
 const checkUpdateButton = document.querySelector("[data-check-update]");
 const installUpdateButton = document.querySelector("[data-install-update]");
@@ -54,14 +56,16 @@ let logLines = [];
 let tauriInvoke = null;
 let tauriListen = null;
 let runnerListenerEventsReady = false;
+let firstRunEventsReady = false;
 let runnerStartupLines = [];
 let runnerStartupWaiters = [];
 let previewToken = "";
 let pendingUpdate = null;
 let lastNormalizedApiUrl = "https://api.infergrade.com/";
 let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp jobs.";
-let nativeSuiteReadiness = "Native first-run executor is still in progress; Docker is optional for advanced sandboxed benchmarks.";
+let nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
 let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxed benchmarks.";
+let modelPathReadiness = "Select a local GGUF model for the first benchmark.";
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
 
@@ -274,20 +278,20 @@ function renderLocalReadinessChecklist() {
     containerRuntimeStatus.textContent = containerRuntimeReadiness;
   }
   if (modelPathStatus) {
-    modelPathStatus.textContent = "Chosen in Hub run plans; Desktop validates runtime and listener readiness.";
+    modelPathStatus.textContent = modelPathReadiness;
   }
 }
 
 function renderDesktopReadiness(payload = {}) {
   if (!payload.status) {
-    nativeSuiteReadiness = "Native first-run executor is still in progress; Docker is optional for advanced sandboxed benchmarks.";
+    nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
     containerRuntimeReadiness = "Open the desktop app to check Docker/Podman. Docker is optional advanced support.";
     renderLocalReadinessChecklist();
     return;
   }
   nativeSuiteReadiness =
     payload.native_benchmark_message ||
-    "Native first-run executor is still in progress; Docker is optional for advanced sandboxed benchmarks.";
+    "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
   const runtime = payload.llama_cpp_runtime || "";
   const runtimeMessage = payload.llama_cpp_message || "";
   if (runtime === "available") {
@@ -486,6 +490,28 @@ async function ensureRunnerListenerEvents() {
   });
 }
 
+async function ensureFirstRunEvents() {
+  if (firstRunEventsReady) {
+    return;
+  }
+  const listen = await loadTauriListen();
+  if (!listen) {
+    return;
+  }
+  firstRunEventsReady = true;
+  await listen("runner-first-run-event", (event) => {
+    const payload = event?.payload || {};
+    const message = firstRunMessageFromEvent(payload);
+    if (!message) {
+      return;
+    }
+    if (firstRunStatus) {
+      firstRunStatus.textContent = message;
+    }
+    appendLog(`First-run ${payload.type || "event"}: ${message}`);
+  });
+}
+
 async function loadStoredToken() {
   const invoke = await loadTauriInvoke();
   if (invoke) {
@@ -585,6 +611,23 @@ function appendLog(message) {
   logOutput.scrollTop = logOutput.scrollHeight;
 }
 
+function firstRunMessageFromEvent(payload = {}) {
+  if (payload.type === "benchmark_started") {
+    return "Native first-run started.";
+  }
+  if (payload.type === "benchmark_progress") {
+    const percent = Number.isFinite(payload.progress_percent) ? ` (${Math.round(payload.progress_percent)}%)` : "";
+    return `${payload.message || "Native first-run progress."}${percent}`;
+  }
+  if (payload.type === "benchmark_completed") {
+    return "Native first-run completed. Upload is not wired yet.";
+  }
+  if (payload.type === "error") {
+    return payload.message || "Native first-run failed.";
+  }
+  return "";
+}
+
 function pairingSummary(stdout) {
   try {
     const payload = JSON.parse(stdout || "{}");
@@ -679,6 +722,23 @@ function runtimePlanSummary(plan = {}) {
   const runtimeText = plan.message || "No install command was run. Review the runtime plan before selecting a runtime.";
   const lane = recommended.platform || recommended.accelerator || "this machine";
   return `${runtimeText} Recommended lane: ${lane}. ${selectedText}`;
+}
+
+function readFirstRunModelPath() {
+  const modelPath = form.elements.firstRunModelPath?.value.trim() || "";
+  if (!modelPath) {
+    throw new Error("Select a local GGUF model file before running the first benchmark.");
+  }
+  if (!modelPath.toLowerCase().endsWith(".gguf")) {
+    throw new Error("Use a local GGUF model file for the native first-run benchmark.");
+  }
+  modelPathReadiness = `First-run model selected: ${modelPath}`;
+  renderLocalReadinessChecklist();
+  return modelPath;
+}
+
+function readFirstRunRuntimePath() {
+  return form.elements.firstRunRuntimePath?.value.trim() || null;
 }
 
 async function startRunner({ confirmStarted = false } = {}) {
@@ -811,6 +871,49 @@ async function runDesktopSelfTest() {
   setStatus("Runner self-test passed", "good");
 }
 
+async function runNativeFirstRun() {
+  const modelPath = readFirstRunModelPath();
+  const runtimePath = readFirstRunRuntimePath();
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    firstRunStatus.textContent = "Open the desktop app to run the native first benchmark.";
+    appendLog("Development view cannot run the native first benchmark.");
+    return;
+  }
+
+  await ensureFirstRunEvents();
+  firstRunStartButton.disabled = true;
+  setStatus("First benchmark running", "warning");
+  firstRunStatus.textContent = "Starting native first-run benchmark...";
+  try {
+    const payload = await invoke("run_desktop_native_first_run", {
+      modelPath,
+      runtimePath,
+    });
+    const result = payload?.result || {};
+    const metrics = result.metrics || {};
+    const speed = Number.isFinite(metrics.decode_tokens_per_second)
+      ? `${metrics.decode_tokens_per_second.toFixed(2)} tokens/sec`
+      : "speed unavailable";
+    const ttft = Number.isFinite(metrics.time_to_first_token_ms)
+      ? `${metrics.time_to_first_token_ms} ms TTFT`
+      : "TTFT unavailable";
+    firstRunStatus.textContent = `Completed native first-run (${speed}, ${ttft}). Upload is not wired yet.`;
+    modelPathReadiness = "Native first-run completed locally. Upload is not wired yet.";
+    nativeSuiteReadiness = "Native first-run completed locally with native_first_run evidence. Upload is not wired yet.";
+    setStatus("First benchmark complete", "good");
+    renderLocalReadinessChecklist();
+    appendLog(`Native first-run result: ${JSON.stringify(payload)}`);
+  } catch (error) {
+    const message = error.message || error;
+    firstRunStatus.textContent = `Native first-run failed: ${message}`;
+    setStatus("First benchmark failed", "error");
+    appendLog(`Native first-run failed: ${message}`);
+  } finally {
+    firstRunStartButton.disabled = false;
+  }
+}
+
 async function stopRunner() {
   if (!childProcess) {
     return;
@@ -930,6 +1033,17 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
       setStatus("Runtime selection failed", "error");
       appendLog(`Could not select installed llama.cpp runtime: ${error.message || error}`);
     });
+});
+
+firstRunStartButton?.addEventListener("click", () => {
+  runNativeFirstRun().catch((error) => {
+    const message = error.message || String(error);
+    if (firstRunStatus) {
+      firstRunStatus.textContent = message;
+    }
+    setStatus("First benchmark blocked", "error");
+    appendLog(`Could not start native first-run: ${message}`);
+  });
 });
 
 runnerSelfTestButton?.addEventListener("click", () => {

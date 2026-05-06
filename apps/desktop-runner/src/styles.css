@@ -313,6 +313,19 @@ label {
   margin-bottom: 14px;
 }
 
+.first-run-panel {
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--surface-muted);
+}
+
+.first-run-panel h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
 .readiness-checklist {
   margin-top: 18px;
   border-top: 1px solid var(--border);
