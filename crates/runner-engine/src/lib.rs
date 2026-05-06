@@ -4,6 +4,7 @@ mod hub_client;
 mod pairing;
 mod profile;
 mod token_store;
+mod worker_protocol;
 
 pub use errors::RunnerError;
 pub use events::{RunnerEvent, RuntimeInfo};
@@ -14,6 +15,10 @@ pub use pairing::{
 };
 pub use profile::{MemoryProfileStore, ProfileStore, RunnerProfile, SanitizedRunnerProfile};
 pub use token_store::{MemoryTokenStore, TokenStore};
+pub use worker_protocol::{
+    claim_run_job_payload, runner_heartbeat_payload, runner_register_payload, ClaimRunJobRequest,
+    RunnerCapabilities, RunnerHeartbeatRequest, RunnerRegisterRequest,
+};
 
 use serde_json::{json, Value};
 use std::env;
@@ -183,71 +188,6 @@ pub fn runner_id_from_profile(profile: Option<&Value>) -> String {
         hostname()
             .map(|host| format!("runner-{host}"))
             .unwrap_or_else(|| "runner-local".to_string())
-    })
-}
-
-pub fn runner_register_payload(
-    runner_id: &str,
-    execution_mode: &str,
-    hostname: Option<String>,
-) -> Value {
-    json!({
-        "runner_id": runner_id,
-        "execution_modes": [execution_mode],
-        "status": "starting",
-        "label": runner_id,
-        "runner_kind": if execution_mode == "cloud_container" { "cloud_worker" } else { "local_listener" },
-        "hostname": hostname,
-        "provider_id": Value::Null,
-        "instance_type_id": Value::Null,
-        "capabilities": {
-            "run_token_supported": true,
-            "auto_upload": true,
-        },
-        "version": env!("CARGO_PKG_VERSION"),
-        "environment": desktop_environment(),
-        "contract": {},
-        "diagnostics": {},
-    })
-}
-
-pub fn runner_heartbeat_payload(
-    status: &str,
-    current_run_id: Option<&str>,
-    hostname: Option<String>,
-    message: Option<&str>,
-) -> Value {
-    json!({
-        "status": status,
-        "current_run_id": current_run_id,
-        "hostname": hostname,
-        "provider_id": Value::Null,
-        "instance_type_id": Value::Null,
-        "metadata": match message {
-            Some(message) => json!({"message": message}),
-            None => json!({}),
-        },
-        "environment": desktop_environment(),
-        "contract": {},
-        "diagnostics": {},
-    })
-}
-
-pub fn claim_run_job_payload(
-    worker_id: &str,
-    execution_mode: &str,
-    run_id: Option<&str>,
-    run_config_id: Option<&str>,
-    hostname: Option<String>,
-) -> Value {
-    json!({
-        "worker_id": worker_id,
-        "execution_mode": execution_mode,
-        "run_id": run_id,
-        "run_config_id": run_config_id,
-        "provider_id": Value::Null,
-        "instance_type_id": Value::Null,
-        "hostname": hostname,
     })
 }
 
