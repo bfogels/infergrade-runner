@@ -1,11 +1,13 @@
 mod errors;
 mod events;
+mod hub_client;
 mod pairing;
 mod profile;
 mod token_store;
 
 pub use errors::RunnerError;
 pub use events::{RunnerEvent, RuntimeInfo};
+pub use hub_client::{build_hub_json_request, hub_api_url, HubJsonRequest, HubMethod};
 pub use pairing::{
     build_pairing_redeem_request, complete_pairing_response, pairing_status_payload,
     reset_pairing_state, PairingCompletion, PairingInput, PairingRedeemRequest,
@@ -250,12 +252,7 @@ pub fn claim_run_job_payload(
 }
 
 pub fn worker_request_url(api_url: &str, path: &str) -> Result<String, String> {
-    let normalized = normalize_api_url(api_url)?;
-    Ok(format!(
-        "{}/{}",
-        normalized.trim_end_matches('/'),
-        path.trim_start_matches('/')
-    ))
+    hub_api_url(api_url, path).map_err(|error| error.message().to_string())
 }
 
 pub fn worker_request_preview(
@@ -264,12 +261,9 @@ pub fn worker_request_preview(
     payload: Value,
     token: &str,
 ) -> Result<Value, String> {
-    Ok(json!({
-        "url": worker_request_url(api_url, path)?,
-        "method": "POST",
-        "has_authorization": !token.trim().is_empty(),
-        "payload": payload,
-    }))
+    build_hub_json_request(HubMethod::Post, api_url, path, Some(payload), Some(token))
+        .map(|request| request.sanitized_preview())
+        .map_err(|error| error.message().to_string())
 }
 
 pub fn redact_listener_text(text: &str, sensitive_values: &[String]) -> String {

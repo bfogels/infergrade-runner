@@ -1,11 +1,12 @@
 use infergrade_runner_engine::{
-    build_listener_start_plan, build_pairing_redeem_request, claim_run_job_payload,
-    complete_pairing_response, desktop_environment, hostname,
+    build_hub_json_request, build_listener_start_plan, build_pairing_redeem_request,
+    claim_run_job_payload, complete_pairing_response, desktop_environment, hostname,
     llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, normalize_api_url,
     pairing_error_detail, pairing_status_payload, preferred_execution_mode, profile_string,
     redact_listener_text, redact_worker_response, reset_pairing_state, runner_heartbeat_payload,
     runner_id_from_profile, runner_register_payload, selected_llama_cpp_runtime_path,
-    worker_request_url, PairingInput, ProfileStore, RunnerError, RunnerProfile, TokenStore,
+    worker_request_url, HubMethod, PairingInput, ProfileStore, RunnerError, RunnerProfile,
+    TokenStore,
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
@@ -516,12 +517,19 @@ async fn redeem_runner_pairing(
         desktop_environment(),
     )
     .map_err(|error| error.message().to_string())?;
-    let url = format!(
-        "{}/v1/runner-pairings/redeem",
-        api_url.trim_end_matches('/')
-    );
+    let request = build_hub_json_request(
+        HubMethod::Post,
+        &api_url,
+        "/v1/runner-pairings/redeem",
+        Some(
+            serde_json::to_value(&payload)
+                .map_err(|error| format!("Could not serialize pairing request payload: {error}"))?,
+        ),
+        None,
+    )
+    .map_err(|error| error.message().to_string())?;
     let response = reqwest::Client::new()
-        .post(url)
+        .post(request.url)
         .json(&payload)
         .send()
         .await
