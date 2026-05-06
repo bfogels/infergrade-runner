@@ -4,6 +4,8 @@ InferGrade Desktop Runner is the local companion app for people who want to pair
 
 The Hub remains the model selection, benchmark planning, recommendation, and results surface. This app should stay focused on pairing, readiness, Runner lifecycle, local runtime controls, logs, updates, and support export.
 
+Docker is not required for your first local benchmark. The desktop happy path should pair, validate a native `llama.cpp` runtime, and start a first local run without asking the user to install Docker, Python, Rust, clone a repo, edit `PATH`, or use a terminal. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
+
 ## What It Includes
 
 - Tauri 2 desktop shell with a vanilla JavaScript frontend
