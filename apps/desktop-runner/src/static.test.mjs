@@ -72,3 +72,11 @@ test("desktop runtime panel makes native first-run readiness primary and Docker 
   assert.ok(js.includes("renderDesktopReadiness"));
   assert.ok(shapes.includes(JSON.stringify(["desktop-readiness"])));
 });
+
+test("desktop readiness copy does not overclaim when native runtime is missing", () => {
+  const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+
+  assert.ok(js.includes("runtime === \"available\""));
+  assert.ok(js.includes("Select a native runtime for first-run benchmarks"));
+  assert.equal(js.includes("Docker not found. Native benchmarks are available; advanced sandboxed benchmarks are disabled.\";"), false);
+});

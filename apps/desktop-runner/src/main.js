@@ -268,12 +268,13 @@ function renderLocalReadinessChecklist() {
 }
 
 function renderDesktopReadiness(payload = {}) {
-  nativeSuiteReadiness = "Native benchmark suite: ready. Docker is not required for your first local benchmark.";
   if (!payload.status) {
+    nativeSuiteReadiness = "Docker is not required for your first local benchmark.";
     containerRuntimeReadiness = "Open the desktop app to check Docker/Podman. Native benchmarks do not require them.";
     renderLocalReadinessChecklist();
     return;
   }
+  nativeSuiteReadiness = payload.native_benchmark_message || "Docker is not required for your first local benchmark.";
   const runtime = payload.llama_cpp_runtime || "";
   const runtimeMessage = payload.llama_cpp_message || "";
   if (runtime === "available") {
@@ -288,7 +289,10 @@ function renderDesktopReadiness(payload = {}) {
   } else if (podman.status === "found") {
     containerRuntimeReadiness = "Podman detected. Advanced sandboxed benchmark support may be available.";
   } else {
-    containerRuntimeReadiness = "Docker not found. Native benchmarks are available; advanced sandboxed benchmarks are disabled.";
+    containerRuntimeReadiness =
+      runtime === "available"
+        ? "Docker not found. Native benchmarks are available; advanced sandboxed benchmarks are disabled."
+        : "Docker not found. Select a native runtime for first-run benchmarks; advanced sandboxed benchmarks are disabled.";
   }
   renderLocalReadinessChecklist();
 }

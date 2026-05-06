@@ -125,4 +125,3 @@ Linux:
 - Podman detection is advisory.
 - Docker absence does not block native first-run readiness.
 - Logs and support export are readable without terminal access.
-

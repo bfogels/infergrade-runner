@@ -241,9 +241,24 @@ fn optional_container_status(program: &str) -> (&'static str, String) {
     }
 }
 
+fn native_suite_status(first_run: &str) -> (&'static str, &'static str) {
+    if first_run == "ready" {
+        (
+            "ready",
+            "Native benchmark suite is ready. Docker is not required for your first local benchmark.",
+        )
+    } else {
+        (
+            "setup_needed",
+            "Native benchmark suite is available after selecting a local llama.cpp runtime. Docker is not required.",
+        )
+    }
+}
+
 fn desktop_readiness() -> String {
     let (hardware_class, accelerator_api) = desktop_hardware_hint();
     let (runtime_status, runtime_message, first_run) = llama_runtime_status(accelerator_api);
+    let (native_suite, native_message) = native_suite_status(first_run);
     let (docker_status, docker_message) = optional_container_status("docker");
     let (podman_status, podman_message) = optional_container_status("podman");
     format!(
@@ -252,8 +267,8 @@ fn desktop_readiness() -> String {
             "\"status\":\"ok\",",
             "\"hardware_class\":\"{}\",",
             "\"accelerator_api\":\"{}\",",
-            "\"native_benchmark_suite\":\"ready\",",
-            "\"native_benchmark_message\":\"Docker is not required for your first local benchmark.\",",
+            "\"native_benchmark_suite\":\"{}\",",
+            "\"native_benchmark_message\":\"{}\",",
             "\"llama_cpp_runtime\":\"{}\",",
             "\"llama_cpp_message\":\"{}\",",
             "\"first_run\":\"{}\",",
@@ -264,6 +279,8 @@ fn desktop_readiness() -> String {
         ),
         json_escape(hardware_class),
         json_escape(accelerator_api),
+        json_escape(native_suite),
+        json_escape(native_message),
         json_escape(runtime_status),
         json_escape(runtime_message),
         json_escape(first_run),
@@ -475,10 +492,16 @@ mod tests {
     fn desktop_readiness_reports_native_first_and_optional_containers() {
         let payload = desktop_readiness();
 
-        assert!(payload.contains("\"native_benchmark_suite\":\"ready\""));
+        assert!(payload.contains("\"native_benchmark_suite\""));
         assert!(payload.contains("\"first_run\""));
         assert!(payload.contains("\"docker\""));
-        assert!(payload.contains("Docker is not required for your first local benchmark."));
+        assert!(payload.contains("Docker is not required"));
         assert!(payload.contains("\"podman\""));
+    }
+
+    #[test]
+    fn native_suite_status_requires_first_run_runtime_readiness() {
+        assert_eq!(native_suite_status("ready").0, "ready");
+        assert_eq!(native_suite_status("blocked").0, "setup_needed");
     }
 }
