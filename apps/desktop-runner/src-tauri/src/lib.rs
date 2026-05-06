@@ -312,6 +312,63 @@ fn claim_run_job_payload(
     })
 }
 
+fn worker_request_url(api_url: &str, path: &str) -> Result<String, String> {
+    let normalized = normalize_desktop_api_url(api_url)?;
+    Ok(format!(
+        "{}/{}",
+        normalized.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    ))
+}
+
+#[cfg(test)]
+fn worker_request_preview(
+    api_url: &str,
+    path: &str,
+    payload: Value,
+    token: &str,
+) -> Result<Value, String> {
+    Ok(json!({
+        "url": worker_request_url(api_url, path)?,
+        "method": "POST",
+        "has_authorization": !token.trim().is_empty(),
+        "payload": payload,
+    }))
+}
+
+async fn send_worker_json_request(
+    api_url: &str,
+    path: &str,
+    payload: &Value,
+    token: &str,
+) -> Result<Value, String> {
+    let url = worker_request_url(api_url, path)?;
+    let token = token.trim();
+    let client = reqwest::Client::new();
+    let mut request = client.post(url).json(payload);
+    if !token.is_empty() {
+        request = request.bearer_auth(token);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach Hub worker endpoint: {error}"))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("Could not read Hub worker response: {error}"))?;
+    let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"error": text}));
+    if !status.is_success() {
+        return Err(format!(
+            "Hub worker request failed: HTTP {}: {}",
+            status.as_u16(),
+            pairing_error_detail(&parsed).unwrap_or("no detail")
+        ));
+    }
+    Ok(parsed)
+}
+
 fn command_version(program: &str) -> Value {
     match StdCommand::new(program).arg("--version").output() {
         Ok(output) if output.status.success() => {
@@ -612,6 +669,46 @@ fn worker_protocol_preview(api_url: String) -> Result<Value, String> {
     }))
 }
 
+#[tauri::command]
+async fn worker_protocol_ping(api_url: String) -> Result<Value, String> {
+    let normalized_api_url = normalize_desktop_api_url(&api_url)?;
+    let profile = load_runner_profile()?;
+    let token = load_runner_token_value()?
+        .ok_or_else(|| "Pair this machine before sending Runner register/heartbeat.".to_string())?;
+    let execution_mode = profile_string(profile.as_ref(), "preferred_execution_mode")
+        .unwrap_or_else(|| preferred_execution_mode().to_string());
+    let runner_id = runner_id_from_profile(profile.as_ref());
+    let host = hostname();
+    let register_payload = runner_register_payload(&runner_id, &execution_mode, host.clone());
+    let heartbeat_payload = runner_heartbeat_payload(
+        "listening",
+        None,
+        host,
+        Some("Runner registered and is listening for jobs."),
+    );
+    let register = send_worker_json_request(
+        &normalized_api_url,
+        "/v1/runners/register",
+        &register_payload,
+        &token,
+    )
+    .await?;
+    let heartbeat = send_worker_json_request(
+        &normalized_api_url,
+        &format!("/v1/runners/{runner_id}/heartbeat"),
+        &heartbeat_payload,
+        &token,
+    )
+    .await?;
+    Ok(json!({
+        "status": "sent",
+        "runner_id": runner_id,
+        "execution_mode": execution_mode,
+        "register": register,
+        "heartbeat": heartbeat,
+    }))
+}
+
 fn emit_listener_event(app: &AppHandle, payload: Value) {
     let _ = app.emit("runner-listener-event", payload);
 }
@@ -872,6 +969,7 @@ pub fn run() {
             runner_pairing_status,
             listener_start_plan,
             worker_protocol_preview,
+            worker_protocol_ping,
             start_runner_listener,
             stop_runner_listener,
             reset_runner_pairing,
@@ -1179,5 +1277,27 @@ mod tests {
         .to_string();
         assert!(!combined.contains("qbhr_"));
         assert!(!combined.contains("Authorization"));
+    }
+
+    #[test]
+    fn rust_worker_request_preview_keeps_token_out_of_payload() {
+        let payload =
+            runner_register_payload("runner_123", "local_native", Some("host-a".to_string()));
+        let request = worker_request_preview(
+            "api.infergrade.com",
+            "/v1/runners/register",
+            payload,
+            "qbhr_secret_token",
+        )
+        .expect("request preview");
+
+        assert_eq!(
+            request["url"],
+            "https://api.infergrade.com/v1/runners/register"
+        );
+        assert_eq!(request["method"], "POST");
+        assert_eq!(request["has_authorization"], true);
+        assert!(!request["payload"].to_string().contains("qbhr_secret_token"));
+        assert!(!request.to_string().contains("Authorization"));
     }
 }

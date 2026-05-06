@@ -47,6 +47,8 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(rust.includes("fn start_runner_listener"));
   assert.ok(rust.includes("fn stop_runner_listener"));
   assert.ok(rust.includes("fn worker_protocol_preview"));
+  assert.ok(rust.includes("fn worker_protocol_ping"));
+  assert.ok(rust.includes("send_worker_json_request"));
   assert.ok(rust.includes("runner_register_payload"));
   assert.ok(rust.includes("claim_run_job_payload"));
   assert.ok(rust.includes("runner-listener-event"));
