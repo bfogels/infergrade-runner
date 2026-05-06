@@ -155,6 +155,17 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn("Docker remains supported for advanced sandboxed benchmarks", first_user_path)
         self.assertNotIn("containerized golden path", runner_readme.lower())
 
+    def test_rust_engine_workplan_tracks_develop_only_migration(self):
+        root = self._repo_root()
+        path = os.path.join(root, "docs/desktop_runner_rust_engine_workplan.md")
+        with open(path, "r", encoding="utf-8") as handle:
+            plan = handle.read()
+
+        self.assertIn("Work primarily on `develop`", plan)
+        self.assertIn("Rust-owned paired-runner status", plan)
+        self.assertIn("Do not promote to `main`", plan)
+        self.assertIn("Python runner-core remains the execution bridge", plan)
+
 
 if __name__ == "__main__":
     unittest.main()
