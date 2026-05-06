@@ -75,7 +75,7 @@ pub struct SanitizedRunnerProfile {
 pub trait ProfileStore {
     fn save_profile(&self, profile: &RunnerProfile) -> Result<(), RunnerError>;
     fn load_profile(&self) -> Result<Option<RunnerProfile>, RunnerError>;
-    fn clear_profile(&self) -> Result<(), RunnerError>;
+    fn clear_profile(&self) -> Result<bool, RunnerError>;
 }
 
 #[derive(Default)]
@@ -101,10 +101,12 @@ impl ProfileStore for MemoryProfileStore {
             .clone())
     }
 
-    fn clear_profile(&self) -> Result<(), RunnerError> {
-        *self.profile.lock().map_err(|_| {
+    fn clear_profile(&self) -> Result<bool, RunnerError> {
+        let mut profile = self.profile.lock().map_err(|_| {
             RunnerError::new("profile_store_unavailable", "profile store lock failed")
-        })? = None;
-        Ok(())
+        })?;
+        let removed = profile.is_some();
+        *profile = None;
+        Ok(removed)
     }
 }

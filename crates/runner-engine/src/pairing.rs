@@ -103,3 +103,51 @@ where
         ui_response: body,
     })
 }
+
+pub fn pairing_status_payload(
+    profile: Option<RunnerProfile>,
+    token_available: bool,
+    profile_path: impl Into<String>,
+) -> Result<Value, RunnerError> {
+    let profile_status = match profile {
+        Some(profile) => json!({
+            "status": "present",
+            "profile": profile.sanitized(),
+        }),
+        None => json!({
+            "status": "missing",
+            "profile": Value::Null,
+        }),
+    };
+    let profile_available = profile_status["status"] == "present";
+    Ok(json!({
+        "paired": profile_available && token_available,
+        "profile_path": profile_path.into(),
+        "profile": profile_status,
+        "token": {
+            "status": if token_available { "present" } else { "missing" },
+            "stored_in": "os_credential_store",
+        },
+    }))
+}
+
+pub fn reset_pairing_state<P, T>(
+    profile_store: &P,
+    token_store: &T,
+    profile_path: impl Into<String>,
+) -> Result<Value, RunnerError>
+where
+    P: ProfileStore,
+    T: TokenStore,
+{
+    let token_cleared = token_store.clear_runner_token()?;
+    let profile_removed = profile_store.clear_profile()?;
+    Ok(json!({
+        "reset": true,
+        "token_cleared": token_cleared,
+        "profile": {
+            "removed": profile_removed,
+            "profile_path": profile_path.into(),
+        },
+    }))
+}
