@@ -554,6 +554,27 @@ async function runnerEnvironment() {
   return {};
 }
 
+function credentialSourceLabel(source = "") {
+  if (source === "typed_input") {
+    return "the pasted token";
+  }
+  if (source === "saved_pairing") {
+    return "the saved Runner profile and OS credential store";
+  }
+  return "missing pairing credentials";
+}
+
+async function listenerStartPlan(apiUrl) {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  return invoke("listener_start_plan", {
+    apiUrl,
+    typedTokenPresent: Boolean(form.elements.hubToken.value.trim()),
+  });
+}
+
 function readApiUrl() {
   const normalized = normalizeDesktopApiUrl(form.elements.apiUrl.value);
   form.elements.apiUrl.value = normalized;
@@ -598,6 +619,17 @@ async function startRunner({ confirmStarted = false } = {}) {
     appendLog("Open the desktop app to start the local Runner.");
     startButton.disabled = false;
     return;
+  }
+
+  const plan = await listenerStartPlan(apiUrl);
+  if (plan) {
+    if (!plan.can_start) {
+      throw new Error("Pair this machine before starting the local Runner listener.");
+    }
+    const runner = plan.runner_id ? ` for ${plan.runner_id}` : "";
+    appendLog(
+      `Runner start plan: ${plan.execution_mode || "default mode"} using ${credentialSourceLabel(plan.credential_source)}${runner}.`
+    );
   }
 
   const command = Command.sidecar(SIDECAR_NAME, ["start", "--api-url", apiUrl], {

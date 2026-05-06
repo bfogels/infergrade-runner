@@ -179,6 +179,55 @@ fn sanitized_runner_profile(profile: &Value) -> Value {
     })
 }
 
+fn ui_pairing_response(mut body: Value, profile: &Value, profile_path: PathBuf) -> Value {
+    body["runner_profile"] = sanitized_runner_profile(profile);
+    body["profile_path"] = Value::String(profile_path.display().to_string());
+    body["next_action"] = Value::String("start_runner".to_string());
+    body["commands"] = json!({ "start": "infergrade start" });
+    body
+}
+
+fn profile_string(profile: Option<&Value>, key: &str) -> Option<String> {
+    profile
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn profile_token_available(profile: Option<&Value>) -> bool {
+    profile_string(profile, "access_token").is_some()
+}
+
+fn build_listener_start_plan(
+    api_url: &str,
+    typed_token_present: bool,
+    profile: Option<&Value>,
+    os_token_available: bool,
+) -> Result<Value, String> {
+    let normalized_api_url = normalize_desktop_api_url(api_url)?;
+    let profile_available = profile.is_some();
+    let profile_has_token = profile_token_available(profile);
+    let credential_source = if typed_token_present {
+        "typed_input"
+    } else if profile_available && profile_has_token && os_token_available {
+        "saved_pairing"
+    } else {
+        "missing"
+    };
+    Ok(json!({
+        "api_url": normalized_api_url,
+        "runner_id": profile_string(profile, "runner_id").unwrap_or_default(),
+        "execution_mode": profile_string(profile, "preferred_execution_mode").unwrap_or_else(|| preferred_execution_mode().to_string()),
+        "credential_source": credential_source,
+        "can_start": credential_source != "missing",
+        "profile_status": if profile_available { "present" } else { "missing" },
+        "profile_token_status": if profile_has_token { "present" } else { "missing" },
+        "token_status": if os_token_available { "present" } else { "missing" },
+    }))
+}
+
 fn command_version(program: &str) -> Value {
     match Command::new(program).arg("--version").output() {
         Ok(output) if output.status.success() => {
@@ -437,6 +486,18 @@ fn runner_pairing_status_payload(
 }
 
 #[tauri::command]
+fn listener_start_plan(api_url: String, typed_token_present: bool) -> Result<Value, String> {
+    let profile = load_runner_profile()?;
+    let token_available = runner_token_available()?;
+    build_listener_start_plan(
+        &api_url,
+        typed_token_present,
+        profile.as_ref(),
+        token_available,
+    )
+}
+
+#[tauri::command]
 fn reset_runner_pairing() -> Result<Value, String> {
     let token_cleared = match clear_runner_token() {
         Ok(()) => true,
@@ -524,7 +585,7 @@ async fn redeem_runner_pairing(
             status.as_u16()
         ));
     }
-    let mut body = parsed.ok_or_else(|| "Hub pairing response was not valid JSON.".to_string())?;
+    let body = parsed.ok_or_else(|| "Hub pairing response was not valid JSON.".to_string())?;
     let profile = body
         .get("runner_profile")
         .cloned()
@@ -535,10 +596,7 @@ async fn redeem_runner_pairing(
         .ok_or_else(|| "Hub pairing response did not include a runner token.".to_string())?;
     let profile_path = save_runner_profile(&profile)?;
     save_runner_token_value(access_token)?;
-    body["profile_path"] = Value::String(profile_path.display().to_string());
-    body["next_action"] = Value::String("start_runner".to_string());
-    body["commands"] = json!({ "start": "infergrade start" });
-    Ok(body)
+    Ok(ui_pairing_response(body, &profile, profile_path))
 }
 
 fn pairing_error_detail(payload: &Value) -> Option<&str> {
@@ -558,6 +616,7 @@ pub fn run() {
             save_runner_token,
             clear_runner_token,
             runner_pairing_status,
+            listener_start_plan,
             reset_runner_pairing,
             llama_cpp_runtime_plan,
             redeem_runner_pairing
@@ -707,6 +766,30 @@ mod tests {
     }
 
     #[test]
+    fn pairing_response_does_not_return_runner_token_to_ui() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "access_token": "qbhr_secret",
+            "runner_id": "runner_123",
+            "label": "Test runner",
+        });
+        let response = ui_pairing_response(
+            json!({
+                "runner_profile": profile.clone(),
+                "other": "unchanged",
+            }),
+            &profile,
+            PathBuf::from("/tmp/infergrade/runner_profile.json"),
+        );
+
+        assert_eq!(response["runner_profile"]["runner_id"], "runner_123");
+        assert_eq!(response["runner_profile"]["has_access_token"], true);
+        assert_eq!(response["other"], "unchanged");
+        assert!(!response.to_string().contains("qbhr_secret"));
+        assert_eq!(response["runner_profile"].get("access_token"), None);
+    }
+
+    #[test]
     fn pairing_status_requires_profile_and_os_token_to_be_ready() {
         let profile = json!({
             "api_url": "https://api.infergrade.com/",
@@ -728,5 +811,44 @@ mod tests {
 
         let ready = runner_pairing_status_payload(Some(profile), true, path);
         assert_eq!(ready["paired"], true);
+    }
+
+    #[test]
+    fn listener_start_plan_prefers_os_token_without_exposing_secret() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "access_token": "qbhr_secret",
+            "runner_id": "runner_123",
+            "preferred_execution_mode": "local_native",
+        });
+        let plan = build_listener_start_plan("api.infergrade.com", false, Some(&profile), true)
+            .expect("listener plan");
+
+        assert_eq!(plan["api_url"], "https://api.infergrade.com/");
+        assert_eq!(plan["runner_id"], "runner_123");
+        assert_eq!(plan["execution_mode"], "local_native");
+        assert_eq!(plan["credential_source"], "saved_pairing");
+        assert_eq!(plan["can_start"], true);
+        assert!(!plan.to_string().contains("qbhr_secret"));
+    }
+
+    #[test]
+    fn listener_start_plan_rejects_stale_profile_without_os_token() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "access_token": "qbhr_secret",
+            "runner_id": "runner_123",
+        });
+        let stale = build_listener_start_plan("api.infergrade.com", false, Some(&profile), false)
+            .expect("listener plan");
+        assert_eq!(stale["credential_source"], "missing");
+        assert_eq!(stale["can_start"], false);
+        assert_eq!(stale["profile_token_status"], "present");
+        assert_eq!(stale["token_status"], "missing");
+
+        let typed = build_listener_start_plan("api.infergrade.com", true, None, false)
+            .expect("typed token plan");
+        assert_eq!(typed["credential_source"], "typed_input");
+        assert_eq!(typed["can_start"], true);
     }
 }
