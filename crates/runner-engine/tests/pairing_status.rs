@@ -34,6 +34,13 @@ fn pairing_status_requires_profile_and_token() {
     assert_eq!(ready["paired"], true);
     assert_eq!(ready["profile"]["profile"]["runner_id"], "runner_123");
     assert!(!ready.to_string().contains("qbhr_"));
+
+    let mut legacy_profile = profile();
+    legacy_profile.access_token = Some("qbhr_legacy_secret".to_string());
+    let legacy_ready = pairing_status_payload(Some(legacy_profile), true, path).expect("status");
+    assert_eq!(legacy_ready["paired"], true);
+    assert_eq!(legacy_ready["profile"]["profile"]["has_access_token"], true);
+    assert!(!legacy_ready.to_string().contains("qbhr_legacy_secret"));
 }
 
 #[test]
@@ -55,4 +62,10 @@ fn reset_pairing_clears_profile_and_token_through_store_traits() {
     assert!(profiles.load_profile().unwrap().is_none());
     assert!(tokens.load_runner_token().unwrap().is_none());
     assert!(!result.to_string().contains("qbhr_secret"));
+
+    let second = reset_pairing_state(&profiles, &tokens, "/tmp/infergrade/runner_profile.json")
+        .expect("idempotent reset");
+    assert_eq!(second["reset"], true);
+    assert_eq!(second["token_cleared"], false);
+    assert_eq!(second["profile"]["removed"], false);
 }
