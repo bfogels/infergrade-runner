@@ -1,16 +1,17 @@
 use infergrade_runner_engine::{
-    container_runtime_readiness, llama_cpp_runtime_plan, normalize_api_url, run_native_first_run,
-    LlamaCppRuntime, NativeCommandRuntime, NativeFirstRunInput, NativeFirstRunRuntime,
-    NativeRuntimeOutput,
+    container_runtime_readiness, llama_cpp_runtime_plan, normalize_api_url,
+    run_native_first_run_with_events, LlamaCppRuntime, NativeCommandRuntime, NativeFirstRunInput,
+    NativeFirstRunRuntime, NativeRuntimeOutput, RunnerEvent,
 };
 use serde_json::{json, Value};
 use std::env;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 fn print_help() {
     println!(
-        "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>]\n                                               Run the built-in native llama.cpp first-run adapter\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration."
+        "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration."
     );
 }
 
@@ -101,7 +102,19 @@ fn write_first_run_artifact(output_dir: &Path, payload: &Value) -> Result<String
     Ok(artifact_path.display().to_string())
 }
 
-fn command_first_run(args: &[String]) -> Result<Value, String> {
+fn command_first_run_with_events(
+    args: &[String],
+) -> Result<(Value, Vec<RunnerEvent>, bool), String> {
+    command_first_run_with_event_sink(args, |event| event)
+}
+
+fn command_first_run_with_event_sink<F>(
+    args: &[String],
+    mut event_sink: F,
+) -> Result<(Value, Vec<RunnerEvent>, bool), String>
+where
+    F: FnMut(RunnerEvent) -> RunnerEvent,
+{
     let mut model_path: Option<PathBuf> = None;
     let mut runtime_hint = Some("auto".to_string());
     let mut prompt = "Say hello in one sentence.".to_string();
@@ -111,6 +124,7 @@ fn command_first_run(args: &[String]) -> Result<Value, String> {
     let mut runtime_command: Option<PathBuf> = None;
     let mut runtime_path: Option<PathBuf> = None;
     let mut output_dir: Option<PathBuf> = None;
+    let mut jsonl = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -167,6 +181,8 @@ fn command_first_run(args: &[String]) -> Result<Value, String> {
             }
             "--dry-run" => dry_run = true,
             "--no-upload" => no_upload = true,
+            "--json" => {}
+            "--jsonl" => jsonl = true,
             unknown => return Err(format!("unknown first-run option: {unknown}")),
         }
         index += 1;
@@ -204,6 +220,7 @@ fn command_first_run(args: &[String]) -> Result<Value, String> {
         max_tokens,
         upload: false,
     };
+    let mut events = Vec::new();
     let (mode, execution, message, result) = if let Some(command_path) = runtime_command {
         let runtime_id = input
             .runtime_hint
@@ -214,14 +231,20 @@ fn command_first_run(args: &[String]) -> Result<Value, String> {
             "runtime_command",
             "explicit_command",
             "Native first-run command adapter completed. This is not built-in llama.cpp support.",
-            run_native_first_run(input, &runtime).map_err(|error| error.to_string())?,
+            run_native_first_run_with_events(input, &runtime, |event| {
+                events.push(event_sink(event))
+            })
+            .map_err(|error| error.to_string())?,
         )
     } else if dry_run {
         (
             "dry_run",
             "simulated",
             "Native first-run contract validated. Real llama.cpp execution was not requested.",
-            run_native_first_run(input, &DryRunRuntime).map_err(|error| error.to_string())?,
+            run_native_first_run_with_events(input, &DryRunRuntime, |event| {
+                events.push(event_sink(event))
+            })
+            .map_err(|error| error.to_string())?,
         )
     } else {
         let runtime = LlamaCppRuntime::resolve(runtime_path)
@@ -230,7 +253,10 @@ fn command_first_run(args: &[String]) -> Result<Value, String> {
             "llama_cpp",
             "local_native",
             "Native first-run llama.cpp adapter completed. Upload remains disabled.",
-            run_native_first_run(input, &runtime).map_err(|error| error.to_string())?,
+            run_native_first_run_with_events(input, &runtime, |event| {
+                events.push(event_sink(event))
+            })
+            .map_err(|error| error.to_string())?,
         )
     };
     let mut payload = json!({
@@ -247,7 +273,12 @@ fn command_first_run(args: &[String]) -> Result<Value, String> {
             "uploaded": false,
         });
     }
-    Ok(payload)
+    payload["events"] = serde_json::to_value(&events).map_err(|error| error.to_string())?;
+    Ok((payload, events, jsonl))
+}
+
+fn command_first_run(args: &[String]) -> Result<Value, String> {
+    command_first_run_with_events(args).map(|(payload, _events, _jsonl)| payload)
 }
 
 fn run(args: &[String]) -> Result<Option<Value>, String> {
@@ -266,6 +297,34 @@ fn run(args: &[String]) -> Result<Option<Value>, String> {
 
 fn main() -> ExitCode {
     let args = env::args().skip(1).collect::<Vec<_>>();
+    if args.first().map(String::as_str) == Some("first-run")
+        && args.iter().any(|arg| arg == "--jsonl")
+    {
+        let result = command_first_run_with_event_sink(&args[1..], |event| {
+            print_json_line(&serde_json::to_value(&event).expect("event JSON"));
+            let _ = io::stdout().flush();
+            event
+        });
+        match result {
+            Ok((mut payload, _events, _jsonl)) => {
+                if let Some(object) = payload.as_object_mut() {
+                    object.remove("events");
+                }
+                print_json_line(&json!({
+                    "type": "first_run_result",
+                    "payload": payload,
+                }));
+                return ExitCode::SUCCESS;
+            }
+            Err(error) => {
+                print_json_line(&json!({
+                    "type": "first_run_error",
+                    "error": error,
+                }));
+                return ExitCode::from(2);
+            }
+        }
+    }
     match run(&args) {
         Ok(Some(value)) => {
             print_json(value);
@@ -278,6 +337,13 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+fn print_json_line(value: &Value) {
+    println!(
+        "{}",
+        serde_json::to_string(value).expect("JSONL rendering should not fail")
+    );
 }
 
 #[cfg(test)]
@@ -337,8 +403,79 @@ mod tests {
         assert_eq!(output["result"]["evidence_kind"], "native_first_run");
         assert_eq!(output["result"]["uploaded"], false);
         assert_eq!(output["result"]["metrics"]["generated_tokens"], 0);
+        assert_eq!(output["events"][0]["type"], "benchmark_started");
+        assert_eq!(
+            output["events"]
+                .as_array()
+                .expect("events array")
+                .last()
+                .expect("last event")["type"],
+            "benchmark_completed"
+        );
 
         let _ = std::fs::remove_file(model_path);
+    }
+
+    #[test]
+    fn first_run_jsonl_flag_keeps_typed_events_for_streaming() {
+        let model_path = env::temp_dir().join(format!(
+            "infergrade-runner-cli-jsonl-model-{}.gguf",
+            std::process::id()
+        ));
+        std::fs::write(&model_path, b"fake gguf path validation only").expect("model file");
+
+        let (output, events, jsonl) = command_first_run_with_events(&[
+            "--model".to_string(),
+            model_path.display().to_string(),
+            "--runtime".to_string(),
+            "auto".to_string(),
+            "--no-upload".to_string(),
+            "--dry-run".to_string(),
+            "--jsonl".to_string(),
+        ])
+        .expect("first-run jsonl output");
+
+        assert_eq!(jsonl, true);
+        assert_eq!(events.len(), output["events"].as_array().unwrap().len());
+        assert!(matches!(
+            events.first(),
+            Some(RunnerEvent::BenchmarkStarted { benchmark_id })
+                if benchmark_id == "native_first_run"
+        ));
+
+        let _ = std::fs::remove_file(model_path);
+    }
+
+    #[test]
+    fn first_run_event_sink_observes_error_events_before_failure() {
+        let missing_model = env::temp_dir().join(format!(
+            "infergrade-runner-cli-jsonl-missing-model-{}.gguf",
+            std::process::id()
+        ));
+        let mut streamed_events = Vec::new();
+
+        let error = command_first_run_with_event_sink(
+            &[
+                "--model".to_string(),
+                missing_model.display().to_string(),
+                "--runtime".to_string(),
+                "auto".to_string(),
+                "--no-upload".to_string(),
+                "--dry-run".to_string(),
+                "--jsonl".to_string(),
+            ],
+            |event| {
+                streamed_events.push(serde_json::to_value(&event).expect("event JSON"));
+                event
+            },
+        )
+        .expect_err("missing model fails after emitting error");
+
+        assert!(error.contains("model_path_missing"));
+        assert_eq!(streamed_events[0]["type"], "benchmark_started");
+        assert!(streamed_events
+            .iter()
+            .any(|event| { event["type"] == "error" && event["code"] == "model_path_missing" }));
     }
 
     #[test]

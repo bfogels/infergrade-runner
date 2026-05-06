@@ -1,5 +1,6 @@
 use infergrade_runner_engine::{
-    run_native_first_run, NativeFirstRunInput, NativeFirstRunRuntime, NativeRuntimeOutput,
+    run_native_first_run, run_native_first_run_with_events, NativeFirstRunInput,
+    NativeFirstRunRuntime, NativeRuntimeOutput, RunnerEvent,
 };
 use std::path::PathBuf;
 
@@ -82,6 +83,77 @@ fn native_first_run_uses_fake_runtime_and_labels_no_upload_evidence() {
     assert_eq!(result.metrics.generated_tokens, 32);
 
     let _ = std::fs::remove_file(model_path);
+}
+
+#[test]
+fn native_first_run_emits_typed_progress_events() {
+    let model_path = temp_model_path("events-ok");
+    std::fs::write(&model_path, b"not a real model, only path validation").expect("model file");
+    let mut events = Vec::new();
+
+    let result = run_native_first_run_with_events(
+        NativeFirstRunInput {
+            model_path: model_path.clone(),
+            runtime_hint: Some("llama.cpp-metal".to_string()),
+            prompt: "Say hello in one sentence.".to_string(),
+            max_tokens: 32,
+            upload: false,
+        },
+        &FakeRuntime,
+        |event| events.push(event),
+    )
+    .expect("native first run result");
+
+    assert_eq!(result.status, "completed");
+    assert!(matches!(
+        events.first(),
+        Some(RunnerEvent::BenchmarkStarted { benchmark_id })
+            if benchmark_id == "native_first_run"
+    ));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        RunnerEvent::BenchmarkProgress {
+            benchmark_id,
+            progress_percent: Some(80.0),
+            ..
+        } if benchmark_id == "native_first_run"
+    )));
+    assert!(matches!(
+        events.last(),
+        Some(RunnerEvent::BenchmarkCompleted { benchmark_id })
+            if benchmark_id == "native_first_run"
+    ));
+
+    let _ = std::fs::remove_file(model_path);
+}
+
+#[test]
+fn native_first_run_emits_error_event_on_validation_failure() {
+    let missing_model = temp_model_path("events-missing");
+    let mut events = Vec::new();
+
+    let error = run_native_first_run_with_events(
+        NativeFirstRunInput {
+            model_path: missing_model,
+            runtime_hint: None,
+            prompt: "hello".to_string(),
+            max_tokens: 16,
+            upload: false,
+        },
+        &PanicRuntime,
+        |event| events.push(event),
+    )
+    .expect_err("missing model is rejected");
+
+    assert_eq!(error.code(), "model_path_missing");
+    assert!(events.iter().any(|event| matches!(
+        event,
+        RunnerEvent::BenchmarkStarted { benchmark_id }
+            if benchmark_id == "native_first_run"
+    )));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, RunnerEvent::BenchmarkCompleted { .. })));
 }
 
 #[test]

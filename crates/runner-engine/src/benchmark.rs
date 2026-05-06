@@ -1,4 +1,4 @@
-use crate::RunnerError;
+use crate::{RunnerError, RunnerEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
@@ -14,6 +14,7 @@ const MAX_FIRST_RUN_DURATION_MS: u64 = 86_400_000;
 const MAX_DECODE_TOKENS_PER_SECOND: f64 = 1_000_000.0;
 const MAX_PEAK_MEMORY_BYTES: u64 = 1 << 44;
 const LLAMA_CPP_AUTO_RUNTIME_ID: &str = "llama.cpp-auto";
+const NATIVE_FIRST_RUN_BENCHMARK_ID: &str = "native_first_run";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct NativeFirstRunInput {
@@ -647,15 +648,55 @@ pub fn run_native_first_run(
     input: NativeFirstRunInput,
     runtime: &dyn NativeFirstRunRuntime,
 ) -> Result<NativeFirstRunResult, RunnerError> {
-    validate_native_first_run_input(&input)?;
+    run_native_first_run_with_events(input, runtime, |_| {})
+}
+
+pub fn run_native_first_run_with_events<F>(
+    input: NativeFirstRunInput,
+    runtime: &dyn NativeFirstRunRuntime,
+    mut emit: F,
+) -> Result<NativeFirstRunResult, RunnerError>
+where
+    F: FnMut(RunnerEvent),
+{
+    emit(RunnerEvent::BenchmarkStarted {
+        benchmark_id: NATIVE_FIRST_RUN_BENCHMARK_ID.to_string(),
+    });
+    emit(RunnerEvent::BenchmarkProgress {
+        benchmark_id: NATIVE_FIRST_RUN_BENCHMARK_ID.to_string(),
+        message: "Validating local model and first-run request.".to_string(),
+        progress_percent: Some(5.0),
+    });
+    if let Err(error) = validate_native_first_run_input(&input) {
+        emit(RunnerEvent::Error {
+            code: error.code().to_string(),
+            message: error.message().to_string(),
+        });
+        return Err(error);
+    }
+    emit(RunnerEvent::BenchmarkProgress {
+        benchmark_id: NATIVE_FIRST_RUN_BENCHMARK_ID.to_string(),
+        message: "Starting native runtime.".to_string(),
+        progress_percent: Some(20.0),
+    });
     let output = runtime.run(&input).map_err(|message| {
-        RunnerError::new(
+        let error = RunnerError::new(
             "native_runtime_failed",
             format!("Native first-run runtime failed: {message}"),
-        )
+        );
+        emit(RunnerEvent::Error {
+            code: error.code().to_string(),
+            message: error.message().to_string(),
+        });
+        error
     })?;
+    emit(RunnerEvent::BenchmarkProgress {
+        benchmark_id: NATIVE_FIRST_RUN_BENCHMARK_ID.to_string(),
+        message: "Native runtime completed; validating metrics.".to_string(),
+        progress_percent: Some(80.0),
+    });
     if output.exit_code != 0 {
-        return Err(RunnerError::new(
+        let error = RunnerError::new(
             "native_runtime_failed",
             format!(
                 "Native first-run runtime exited with code {}. stdout preview: `{}` stderr preview: `{}`",
@@ -663,11 +704,25 @@ pub fn run_native_first_run(
                 preview(&output.stdout),
                 preview(&output.stderr)
             ),
-        ));
+        );
+        emit(RunnerEvent::Error {
+            code: error.code().to_string(),
+            message: error.message().to_string(),
+        });
+        return Err(error);
     }
-    let metrics = validate_runtime_output(&output, input.max_tokens)?;
+    let metrics = match validate_runtime_output(&output, input.max_tokens) {
+        Ok(metrics) => metrics,
+        Err(error) => {
+            emit(RunnerEvent::Error {
+                code: error.code().to_string(),
+                message: error.message().to_string(),
+            });
+            return Err(error);
+        }
+    };
 
-    Ok(NativeFirstRunResult {
+    let result = NativeFirstRunResult {
         status: "completed".to_string(),
         evidence_kind: "native_first_run".to_string(),
         uploaded: false,
@@ -677,5 +732,9 @@ pub fn run_native_first_run(
         metrics,
         stdout_preview: preview(&output.stdout),
         stderr_preview: preview(&output.stderr),
-    })
+    };
+    emit(RunnerEvent::BenchmarkCompleted {
+        benchmark_id: NATIVE_FIRST_RUN_BENCHMARK_ID.to_string(),
+    });
+    Ok(result)
 }
