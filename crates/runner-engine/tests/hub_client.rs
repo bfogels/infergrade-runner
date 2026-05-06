@@ -1,8 +1,12 @@
 use infergrade_runner_engine::{
     build_hub_json_request, build_run_bundle_upload_request, build_run_completion_request,
-    hub_api_url, HubMethod,
+    execute_hub_json_request, hub_api_url, HubMethod,
 };
 use serde_json::json;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::mpsc;
+use std::thread;
 
 #[test]
 fn hub_api_url_normalizes_and_joins_paths() {
@@ -146,4 +150,82 @@ fn run_completion_request_uses_same_secret_safe_request_boundary() {
         .sanitized_preview()
         .to_string()
         .contains("rtok_secret_for_run"));
+}
+
+#[tokio::test]
+async fn execute_run_bundle_upload_posts_json_to_hub() {
+    let (api_url, received) =
+        spawn_json_server(200, r#"{"stored":true,"bundle_id":"nfr_bundle_1"}"#);
+    let request = build_run_bundle_upload_request(
+        &api_url,
+        "run_cfg_abc_123",
+        json!({
+            "manifest": {"bundle_id": "nfr_bundle_1"},
+            "results": [{"bundle_id": "nfr_bundle_1", "result_id": "nfr_result_1"}],
+        }),
+        Some("rtok_secret_for_run"),
+    )
+    .expect("upload request");
+
+    let response = execute_hub_json_request(&request)
+        .await
+        .expect("upload response");
+
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body["stored"], true);
+    assert_eq!(response.body["bundle_id"], "nfr_bundle_1");
+    let raw_request = received.recv().expect("server request");
+    assert!(raw_request.starts_with("POST /v1/runs/run_cfg_abc_123/bundle HTTP/1.1"));
+    assert!(raw_request.contains("authorization: Bearer rtok_secret_for_run"));
+    assert!(raw_request.contains("\"manifest\""));
+    assert!(raw_request.contains("\"results\""));
+}
+
+#[tokio::test]
+async fn execute_run_bundle_upload_redacts_token_from_hub_error() {
+    let (api_url, _received) = spawn_json_server(
+        403,
+        r#"{"detail":{"message":"runner token rtok_secret_for_run cannot upload this run"}}"#,
+    );
+    let request = build_run_bundle_upload_request(
+        &api_url,
+        "run_cfg_abc_123",
+        json!({
+            "manifest": {"bundle_id": "nfr_bundle_1"},
+            "results": [{"bundle_id": "nfr_bundle_1", "result_id": "nfr_result_1"}],
+        }),
+        Some("rtok_secret_for_run"),
+    )
+    .expect("upload request");
+
+    let error = execute_hub_json_request(&request)
+        .await
+        .expect_err("Hub rejected upload");
+
+    assert_eq!(error.code(), "hub_request_failed");
+    assert!(error.message().contains("HTTP 403"));
+    assert!(error.message().contains("[redacted]"));
+    assert!(!error.message().contains("rtok_secret_for_run"));
+}
+
+fn spawn_json_server(status: u16, body: &'static str) -> (String, mpsc::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    let address = listener.local_addr().expect("server address");
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        let mut buffer = [0_u8; 8192];
+        let bytes_read = stream.read(&mut buffer).expect("read request");
+        let request = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+        sender.send(request).expect("send request");
+        let reason = if status >= 400 { "Forbidden" } else { "OK" };
+        let response = format!(
+            "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+    });
+    (format!("http://{address}"), receiver)
 }
