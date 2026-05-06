@@ -316,6 +316,19 @@ fn save_runner_profile(profile: &Value) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+fn clear_runner_profile() -> Result<Value, String> {
+    let path = runner_profile_path()?;
+    let removed = match fs::remove_file(&path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(format!("could not remove Runner profile: {error}")),
+    };
+    Ok(json!({
+        "removed": removed,
+        "profile_path": path.display().to_string(),
+    }))
+}
+
 fn save_runner_token_value(token: &str) -> Result<(), String> {
     let token = token.trim();
     if token.is_empty() {
@@ -359,6 +372,20 @@ fn clear_runner_token() -> Result<(), String> {
         Err(error) if is_user_canceled(&error) => Ok(()),
         Err(error) => Err(format!("could not clear runner token: {error}")),
     }
+}
+
+#[tauri::command]
+fn reset_runner_pairing() -> Result<Value, String> {
+    let token_cleared = match clear_runner_token() {
+        Ok(()) => true,
+        Err(error) => return Err(error),
+    };
+    let profile = clear_runner_profile()?;
+    Ok(json!({
+        "reset": true,
+        "token_cleared": token_cleared,
+        "profile": profile,
+    }))
 }
 
 #[tauri::command]
@@ -469,6 +496,7 @@ pub fn run() {
             save_runner_token,
             load_runner_token,
             clear_runner_token,
+            reset_runner_pairing,
             llama_cpp_runtime_plan,
             redeem_runner_pairing
         ])
@@ -582,5 +610,22 @@ mod tests {
         assert!(verify_runtime_download_manifest(&missing_rollback)
             .expect_err("rollback required")
             .contains("rollback"));
+    }
+
+    #[test]
+    fn reset_pairing_clears_runner_profile_without_requiring_existing_file() {
+        let temp = env::temp_dir().join(format!("infergrade-reset-test-{}", std::process::id()));
+        env::set_var("INFERGRADE_CONFIG_DIR", &temp);
+        let first = clear_runner_profile().expect("missing profile is ok");
+        assert_eq!(first["removed"], false);
+
+        fs::create_dir_all(&temp).expect("config dir");
+        fs::write(temp.join("runner_profile.json"), "{}\n").expect("profile");
+        let second = clear_runner_profile().expect("profile removed");
+        assert_eq!(second["removed"], true);
+        assert!(!temp.join("runner_profile.json").exists());
+
+        env::remove_var("INFERGRADE_CONFIG_DIR");
+        let _ = fs::remove_dir_all(temp);
     }
 }
