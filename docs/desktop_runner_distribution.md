@@ -30,7 +30,7 @@ The script runs:
 It then prints any macOS DMG artifacts under:
 
 ```text
-apps/desktop-runner/src-tauri/target/release/bundle/dmg/
+target/release/bundle/dmg/
 ```
 
 with file sizes and SHA-256 digests. The digest identifies the emitted artifact for that candidate build; it is not a bit-for-bit reproducibility guarantee until the toolchain and packaging timestamps are pinned.
