@@ -1,15 +1,16 @@
 use infergrade_runner_engine::{
     build_hub_json_request, build_listener_start_plan, build_pairing_redeem_request,
-    complete_pairing_response, desktop_environment, hostname,
-    llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, normalize_api_url,
-    pairing_error_detail, pairing_status_payload, preferred_execution_mode, profile_string,
-    redact_listener_text, redact_worker_response, reset_pairing_state,
+    build_run_bundle_upload_request, build_run_completion_request, complete_pairing_response,
+    desktop_environment, execute_hub_json_request, hostname,
+    llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, native_first_run_bundle_payload,
+    normalize_api_url, pairing_error_detail, pairing_status_payload, preferred_execution_mode,
+    profile_string, redact_listener_text, redact_worker_response, reset_pairing_state,
     run_native_first_run_with_events as engine_run_native_first_run_with_events,
     runner_id_from_profile, selected_llama_cpp_runtime_path, worker_request_url,
     write_native_first_run_artifact, write_native_first_run_bundle_payload, HubMethod,
-    LlamaCppRuntime, NativeFirstRunBundleOptions, NativeFirstRunInput, PairingInput, ProfileStore,
-    RunnerError, RunnerEvent, RunnerProfile, RunnerProtocolPingInput, RunnerProtocolPreviewInput,
-    TokenStore,
+    LlamaCppRuntime, NativeFirstRunBundleOptions, NativeFirstRunInput, NativeFirstRunResult,
+    PairingInput, ProfileStore, RunnerError, RunnerEvent, RunnerProfile, RunnerProtocolPingInput,
+    RunnerProtocolPreviewInput, TokenStore,
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
@@ -565,11 +566,101 @@ fn desktop_native_first_run_response(
     Ok(payload)
 }
 
+async fn upload_desktop_native_first_run(
+    payload: &mut Value,
+    artifact_dir: &PathBuf,
+    run_id: &str,
+    worker_id: Option<&str>,
+) -> Result<(), String> {
+    let token = DesktopTokenStore
+        .load_runner_token()
+        .map_err(|error| error.message().to_string())?
+        .ok_or_else(|| "Pair with Hub before uploading a native first-run result.".to_string())?;
+    let profile = load_runner_profile()?;
+    let api_url = profile_string(profile.as_ref(), "api_url")
+        .unwrap_or_else(|| "https://api.infergrade.com".to_string());
+    let worker_id = worker_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| runner_id_from_profile(profile.as_ref()));
+    let result: NativeFirstRunResult = serde_json::from_value(payload["result"].clone())
+        .map_err(|error| format!("Could not rebuild native first-run result: {error}"))?;
+    let bundle_payload = native_first_run_bundle_payload(
+        &result,
+        NativeFirstRunBundleOptions {
+            submission_channel: "infergrade_desktop_runner".to_string(),
+            ..NativeFirstRunBundleOptions::default()
+        },
+    );
+    let upload_request =
+        build_run_bundle_upload_request(&api_url, run_id, bundle_payload, Some(&token))
+            .map_err(|error| error.message().to_string())?;
+    let upload_response = execute_hub_json_request(&upload_request)
+        .await
+        .map_err(|error| error.message().to_string())?;
+    let redacted_upload_body =
+        redact_worker_response(upload_response.body.clone(), &[token.to_string()]);
+    let bundle_id = upload_response
+        .body
+        .get("bundle_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Hub upload response did not include bundle_id".to_string())?
+        .to_string();
+    let completion_request = build_run_completion_request(
+        &api_url,
+        run_id,
+        &worker_id,
+        &bundle_id,
+        Some(redacted_upload_body.clone()),
+        Some(&token),
+    )
+    .map_err(|error| error.message().to_string())?;
+    let completion_response = execute_hub_json_request(&completion_request)
+        .await
+        .map_err(|error| error.message().to_string())?;
+    let redacted_completion_body =
+        redact_worker_response(completion_response.body.clone(), &[token.to_string()]);
+    payload["uploaded"] = Value::Bool(true);
+    payload["result"]["uploaded"] = Value::Bool(true);
+    payload["upload"] = json!({
+        "uploaded": true,
+        "run_id": run_id,
+        "worker_id": worker_id,
+        "bundle_id": bundle_id,
+        "server": redacted_upload_body,
+        "completion": redacted_completion_body,
+    });
+    let mut persisted_payload = payload.clone();
+    if let Some(entries) = persisted_payload.as_object_mut() {
+        entries.remove("artifact");
+    }
+    let artifact = write_native_first_run_artifact(artifact_dir, &persisted_payload)
+        .map_err(|error| error.message().to_string())?;
+    payload["artifact"] = serde_json::to_value(artifact).map_err(|error| {
+        format!("Could not serialize native first-run artifact metadata: {error}")
+    })?;
+    payload["artifact"]["uploaded"] = Value::Bool(true);
+    Ok(())
+}
+
+fn mark_desktop_native_first_run_upload_failed(payload: &mut Value, run_id: &str, error: String) {
+    payload["uploaded"] = Value::Bool(false);
+    payload["result"]["uploaded"] = Value::Bool(false);
+    payload["upload"] = json!({
+        "uploaded": false,
+        "run_id": run_id,
+        "error": error,
+    });
+}
+
 #[tauri::command]
 async fn run_desktop_native_first_run(
     app: AppHandle,
     model_path: String,
     runtime_path: Option<String>,
+    upload_run_id: Option<String>,
+    upload_worker_id: Option<String>,
 ) -> Result<Value, String> {
     let input = native_first_run_input(&model_path);
     let runtime_path = runtime_path
@@ -577,8 +668,9 @@ async fn run_desktop_native_first_run(
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
     let artifact_dir = desktop_first_run_artifact_dir()?;
+    let local_artifact_dir = artifact_dir.clone();
     let event_app = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    let mut result = tauri::async_runtime::spawn_blocking(move || {
         emit_first_run_event(
             &event_app,
             RunnerEvent::BenchmarkProgress {
@@ -600,12 +692,27 @@ async fn run_desktop_native_first_run(
                 return Err(message);
             }
         };
-        desktop_native_first_run_response(input, &runtime, &artifact_dir, |event| {
+        desktop_native_first_run_response(input, &runtime, &local_artifact_dir, |event| {
             emit_first_run_event(&event_app, event);
         })
     })
     .await
     .map_err(|error| format!("Native first-run task failed: {error}"))??;
+    if let Some(run_id) = upload_run_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        if let Err(error) = upload_desktop_native_first_run(
+            &mut result,
+            &artifact_dir,
+            &run_id,
+            upload_worker_id.as_deref(),
+        )
+        .await
+        {
+            mark_desktop_native_first_run_upload_failed(&mut result, &run_id, error);
+        }
+    }
     Ok(result)
 }
 
@@ -841,6 +948,38 @@ mod tests {
 
         let _ = fs::remove_file(model_path);
         let _ = fs::remove_dir_all(artifact_dir);
+    }
+
+    #[test]
+    fn desktop_first_run_upload_failure_keeps_local_result_successful() {
+        let mut response = json!({
+            "status": "completed",
+            "uploaded": false,
+            "result": {
+                "uploaded": false,
+                "evidence_kind": "native_first_run"
+            },
+            "artifact": {
+                "path": "/tmp/native-first-run-result.json"
+            }
+        });
+
+        mark_desktop_native_first_run_upload_failed(
+            &mut response,
+            "run_upload_failed_123",
+            "Hub request failed with HTTP 403: run is not owned by this paired runner".to_string(),
+        );
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["uploaded"], false);
+        assert_eq!(response["result"]["uploaded"], false);
+        assert_eq!(response["result"]["evidence_kind"], "native_first_run");
+        assert_eq!(response["upload"]["uploaded"], false);
+        assert_eq!(response["upload"]["run_id"], "run_upload_failed_123");
+        assert!(response["upload"]["error"]
+            .as_str()
+            .expect("upload error")
+            .contains("paired runner"));
     }
 
     #[test]

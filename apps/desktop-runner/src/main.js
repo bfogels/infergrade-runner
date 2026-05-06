@@ -620,7 +620,7 @@ function firstRunMessageFromEvent(payload = {}) {
     return `${payload.message || "Native first-run progress."}${percent}`;
   }
   if (payload.type === "benchmark_completed") {
-    return "Native first-run completed. Upload is not wired yet.";
+    return "Native first-run completed.";
   }
   if (payload.type === "error") {
     return payload.message || "Native first-run failed.";
@@ -739,6 +739,14 @@ function readFirstRunModelPath() {
 
 function readFirstRunRuntimePath() {
   return form.elements.firstRunRuntimePath?.value.trim() || null;
+}
+
+function readFirstRunUploadRunId() {
+  return form.elements.firstRunUploadRunId?.value.trim() || null;
+}
+
+function readFirstRunUploadWorkerId() {
+  return form.elements.firstRunUploadWorkerId?.value.trim() || null;
 }
 
 async function startRunner({ confirmStarted = false } = {}) {
@@ -874,6 +882,8 @@ async function runDesktopSelfTest() {
 async function runNativeFirstRun() {
   const modelPath = readFirstRunModelPath();
   const runtimePath = readFirstRunRuntimePath();
+  const uploadRunId = readFirstRunUploadRunId();
+  const uploadWorkerId = readFirstRunUploadWorkerId();
   const invoke = await loadTauriInvoke();
   if (!invoke) {
     firstRunStatus.textContent = "Open the desktop app to run the native first benchmark.";
@@ -889,6 +899,8 @@ async function runNativeFirstRun() {
     const payload = await invoke("run_desktop_native_first_run", {
       modelPath,
       runtimePath,
+      uploadRunId,
+      uploadWorkerId,
     });
     const result = payload?.result || {};
     const metrics = result.metrics || {};
@@ -900,9 +912,22 @@ async function runNativeFirstRun() {
       : "TTFT unavailable";
     const artifactPath = payload?.artifact?.path ? ` Artifact: ${payload.artifact.path}.` : "";
     const bundlePath = payload?.bundle_artifact?.path ? ` Bundle payload: ${payload.bundle_artifact.path}.` : "";
-    firstRunStatus.textContent = `Completed native first-run (${speed}, ${ttft}).${artifactPath}${bundlePath} Upload is not wired yet.`;
-    modelPathReadiness = "Native first-run completed locally with result and bundle artifacts. Upload is not wired yet.";
-    nativeSuiteReadiness = "Native first-run completed locally with native_first_run evidence and a Hub-compatible bundle preview. Upload is not wired yet.";
+    const uploadStatus = payload?.upload?.uploaded
+      ? ` Uploaded bundle ${payload.upload.bundle_id} to Hub run ${payload.upload.run_id}.`
+      : payload?.upload?.error
+        ? ` Upload failed: ${payload.upload.error}`
+        : " Not uploaded; enter a Hub run ID to attach this evidence to a run.";
+    firstRunStatus.textContent = `Completed native first-run (${speed}, ${ttft}).${artifactPath}${bundlePath}${uploadStatus}`;
+    modelPathReadiness = payload?.upload?.uploaded
+      ? "Native first-run completed and uploaded to Hub with native_first_run evidence."
+      : payload?.upload?.error
+        ? "Native first-run completed locally, but Hub upload failed. Keep the local artifacts and retry upload after fixing pairing or run access."
+        : "Native first-run completed locally with result and bundle artifacts.";
+    nativeSuiteReadiness = payload?.upload?.uploaded
+      ? "Native first-run completed and uploaded through the paired desktop runner."
+      : payload?.upload?.error
+        ? "Native first-run evidence exists locally; Hub upload still needs a valid paired runner and run ID."
+        : "Native first-run completed locally with native_first_run evidence and a Hub-compatible bundle preview.";
     setStatus("First benchmark complete", "good");
     renderLocalReadinessChecklist();
     appendLog(`Native first-run result: ${JSON.stringify(payload)}`);
