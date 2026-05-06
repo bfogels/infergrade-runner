@@ -239,6 +239,79 @@ fn build_listener_start_plan(
     }))
 }
 
+fn runner_id_from_profile(profile: Option<&Value>) -> String {
+    profile_string(profile, "runner_id").unwrap_or_else(|| {
+        hostname()
+            .map(|host| format!("runner-{host}"))
+            .unwrap_or_else(|| "runner-local".to_string())
+    })
+}
+
+fn runner_register_payload(
+    runner_id: &str,
+    execution_mode: &str,
+    hostname: Option<String>,
+) -> Value {
+    json!({
+        "runner_id": runner_id,
+        "execution_modes": [execution_mode],
+        "status": "starting",
+        "label": runner_id,
+        "runner_kind": if execution_mode == "cloud_container" { "cloud_worker" } else { "local_listener" },
+        "hostname": hostname,
+        "provider_id": Value::Null,
+        "instance_type_id": Value::Null,
+        "capabilities": {
+            "run_token_supported": true,
+            "auto_upload": true,
+        },
+        "version": env!("CARGO_PKG_VERSION"),
+        "environment": desktop_environment(),
+        "contract": {},
+        "diagnostics": {},
+    })
+}
+
+fn runner_heartbeat_payload(
+    status: &str,
+    current_run_id: Option<&str>,
+    hostname: Option<String>,
+    message: Option<&str>,
+) -> Value {
+    json!({
+        "status": status,
+        "current_run_id": current_run_id,
+        "hostname": hostname,
+        "provider_id": Value::Null,
+        "instance_type_id": Value::Null,
+        "metadata": match message {
+            Some(message) => json!({"message": message}),
+            None => json!({}),
+        },
+        "environment": desktop_environment(),
+        "contract": {},
+        "diagnostics": {},
+    })
+}
+
+fn claim_run_job_payload(
+    worker_id: &str,
+    execution_mode: &str,
+    run_id: Option<&str>,
+    run_config_id: Option<&str>,
+    hostname: Option<String>,
+) -> Value {
+    json!({
+        "worker_id": worker_id,
+        "execution_mode": execution_mode,
+        "run_id": run_id,
+        "run_config_id": run_config_id,
+        "provider_id": Value::Null,
+        "instance_type_id": Value::Null,
+        "hostname": hostname,
+    })
+}
+
 fn command_version(program: &str) -> Value {
     match StdCommand::new(program).arg("--version").output() {
         Ok(output) if output.status.success() => {
@@ -515,6 +588,30 @@ fn listener_start_plan(api_url: String, typed_token_present: bool) -> Result<Val
     )
 }
 
+#[tauri::command]
+fn worker_protocol_preview(api_url: String) -> Result<Value, String> {
+    let normalized_api_url = normalize_desktop_api_url(&api_url)?;
+    let profile = load_runner_profile()?;
+    let execution_mode = profile_string(profile.as_ref(), "preferred_execution_mode")
+        .unwrap_or_else(|| preferred_execution_mode().to_string());
+    let runner_id = runner_id_from_profile(profile.as_ref());
+    let host = hostname();
+    Ok(json!({
+        "api_url": normalized_api_url,
+        "runner_id": runner_id,
+        "execution_mode": execution_mode,
+        "endpoints": {
+            "register": "/v1/runners/register",
+            "heartbeat": format!("/v1/runners/{}/heartbeat", runner_id),
+            "claim": "/v1/runs/claim",
+        },
+        "register": runner_register_payload(&runner_id, &execution_mode, host.clone()),
+        "heartbeat": runner_heartbeat_payload("listening", None, host.clone(), Some("Runner registered and is listening for jobs.")),
+        "claim": claim_run_job_payload(&runner_id, &execution_mode, None, None, host),
+        "secret_boundary": "payload preview excludes bearer tokens; Rust attaches authorization only when sending requests",
+    }))
+}
+
 fn emit_listener_event(app: &AppHandle, payload: Value) {
     let _ = app.emit("runner-listener-event", payload);
 }
@@ -774,6 +871,7 @@ pub fn run() {
             clear_runner_token,
             runner_pairing_status,
             listener_start_plan,
+            worker_protocol_preview,
             start_runner_listener,
             stop_runner_listener,
             reset_runner_pairing,
@@ -1034,5 +1132,52 @@ mod tests {
 
         assert_eq!(redacted, "starting with [redacted] in stderr");
         assert!(!redacted.contains("qbhr_secret_token"));
+    }
+
+    #[test]
+    fn rust_worker_protocol_payloads_match_python_bridge_contract_shape() {
+        let register =
+            runner_register_payload("runner_123", "local_native", Some("host-a".to_string()));
+        assert_eq!(register["runner_id"], "runner_123");
+        assert_eq!(register["execution_modes"][0], "local_native");
+        assert_eq!(register["status"], "starting");
+        assert_eq!(register["runner_kind"], "local_listener");
+        assert_eq!(register["capabilities"]["run_token_supported"], true);
+        assert_eq!(register["capabilities"]["auto_upload"], true);
+        assert_eq!(register["environment"]["source"], "desktop_rust_supervisor");
+
+        let heartbeat = runner_heartbeat_payload(
+            "listening",
+            None,
+            Some("host-a".to_string()),
+            Some("Runner is listening for jobs."),
+        );
+        assert_eq!(heartbeat["status"], "listening");
+        assert_eq!(
+            heartbeat["metadata"]["message"],
+            "Runner is listening for jobs."
+        );
+        assert_eq!(heartbeat["current_run_id"], Value::Null);
+
+        let claim = claim_run_job_payload(
+            "runner_123",
+            "local_native",
+            Some("run_1"),
+            None,
+            Some("host-a".to_string()),
+        );
+        assert_eq!(claim["worker_id"], "runner_123");
+        assert_eq!(claim["execution_mode"], "local_native");
+        assert_eq!(claim["run_id"], "run_1");
+        assert_eq!(claim["provider_id"], Value::Null);
+
+        let combined = json!({
+            "register": register,
+            "heartbeat": heartbeat,
+            "claim": claim,
+        })
+        .to_string();
+        assert!(!combined.contains("qbhr_"));
+        assert!(!combined.contains("Authorization"));
     }
 }
