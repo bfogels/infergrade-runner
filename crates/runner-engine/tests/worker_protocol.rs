@@ -1,6 +1,7 @@
 use infergrade_runner_engine::{
     claim_run_job_payload, desktop_environment, runner_heartbeat_payload, runner_register_payload,
-    ClaimRunJobRequest, RunnerHeartbeatRequest, RunnerProtocolPreviewInput, RunnerRegisterRequest,
+    ClaimRunJobRequest, RunnerHeartbeatRequest, RunnerProtocolPingInput,
+    RunnerProtocolPreviewInput, RunnerRegisterRequest,
 };
 use serde_json::{json, Value};
 
@@ -195,4 +196,33 @@ fn worker_protocol_preview_trims_identity_fields_and_rejects_bad_hub_urls() {
     .build()
     .expect_err("execution mode required");
     assert_eq!(missing_mode.code(), "execution_mode_missing");
+}
+
+#[test]
+fn worker_protocol_ping_plan_uses_typed_register_and_heartbeat_requests() {
+    let plan = RunnerProtocolPingInput {
+        api_url: "api.infergrade.com".to_string(),
+        runner_id: "runner_123".to_string(),
+        execution_mode: "local_native".to_string(),
+        hostname: Some("host-a".to_string()),
+    }
+    .build()
+    .expect("ping plan");
+
+    assert_eq!(plan.api_url, "https://api.infergrade.com/");
+    assert_eq!(plan.runner_id, "runner_123");
+    assert_eq!(plan.execution_mode, "local_native");
+    assert_eq!(plan.register_endpoint, "/v1/runners/register");
+    assert_eq!(plan.heartbeat_endpoint, "/v1/runners/runner_123/heartbeat");
+    assert_eq!(plan.register.runner_id, "runner_123");
+    assert_eq!(plan.register.execution_modes, vec!["local_native"]);
+    assert_eq!(plan.heartbeat.status, "listening");
+    assert_eq!(
+        plan.heartbeat.metadata["message"],
+        "Runner registered and is listening for jobs."
+    );
+
+    let serialized = serde_json::to_value(&plan).expect("ping plan json");
+    assert!(!serialized.to_string().contains("qbhr_"));
+    assert!(!serialized.to_string().contains("Authorization"));
 }
