@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = [
+  "apps/desktop-runner/sidecar",
+  "apps/desktop-runner/src-tauri",
+  "apps/runner-cli",
+  "crates/runner-engine",
+]

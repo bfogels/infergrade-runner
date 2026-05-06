@@ -1,11 +1,16 @@
+use infergrade_runner_engine::{
+    build_listener_start_plan, claim_run_job_payload, desktop_environment, hostname,
+    llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, normalize_api_url,
+    pairing_error_detail, preferred_execution_mode, profile_string, redact_listener_text,
+    redact_worker_response, runner_heartbeat_payload, runner_id_from_profile,
+    runner_register_payload, sanitized_runner_profile, selected_llama_cpp_runtime_path,
+    ui_pairing_response, worker_request_url,
+};
 use keyring::{Entry, Error as KeyringError};
-use reqwest::Url;
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
-use std::net::IpAddr;
 use std::path::PathBuf;
-use std::process::Command as StdCommand;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_shell::{
@@ -15,8 +20,6 @@ use tauri_plugin_shell::{
 
 const KEYRING_SERVICE: &str = "com.infergrade.runner";
 const KEYRING_USER: &str = "hub-runner-token";
-const LLAMA_CPP_RUNTIME_ID: &str = "llama-cpp-homebrew-stable-2026-04";
-const RUNTIME_MANIFEST_VERSION: &str = "2026-04-22";
 
 #[derive(Default)]
 struct ListenerProcess {
@@ -31,75 +34,6 @@ fn runner_token_entry() -> Result<Entry, String> {
 fn is_user_canceled(error: &KeyringError) -> bool {
     let message = error.to_string().to_lowercase();
     message.contains("cancel") || message.contains("user interaction")
-}
-
-fn is_local_http_host(host: &str) -> bool {
-    if host == "localhost" {
-        return true;
-    }
-    host.parse::<IpAddr>()
-        .map(|address| address.is_loopback())
-        .unwrap_or(false)
-}
-
-fn normalize_desktop_api_url(raw: &str) -> Result<String, String> {
-    let trimmed = raw.trim();
-    let with_scheme = if trimmed.is_empty() {
-        "https://api.infergrade.com".to_string()
-    } else if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-        trimmed.to_string()
-    } else if trimmed.starts_with("localhost")
-        || trimmed.starts_with("127.")
-        || trimmed.starts_with("[::1]")
-    {
-        format!("http://{trimmed}")
-    } else {
-        format!("https://{trimmed}")
-    };
-
-    let parsed = Url::parse(&with_scheme).map_err(|_| {
-        "Hub URL is invalid. Use https://api.infergrade.com or a local http://localhost URL."
-            .to_string()
-    })?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "Hub URL must include a host.".to_string())?
-        .to_lowercase();
-    match parsed.scheme() {
-        "https" => Ok(parsed.to_string()),
-        "http" if is_local_http_host(&host) => Ok(parsed.to_string()),
-        _ => Err("Hosted Hub URLs must use HTTPS. HTTP is allowed only for localhost or loopback addresses.".to_string()),
-    }
-}
-
-fn preferred_execution_mode() -> &'static str {
-    if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-        "local_native"
-    } else {
-        "local_container"
-    }
-}
-
-fn hostname() -> Option<String> {
-    env::var("HOSTNAME")
-        .or_else(|_| env::var("COMPUTERNAME"))
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn desktop_environment() -> Value {
-    json!({
-        "source": "desktop_rust_supervisor",
-        "os": env::consts::OS,
-        "arch": env::consts::ARCH,
-        "hardware_class": if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-            "apple_silicon"
-        } else {
-            "unknown"
-        },
-        "execution_mode": preferred_execution_mode(),
-    })
 }
 
 fn runner_config_dir() -> Result<PathBuf, String> {
@@ -133,28 +67,6 @@ fn runner_profile_path() -> Result<PathBuf, String> {
     Ok(runner_config_dir()?.join("runner_profile.json"))
 }
 
-fn runtime_cache_root() -> Result<PathBuf, String> {
-    if let Ok(value) = env::var("INFERGRADE_RUNTIME_CACHE_DIR") {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return Ok(PathBuf::from(trimmed));
-        }
-    }
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .map_err(|_| "Could not resolve a home directory for the runtime cache.".to_string())?;
-    Ok(PathBuf::from(home)
-        .join(".cache")
-        .join("infergrade")
-        .join("runtimes"))
-}
-
-fn selected_llama_cpp_runtime_path() -> Result<PathBuf, String> {
-    Ok(runtime_cache_root()?
-        .join("llama.cpp")
-        .join("selected_runtime.json"))
-}
-
 fn selected_llama_cpp_runtime() -> Value {
     match selected_llama_cpp_runtime_path()
         .ok()
@@ -174,201 +86,6 @@ fn load_runner_profile() -> Result<Option<Value>, String> {
             .map_err(|error| format!("could not parse Runner profile: {error}")),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(format!("could not read Runner profile: {error}")),
-    }
-}
-
-fn sanitized_runner_profile(profile: &Value) -> Value {
-    json!({
-        "api_url": profile.get("api_url").and_then(Value::as_str).unwrap_or(""),
-        "runner_id": profile.get("runner_id").and_then(Value::as_str).unwrap_or(""),
-        "label": profile.get("label").and_then(Value::as_str).unwrap_or(""),
-        "preferred_execution_mode": profile.get("preferred_execution_mode").and_then(Value::as_str).unwrap_or(""),
-        "paired_at": profile.get("paired_at").and_then(Value::as_str).unwrap_or(""),
-        "expires_at": profile.get("expires_at").and_then(Value::as_str).unwrap_or(""),
-        "user": profile.get("user").cloned().unwrap_or(Value::Null),
-        "has_access_token": profile.get("access_token").and_then(Value::as_str).map(|token| !token.trim().is_empty()).unwrap_or(false),
-    })
-}
-
-fn ui_pairing_response(mut body: Value, profile: &Value, profile_path: PathBuf) -> Value {
-    body["runner_profile"] = sanitized_runner_profile(profile);
-    body["profile_path"] = Value::String(profile_path.display().to_string());
-    body["next_action"] = Value::String("start_runner".to_string());
-    body["commands"] = json!({ "start": "infergrade start" });
-    body
-}
-
-fn profile_string(profile: Option<&Value>, key: &str) -> Option<String> {
-    profile
-        .and_then(|value| value.get(key))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn profile_token_available(profile: Option<&Value>) -> bool {
-    profile_string(profile, "access_token").is_some()
-}
-
-fn build_listener_start_plan(
-    api_url: &str,
-    typed_token_present: bool,
-    profile: Option<&Value>,
-    os_token_available: bool,
-) -> Result<Value, String> {
-    let normalized_api_url = normalize_desktop_api_url(api_url)?;
-    let profile_available = profile.is_some();
-    let profile_has_token = profile_token_available(profile);
-    let credential_source = if typed_token_present {
-        "typed_input"
-    } else if profile_available && os_token_available {
-        "saved_pairing"
-    } else {
-        "missing"
-    };
-    Ok(json!({
-        "api_url": normalized_api_url,
-        "runner_id": profile_string(profile, "runner_id").unwrap_or_default(),
-        "execution_mode": profile_string(profile, "preferred_execution_mode").unwrap_or_else(|| preferred_execution_mode().to_string()),
-        "credential_source": credential_source,
-        "can_start": credential_source != "missing",
-        "profile_status": if profile_available { "present" } else { "missing" },
-        "profile_token_status": if profile_has_token { "present" } else { "missing" },
-        "token_status": if os_token_available { "present" } else { "missing" },
-    }))
-}
-
-fn runner_id_from_profile(profile: Option<&Value>) -> String {
-    profile_string(profile, "runner_id").unwrap_or_else(|| {
-        hostname()
-            .map(|host| format!("runner-{host}"))
-            .unwrap_or_else(|| "runner-local".to_string())
-    })
-}
-
-fn runner_register_payload(
-    runner_id: &str,
-    execution_mode: &str,
-    hostname: Option<String>,
-) -> Value {
-    json!({
-        "runner_id": runner_id,
-        "execution_modes": [execution_mode],
-        "status": "starting",
-        "label": runner_id,
-        "runner_kind": if execution_mode == "cloud_container" { "cloud_worker" } else { "local_listener" },
-        "hostname": hostname,
-        "provider_id": Value::Null,
-        "instance_type_id": Value::Null,
-        "capabilities": {
-            "run_token_supported": true,
-            "auto_upload": true,
-        },
-        "version": env!("CARGO_PKG_VERSION"),
-        "environment": desktop_environment(),
-        "contract": {},
-        "diagnostics": {},
-    })
-}
-
-fn runner_heartbeat_payload(
-    status: &str,
-    current_run_id: Option<&str>,
-    hostname: Option<String>,
-    message: Option<&str>,
-) -> Value {
-    json!({
-        "status": status,
-        "current_run_id": current_run_id,
-        "hostname": hostname,
-        "provider_id": Value::Null,
-        "instance_type_id": Value::Null,
-        "metadata": match message {
-            Some(message) => json!({"message": message}),
-            None => json!({}),
-        },
-        "environment": desktop_environment(),
-        "contract": {},
-        "diagnostics": {},
-    })
-}
-
-fn claim_run_job_payload(
-    worker_id: &str,
-    execution_mode: &str,
-    run_id: Option<&str>,
-    run_config_id: Option<&str>,
-    hostname: Option<String>,
-) -> Value {
-    json!({
-        "worker_id": worker_id,
-        "execution_mode": execution_mode,
-        "run_id": run_id,
-        "run_config_id": run_config_id,
-        "provider_id": Value::Null,
-        "instance_type_id": Value::Null,
-        "hostname": hostname,
-    })
-}
-
-fn worker_request_url(api_url: &str, path: &str) -> Result<String, String> {
-    let normalized = normalize_desktop_api_url(api_url)?;
-    Ok(format!(
-        "{}/{}",
-        normalized.trim_end_matches('/'),
-        path.trim_start_matches('/')
-    ))
-}
-
-#[cfg(test)]
-fn worker_request_preview(
-    api_url: &str,
-    path: &str,
-    payload: Value,
-    token: &str,
-) -> Result<Value, String> {
-    Ok(json!({
-        "url": worker_request_url(api_url, path)?,
-        "method": "POST",
-        "has_authorization": !token.trim().is_empty(),
-        "payload": payload,
-    }))
-}
-
-fn redact_worker_text(text: &str, sensitive_values: &[String]) -> String {
-    let redacted = redact_listener_text(text, sensitive_values);
-    redacted
-        .replace("Authorization", "[redacted-header]")
-        .replace("authorization", "[redacted-header]")
-}
-
-fn redact_worker_response(value: Value, sensitive_values: &[String]) -> Value {
-    match value {
-        Value::String(text) => Value::String(redact_worker_text(&text, sensitive_values)),
-        Value::Array(items) => Value::Array(
-            items
-                .into_iter()
-                .map(|item| redact_worker_response(item, sensitive_values))
-                .collect(),
-        ),
-        Value::Object(entries) => Value::Object(
-            entries
-                .into_iter()
-                .map(|(key, value)| {
-                    let normalized_key = key.to_lowercase();
-                    let redacted_value = if normalized_key.contains("authorization")
-                        || (normalized_key.contains("token") && value.is_string())
-                    {
-                        Value::String("[redacted]".to_string())
-                    } else {
-                        redact_worker_response(value, sensitive_values)
-                    };
-                    (key, redacted_value)
-                })
-                .collect(),
-        ),
-        other => other,
     }
 }
 
@@ -404,148 +121,6 @@ async fn send_worker_json_request(
         ));
     }
     Ok(redact_worker_response(parsed, &[token.to_string()]))
-}
-
-fn command_version(program: &str) -> Value {
-    match StdCommand::new(program).arg("--version").output() {
-        Ok(output) if output.status.success() => {
-            let text = String::from_utf8_lossy(if output.stdout.is_empty() {
-                &output.stderr
-            } else {
-                &output.stdout
-            })
-            .trim()
-            .lines()
-            .next()
-            .unwrap_or("")
-            .to_string();
-            json!({"status": "found", "program": program, "version": text})
-        }
-        Ok(output) => json!({
-            "status": "error",
-            "program": program,
-            "detail": String::from_utf8_lossy(&output.stderr).trim().chars().take(300).collect::<String>(),
-        }),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            json!({"status": "not_found", "program": program})
-        }
-        Err(error) => json!({"status": "error", "program": program, "detail": error.to_string()}),
-    }
-}
-
-fn recommended_llama_cpp_runtime() -> Value {
-    if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-        json!({
-            "runtime_id": LLAMA_CPP_RUNTIME_ID,
-            "backend": "llama.cpp",
-            "accelerator": "metal",
-            "platform": "macOS Apple Silicon",
-            "source": "homebrew",
-            "provenance": "Homebrew formula `llama.cpp`; inspect with `brew info llama.cpp` before executing.",
-            "install_command": ["brew", "install", "llama.cpp"],
-            "download_required": false,
-            "supported_on_this_platform": true,
-            "notes": [
-                "Recommended managed path for Apple Silicon native benchmarking.",
-                "No install command was run. Installation remains explicit."
-            ],
-        })
-    } else {
-        json!({
-            "runtime_id": "llama-cpp-native-manual",
-            "backend": "llama.cpp",
-            "accelerator": preferred_execution_mode(),
-            "platform": format!("{} {}", env::consts::OS, env::consts::ARCH),
-            "source": "manual",
-            "provenance": "Use an explicit llama.cpp build for this platform until InferGrade ships a verified runtime lane.",
-            "install_command": Value::Null,
-            "download_required": false,
-            "download_policy": verified_runtime_download_policy(),
-            "supported_on_this_platform": false,
-            "notes": [
-                "Verified GPU-specific runtime downloads are not implemented yet.",
-                "No install command was run. Installation remains explicit."
-            ],
-        })
-    }
-}
-
-fn verified_runtime_download_policy() -> Value {
-    let verifier_status = if verify_runtime_download_manifest(&json!({
-        "runtime_id": "schema-check",
-        "archive_url": "https://downloads.infergrade.com/runtimes/schema-check.tar.zst",
-        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-        "signature_url": "https://downloads.infergrade.com/runtimes/schema-check.tar.zst.minisig",
-        "expected_binaries": ["llama-cli", "llama-server"],
-        "rollback_runtime_id": "previous-runtime",
-    }))
-    .is_ok()
-    {
-        "ready"
-    } else {
-        "unavailable"
-    };
-    json!({
-        "status": "not_configured",
-        "manifest_verifier": verifier_status,
-        "requires_explicit_user_action": true,
-        "required_fields": [
-            "runtime_id",
-            "archive_url",
-            "sha256",
-            "signature_url",
-            "expected_binaries",
-            "rollback_runtime_id"
-        ],
-        "message": "Runtime downloads are disabled until a manifest entry passes HTTPS, checksum, signature, expected-binary, and rollback validation.",
-    })
-}
-
-fn verify_runtime_download_manifest(entry: &Value) -> Result<(), String> {
-    let runtime_id = entry
-        .get("runtime_id")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
-    if runtime_id.is_empty() {
-        return Err("runtime_id is required".to_string());
-    }
-    for key in ["archive_url", "signature_url"] {
-        let raw = entry.get(key).and_then(Value::as_str).unwrap_or("").trim();
-        let url = Url::parse(raw).map_err(|_| format!("{key} must be a valid HTTPS URL"))?;
-        if url.scheme() != "https" {
-            return Err(format!("{key} must use HTTPS"));
-        }
-    }
-    let sha256 = entry
-        .get("sha256")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
-    if sha256.len() != 64 || !sha256.chars().all(|ch| ch.is_ascii_hexdigit()) {
-        return Err("sha256 must be a 64-character hex digest".to_string());
-    }
-    let binaries = entry
-        .get("expected_binaries")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "expected_binaries must list required runtime binaries".to_string())?;
-    let has_binary = |name: &str| {
-        binaries
-            .iter()
-            .any(|item| item.as_str().map(|value| value == name).unwrap_or(false))
-    };
-    if !has_binary("llama-cli") || !has_binary("llama-server") {
-        return Err("expected_binaries must include llama-cli and llama-server".to_string());
-    }
-    let rollback = entry
-        .get("rollback_runtime_id")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
-    if rollback.is_empty() {
-        return Err("rollback_runtime_id is required".to_string());
-    }
-    Ok(())
 }
 
 fn save_runner_profile(profile: &Value) -> Result<PathBuf, String> {
@@ -684,7 +259,7 @@ fn listener_start_plan(api_url: String, typed_token_present: bool) -> Result<Val
 
 #[tauri::command]
 fn worker_protocol_preview(api_url: String) -> Result<Value, String> {
-    let normalized_api_url = normalize_desktop_api_url(&api_url)?;
+    let normalized_api_url = normalize_api_url(&api_url)?;
     let profile = load_runner_profile()?;
     let execution_mode = profile_string(profile.as_ref(), "preferred_execution_mode")
         .unwrap_or_else(|| preferred_execution_mode().to_string());
@@ -708,7 +283,7 @@ fn worker_protocol_preview(api_url: String) -> Result<Value, String> {
 
 #[tauri::command]
 async fn worker_protocol_ping(api_url: String) -> Result<Value, String> {
-    let normalized_api_url = normalize_desktop_api_url(&api_url)?;
+    let normalized_api_url = normalize_api_url(&api_url)?;
     let profile = load_runner_profile()?
         .ok_or_else(|| "Pair this machine before sending Runner register/heartbeat.".to_string())?;
     let token = load_runner_token_value()?
@@ -749,15 +324,6 @@ async fn worker_protocol_ping(api_url: String) -> Result<Value, String> {
 
 fn emit_listener_event(app: &AppHandle, payload: Value) {
     let _ = app.emit("runner-listener-event", payload);
-}
-
-fn redact_listener_text(text: &str, sensitive_values: &[String]) -> String {
-    sensitive_values
-        .iter()
-        .filter(|value| !value.trim().is_empty())
-        .fold(text.to_string(), |redacted, value| {
-            redacted.replace(value, "[redacted]")
-        })
 }
 
 #[tauri::command]
@@ -901,28 +467,7 @@ fn reset_runner_pairing() -> Result<Value, String> {
 
 #[tauri::command]
 fn llama_cpp_runtime_plan() -> Value {
-    let cli = command_version("llama-cli");
-    let server = command_version("llama-server");
-    let runtime_available = cli.get("status").and_then(Value::as_str) == Some("found")
-        && server.get("status").and_then(Value::as_str) == Some("found");
-    json!({
-        "manifest_version": RUNTIME_MANIFEST_VERSION,
-        "runtime_family": "llama.cpp",
-        "recommended_runtime": recommended_llama_cpp_runtime(),
-        "download_policy": verified_runtime_download_policy(),
-        "selected_runtime": selected_llama_cpp_runtime(),
-        "detected_binaries": {
-            "cli": cli,
-            "server": server,
-            "perplexity": command_version("llama-perplexity"),
-        },
-        "native_runtime_status": if runtime_available { "available" } else { "missing" },
-        "message": if runtime_available {
-            "llama.cpp binaries are available. Review provenance before running benchmark jobs."
-        } else {
-            "No install command was run. Select or install a native llama.cpp runtime before the first local benchmark."
-        },
-    })
+    engine_llama_cpp_runtime_plan(selected_llama_cpp_runtime())
 }
 
 #[tauri::command]
@@ -931,7 +476,7 @@ async fn redeem_runner_pairing(
     pair_code: String,
     label: Option<String>,
 ) -> Result<Value, String> {
-    let api_url = normalize_desktop_api_url(&api_url)?;
+    let api_url = normalize_api_url(&api_url)?;
     let pair_code = pair_code.trim();
     if pair_code.is_empty() {
         return Err("Paste the one-time pairing code from the Hub first.".to_string());
@@ -987,14 +532,6 @@ async fn redeem_runner_pairing(
     Ok(ui_pairing_response(body, &profile, profile_path))
 }
 
-fn pairing_error_detail(payload: &Value) -> Option<&str> {
-    payload
-        .get("detail")
-        .and_then(Value::as_str)
-        .or_else(|| payload.pointer("/error/message").and_then(Value::as_str))
-        .or_else(|| payload.get("error").and_then(Value::as_str))
-}
-
 pub fn run() {
     tauri::Builder::default()
         .manage(ListenerProcess::default())
@@ -1021,31 +558,34 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use infergrade_runner_engine::{
+        verify_runtime_download_manifest, worker_request_preview, LLAMA_CPP_RUNTIME_ID,
+    };
 
     #[test]
     fn normalizes_hosted_and_local_api_urls() {
         assert_eq!(
-            normalize_desktop_api_url("").expect("hosted default"),
+            normalize_api_url("").expect("hosted default"),
             "https://api.infergrade.com/"
         );
         assert_eq!(
-            normalize_desktop_api_url("api.infergrade.com").expect("hosted shorthand"),
+            normalize_api_url("api.infergrade.com").expect("hosted shorthand"),
             "https://api.infergrade.com/"
         );
         assert_eq!(
-            normalize_desktop_api_url("localhost:8000").expect("local shorthand"),
+            normalize_api_url("localhost:8000").expect("local shorthand"),
             "http://localhost:8000/"
         );
         assert_eq!(
-            normalize_desktop_api_url("127.0.0.1:8000").expect("loopback shorthand"),
+            normalize_api_url("127.0.0.1:8000").expect("loopback shorthand"),
             "http://127.0.0.1:8000/"
         );
     }
 
     #[test]
     fn rejects_cleartext_hosted_api_urls() {
-        let error = normalize_desktop_api_url("http://api.infergrade.com")
-            .expect_err("cleartext hosted rejected");
+        let error =
+            normalize_api_url("http://api.infergrade.com").expect_err("cleartext hosted rejected");
         assert!(error.contains("HTTPS"));
     }
 

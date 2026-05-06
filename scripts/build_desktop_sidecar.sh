@@ -45,9 +45,15 @@ fi
 if [ -n "${INFERGRADE_DESKTOP_SIDECAR_TARGET:-}" ]; then
   cargo build --manifest-path "$SIDECAR_DIR/Cargo.toml" --release --locked --target "$TARGET_TRIPLE"
   BUILT_BINARY="$SIDECAR_DIR/target/$TARGET_TRIPLE/release/infergrade-sidecar${EXE_SUFFIX}"
+  WORKSPACE_BINARY="$ROOT_DIR/target/$TARGET_TRIPLE/release/infergrade-sidecar${EXE_SUFFIX}"
 else
   cargo build --manifest-path "$SIDECAR_DIR/Cargo.toml" --release --locked
   BUILT_BINARY="$SIDECAR_DIR/target/release/infergrade-sidecar${EXE_SUFFIX}"
+  WORKSPACE_BINARY="$ROOT_DIR/target/release/infergrade-sidecar${EXE_SUFFIX}"
+fi
+
+if [ ! -f "$BUILT_BINARY" ] && [ -f "$WORKSPACE_BINARY" ]; then
+  BUILT_BINARY="$WORKSPACE_BINARY"
 fi
 
 if [ ! -f "$BUILT_BINARY" ]; then
