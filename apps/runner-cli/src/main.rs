@@ -1,6 +1,6 @@
 use infergrade_runner_engine::{
     container_runtime_readiness, llama_cpp_runtime_plan, normalize_api_url, run_native_first_run,
-    NativeFirstRunInput, NativeFirstRunRuntime, NativeRuntimeOutput,
+    NativeCommandRuntime, NativeFirstRunInput, NativeFirstRunRuntime, NativeRuntimeOutput,
 };
 use serde_json::{json, Value};
 use std::env;
@@ -9,7 +9,7 @@ use std::process::ExitCode;
 
 fn print_help() {
     println!(
-        "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --no-upload --dry-run\n                                               Validate and render the native first-run contract\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration."
+        "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --no-upload --dry-run\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path>\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration."
     );
 }
 
@@ -96,6 +96,7 @@ fn command_first_run(args: &[String]) -> Result<Value, String> {
     let mut max_tokens = 32_u32;
     let mut dry_run = false;
     let mut no_upload = false;
+    let mut runtime_command: Option<PathBuf> = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -129,17 +130,31 @@ fn command_first_run(args: &[String]) -> Result<Value, String> {
                     .parse::<u32>()
                     .map_err(|_| "--max-tokens must be a positive integer".to_string())?;
             }
+            "--runtime-command" => {
+                index += 1;
+                runtime_command =
+                    Some(PathBuf::from(args.get(index).ok_or_else(|| {
+                        "--runtime-command requires a path".to_string()
+                    })?));
+            }
             "--dry-run" => dry_run = true,
             "--no-upload" => no_upload = true,
             unknown => return Err(format!("unknown first-run option: {unknown}")),
         }
         index += 1;
     }
-    if !dry_run {
-        return Err("first-run currently requires --dry-run; real native execution is not implemented yet".to_string());
-    }
     if !no_upload {
-        return Err("first-run currently requires --no-upload; upload is not implemented yet".to_string());
+        return Err(
+            "first-run currently requires --no-upload; upload is not implemented yet".to_string(),
+        );
+    }
+    if dry_run && runtime_command.is_some() {
+        return Err(
+            "first-run accepts either --dry-run or --runtime-command, not both".to_string(),
+        );
+    }
+    if !dry_run && runtime_command.is_none() {
+        return Err("first-run requires --dry-run or --runtime-command; built-in llama.cpp execution is not implemented yet".to_string());
     }
     let input = NativeFirstRunInput {
         model_path: model_path.ok_or_else(|| "--model is required".to_string())?,
@@ -148,11 +163,30 @@ fn command_first_run(args: &[String]) -> Result<Value, String> {
         max_tokens,
         upload: false,
     };
-    let result = run_native_first_run(input, &DryRunRuntime).map_err(|error| error.to_string())?;
+    let (mode, execution, message, result) = if let Some(command_path) = runtime_command {
+        let runtime_id = input
+            .runtime_hint
+            .clone()
+            .unwrap_or_else(|| "native-command-runtime".to_string());
+        let runtime = NativeCommandRuntime::new(command_path, runtime_id);
+        (
+            "runtime_command",
+            "explicit_command",
+            "Native first-run command adapter completed. This is not built-in llama.cpp support.",
+            run_native_first_run(input, &runtime).map_err(|error| error.to_string())?,
+        )
+    } else {
+        (
+            "dry_run",
+            "simulated",
+            "Native first-run contract validated. Real llama.cpp execution is not implemented in this CLI slice.",
+            run_native_first_run(input, &DryRunRuntime).map_err(|error| error.to_string())?,
+        )
+    };
     serde_json::to_value(json!({
-        "mode": "dry_run",
-        "execution": "simulated",
-        "message": "Native first-run contract validated. Real llama.cpp execution is not implemented in this CLI slice.",
+        "mode": mode,
+        "execution": execution,
+        "message": message,
         "result": result,
     }))
     .map_err(|error| error.to_string())
@@ -219,10 +253,7 @@ mod tests {
         );
         assert!(output["runtimes"]["docker"].get("cli").is_some());
         assert!(output["runtimes"]["docker"].get("daemon").is_some());
-        assert_eq!(
-            output["runtimes"]["podman"]["first_run_required"],
-            false
-        );
+        assert_eq!(output["runtimes"]["podman"]["first_run_required"], false);
     }
 
     #[test]
@@ -261,6 +292,61 @@ mod tests {
         ])
         .expect_err("real execution rejected");
 
-        assert!(error.contains("requires --dry-run"));
+        assert!(error.contains("requires --dry-run or --runtime-command"));
+    }
+
+    #[test]
+    fn first_run_runtime_command_executes_explicit_adapter_metrics() {
+        let model_path = env::temp_dir().join(format!(
+            "infergrade-runner-cli-runtime-command-model-{}.gguf",
+            std::process::id()
+        ));
+        let extension = if cfg!(windows) { "cmd" } else { "sh" };
+        let runtime_path = env::temp_dir().join(format!(
+            "infergrade-runner-cli-runtime-command-{}.{}",
+            std::process::id(),
+            extension
+        ));
+        std::fs::write(&model_path, b"fake gguf path validation only").expect("model file");
+        if cfg!(windows) {
+            std::fs::write(
+                &runtime_path,
+                "@echo off\r\necho INFERGRADE_NATIVE_FIRST_RUN_METRICS {\"load_time_ms\":12,\"time_to_first_token_ms\":3,\"decode_tokens_per_second\":4.5,\"generated_tokens\":6,\"peak_memory_bytes\":789}\r\n",
+            )
+            .expect("runtime script");
+        } else {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(
+                &runtime_path,
+                "#!/bin/sh\necho 'INFERGRADE_NATIVE_FIRST_RUN_METRICS {\"load_time_ms\":12,\"time_to_first_token_ms\":3,\"decode_tokens_per_second\":4.5,\"generated_tokens\":6,\"peak_memory_bytes\":789}'\n",
+            )
+            .expect("runtime script");
+            let mut permissions = std::fs::metadata(&runtime_path)
+                .expect("runtime metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&runtime_path, permissions).expect("runtime executable");
+        }
+
+        let output = command_first_run(&[
+            "--model".to_string(),
+            model_path.display().to_string(),
+            "--runtime".to_string(),
+            "explicit-test-runtime".to_string(),
+            "--no-upload".to_string(),
+            "--runtime-command".to_string(),
+            runtime_path.display().to_string(),
+        ])
+        .expect("first-run runtime-command output");
+
+        assert_eq!(output["mode"], "runtime_command");
+        assert_eq!(output["execution"], "explicit_command");
+        assert_eq!(output["result"]["runtime_id"], "explicit-test-runtime");
+        assert_eq!(output["result"]["uploaded"], false);
+        assert_eq!(output["result"]["metrics"]["generated_tokens"], 6);
+        assert_eq!(output["result"]["metrics"]["decode_tokens_per_second"], 4.5);
+
+        let _ = std::fs::remove_file(model_path);
+        let _ = std::fs::remove_file(runtime_path);
     }
 }
