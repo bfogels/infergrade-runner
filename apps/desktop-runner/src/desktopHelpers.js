@@ -1,4 +1,6 @@
 const HOSTED_API_URL = "https://api.infergrade.com";
+const SENSITIVE_HANDOFF_TEXT = /token|secret|authorization|bearer/i;
+const HUB_HANDOFF_ID = /^[A-Za-z0-9_.-]{1,160}$/;
 
 function isLocalHost(hostname) {
   const host = String(hostname || "").toLowerCase();
@@ -41,22 +43,47 @@ export function normalizeDesktopApiUrl(value = "") {
 
 export function firstRunHandoffFromParams(params, onRejected = () => {}) {
   const searchParams = params instanceof URLSearchParams ? params : new URLSearchParams(params || "");
-  const sensitiveKeys = [...searchParams.keys()].filter((key) => /token|secret|authorization/i.test(key));
+  const sensitiveKeys = [...searchParams.keys()].filter((key) => SENSITIVE_HANDOFF_TEXT.test(key));
   if (sensitiveKeys.length) {
     onRejected("sensitive handoff parameter");
     return { runId: "", workerId: "" };
   }
-  const runId =
+  const rawRunId =
     searchParams.get("first_run_run_id") ||
     searchParams.get("firstRunRunId") ||
     searchParams.get("run_id") ||
     searchParams.get("runId") ||
     "";
-  const workerId = searchParams.get("first_run_worker_id") || searchParams.get("worker_id") || searchParams.get("workerId") || "";
+  const rawWorkerId =
+    searchParams.get("first_run_worker_id") || searchParams.get("worker_id") || searchParams.get("workerId") || "";
+  const runId = safeHandoffId(rawRunId, onRejected);
+  const workerId = safeHandoffId(rawWorkerId, onRejected);
+  if (runId === null || workerId === null) {
+    return { runId: "", workerId: "" };
+  }
   return {
-    runId: runId.trim(),
-    workerId: workerId.trim(),
+    runId,
+    workerId,
   };
+}
+
+function safeHandoffId(value, onRejected) {
+  const raw = String(value || "");
+  if (!raw) {
+    return "";
+  }
+  const trimmed = raw.trim();
+  if (
+    raw !== trimmed ||
+    trimmed === "." ||
+    trimmed === ".." ||
+    !HUB_HANDOFF_ID.test(trimmed) ||
+    SENSITIVE_HANDOFF_TEXT.test(trimmed)
+  ) {
+    onRejected("unsafe handoff identifier");
+    return null;
+  }
+  return trimmed;
 }
 
 export function firstRunHandoffFromDeepLink(value, onRejected = () => {}) {

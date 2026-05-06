@@ -53,6 +53,22 @@ test("rejects first-run handoffs with sensitive parameters", () => {
   assert.equal(rejected[0], "sensitive handoff parameter");
 });
 
+test("rejects first-run handoffs with unsafe or sensitive identifier values", () => {
+  const rejected = [];
+  assert.deepEqual(
+    firstRunHandoffFromDeepLink(
+      "infergrade-runner://first-run?first_run_run_id=igrt_secret_token&first_run_worker_id=worker_456",
+      (reason) => rejected.push(reason)
+    ),
+    { runId: "", workerId: "" }
+  );
+  assert.deepEqual(
+    firstRunHandoffFromParams(new URLSearchParams("run_id=run_abc/../../secret&workerId=worker_def")),
+    { runId: "", workerId: "" }
+  );
+  assert.equal(rejected[0], "unsafe handoff identifier");
+});
+
 test("rejects first-run handoffs from unexpected URL schemes", () => {
   const rejected = [];
   assert.deepEqual(
