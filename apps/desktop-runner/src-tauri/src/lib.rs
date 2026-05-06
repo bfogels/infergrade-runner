@@ -312,6 +312,100 @@ fn claim_run_job_payload(
     })
 }
 
+fn worker_request_url(api_url: &str, path: &str) -> Result<String, String> {
+    let normalized = normalize_desktop_api_url(api_url)?;
+    Ok(format!(
+        "{}/{}",
+        normalized.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    ))
+}
+
+#[cfg(test)]
+fn worker_request_preview(
+    api_url: &str,
+    path: &str,
+    payload: Value,
+    token: &str,
+) -> Result<Value, String> {
+    Ok(json!({
+        "url": worker_request_url(api_url, path)?,
+        "method": "POST",
+        "has_authorization": !token.trim().is_empty(),
+        "payload": payload,
+    }))
+}
+
+fn redact_worker_text(text: &str, sensitive_values: &[String]) -> String {
+    let redacted = redact_listener_text(text, sensitive_values);
+    redacted
+        .replace("Authorization", "[redacted-header]")
+        .replace("authorization", "[redacted-header]")
+}
+
+fn redact_worker_response(value: Value, sensitive_values: &[String]) -> Value {
+    match value {
+        Value::String(text) => Value::String(redact_worker_text(&text, sensitive_values)),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| redact_worker_response(item, sensitive_values))
+                .collect(),
+        ),
+        Value::Object(entries) => Value::Object(
+            entries
+                .into_iter()
+                .map(|(key, value)| {
+                    let normalized_key = key.to_lowercase();
+                    let redacted_value = if normalized_key.contains("authorization")
+                        || (normalized_key.contains("token") && value.is_string())
+                    {
+                        Value::String("[redacted]".to_string())
+                    } else {
+                        redact_worker_response(value, sensitive_values)
+                    };
+                    (key, redacted_value)
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+async fn send_worker_json_request(
+    api_url: &str,
+    path: &str,
+    payload: &Value,
+    token: &str,
+) -> Result<Value, String> {
+    let url = worker_request_url(api_url, path)?;
+    let token = token.trim();
+    let client = reqwest::Client::new();
+    let mut request = client.post(url).json(payload);
+    if !token.is_empty() {
+        request = request.bearer_auth(token);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach Hub worker endpoint: {error}"))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("Could not read Hub worker response: {error}"))?;
+    let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"error": text}));
+    if !status.is_success() {
+        let redacted = redact_worker_response(parsed, &[token.to_string()]);
+        return Err(format!(
+            "Hub worker request failed: HTTP {}: {}",
+            status.as_u16(),
+            pairing_error_detail(&redacted).unwrap_or("no detail")
+        ));
+    }
+    Ok(redact_worker_response(parsed, &[token.to_string()]))
+}
+
 fn command_version(program: &str) -> Value {
     match StdCommand::new(program).arg("--version").output() {
         Ok(output) if output.status.success() => {
@@ -612,6 +706,47 @@ fn worker_protocol_preview(api_url: String) -> Result<Value, String> {
     }))
 }
 
+#[tauri::command]
+async fn worker_protocol_ping(api_url: String) -> Result<Value, String> {
+    let normalized_api_url = normalize_desktop_api_url(&api_url)?;
+    let profile = load_runner_profile()?
+        .ok_or_else(|| "Pair this machine before sending Runner register/heartbeat.".to_string())?;
+    let token = load_runner_token_value()?
+        .ok_or_else(|| "Pair this machine before sending Runner register/heartbeat.".to_string())?;
+    let execution_mode = profile_string(Some(&profile), "preferred_execution_mode")
+        .unwrap_or_else(|| preferred_execution_mode().to_string());
+    let runner_id = runner_id_from_profile(Some(&profile));
+    let host = hostname();
+    let register_payload = runner_register_payload(&runner_id, &execution_mode, host.clone());
+    let heartbeat_payload = runner_heartbeat_payload(
+        "listening",
+        None,
+        host,
+        Some("Runner registered and is listening for jobs."),
+    );
+    let register = send_worker_json_request(
+        &normalized_api_url,
+        "/v1/runners/register",
+        &register_payload,
+        &token,
+    )
+    .await?;
+    let heartbeat = send_worker_json_request(
+        &normalized_api_url,
+        &format!("/v1/runners/{runner_id}/heartbeat"),
+        &heartbeat_payload,
+        &token,
+    )
+    .await?;
+    Ok(json!({
+        "status": "sent",
+        "runner_id": runner_id,
+        "execution_mode": execution_mode,
+        "register": register,
+        "heartbeat": heartbeat,
+    }))
+}
+
 fn emit_listener_event(app: &AppHandle, payload: Value) {
     let _ = app.emit("runner-listener-event", payload);
 }
@@ -872,6 +1007,7 @@ pub fn run() {
             runner_pairing_status,
             listener_start_plan,
             worker_protocol_preview,
+            worker_protocol_ping,
             start_runner_listener,
             stop_runner_listener,
             reset_runner_pairing,
@@ -1178,6 +1314,49 @@ mod tests {
         })
         .to_string();
         assert!(!combined.contains("qbhr_"));
+        assert!(!combined.contains("Authorization"));
+    }
+
+    #[test]
+    fn rust_worker_request_preview_keeps_token_out_of_payload() {
+        let payload =
+            runner_register_payload("runner_123", "local_native", Some("host-a".to_string()));
+        let request = worker_request_preview(
+            "api.infergrade.com",
+            "/v1/runners/register",
+            payload,
+            "qbhr_secret_token",
+        )
+        .expect("request preview");
+
+        assert_eq!(
+            request["url"],
+            "https://api.infergrade.com/v1/runners/register"
+        );
+        assert_eq!(request["method"], "POST");
+        assert_eq!(request["has_authorization"], true);
+        assert!(!request["payload"].to_string().contains("qbhr_secret_token"));
+        assert!(!request.to_string().contains("Authorization"));
+    }
+
+    #[test]
+    fn rust_worker_response_redacts_header_and_token_echoes() {
+        let response = redact_worker_response(
+            json!({
+                "runner_id": "runner_123",
+                "access_token": "qbhr_secret_token",
+                "detail": "Authorization Bearer qbhr_secret_token failed",
+                "capabilities": {
+                    "run_token_supported": true
+                }
+            }),
+            &[String::from("qbhr_secret_token")],
+        );
+
+        let combined = response.to_string();
+        assert_eq!(response["access_token"], "[redacted]");
+        assert_eq!(response["capabilities"]["run_token_supported"], true);
+        assert!(!combined.contains("qbhr_secret_token"));
         assert!(!combined.contains("Authorization"));
     }
 }
