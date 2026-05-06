@@ -4,7 +4,7 @@ InferGrade Desktop Runner is the local companion app for people who want to pair
 
 The Hub remains the model selection, benchmark planning, recommendation, and results surface. This app should stay focused on pairing, readiness, Runner lifecycle, local runtime controls, logs, updates, and support export.
 
-Docker is not required for your first local benchmark. The desktop happy path should pair, validate a native `llama.cpp` runtime, and start a first local run without asking the user to install Docker, Python, Rust, clone a repo, edit `PATH`, or use a terminal. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
+The desktop happy path is being built so Docker will not be required for the first local benchmark. In the current preview, the app pairs the machine, shows native `llama.cpp` readiness, and supervises the Runner process, but the full installer-and-go native first-run executor is still in progress. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
 
 ## What It Includes
 
@@ -83,6 +83,8 @@ Tauri updater signing is separate from Apple code signing:
 - `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, and `APPLE_TEAM_ID` allow CI to use Developer ID signing.
 - Either `APPLE_ID` plus `APPLE_PASSWORD` or `APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_PRIVATE_KEY` allow CI to notarize protected release artifacts.
 - `INFERGRADE_MACOS_SIGNING_IDENTITY` can be configured as a release environment variable; CI also accepts the `APPLE_SIGNING_IDENTITY` secret for the same value.
+
+Public release credentials should be configured only in the protected GitHub `release` environment. Do not copy Apple certificates, notary credentials, Tauri updater keys, or passwords into repository-level secrets, local docs, screenshots, or checked-in config files.
 
 If CI reports that `APPLE_CERTIFICATE` could not be opened with `APPLE_CERTIFICATE_PASSWORD`, re-export the Developer ID Application certificate as a password-protected `.p12`, verify it locally with `openssl pkcs12 -passin env:APPLE_CERTIFICATE_PASSWORD`, then update the certificate and password secrets together in the protected GitHub release environment.
 

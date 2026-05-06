@@ -2,6 +2,18 @@
 
 InferGrade is meant to be useful, inspectable, and easy to extend. This guide defines the baseline style we use across the repo so new contributions feel consistent instead of stitched together.
 
+## Public Contribution Policy
+
+Issues and pull requests are welcome when they keep the Runner trustworthy, reproducible, and easy to inspect.
+
+- Use issues for reproducible bugs, documentation gaps, benchmark methodology questions, and focused feature proposals.
+- Do not include tokens, `.env` files, private model credentials, Apple signing materials, certificates, private keys, or private run artifacts in issues, PRs, screenshots, logs, or uploaded bundles.
+- Report suspected vulnerabilities privately through the process in [SECURITY.md](SECURITY.md).
+- Keep PRs focused. Separate unrelated benchmark, packaging, workflow, and documentation changes unless a maintainer asks for a combined patch.
+- PRs that change execution behavior should include tests or a clear smoke path. PRs that change user-facing workflows should update the nearest README or doc.
+- Public release, signing, notarization, and package-publishing changes require maintainer review and must not weaken the protected release workflow.
+- PRs that add vendored code, benchmark fixtures, datasets, or generated third-party assets must update [docs/third_party_license_audit.md](docs/third_party_license_audit.md).
+
 ## Core Principles
 
 - Prefer clarity over cleverness.
