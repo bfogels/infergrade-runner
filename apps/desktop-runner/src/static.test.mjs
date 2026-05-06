@@ -132,14 +132,18 @@ test("desktop first-run UI calls runner-engine through Tauri and keeps upload di
   assert.ok(html.includes("name=\"firstRunModelPath\""));
   assert.ok(html.includes("name=\"firstRunRuntimePath\""));
   assert.ok(html.includes("Run native first benchmark"));
+  assert.ok(html.includes("write a local result"));
   assert.ok(html.includes("Upload is not wired yet."));
   assert.ok(js.includes('listen("runner-first-run-event"'));
   assert.ok(js.includes('invoke("run_desktop_native_first_run"'));
   assert.ok(js.includes("readFirstRunModelPath"));
   assert.ok(js.includes(".endsWith(\".gguf\")"));
   assert.ok(js.includes("native_first_run evidence"));
+  assert.ok(js.includes("payload?.artifact?.path"));
   assert.ok(rust.includes("fn native_first_run_input"));
   assert.ok(rust.includes("async fn run_desktop_native_first_run"));
+  assert.ok(rust.includes("fn desktop_first_run_artifact_dir"));
+  assert.ok(rust.includes("write_native_first_run_artifact"));
   assert.ok(rust.includes("LlamaCppRuntime::resolve"));
   assert.ok(rust.includes("engine_run_native_first_run_with_events"));
   assert.ok(rust.includes("RunnerEvent::Error"));

@@ -1,12 +1,13 @@
 use infergrade_runner_engine::{
     container_runtime_readiness, llama_cpp_runtime_plan, normalize_api_url,
-    run_native_first_run_with_events, LlamaCppRuntime, NativeCommandRuntime, NativeFirstRunInput,
-    NativeFirstRunRuntime, NativeRuntimeOutput, RunnerEvent,
+    run_native_first_run_with_events, write_native_first_run_artifact, LlamaCppRuntime,
+    NativeCommandRuntime, NativeFirstRunInput, NativeFirstRunRuntime, NativeRuntimeOutput,
+    RunnerEvent,
 };
 use serde_json::{json, Value};
 use std::env;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn print_help() {
@@ -89,17 +90,6 @@ impl NativeFirstRunRuntime for DryRunRuntime {
             peak_memory_bytes: None,
         })
     }
-}
-
-fn write_first_run_artifact(output_dir: &Path, payload: &Value) -> Result<String, String> {
-    std::fs::create_dir_all(output_dir)
-        .map_err(|error| format!("could not create output directory: {error}"))?;
-    let artifact_path = output_dir.join("native-first-run-result.json");
-    let rendered = serde_json::to_string_pretty(payload)
-        .map_err(|error| format!("could not render first-run artifact: {error}"))?;
-    std::fs::write(&artifact_path, rendered)
-        .map_err(|error| format!("could not write first-run artifact: {error}"))?;
-    Ok(artifact_path.display().to_string())
 }
 
 fn command_first_run_with_events(
@@ -266,12 +256,9 @@ where
         "result": result,
     });
     if let Some(output_dir) = output_dir {
-        let artifact_path = write_first_run_artifact(&output_dir, &payload)?;
-        payload["artifact"] = json!({
-            "path": artifact_path,
-            "format": "infergrade.native_first_run.v1",
-            "uploaded": false,
-        });
+        let artifact = write_native_first_run_artifact(&output_dir, &payload)
+            .map_err(|error| error.to_string())?;
+        payload["artifact"] = serde_json::to_value(artifact).map_err(|error| error.to_string())?;
     }
     payload["events"] = serde_json::to_value(&events).map_err(|error| error.to_string())?;
     Ok((payload, events, jsonl))

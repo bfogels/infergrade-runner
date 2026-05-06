@@ -3,10 +3,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+const NATIVE_FIRST_RUN_ARTIFACT_FORMAT: &str = "infergrade.native_first_run.v1";
 const METRIC_ENVELOPE_PREFIX: &str = "INFERGRADE_NATIVE_FIRST_RUN_METRICS ";
 const DEFAULT_NATIVE_RUNTIME_TIMEOUT: Duration = Duration::from_secs(120);
 const PREVIEW_CHAR_LIMIT: usize = 2_000;
@@ -58,6 +59,13 @@ pub struct NativeFirstRunResult {
     pub metrics: NativeFirstRunMetrics,
     pub stdout_preview: String,
     pub stderr_preview: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct NativeFirstRunArtifact {
+    pub path: String,
+    pub format: String,
+    pub uploaded: bool,
 }
 
 pub trait NativeFirstRunRuntime {
@@ -737,4 +745,35 @@ where
         benchmark_id: NATIVE_FIRST_RUN_BENCHMARK_ID.to_string(),
     });
     Ok(result)
+}
+
+pub fn write_native_first_run_artifact(
+    output_dir: impl AsRef<Path>,
+    payload: &Value,
+) -> Result<NativeFirstRunArtifact, RunnerError> {
+    let output_dir = output_dir.as_ref();
+    std::fs::create_dir_all(output_dir).map_err(|error| {
+        RunnerError::new(
+            "native_first_run_artifact_failed",
+            format!("Could not create native first-run artifact directory: {error}"),
+        )
+    })?;
+    let artifact_path = output_dir.join("native-first-run-result.json");
+    let rendered = serde_json::to_string_pretty(payload).map_err(|error| {
+        RunnerError::new(
+            "native_first_run_artifact_failed",
+            format!("Could not render native first-run artifact: {error}"),
+        )
+    })?;
+    std::fs::write(&artifact_path, rendered).map_err(|error| {
+        RunnerError::new(
+            "native_first_run_artifact_failed",
+            format!("Could not write native first-run artifact: {error}"),
+        )
+    })?;
+    Ok(NativeFirstRunArtifact {
+        path: artifact_path.display().to_string(),
+        format: NATIVE_FIRST_RUN_ARTIFACT_FORMAT.to_string(),
+        uploaded: false,
+    })
 }

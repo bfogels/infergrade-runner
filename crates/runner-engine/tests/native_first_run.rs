@@ -1,7 +1,8 @@
 use infergrade_runner_engine::{
-    run_native_first_run, run_native_first_run_with_events, NativeFirstRunInput,
-    NativeFirstRunRuntime, NativeRuntimeOutput, RunnerEvent,
+    run_native_first_run, run_native_first_run_with_events, write_native_first_run_artifact,
+    NativeFirstRunInput, NativeFirstRunRuntime, NativeRuntimeOutput, RunnerEvent,
 };
+use serde_json::{json, Value};
 use std::path::PathBuf;
 
 struct FakeRuntime;
@@ -125,6 +126,34 @@ fn native_first_run_emits_typed_progress_events() {
     ));
 
     let _ = std::fs::remove_file(model_path);
+}
+
+#[test]
+fn native_first_run_writes_local_no_upload_artifact_without_recursion() {
+    let output_dir = temp_model_path("artifact-dir");
+    let _ = std::fs::remove_dir_all(&output_dir);
+    let payload = json!({
+        "mode": "llama_cpp",
+        "execution": "local_native",
+        "result": {
+            "evidence_kind": "native_first_run",
+            "uploaded": false,
+        }
+    });
+
+    let artifact =
+        write_native_first_run_artifact(&output_dir, &payload).expect("artifact written");
+
+    assert_eq!(artifact.format, "infergrade.native_first_run.v1");
+    assert_eq!(artifact.uploaded, false);
+    let artifact_text = std::fs::read_to_string(&artifact.path).expect("artifact text");
+    let artifact_json: Value = serde_json::from_str(&artifact_text).expect("artifact JSON");
+    assert_eq!(artifact_json["execution"], "local_native");
+    assert_eq!(artifact_json["result"]["evidence_kind"], "native_first_run");
+    assert_eq!(artifact_json["result"]["uploaded"], false);
+    assert_eq!(artifact_json.get("artifact"), None);
+
+    let _ = std::fs::remove_dir_all(output_dir);
 }
 
 #[test]

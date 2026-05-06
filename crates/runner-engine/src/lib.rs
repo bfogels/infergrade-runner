@@ -9,8 +9,9 @@ mod worker_protocol;
 
 pub use benchmark::{
     run_native_first_run, run_native_first_run_with_events, validate_native_first_run_input,
-    LlamaCppRuntime, NativeCommandRuntime, NativeFirstRunInput, NativeFirstRunMetrics,
-    NativeFirstRunResult, NativeFirstRunRuntime, NativeRuntimeOutput,
+    write_native_first_run_artifact, LlamaCppRuntime, NativeCommandRuntime, NativeFirstRunArtifact,
+    NativeFirstRunInput, NativeFirstRunMetrics, NativeFirstRunResult, NativeFirstRunRuntime,
+    NativeRuntimeOutput,
 };
 pub use errors::RunnerError;
 pub use events::{RunnerEvent, RuntimeInfo};
