@@ -7,8 +7,8 @@ This is the live Codex planning file for the Runner v0.2.0 installer-and-go comp
 ## Current Branch State
 
 - Runner `origin/main`: `d2f31b82a334d26f949c0a5e26a656d896f9174a` (`0.1.45`, PR #126).
-- Runner `origin/develop`: `ff3c637b98d1392ed4ce44b3b68c514741004db8`.
-- Runner open PRs: none at sprint start.
+- Runner `origin/develop`: `0e11f989627252e4052310480ca82f44ef35c48d`.
+- Runner open PRs: none after #138 landed.
 - Runner recent develop train:
   - #127 Add CLI first-run local artifact output.
   - #128 Harden native command first-run boundary.
@@ -20,8 +20,10 @@ This is the live Codex planning file for the Runner v0.2.0 installer-and-go comp
   - #134 Add run-scoped bundle upload request builder.
   - #135 Add native Hub JSON executor.
   - #136 Add explicit CLI native first-run upload.
+  - #137 Add Desktop native first-run upload adapter.
+  - #138 Prefill Desktop first-run Hub handoff.
 - Runner `main` does not contain the develop train after #126. v0.2.0 has not landed.
-- Hub `origin/main`: `52e73d5182ea37a88da1ce977d5432e078a7d3d1`, including PR #203 (`Promote develop pairing UX to main`).
+- Hub `origin/main`: `fd9a70ee4ed37196eae3a804446e7f5dca3c52cc`, including PR #203 (`Promote develop pairing UX to main`) and PR #204 (`Keep native first-run evidence informational`).
 - Hub open PRs: none at sprint start.
 - Hub code-first pairing is present on `main`: pairing code, regenerate, status polling, and advanced CLI command disclosure exist in `apps/web/app.js`.
 
@@ -32,22 +34,23 @@ This is the live Codex planning file for the Runner v0.2.0 installer-and-go comp
 - CLI can run local native first-run with `--no-upload`.
 - CLI can explicitly upload native first-run evidence with a run-scoped token and complete the run.
 - Desktop can run the native first-run engine and write local result and bundle-preview artifacts.
-- In progress on `codex/runner-v020-desktop-upload`: Desktop can opt into a run-scoped native first-run upload by providing a Hub run ID; Rust loads the saved token and JS never receives an upload token field.
+- Desktop can upload native first-run evidence for a Hub run handoff; Rust loads the saved token and JS never receives an upload token field.
+- Hub keeps native first-run evidence experimental, informational-only, and private to the run owner across the tested read surfaces.
+- In progress on `codex/runner-v020-runtime-proof`: built-in llama.cpp first-run now avoids unbounded preview scans, redacts prompt echoes, prefers the sibling `llama-completion` measurement binary when available, requests Apple Silicon Metal offload, exits after a single turn, and rejects summary-only output when an observed token count is missing.
 - Docker/Podman remain optional advanced capabilities in readiness surfaces.
 - Token tests cover pairing, worker previews, Hub request previews, Hub executor errors, and CLI upload output redaction.
 
 ## Remaining Blockers
 
-1. Desktop upload is not fully productized.
-   - The current branch wires an explicit run-scoped upload adapter, but normal Hub-to-Desktop run handoff still needs to provide/preserve the run ID without asking the user to paste it manually.
-   - The upload path still needs end-to-end validation against Hub and evidence display surfaces.
+1. Desktop upload needs full end-to-end smoke.
+   - Hub-to-Desktop run handoff is implemented, but the normal browser-to-packaged-Desktop path still needs validation with a real run, real saved token, real local artifact, and Hub evidence display.
 
-2. Real Apple Silicon Metal proof is missing.
-   - Built-in llama.cpp adapter exists, but no current validation has run with a real GGUF model and real Metal `llama-cli`.
-   - Runtime path may be selected/app-managed, but v0.2.0 needs proof that the normal Desktop path can find/use it without PATH assumptions.
+2. Runtime selection/provisioning is not yet installer-and-go.
+   - A real Apple Silicon Metal CLI smoke succeeded using `/opt/homebrew/bin/llama-cli` and `/Users/brianfogelson/Desktop/Code/ext/models/open_llama_3b_v2/ggml-model-f16-q4_0.gguf`.
+   - v0.2.0 still needs proof that the normal Desktop path can find/use a selected or app-managed runtime without PATH assumptions.
 
-3. Hub evidence display for uploaded native-first-run evidence is not yet validated.
-   - Hub can validate/upload bundles through existing run-scoped routes, but the visual evidence/recommendation surfacing for native-first-run uploads needs an end-to-end smoke.
+3. Hub evidence display for uploaded native-first-run evidence needs browser validation.
+   - Hub API tests prove privacy and informational labeling, but the visual evidence/recommendation surfaces still need an end-to-end smoke with uploaded native-first-run evidence.
 
 4. Package/fresh-machine proof is missing.
    - No clean macOS Apple Silicon proof yet for: no Docker, no user Python, no Rust, no global CLI, no repo checkout, no terminal, no `INFERGRADE_RUNNER_REPO`.
@@ -58,21 +61,20 @@ This is the live Codex planning file for the Runner v0.2.0 installer-and-go comp
 
 ## Planned PR Sequence
 
-1. Desktop run-scoped native first-run upload adapter.
-   - Base: `origin/develop`.
-   - Add Tauri command/UI fields for explicit run id/upload action or clear upload-unavailable state if no run token exists.
-   - Rust loads token through `DesktopTokenStore`; JS never sees token.
-   - Use shared engine upload request builders and executor.
-   - Keep upload status and errors user-safe.
+1. Land `codex/runner-v020-runtime-proof`.
+   - Keep native runtime previews bounded and secret-safe.
+   - Make built-in llama.cpp first-run use Apple Silicon Metal offload where appropriate.
+   - Make llama.cpp first-run exit after one turn, use an observed token count, and avoid persisting prompt echoes.
+   - Include the real local CLI smoke evidence.
 
-2. Hub local validation smoke for native-first-run upload evidence.
-   - Prefer no product changes if existing Hub ingestion is sufficient.
-   - Add narrow Hub test only if native-first-run evidence needs label/display support.
+2. Runtime selection without Python/PATH assumptions.
+   - Move selected existing llama.cpp runtime selection into `runner-engine`.
+   - Let Desktop and Rust CLI select or inspect the runtime without shelling to Python runner-core.
+   - Keep downloads/provisioning explicit and provenance-gated.
 
-3. Real runtime/model validation and docs.
-   - Locate or select a small supported GGUF and real `llama-cli`.
-   - Run CLI and Desktop first-run smoke where possible.
-   - Document missing local prerequisites honestly if not available.
+3. Desktop + Hub end-to-end first-run upload smoke.
+   - Use a real paired Desktop profile, Hub handoff run ID, selected runtime, and GGUF.
+   - Confirm artifact path, upload status, Hub owner-visible evidence, and public/private boundaries.
 
 4. macOS package candidate validation.
    - Build sidecar and Desktop package.
@@ -90,13 +92,13 @@ Current live checks before this file:
 - Hub open PR list: none.
 - Runner `origin/main` version: `0.1.45`.
 - Runner `origin/develop` version: `0.1.45`.
-- Hub `origin/main` includes PR #203 and code-first pairing helpers.
+- Hub `origin/main` includes PR #203 code-first pairing and PR #204 native-first-run evidence/privacy helpers.
 - Previous develop PR validations were local because GitHub Actions jobs were blocked before execution by account billing/spending-limit annotations.
-- `codex/runner-v020-desktop-upload` local checks so far:
-  - `npm run check --prefix apps/desktop-runner`: pass.
+- #137 local checks included `npm run check --prefix apps/desktop-runner`, desktop sidecar build, runner-engine/CLI/Desktop cargo tests, Python desktop capability unittest, CLI help, gitleaks, and `git diff --check`.
+- #138 local checks included `npm ci --prefix apps/desktop-runner`, `npm run check --prefix apps/desktop-runner`, desktop sidecar build, runner-engine/CLI/Desktop cargo tests, Python desktop capability unittest, CLI help, gitleaks, and `git diff --check`.
+- `codex/runner-v020-runtime-proof` local checks so far:
   - `cargo test --manifest-path crates/runner-engine/Cargo.toml --locked`: pass.
-  - `cargo test --manifest-path apps/runner-cli/Cargo.toml --locked`: pass.
-  - `cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked`: pass.
+  - Real native CLI smoke: `cargo run --manifest-path apps/runner-cli/Cargo.toml -- first-run --model /Users/brianfogelson/Desktop/Code/ext/models/open_llama_3b_v2/ggml-model-f16-q4_0.gguf --runtime auto --runtime-path /opt/homebrew/bin/llama-cli --prompt PRIVATE_PROMPT_DO_NOT_SHOW_12345 --max-tokens 4 --no-upload --output-dir /tmp/infergrade-pr139-prompt-echo --json`: pass, produced `/tmp/infergrade-pr139-prompt-echo/native-first-run-result.json`, loaded Metal backend through `llama-completion`, did not persist the exact prompt, and reported 3 observed eval tokens at about 27.8 tokens/sec.
 
 ## Reviewer Findings
 
@@ -104,11 +106,13 @@ Current live checks before this file:
 - #134 reviewer caught path-id trim/embedding mismatch; fixed by returning and using validated ids.
 - #135 reviewer caught response Debug and redact-after-truncate token leaks; fixed with manual Debug and redact-before-truncate tests.
 - #136 reviewer found no blockers and approved CLI run-scoped upload.
+- #137 reviewer caught upload failure being allowed to mask successful local artifact creation; fixed by preserving result success and reporting upload failure separately.
+- #138 reviewer caught stale worker handoff reuse; fixed by clearing old worker IDs when a new run-only handoff arrives.
 
 ## Release-Gate Status
 
 Not ready for v0.2.0.
 
-The product has meaningful native first-run/upload primitives, but Desktop upload, real Apple Silicon Metal proof, Hub evidence display validation, and package/fresh-machine proof remain release blockers.
+The product has meaningful native first-run/upload primitives, and the Rust CLI can now complete a real local Apple Silicon Metal llama.cpp first-run with a GGUF model. Desktop end-to-end upload, visual Hub evidence validation, runtime selection without PATH assumptions, and package/fresh-machine proof remain release blockers.
 
-Desktop upload is moving from "not wired" to "explicit run-scoped adapter" on the current branch, but v0.2.0 remains blocked until the full Desktop-Hub upload/evidence loop and macOS package proof are validated.
+v0.2.0 remains blocked until the full Desktop-Hub upload/evidence loop and macOS package proof are validated.
