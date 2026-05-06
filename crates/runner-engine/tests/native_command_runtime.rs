@@ -129,7 +129,7 @@ fn llama_cpp_runtime_executes_cli_and_parses_timings() {
     } else {
         write_executable(
             &runtime_path,
-            "#!/bin/sh\necho 'hello from llama'\necho 'llama_print_timings:        load time =     617.57 ms' >&2\necho 'llama_print_timings:        eval time =    1285.25 ms /    9 runs   (40.16 ms per token, 24.90 tokens per second)' >&2\necho 'llama_print_timings:       total time =    1901.48 ms /    12 tokens' >&2\n",
+            "#!/bin/sh\nsleep 1\necho 'hello from llama'\necho 'llama_print_timings:        load time =     617.57 ms' >&2\necho 'llama_print_timings:        eval time =    1285.25 ms /    9 runs   (40.16 ms per token, 24.90 tokens per second)' >&2\necho 'llama_print_timings:       total time =    1901.48 ms /    12 tokens' >&2\n",
         );
     }
 
@@ -150,7 +150,11 @@ fn llama_cpp_runtime_executes_cli_and_parses_timings() {
     assert_eq!(result.metrics.load_time_ms, 618);
     assert_eq!(result.metrics.generated_tokens, 9);
     assert_eq!(result.metrics.decode_tokens_per_second, 24.9);
-    assert!(result.metrics.time_to_first_token_ms <= result.metrics.load_time_ms);
+    if cfg!(windows) {
+        assert!(result.metrics.time_to_first_token_ms <= 5_000);
+    } else {
+        assert!(result.metrics.time_to_first_token_ms >= 900);
+    }
     assert!(result.stdout_preview.contains("hello from llama"));
 
     let _ = std::fs::remove_file(runtime_path);

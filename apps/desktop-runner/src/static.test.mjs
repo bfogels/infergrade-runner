@@ -71,7 +71,7 @@ test("desktop pairing keeps successful pairing when automatic start fails", () =
   assert.ok(js.includes("Checking Runner startup self-test"));
 });
 
-test("desktop runtime panel shows local readiness without owning model selection", () => {
+test("desktop runtime panel shows local readiness and explicit first-run model selection", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
   const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
@@ -82,7 +82,7 @@ test("desktop runtime panel shows local readiness without owning model selection
   assert.ok(html.includes("data-pairing-readiness-status"));
   assert.ok(html.includes("data-runtime-llama-status"));
   assert.ok(html.includes("data-model-path-status"));
-  assert.ok(html.includes("Chosen in Hub run plans"));
+  assert.ok(html.includes("Select a local GGUF model for the first benchmark."));
   assert.ok(js.includes("renderLocalReadinessChecklist"));
   assert.ok(js.includes("await stopRunner()"));
   assert.ok(js.includes('invoke("llama_cpp_runtime_plan"'));
@@ -103,10 +103,12 @@ test("desktop runtime panel keeps native first-run readiness truthful and Docker
   const shapes = permissions.map((entry) => JSON.stringify(entry.args || []));
 
   assert.ok(html.includes("Native benchmark suite"));
-  assert.ok(html.includes("Native first-run executor is still in progress"));
+  assert.ok(html.includes("Native first-run can run with a local GGUF model and selected llama.cpp runtime."));
   assert.ok(html.includes("Docker is optional for advanced sandboxed benchmarks"));
   assert.ok(html.includes("data-native-suite-status"));
   assert.ok(html.includes("data-container-runtime-status"));
+  assert.ok(html.includes("data-first-run-start"));
+  assert.ok(html.includes("data-first-run-status"));
   assert.ok(js.includes("desktop-readiness"));
   assert.ok(js.includes("renderDesktopReadiness"));
   assert.ok(shapes.includes(JSON.stringify(["desktop-readiness"])));
@@ -117,8 +119,31 @@ test("desktop readiness copy does not overclaim when native runtime is missing",
 
   assert.ok(js.includes("runtime === \"available\""));
   assert.ok(js.includes("Select a native runtime before first-run benchmark support"));
-  assert.ok(js.includes("Native first-run executor is still in progress"));
+  assert.ok(js.includes("Upload is not wired yet"));
   assert.equal(js.includes("Docker not found. Native benchmarks are available; advanced sandboxed benchmarks are disabled.\";"), false);
+});
+
+test("desktop first-run UI calls runner-engine through Tauri and keeps upload disabled", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+
+  assert.ok(html.includes("First local benchmark"));
+  assert.ok(html.includes("name=\"firstRunModelPath\""));
+  assert.ok(html.includes("name=\"firstRunRuntimePath\""));
+  assert.ok(html.includes("Run native first benchmark"));
+  assert.ok(html.includes("Upload is not wired yet."));
+  assert.ok(js.includes('listen("runner-first-run-event"'));
+  assert.ok(js.includes('invoke("run_desktop_native_first_run"'));
+  assert.ok(js.includes("readFirstRunModelPath"));
+  assert.ok(js.includes(".endsWith(\".gguf\")"));
+  assert.ok(js.includes("native_first_run evidence"));
+  assert.ok(rust.includes("fn native_first_run_input"));
+  assert.ok(rust.includes("async fn run_desktop_native_first_run"));
+  assert.ok(rust.includes("LlamaCppRuntime::resolve"));
+  assert.ok(rust.includes("engine_run_native_first_run_with_events"));
+  assert.ok(rust.includes("RunnerEvent::Error"));
+  assert.ok(rust.includes("upload: false"));
 });
 
 test("desktop runner engine logic is separated from the Tauri adapter", () => {
