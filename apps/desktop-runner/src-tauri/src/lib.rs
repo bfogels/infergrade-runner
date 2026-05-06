@@ -519,6 +519,15 @@ fn emit_listener_event(app: &AppHandle, payload: Value) {
     let _ = app.emit("runner-listener-event", payload);
 }
 
+fn redact_listener_text(text: &str, sensitive_values: &[String]) -> String {
+    sensitive_values
+        .iter()
+        .filter(|value| !value.trim().is_empty())
+        .fold(text.to_string(), |redacted, value| {
+            redacted.replace(value, "[redacted]")
+        })
+}
+
 #[tauri::command]
 fn start_runner_listener(
     app: AppHandle,
@@ -558,6 +567,10 @@ fn start_runner_listener(
     } else {
         stored_token
     };
+    let sensitive_values = token_for_child
+        .as_ref()
+        .map(|token| vec![token.clone()])
+        .unwrap_or_default();
 
     let mut command = app
         .shell()
@@ -580,17 +593,24 @@ fn start_runner_listener(
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
             match event {
-                CommandEvent::Stdout(bytes) => emit_listener_event(
-                    &event_app,
-                    json!({"type": "stdout", "line": String::from_utf8_lossy(&bytes).trim_end()}),
-                ),
-                CommandEvent::Stderr(bytes) => emit_listener_event(
-                    &event_app,
-                    json!({"type": "stderr", "line": String::from_utf8_lossy(&bytes).trim_end()}),
-                ),
-                CommandEvent::Error(error) => {
-                    emit_listener_event(&event_app, json!({"type": "error", "detail": error}))
+                CommandEvent::Stdout(bytes) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    emit_listener_event(
+                        &event_app,
+                        json!({"type": "stdout", "line": redact_listener_text(line.trim_end(), &sensitive_values)}),
+                    );
                 }
+                CommandEvent::Stderr(bytes) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    emit_listener_event(
+                        &event_app,
+                        json!({"type": "stderr", "line": redact_listener_text(line.trim_end(), &sensitive_values)}),
+                    );
+                }
+                CommandEvent::Error(error) => emit_listener_event(
+                    &event_app,
+                    json!({"type": "error", "detail": redact_listener_text(&error, &sensitive_values)}),
+                ),
                 CommandEvent::Terminated(payload) => {
                     let listener_state = event_app.state::<ListenerProcess>();
                     if let Ok(mut child) = listener_state.child.lock() {
@@ -1003,5 +1023,16 @@ mod tests {
         assert_eq!(plan["profile_token_status"], "missing");
         assert_eq!(plan["token_status"], "present");
         assert_eq!(plan["can_start"], true);
+    }
+
+    #[test]
+    fn listener_output_redacts_child_env_token_before_browser_event() {
+        let redacted = redact_listener_text(
+            "starting with qbhr_secret_token in stderr",
+            &[String::from("qbhr_secret_token")],
+        );
+
+        assert_eq!(redacted, "starting with [redacted] in stderr");
+        assert!(!redacted.contains("qbhr_secret_token"));
     }
 }
