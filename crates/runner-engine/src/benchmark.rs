@@ -13,6 +13,7 @@ const PREVIEW_CHAR_LIMIT: usize = 2_000;
 const MAX_FIRST_RUN_DURATION_MS: u64 = 86_400_000;
 const MAX_DECODE_TOKENS_PER_SECOND: f64 = 1_000_000.0;
 const MAX_PEAK_MEMORY_BYTES: u64 = 1 << 44;
+const LLAMA_CPP_AUTO_RUNTIME_ID: &str = "llama.cpp-auto";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct NativeFirstRunInput {
@@ -84,6 +85,62 @@ impl NativeCommandRuntime {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LlamaCppRuntime {
+    command_path: PathBuf,
+    runtime_id: String,
+    timeout: Duration,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct LlamaTimings {
+    load_time_ms: Option<f64>,
+    eval_time_ms: Option<f64>,
+    eval_tokens: Option<f64>,
+    eval_tokens_per_second: Option<f64>,
+    total_time_ms: Option<f64>,
+}
+
+#[derive(Clone, Debug)]
+struct ProcessStream {
+    text: String,
+    first_byte_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+struct ProcessRun {
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
+    elapsed_ms: u64,
+    stdout_first_byte_ms: Option<u64>,
+}
+
+impl LlamaCppRuntime {
+    pub fn new(command_path: impl Into<PathBuf>, runtime_id: impl Into<String>) -> Self {
+        Self {
+            command_path: command_path.into(),
+            runtime_id: runtime_id.into(),
+            timeout: DEFAULT_NATIVE_RUNTIME_TIMEOUT,
+        }
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    pub fn resolve(command_path: Option<PathBuf>) -> Result<Self, String> {
+        let command_path = match command_path {
+            Some(path) => validate_llama_cpp_command_path(path)?,
+            None => selected_llama_cpp_cli_path()?.ok_or_else(|| {
+                "No selected llama.cpp runtime was found. Pass --runtime-path or select an app-managed llama.cpp runtime before using --runtime auto.".to_string()
+            })?,
+        };
+        Ok(Self::new(command_path, LLAMA_CPP_AUTO_RUNTIME_ID))
+    }
+}
+
 fn metric_u64(metrics: &Value, key: &str) -> Result<u64, String> {
     metrics
         .get(key)
@@ -137,85 +194,120 @@ fn parse_metric_envelope(stdout: &str) -> Result<Value, String> {
     serde_json::from_str(raw).map_err(|error| format!("metric envelope is invalid JSON: {error}"))
 }
 
-fn read_process_stream(mut stream: impl Read) -> Result<String, String> {
+fn read_process_stream(
+    mut stream: impl Read,
+    started_at: Instant,
+) -> Result<ProcessStream, String> {
     let mut bytes = Vec::new();
-    stream
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("could not read native runtime output: {error}"))?;
-    Ok(String::from_utf8_lossy(&bytes).to_string())
+    let mut first_byte_ms = None;
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let count = stream
+            .read(&mut buffer)
+            .map_err(|error| format!("could not read native runtime output: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        if first_byte_ms.is_none() {
+            first_byte_ms = Some(duration_ms(started_at.elapsed()));
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+    }
+    Ok(ProcessStream {
+        text: String::from_utf8_lossy(&bytes).to_string(),
+        first_byte_ms,
+    })
 }
 
 fn collect_process_stream(
-    reader: std::thread::JoinHandle<Result<String, String>>,
+    reader: std::thread::JoinHandle<Result<ProcessStream, String>>,
     label: &str,
-) -> Result<String, String> {
+) -> Result<ProcessStream, String> {
     reader
         .join()
         .map_err(|_| format!("native runtime {label} reader failed"))?
 }
 
+fn duration_ms(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn run_process_with_timeout(mut command: Command, timeout: Duration) -> Result<ProcessRun, String> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("could not invoke native runtime: {error}"))?;
+    let started_at = Instant::now();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "could not capture native runtime stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "could not capture native runtime stderr".to_string())?;
+    let stdout_reader = std::thread::spawn(move || read_process_stream(stdout, started_at));
+    let stderr_reader = std::thread::spawn(move || read_process_stream(stderr, started_at));
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("could not wait for native runtime: {error}"))?
+        {
+            break status;
+        }
+        if started_at.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            let stdout = collect_process_stream(stdout_reader, "stdout")?;
+            let stderr = collect_process_stream(stderr_reader, "stderr")?;
+            return Err(format!(
+                "native runtime timed out after {} seconds. stdout preview: `{}` stderr preview: `{}`",
+                timeout.as_secs(),
+                preview(&stdout.text),
+                preview(&stderr.text)
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let elapsed_ms = duration_ms(started_at.elapsed());
+    let stdout = collect_process_stream(stdout_reader, "stdout")?;
+    let stderr = collect_process_stream(stderr_reader, "stderr")?;
+    Ok(ProcessRun {
+        stdout: stdout.text,
+        stderr: stderr.text,
+        exit_code: status.code().unwrap_or(-1),
+        elapsed_ms,
+        stdout_first_byte_ms: stdout.first_byte_ms,
+    })
+}
+
 impl NativeFirstRunRuntime for NativeCommandRuntime {
     fn run(&self, input: &NativeFirstRunInput) -> Result<NativeRuntimeOutput, String> {
-        let mut child = Command::new(&self.command_path)
+        let mut command = Command::new(&self.command_path);
+        command
             .arg("--model")
             .arg(&input.model_path)
             .arg("--prompt")
             .arg(&input.prompt)
             .arg("--max-tokens")
-            .arg(input.max_tokens.to_string())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| {
-                format!(
-                    "could not invoke native runtime `{}`: {error}",
-                    self.command_path.display()
-                )
-            })?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "could not capture native runtime stdout".to_string())?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| "could not capture native runtime stderr".to_string())?;
-        let stdout_reader = std::thread::spawn(move || read_process_stream(stdout));
-        let stderr_reader = std::thread::spawn(move || read_process_stream(stderr));
-        let started_at = Instant::now();
-        let status = loop {
-            if let Some(status) = child
-                .try_wait()
-                .map_err(|error| format!("could not wait for native runtime: {error}"))?
-            {
-                break status;
-            }
-            if started_at.elapsed() >= self.timeout {
-                let _ = child.kill();
-                let _ = child.wait();
-                let stdout = collect_process_stream(stdout_reader, "stdout")?;
-                let stderr = collect_process_stream(stderr_reader, "stderr")?;
-                return Err(format!(
-                    "native runtime timed out after {} seconds. stdout preview: `{}` stderr preview: `{}`",
-                    self.timeout.as_secs(),
-                    preview(&stdout),
-                    preview(&stderr)
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        };
-        let stdout = collect_process_stream(stdout_reader, "stdout")?;
-        let stderr = collect_process_stream(stderr_reader, "stderr")?;
-        let metrics = if status.success() {
-            Some(parse_metric_envelope(&stdout)?)
+            .arg(input.max_tokens.to_string());
+        let output = run_process_with_timeout(command, self.timeout).map_err(|error| {
+            format!(
+                "could not invoke native runtime `{}`: {error}",
+                self.command_path.display()
+            )
+        })?;
+        let metrics = if output.exit_code == 0 {
+            Some(parse_metric_envelope(&output.stdout)?)
         } else {
             None
         };
         Ok(NativeRuntimeOutput {
             runtime_id: self.runtime_id.clone(),
-            stdout,
-            stderr,
-            exit_code: status.code().unwrap_or(-1),
+            stdout: output.stdout,
+            stderr: output.stderr,
+            exit_code: output.exit_code,
             load_time_ms: metrics
                 .as_ref()
                 .map(|value| metric_duration_ms(value, "load_time_ms"))
@@ -243,6 +335,183 @@ impl NativeFirstRunRuntime for NativeCommandRuntime {
                 .flatten(),
         })
     }
+}
+
+impl NativeFirstRunRuntime for LlamaCppRuntime {
+    fn run(&self, input: &NativeFirstRunInput) -> Result<NativeRuntimeOutput, String> {
+        let mut command = Command::new(&self.command_path);
+        command
+            .arg("-m")
+            .arg(&input.model_path)
+            .arg("-p")
+            .arg(&input.prompt)
+            .arg("-n")
+            .arg(input.max_tokens.to_string())
+            .arg("--no-display-prompt");
+        let output = run_process_with_timeout(command, self.timeout).map_err(|error| {
+            format!(
+                "could not invoke llama.cpp runtime `{}`: {error}",
+                self.command_path.display()
+            )
+        })?;
+        if output.exit_code != 0 {
+            return Ok(NativeRuntimeOutput {
+                runtime_id: self.runtime_id.clone(),
+                stdout: output.stdout,
+                stderr: output.stderr,
+                exit_code: output.exit_code,
+                load_time_ms: 0,
+                time_to_first_token_ms: 0,
+                decode_tokens_per_second: 0.0,
+                generated_tokens: 0,
+                peak_memory_bytes: None,
+            });
+        }
+        let combined_log = format!("{}\n{}", output.stdout, output.stderr);
+        let timings = parse_llama_timings(&combined_log);
+        let generated_tokens = timing_u32(timings.eval_tokens, "eval tokens")?;
+        let decode_tokens_per_second = timing_decode_tokens_per_second(&timings, generated_tokens)?;
+        Ok(NativeRuntimeOutput {
+            runtime_id: self.runtime_id.clone(),
+            stdout: output.stdout,
+            stderr: output.stderr,
+            exit_code: output.exit_code,
+            load_time_ms: timing_ms(timings.load_time_ms).unwrap_or(output.elapsed_ms),
+            time_to_first_token_ms: output
+                .stdout_first_byte_ms
+                .or_else(|| timing_ms(timings.total_time_ms))
+                .unwrap_or(output.elapsed_ms),
+            decode_tokens_per_second,
+            generated_tokens,
+            peak_memory_bytes: None,
+        })
+    }
+}
+
+fn validate_llama_cpp_command_path(path: PathBuf) -> Result<PathBuf, String> {
+    if !path.is_file() {
+        return Err(format!(
+            "llama.cpp runtime path `{}` does not exist or is not a file.",
+            path.display()
+        ));
+    }
+    Ok(path)
+}
+
+fn selected_llama_cpp_cli_path() -> Result<Option<PathBuf>, String> {
+    let path = crate::selected_llama_cpp_runtime_path()?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "could not read selected llama.cpp runtime at `{}`: {error}",
+                path.display()
+            ))
+        }
+    };
+    let value: Value = serde_json::from_str(&text).map_err(|error| {
+        format!(
+            "selected llama.cpp runtime at `{}` is not valid JSON: {error}",
+            path.display()
+        )
+    })?;
+    let raw = value
+        .pointer("/binaries/cli")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "selected llama.cpp runtime at `{}` does not include binaries.cli.",
+                path.display()
+            )
+        })?;
+    validate_llama_cpp_command_path(PathBuf::from(raw)).map(Some)
+}
+
+fn parse_llama_timings(raw_log: &str) -> LlamaTimings {
+    let mut timings = LlamaTimings::default();
+    for line in raw_log.lines() {
+        let lowered = line.to_ascii_lowercase();
+        if lowered.contains("load time") {
+            timings.load_time_ms = parse_ms_value(line);
+        } else if lowered.contains("eval time") && !lowered.contains("prompt eval time") {
+            timings.eval_time_ms = parse_ms_value(line);
+            timings.eval_tokens = parse_slash_count(line);
+            timings.eval_tokens_per_second = parse_tokens_per_second(line);
+        } else if lowered.contains("total time") {
+            timings.total_time_ms = parse_ms_value(line);
+        }
+    }
+    timings
+}
+
+fn parse_ms_value(line: &str) -> Option<f64> {
+    line.split_once('=')?
+        .1
+        .split("ms")
+        .next()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+fn parse_slash_count(line: &str) -> Option<f64> {
+    line.split_once('/')?
+        .1
+        .split_whitespace()
+        .next()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+fn parse_tokens_per_second(line: &str) -> Option<f64> {
+    let marker = "tokens per second";
+    let lower = line.to_ascii_lowercase();
+    let marker_start = lower.find(marker)?;
+    let before_marker = &line[..marker_start];
+    before_marker
+        .split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
+        .filter(|part| !part.is_empty())
+        .last()?
+        .parse()
+        .ok()
+}
+
+fn timing_ms(value: Option<f64>) -> Option<u64> {
+    let value = value?;
+    if value.is_finite() && value >= 0.0 && value <= MAX_FIRST_RUN_DURATION_MS as f64 {
+        Some(value.round() as u64)
+    } else {
+        None
+    }
+}
+
+fn timing_u32(value: Option<f64>, label: &str) -> Result<u32, String> {
+    let value = value.ok_or_else(|| format!("llama.cpp output did not include {label}"))?;
+    if value.is_finite() && value >= 0.0 && value <= u32::MAX as f64 {
+        Ok(value.round() as u32)
+    } else {
+        Err(format!("llama.cpp output included unsupported {label}"))
+    }
+}
+
+fn timing_decode_tokens_per_second(
+    timings: &LlamaTimings,
+    generated_tokens: u32,
+) -> Result<f64, String> {
+    if let Some(value) = timings.eval_tokens_per_second {
+        if value.is_finite() && value >= 0.0 && value <= MAX_DECODE_TOKENS_PER_SECOND {
+            return Ok(value);
+        }
+    }
+    let eval_time_ms = timings
+        .eval_time_ms
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .ok_or_else(|| "llama.cpp output did not include usable eval timing".to_string())?;
+    Ok(generated_tokens as f64 / (eval_time_ms / 1000.0))
 }
 
 fn preview(text: &str) -> String {

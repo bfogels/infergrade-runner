@@ -8,8 +8,8 @@ mod token_store;
 mod worker_protocol;
 
 pub use benchmark::{
-    run_native_first_run, validate_native_first_run_input, NativeFirstRunInput,
-    NativeFirstRunMetrics, NativeFirstRunResult, NativeFirstRunRuntime, NativeCommandRuntime,
+    run_native_first_run, validate_native_first_run_input, LlamaCppRuntime, NativeCommandRuntime,
+    NativeFirstRunInput, NativeFirstRunMetrics, NativeFirstRunResult, NativeFirstRunRuntime,
     NativeRuntimeOutput,
 };
 pub use errors::RunnerError;
@@ -309,10 +309,7 @@ pub fn command_version(program: &str) -> Value {
 
 pub fn container_runtime_check(program: &str) -> Value {
     let cli = command_version(program);
-    let cli_status = cli
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or("error");
+    let cli_status = cli.get("status").and_then(Value::as_str).unwrap_or("error");
     let daemon = if cli_status == "found" {
         command_probe(program, &["info"])
     } else {
@@ -823,9 +820,6 @@ mod tests {
             readiness["runtimes"]["docker"]["capability"],
             "advanced_sandboxed_benchmarks"
         );
-        assert_eq!(
-            readiness["runtimes"]["podman"]["first_run_required"],
-            false
-        );
+        assert_eq!(readiness["runtimes"]["podman"]["first_run_required"], false);
     }
 }
