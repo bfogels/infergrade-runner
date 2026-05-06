@@ -1,6 +1,6 @@
 use crate::{RunnerError, RunnerEvent};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::env;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -8,6 +8,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const NATIVE_FIRST_RUN_ARTIFACT_FORMAT: &str = "infergrade.native_first_run.v1";
+const NATIVE_FIRST_RUN_BUNDLE_PAYLOAD_FORMAT: &str = "infergrade.bundle_upload.v1";
 const METRIC_ENVELOPE_PREFIX: &str = "INFERGRADE_NATIVE_FIRST_RUN_METRICS ";
 const DEFAULT_NATIVE_RUNTIME_TIMEOUT: Duration = Duration::from_secs(120);
 const PREVIEW_CHAR_LIMIT: usize = 2_000;
@@ -66,6 +67,27 @@ pub struct NativeFirstRunArtifact {
     pub path: String,
     pub format: String,
     pub uploaded: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct NativeFirstRunBundleOptions {
+    pub bundle_id: Option<String>,
+    pub created_at: Option<String>,
+    pub deployment_profile_id: String,
+    pub use_case: String,
+    pub submission_channel: String,
+}
+
+impl Default for NativeFirstRunBundleOptions {
+    fn default() -> Self {
+        Self {
+            bundle_id: None,
+            created_at: None,
+            deployment_profile_id: "interactive_chat_v1".to_string(),
+            use_case: "general_assistant".to_string(),
+            submission_channel: "infergrade_rust_runner".to_string(),
+        }
+    }
 }
 
 pub trait NativeFirstRunRuntime {
@@ -751,6 +773,32 @@ pub fn write_native_first_run_artifact(
     output_dir: impl AsRef<Path>,
     payload: &Value,
 ) -> Result<NativeFirstRunArtifact, RunnerError> {
+    write_json_artifact(
+        output_dir,
+        "native-first-run-result.json",
+        NATIVE_FIRST_RUN_ARTIFACT_FORMAT,
+        payload,
+    )
+}
+
+pub fn write_native_first_run_bundle_payload(
+    output_dir: impl AsRef<Path>,
+    payload: &Value,
+) -> Result<NativeFirstRunArtifact, RunnerError> {
+    write_json_artifact(
+        output_dir,
+        "native-first-run-bundle.json",
+        NATIVE_FIRST_RUN_BUNDLE_PAYLOAD_FORMAT,
+        payload,
+    )
+}
+
+fn write_json_artifact(
+    output_dir: impl AsRef<Path>,
+    filename: &str,
+    format: &str,
+    payload: &Value,
+) -> Result<NativeFirstRunArtifact, RunnerError> {
     let output_dir = output_dir.as_ref();
     std::fs::create_dir_all(output_dir).map_err(|error| {
         RunnerError::new(
@@ -758,7 +806,7 @@ pub fn write_native_first_run_artifact(
             format!("Could not create native first-run artifact directory: {error}"),
         )
     })?;
-    let artifact_path = output_dir.join("native-first-run-result.json");
+    let artifact_path = output_dir.join(filename);
     let rendered = serde_json::to_string_pretty(payload).map_err(|error| {
         RunnerError::new(
             "native_first_run_artifact_failed",
@@ -773,7 +821,277 @@ pub fn write_native_first_run_artifact(
     })?;
     Ok(NativeFirstRunArtifact {
         path: artifact_path.display().to_string(),
-        format: NATIVE_FIRST_RUN_ARTIFACT_FORMAT.to_string(),
+        format: format.to_string(),
         uploaded: false,
+    })
+}
+
+pub fn native_first_run_bundle_payload(
+    result: &NativeFirstRunResult,
+    options: NativeFirstRunBundleOptions,
+) -> Value {
+    let created_at = options
+        .created_at
+        .unwrap_or_else(native_first_run_timestamp);
+    let model_name = model_name_from_path(&result.model_path);
+    let model_slug = slug_fragment(&model_name);
+    let bundle_id = options.bundle_id.unwrap_or_else(|| {
+        format!(
+            "nfr_{}_{}",
+            created_at
+                .chars()
+                .filter(|ch| ch.is_ascii_alphanumeric())
+                .collect::<String>(),
+            model_slug
+        )
+        .chars()
+        .take(128)
+        .collect()
+    });
+    let result_id = format!(
+        "{}_{}",
+        bundle_id,
+        slug_fragment(&options.deployment_profile_id)
+    )
+    .chars()
+    .take(160)
+    .collect::<String>();
+    let runtime_id = result.runtime_id.trim();
+    let backend_version_pinned = false;
+    let runtime_binding_id = if runtime_id.is_empty() {
+        "llama.cpp-native-first-run"
+    } else {
+        runtime_id
+    };
+    let runtime_ms = result
+        .metrics
+        .load_time_ms
+        .saturating_add(result.metrics.time_to_first_token_ms);
+    let runtime_seconds = i64::try_from(std::cmp::max(1, runtime_ms / 1000)).unwrap_or(i64::MAX);
+    let decode_speed = result.metrics.decode_tokens_per_second;
+    let ttft_ms = result.metrics.time_to_first_token_ms as f64;
+    let load_time_ms = result.metrics.load_time_ms as f64;
+    let missing_requirements = vec![
+        "quant_artifact_sha256",
+        "backend_version_pinned",
+        "capability_suite_not_run",
+        "multi_run_variance_not_captured",
+    ];
+    let result_record = json!({
+        "spec_version": "0.1-draft",
+        "bundle_id": bundle_id,
+        "result_id": result_id,
+        "ontology": {
+            "benchmark_subject": {
+                "subject_id": format!("native_first_run_{}", model_slug),
+                "subject_type": "local_gguf_model",
+            },
+            "model_family": {
+                "family_name": model_name,
+            },
+            "checkpoint": {
+                "checkpoint_name": model_name,
+            },
+            "quantization": {
+                "quantization_label": "unknown",
+                "quantization_format": "gguf",
+            },
+            "runtime_binding": {
+                "runtime_binding_id": runtime_binding_id,
+                "backend_engine": "llama.cpp",
+            },
+        },
+        "configuration": {
+            "configuration_id": format!("cfg_{}", slug_fragment(&format!("{}-{}", model_slug, runtime_binding_id))),
+            "model_base": model_name,
+            "model_variant": Value::Null,
+            "model_instance_name": model_name,
+            "model_source": "local_file",
+            "model_source_repo": Value::Null,
+            "model_revision": "local",
+            "quant_label": "unknown",
+            "quant_format": "gguf",
+            "quant_artifact_sha256": Value::Null,
+            "backend_engine": "llama.cpp",
+            "backend_wrapper": "infergrade_runner_engine",
+            "backend_version": "unverified",
+            "backend_execution": "native",
+            "backend_flags": [],
+            "tokenizer_id": Value::Null,
+            "chat_template_id": Value::Null,
+            "generation_preset_id": "native_first_run_v1",
+        },
+        "hardware": native_first_run_hardware_summary(),
+        "verification": {
+            "verification_level": "experimental",
+            "artifact_pinned": false,
+            "backend_version_pinned": backend_version_pinned,
+            "hardware_captured": true,
+            "missing_requirements": missing_requirements,
+            "local_comparison_grade_candidate": "informational_only",
+        },
+        "execution": {
+            "execution_profile_id": "local_native_v1",
+            "execution_mode": "local_native",
+            "launcher": "infergrade-runner",
+            "started_at": created_at,
+            "completed_at": created_at,
+            "benchmark_job_runtime_seconds": runtime_seconds,
+            "execution_cost_source": "none",
+            "simulated": false,
+        },
+        "deployment": {
+            "deployment_profile_id": options.deployment_profile_id,
+            "deployment_status": result.status,
+            "ttft_p50_ms": ttft_ms,
+            "ttft_p95_ms": ttft_ms,
+            "latency_p50_ms": ttft_ms,
+            "latency_p95_ms": ttft_ms,
+            "decode_tokens_per_second_p50": decode_speed,
+            "decode_tokens_per_second_p95": decode_speed,
+            "request_throughput_per_minute": Value::Null,
+            "peak_vram_mb": result.metrics.peak_memory_bytes.map(|bytes| bytes as f64 / 1024.0 / 1024.0),
+            "load_time_ms": load_time_ms,
+            "oom_or_failure_rate": 0.0,
+            "deployment_confidence": 0.25,
+        },
+        "capability": {
+            "use_case": options.use_case,
+            "capability_suite_id": "native_first_run_v1",
+            "benchmark_tier": "native_first_run",
+            "capability_state": "not_yet_benchmarked",
+            "capability_score": Value::Null,
+            "capability_status": "not_yet_benchmarked",
+        },
+        "cost": {
+            "cost_source": "none",
+            "benchmark_job_cost_included": false,
+            "benchmark_job_cost_usd": Value::Null,
+        },
+        "derived": {
+            "passes_capability_floor": false,
+            "passes_verification_floor": false,
+            "comparison_grade": "informational_only",
+            "native_first_run": true,
+            "canonical_analysis_slice_ids": [],
+        },
+        "provenance": {
+            "submitter": "local_runner",
+            "submission_channel": options.submission_channel,
+            "source_bundle_origin": "infergrade_native_first_run",
+            "normalized_at": created_at,
+            "normalizer_version": env!("CARGO_PKG_VERSION"),
+            "notes": "Native first-run evidence is useful local telemetry, not a full decision-grade benchmark.",
+        },
+    });
+    json!({
+        "manifest": {
+            "bundle_spec_version": "0.1-draft",
+            "result_spec_version": "0.1-draft",
+            "bundle_id": bundle_id,
+            "created_at": created_at,
+            "runner": {
+                "name": "infergrade-runner-engine",
+                "version": env!("CARGO_PKG_VERSION"),
+            },
+            "status": {
+                "execution_status": "completed",
+                "deployment_status": result.status,
+                "capability_status": "not_yet_benchmarked",
+                "validation_status": "client_preview",
+            },
+            "files": {
+                "results": ["results/native-first-run.json"],
+                "environment": "artifacts/environment.json",
+                "ontology": "artifacts/ontology.json",
+                "validation": "validation.json",
+                "summary": "summary.json",
+            },
+        },
+        "results": [result_record],
+        "summary": {
+            "bundle_id": bundle_id,
+            "result_count": 1,
+            "result_ids": [result_id],
+            "benchmark_subject_ids": [format!("native_first_run_{}", model_slug)],
+            "checkpoints": [model_name],
+            "model_families": [model_name],
+            "deployment_profiles": [options.deployment_profile_id],
+            "use_cases": [options.use_case],
+            "verification_levels": ["experimental"],
+            "comparison_grade_candidates": ["informational_only"],
+            "created_at": created_at,
+            "native_first_run": true,
+            "uploaded": false,
+        },
+        "validation": {
+            "client": {
+                "valid": true,
+                "bundle_id": bundle_id,
+                "warnings": [
+                    "native_first_run bundles remain experimental until Hub server validation accepts and labels them"
+                ],
+            }
+        }
+    })
+}
+
+fn native_first_run_timestamp() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    format!("unix-{seconds}")
+}
+
+fn model_name_from_path(path: &str) -> String {
+    Path::new(path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("local-gguf-model")
+        .to_string()
+}
+
+fn slug_fragment(value: &str) -> String {
+    let mut output = String::new();
+    let mut last_was_separator = false;
+    for ch in value.chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch);
+            last_was_separator = false;
+        } else if !last_was_separator && !output.is_empty() {
+            output.push('_');
+            last_was_separator = true;
+        }
+    }
+    while output.ends_with('_') {
+        output.pop();
+    }
+    if output.is_empty() {
+        "local_gguf_model".to_string()
+    } else {
+        output
+    }
+}
+
+fn native_first_run_hardware_summary() -> Value {
+    let accelerator_type = if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        "metal"
+    } else {
+        "unknown"
+    };
+    json!({
+        "hardware_id": format!("local_{}_{}", env::consts::OS, env::consts::ARCH),
+        "environment_class": "local_native",
+        "accelerator_type": accelerator_type,
+        "accelerator_vendor": if accelerator_type == "metal" { "apple" } else { "unknown" },
+        "accelerator_model": Value::Null,
+        "accelerator_vram_gb": Value::Null,
+        "accelerator_count": if accelerator_type == "unknown" { 0 } else { 1 },
+        "cpu_model": Value::Null,
+        "memory_gb": Value::Null,
+        "os": env::consts::OS,
     })
 }

@@ -8,10 +8,11 @@ mod token_store;
 mod worker_protocol;
 
 pub use benchmark::{
-    run_native_first_run, run_native_first_run_with_events, validate_native_first_run_input,
-    write_native_first_run_artifact, LlamaCppRuntime, NativeCommandRuntime, NativeFirstRunArtifact,
-    NativeFirstRunInput, NativeFirstRunMetrics, NativeFirstRunResult, NativeFirstRunRuntime,
-    NativeRuntimeOutput,
+    native_first_run_bundle_payload, run_native_first_run, run_native_first_run_with_events,
+    validate_native_first_run_input, write_native_first_run_artifact,
+    write_native_first_run_bundle_payload, LlamaCppRuntime, NativeCommandRuntime,
+    NativeFirstRunArtifact, NativeFirstRunBundleOptions, NativeFirstRunInput,
+    NativeFirstRunMetrics, NativeFirstRunResult, NativeFirstRunRuntime, NativeRuntimeOutput,
 };
 pub use errors::RunnerError;
 pub use events::{RunnerEvent, RuntimeInfo};

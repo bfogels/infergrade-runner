@@ -899,9 +899,10 @@ async function runNativeFirstRun() {
       ? `${metrics.time_to_first_token_ms} ms TTFT`
       : "TTFT unavailable";
     const artifactPath = payload?.artifact?.path ? ` Artifact: ${payload.artifact.path}.` : "";
-    firstRunStatus.textContent = `Completed native first-run (${speed}, ${ttft}).${artifactPath} Upload is not wired yet.`;
-    modelPathReadiness = "Native first-run completed locally with a result artifact. Upload is not wired yet.";
-    nativeSuiteReadiness = "Native first-run completed locally with native_first_run evidence and a local artifact. Upload is not wired yet.";
+    const bundlePath = payload?.bundle_artifact?.path ? ` Bundle payload: ${payload.bundle_artifact.path}.` : "";
+    firstRunStatus.textContent = `Completed native first-run (${speed}, ${ttft}).${artifactPath}${bundlePath} Upload is not wired yet.`;
+    modelPathReadiness = "Native first-run completed locally with result and bundle artifacts. Upload is not wired yet.";
+    nativeSuiteReadiness = "Native first-run completed locally with native_first_run evidence and a Hub-compatible bundle preview. Upload is not wired yet.";
     setStatus("First benchmark complete", "good");
     renderLocalReadinessChecklist();
     appendLog(`Native first-run result: ${JSON.stringify(payload)}`);

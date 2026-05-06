@@ -1,6 +1,8 @@
 use infergrade_runner_engine::{
-    run_native_first_run, run_native_first_run_with_events, write_native_first_run_artifact,
-    NativeFirstRunInput, NativeFirstRunRuntime, NativeRuntimeOutput, RunnerEvent,
+    native_first_run_bundle_payload, run_native_first_run, run_native_first_run_with_events,
+    write_native_first_run_artifact, NativeFirstRunBundleOptions, NativeFirstRunInput,
+    NativeFirstRunMetrics, NativeFirstRunResult, NativeFirstRunRuntime, NativeRuntimeOutput,
+    RunnerEvent,
 };
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -154,6 +156,79 @@ fn native_first_run_writes_local_no_upload_artifact_without_recursion() {
     assert_eq!(artifact_json.get("artifact"), None);
 
     let _ = std::fs::remove_dir_all(output_dir);
+}
+
+#[test]
+fn native_first_run_builds_hub_bundle_payload_with_experimental_evidence() {
+    let result = NativeFirstRunResult {
+        status: "completed".to_string(),
+        evidence_kind: "native_first_run".to_string(),
+        uploaded: false,
+        model_path: "/models/Qwen2.5-Coder-14B-Q4_K_M.gguf".to_string(),
+        runtime_id: "llama.cpp-auto".to_string(),
+        runtime_hint: Some("auto".to_string()),
+        metrics: NativeFirstRunMetrics {
+            load_time_ms: 1200,
+            time_to_first_token_ms: 250,
+            decode_tokens_per_second: 42.5,
+            generated_tokens: 32,
+            peak_memory_bytes: Some(2_147_483_648),
+        },
+        stdout_preview: "hello".to_string(),
+        stderr_preview: String::new(),
+    };
+
+    let payload = native_first_run_bundle_payload(
+        &result,
+        NativeFirstRunBundleOptions {
+            bundle_id: Some("nfr_test_bundle".to_string()),
+            created_at: Some("2026-05-06T00:00:00Z".to_string()),
+            deployment_profile_id: "interactive_chat_v1".to_string(),
+            use_case: "general_assistant".to_string(),
+            submission_channel: "test".to_string(),
+        },
+    );
+
+    assert_eq!(payload["manifest"]["bundle_id"], "nfr_test_bundle");
+    assert_eq!(
+        payload["manifest"]["files"]["results"][0],
+        "results/native-first-run.json"
+    );
+    assert_eq!(payload["summary"]["native_first_run"], true);
+    assert_eq!(payload["summary"]["uploaded"], false);
+    assert_eq!(payload["summary"]["created_at"], "2026-05-06T00:00:00Z");
+    assert_eq!(
+        payload["summary"]["comparison_grade_candidates"][0],
+        "informational_only"
+    );
+    let record = &payload["results"][0];
+    assert_eq!(record["bundle_id"], "nfr_test_bundle");
+    assert_eq!(record["result_id"], "nfr_test_bundle_interactive_chat_v1");
+    assert_eq!(record["configuration"]["backend_engine"], "llama.cpp");
+    assert_eq!(record["configuration"]["backend_version"], "unverified");
+    assert_eq!(record["verification"]["verification_level"], "experimental");
+    assert_eq!(record["verification"]["artifact_pinned"], false);
+    assert_eq!(record["verification"]["backend_version_pinned"], false);
+    assert!(record["verification"]["missing_requirements"]
+        .as_array()
+        .expect("missing requirements")
+        .iter()
+        .any(|item| item == "backend_version_pinned"));
+    assert_eq!(record["deployment"]["decode_tokens_per_second_p50"], 42.5);
+    assert_eq!(record["deployment"]["ttft_p50_ms"], 250.0);
+    assert_eq!(
+        record["capability"]["capability_state"],
+        "not_yet_benchmarked"
+    );
+    assert_eq!(record["derived"]["comparison_grade"], "informational_only");
+    assert_eq!(
+        record["provenance"]["source_bundle_origin"],
+        "infergrade_native_first_run"
+    );
+    let rendered = serde_json::to_string(&payload).expect("payload JSON");
+    assert!(!rendered.contains("/tmp/model.gguf"));
+    assert!(!rendered.to_ascii_lowercase().contains("runner_token"));
+    assert!(!rendered.to_ascii_lowercase().contains("access_token"));
 }
 
 #[test]
