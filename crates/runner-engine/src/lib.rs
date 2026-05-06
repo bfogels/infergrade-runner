@@ -1,10 +1,15 @@
 mod errors;
 mod events;
+mod pairing;
 mod profile;
 mod token_store;
 
 pub use errors::RunnerError;
 pub use events::{RunnerEvent, RuntimeInfo};
+pub use pairing::{
+    build_pairing_redeem_request, complete_pairing_response, PairingCompletion, PairingInput,
+    PairingRedeemRequest,
+};
 pub use profile::{MemoryProfileStore, ProfileStore, RunnerProfile, SanitizedRunnerProfile};
 pub use token_store::{MemoryTokenStore, TokenStore};
 
