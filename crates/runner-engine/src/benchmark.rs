@@ -1,6 +1,10 @@
 use crate::RunnerError;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::PathBuf;
+use std::process::Command;
+
+const METRIC_ENVELOPE_PREFIX: &str = "INFERGRADE_NATIVE_FIRST_RUN_METRICS ";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct NativeFirstRunInput {
@@ -48,6 +52,110 @@ pub struct NativeFirstRunResult {
 
 pub trait NativeFirstRunRuntime {
     fn run(&self, input: &NativeFirstRunInput) -> Result<NativeRuntimeOutput, String>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeCommandRuntime {
+    command_path: PathBuf,
+    runtime_id: String,
+}
+
+impl NativeCommandRuntime {
+    pub fn new(command_path: impl Into<PathBuf>, runtime_id: impl Into<String>) -> Self {
+        Self {
+            command_path: command_path.into(),
+            runtime_id: runtime_id.into(),
+        }
+    }
+}
+
+fn metric_u64(metrics: &Value, key: &str) -> Result<u64, String> {
+    metrics
+        .get(key)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("metric envelope missing integer field `{key}`"))
+}
+
+fn metric_f64(metrics: &Value, key: &str) -> Result<f64, String> {
+    metrics
+        .get(key)
+        .and_then(Value::as_f64)
+        .ok_or_else(|| format!("metric envelope missing numeric field `{key}`"))
+}
+
+fn optional_metric_u64(metrics: &Value, key: &str) -> Result<Option<u64>, String> {
+    match metrics.get(key) {
+        Some(Value::Null) | None => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| format!("metric envelope field `{key}` must be an integer or null")),
+    }
+}
+
+fn parse_metric_envelope(stdout: &str) -> Result<Value, String> {
+    let raw = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix(METRIC_ENVELOPE_PREFIX))
+        .ok_or_else(|| "native runtime output did not include a metric envelope".to_string())?;
+    serde_json::from_str(raw).map_err(|error| format!("metric envelope is invalid JSON: {error}"))
+}
+
+impl NativeFirstRunRuntime for NativeCommandRuntime {
+    fn run(&self, input: &NativeFirstRunInput) -> Result<NativeRuntimeOutput, String> {
+        let output = Command::new(&self.command_path)
+            .arg("--model")
+            .arg(&input.model_path)
+            .arg("--prompt")
+            .arg(&input.prompt)
+            .arg("--max-tokens")
+            .arg(input.max_tokens.to_string())
+            .output()
+            .map_err(|error| {
+                format!(
+                    "could not invoke native runtime `{}`: {error}",
+                    self.command_path.display()
+                )
+            })?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let metrics = if output.status.success() {
+            Some(parse_metric_envelope(&stdout)?)
+        } else {
+            None
+        };
+        Ok(NativeRuntimeOutput {
+            runtime_id: self.runtime_id.clone(),
+            stdout,
+            stderr,
+            exit_code: output.status.code().unwrap_or(-1),
+            load_time_ms: metrics
+                .as_ref()
+                .map(|value| metric_u64(value, "load_time_ms"))
+                .transpose()?
+                .unwrap_or(0),
+            time_to_first_token_ms: metrics
+                .as_ref()
+                .map(|value| metric_u64(value, "time_to_first_token_ms"))
+                .transpose()?
+                .unwrap_or(0),
+            decode_tokens_per_second: metrics
+                .as_ref()
+                .map(|value| metric_f64(value, "decode_tokens_per_second"))
+                .transpose()?
+                .unwrap_or(0.0),
+            generated_tokens: metrics
+                .as_ref()
+                .map(|value| metric_u64(value, "generated_tokens"))
+                .transpose()?
+                .unwrap_or(0) as u32,
+            peak_memory_bytes: metrics
+                .as_ref()
+                .map(|value| optional_metric_u64(value, "peak_memory_bytes"))
+                .transpose()?
+                .flatten(),
+        })
+    }
 }
 
 fn preview(text: &str) -> String {
