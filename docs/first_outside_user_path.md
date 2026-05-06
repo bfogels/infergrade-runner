@@ -2,7 +2,7 @@
 
 This path keeps the Runner useful for a first outside user who wants to compare quantized model setups on their own hardware.
 
-For the Desktop Runner path, Docker is not required for your first local benchmark. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers, but it should not be an onboarding gate for the native first-run path.
+For the Desktop Runner path, Docker should not be required for the first local benchmark once the native first-run executor is complete. In the current preview, Docker remains optional for Apple Silicon native setup. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers; it should not become an onboarding gate for the native first-run path.
 
 ## Apple Silicon Native Path
 

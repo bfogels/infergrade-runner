@@ -13,6 +13,18 @@ It is responsible for:
 - capturing deployment telemetry and capability evidence
 - writing reproducible run bundles that can be uploaded to InferGrade Hub
 
+## Project Status
+
+InferGrade Runner is moving toward a public open-source release. Treat the current code as preview software:
+
+- Complete enough today: Runner-owned schemas, benchmark catalog metadata, local/native and container-aware execution paths, result bundle generation, support export, and signed macOS desktop release wiring.
+- Actively being hardened: the installer-and-go desktop first-run experience, release packaging, hosted Hub handoff, and broader clean-machine install smoke tests.
+- Planned or limited today: Windows and Linux public desktop installers, fully managed cloud worker provisioning, and heavier reference/gold benchmark lanes that need stronger dataset, sandbox, or cost controls before becoming default local paths.
+
+Security-sensitive release credentials, Apple signing materials, Hub tokens, local runner profiles, and `.env` files should never be committed. See [SECURITY.md](SECURITY.md) before reporting vulnerabilities or sharing security-sensitive logs.
+
+Before the repository is made public, maintainers should run the [Public Release Checklist](docs/public_release_checklist.md), including the third-party license audit.
+
 ## First Path
 
 The clearest first path is:
@@ -27,7 +39,7 @@ The clearest first path is:
 
 The broader Runner architecture remains available, but the current default is intentionally narrower than a general benchmark platform.
 
-For the Desktop Runner product path, Docker is not required for your first local benchmark. Native `llama.cpp` readiness is the first onboarding gate; Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
+The Desktop Runner product path is being built so Docker will not be required for the first local benchmark. In the current preview, native `llama.cpp` readiness is visible but the full installer-and-go first-run executor is still in progress; Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
 
 ## Decision Suite vs Reference Suite
 
@@ -72,7 +84,7 @@ InferGrade aims to benchmark the best realistic execution path on each platform,
 
 The most important implication is that Apple Silicon local benchmarking is a separate path. Dockerized local `llama.cpp` runs on macOS benchmark Docker Desktop's Linux VM and do not represent Metal performance.
 
-The desktop app should keep this split user-visible: native first-run readiness can be ready while Docker is missing, and Docker/Podman availability should unlock optional sandboxed capability lanes rather than block pairing or the first local speed-oriented run.
+The desktop app should keep this split user-visible: native runtime readiness can progress while Docker is missing, and Docker/Podman availability should unlock optional sandboxed capability lanes rather than block pairing or future native first-run setup.
 
 ## Canonical Hub Handoff
 
@@ -193,7 +205,7 @@ docker run --rm \
   infergrade-runner-core:$(cat VERSION)-preview start --api-url http://host.docker.internal:8000
 ```
 
-For security and reproducibility on container-friendly hosts, the recommended container path runs the Runner inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. The desktop first-run path is intentionally different: it should run native local benchmarks without making Docker, a globally installed CLI, or a local repo checkout part of onboarding.
+For security and reproducibility on container-friendly hosts, the recommended container path runs the Runner inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. The desktop first-run path is intentionally different: it is being built to run native local benchmarks without making Docker, a globally installed CLI, or a local repo checkout part of onboarding.
 
 When that listener container talks to a Hub running on your Mac host, use `http://host.docker.internal:8000` inside the container rather than `http://localhost:8000`.
 
@@ -242,6 +254,10 @@ Run the runner test suite:
 ./scripts/test_all.sh
 ```
 
+## License
+
+InferGrade Runner is licensed under the [Apache License 2.0](LICENSE).
+
 ## Key Docs
 
 - [Decision Workflow](docs/decision_workflow.md)
@@ -254,6 +270,8 @@ Run the runner test suite:
 - [Input/Output Spec](docs/input_output_spec.md)
 - [Schema Draft](docs/schema_draft.md)
 - [Capability Benchmarks](docs/capability_benchmarks.md)
+- [Public Release Checklist](docs/public_release_checklist.md)
+- [Third-Party License Audit](docs/third_party_license_audit.md)
 
 ## Relationship To InferGrade Hub
 
