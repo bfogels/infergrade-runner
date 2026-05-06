@@ -699,7 +699,13 @@ async function resetPairing() {
   }
   form.elements.pairCode.value = "";
   form.elements.hubToken.value = "";
-  await clearStoredToken().catch((error) => appendLog(`Reset pairing could not clear stored token: ${error.message || error}`));
+  const invoke = await loadTauriInvoke();
+  if (invoke) {
+    const payload = await invoke("reset_runner_pairing");
+    appendLog(`Reset pairing state: ${JSON.stringify(payload || {})}`);
+  } else {
+    await clearStoredToken().catch((error) => appendLog(`Reset pairing could not clear stored token: ${error.message || error}`));
+  }
   window.localStorage.setItem(API_URL_STORAGE_KEY, readApiUrl());
   pairState.textContent = wasListening
     ? "Pairing reset. Listener stop requested. Paste a fresh one-time code from Hub."
