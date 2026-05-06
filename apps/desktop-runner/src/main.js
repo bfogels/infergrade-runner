@@ -52,6 +52,10 @@ const logOutput = document.querySelector("[data-log-output]");
 let childProcess = null;
 let logLines = [];
 let tauriInvoke = null;
+let tauriListen = null;
+let runnerListenerEventsReady = false;
+let runnerStartupLines = [];
+let runnerStartupWaiters = [];
 let previewToken = "";
 let pendingUpdate = null;
 let lastNormalizedApiUrl = "https://api.infergrade.com/";
@@ -59,6 +63,7 @@ let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp job
 let nativeSuiteReadiness = "Docker is not required for your first local benchmark.";
 let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxed benchmarks.";
 let savedTokenAvailable = false;
+let runnerProfileAvailable = false;
 
 function systemTheme() {
   if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
@@ -250,8 +255,14 @@ function renderLocalReadinessChecklist() {
   if (pairingReadinessStatus) {
     if (childProcess) {
       pairingReadinessStatus.textContent = "Paired and listening for Hub runs.";
-    } else if (savedTokenAvailable || previewToken || form.elements.hubToken.value.trim()) {
-      pairingReadinessStatus.textContent = "Pairing token is available. Start listening when ready.";
+    } else if ((savedTokenAvailable && runnerProfileAvailable) || previewToken || form.elements.hubToken.value.trim()) {
+      pairingReadinessStatus.textContent = savedTokenAvailable && runnerProfileAvailable
+        ? "Pairing token and profile are saved. Start listening when ready."
+        : "Pairing token is available. Start listening when ready.";
+    } else if (runnerProfileAvailable) {
+      pairingReadinessStatus.textContent = "Runner profile is saved, but the token is unavailable. Pair again or reset pairing.";
+    } else if (savedTokenAvailable) {
+      pairingReadinessStatus.textContent = "Runner token is saved, but the profile is unavailable. Pair again or reset pairing.";
     } else {
       pairingReadinessStatus.textContent = "Paste a Hub pairing code to save this machine.";
     }
@@ -399,10 +410,84 @@ async function loadTauriInvoke() {
   return tauriInvoke;
 }
 
+async function loadTauriListen() {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  if (!tauriListen) {
+    const event = await import("@tauri-apps/api/event");
+    tauriListen = event.listen;
+  }
+  return tauriListen;
+}
+
+function resolveRunnerStartupWaiters(error = null) {
+  const waiters = runnerStartupWaiters;
+  runnerStartupWaiters = [];
+  waiters.forEach((resolve) => resolve(error));
+}
+
+function waitForEarlyRunnerFailure(timeoutMs = 900) {
+  return new Promise((resolve) => {
+    runnerStartupWaiters.push(resolve);
+    window.setTimeout(() => {
+      runnerStartupWaiters = runnerStartupWaiters.filter((waiter) => waiter !== resolve);
+      resolve(null);
+    }, timeoutMs);
+  });
+}
+
+async function ensureRunnerListenerEvents() {
+  if (runnerListenerEventsReady) {
+    return;
+  }
+  const listen = await loadTauriListen();
+  if (!listen) {
+    return;
+  }
+  runnerListenerEventsReady = true;
+  await listen("runner-listener-event", (event) => {
+    const payload = event?.payload || {};
+    if (payload.type === "stdout" || payload.type === "stderr") {
+      const line = String(payload.line || "");
+      if (line.trim()) {
+        runnerStartupLines.push(line.trim());
+        if (runnerStartupLines.length > 8) {
+          runnerStartupLines.shift();
+        }
+        appendLog(line);
+      }
+      return;
+    }
+    if (payload.type === "error") {
+      const detail = payload.detail || "Runner process error.";
+      appendLog(`Runner process error: ${detail}`);
+      childProcess = null;
+      startButton.disabled = false;
+      stopButton.disabled = true;
+      setStatus("Failed", "error");
+      renderLocalReadinessChecklist();
+      resolveRunnerStartupWaiters(new Error(String(detail)));
+      return;
+    }
+    if (payload.type === "terminated") {
+      const code = payload.code ?? "unknown";
+      appendLog(`Runner exited with code ${code}.`);
+      childProcess = null;
+      startButton.disabled = false;
+      stopButton.disabled = true;
+      setStatus("Stopped", code === 0 ? "idle" : "error");
+      renderLocalReadinessChecklist();
+      const detail = runnerStartupLines.filter(Boolean).join("\n");
+      resolveRunnerStartupWaiters(new Error(detail || `Runner exited with code ${code} before listening.`));
+    }
+  });
+}
+
 async function loadStoredToken() {
   const invoke = await loadTauriInvoke();
   if (invoke) {
-    return invoke("load_runner_token");
+    return null;
   }
   return previewToken;
 }
@@ -428,14 +513,35 @@ async function clearStoredToken() {
 async function updateTokenState() {
   let hasToken = false;
   try {
+    const invoke = await loadTauriInvoke();
+    if (invoke) {
+      const status = await invoke("runner_pairing_status");
+      hasToken = status?.token?.status === "present";
+      savedTokenAvailable = hasToken;
+      runnerProfileAvailable = status?.profile?.status === "present";
+      const profile = status?.profile?.profile || {};
+      if (runnerProfileAvailable && hasToken) {
+        tokenState.textContent = `Runner profile and OS token saved${profile.label ? ` for ${profile.label}` : ""}.`;
+      } else if (runnerProfileAvailable) {
+        tokenState.textContent = `Runner profile saved${profile.label ? ` for ${profile.label}` : ""}, but the OS token is unavailable.`;
+      } else if (hasToken) {
+        tokenState.textContent = "Runner token is saved in the OS credential store, but no runner profile is saved.";
+      } else {
+        tokenState.textContent = "No runner profile saved. Paste a Hub pairing code before listening for Hub runs.";
+      }
+      renderLocalReadinessChecklist();
+      return;
+    }
     hasToken = Boolean(await loadStoredToken());
   } catch (error) {
     savedTokenAvailable = false;
+    runnerProfileAvailable = false;
     tokenState.textContent = userSafeTokenFailure(error.message || error);
     appendLog(`Could not read saved token: ${error.message || error}`);
     return;
   }
   savedTokenAvailable = hasToken;
+  runnerProfileAvailable = false;
   if (isTauriRuntime()) {
     tokenState.textContent = hasToken
       ? "Runner token saved in the OS credential store."
@@ -523,9 +629,28 @@ async function runnerEnvironment() {
   if (typedToken) {
     return { INFERGRADE_HUB_TOKEN: typedToken };
   }
+  return {};
+}
 
-  const savedToken = await loadStoredToken();
-  return savedToken ? { INFERGRADE_HUB_TOKEN: savedToken } : {};
+function credentialSourceLabel(source = "") {
+  if (source === "typed_input") {
+    return "the pasted token";
+  }
+  if (source === "saved_pairing") {
+    return "the saved Runner profile and OS credential store";
+  }
+  return "missing pairing credentials";
+}
+
+async function listenerStartPlan(apiUrl) {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  return invoke("listener_start_plan", {
+    apiUrl,
+    typedTokenPresent: Boolean(form.elements.hubToken.value.trim()),
+  });
 }
 
 function readApiUrl() {
@@ -566,73 +691,34 @@ async function startRunner({ confirmStarted = false } = {}) {
   startButton.disabled = true;
   setStatus("Starting", "warning");
 
-  const Command = await loadTauriShell();
-  if (!Command) {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
     setStatus("Development view", "warning");
     appendLog("Open the desktop app to start the local Runner.");
     startButton.disabled = false;
     return;
   }
 
-  const command = Command.sidecar(SIDECAR_NAME, ["start", "--api-url", apiUrl], {
-    env: await runnerEnvironment()
+  await ensureRunnerListenerEvents();
+  runnerStartupLines = [];
+  const output = await invoke("start_runner_listener", {
+    apiUrl,
+    typedToken: form.elements.hubToken.value.trim() || null,
   });
-
-  const startupOutput = [];
-  const rememberStartupLine = (line) => {
-    startupOutput.push(String(line || "").trim());
-    if (startupOutput.length > 8) {
-      startupOutput.shift();
-    }
-  };
-  let startupFailure = null;
-  let markStartupFailure = null;
-  const startupFailurePromise = new Promise((resolve) => {
-    markStartupFailure = resolve;
-  });
-
-  command.stdout.on("data", (line) => {
-    rememberStartupLine(line);
-    appendLog(line);
-  });
-  command.stderr.on("data", (line) => {
-    rememberStartupLine(line);
-    appendLog(line);
-  });
-  command.on("close", (event) => {
-    appendLog(`Runner exited with code ${event.code ?? "unknown"}.`);
-    childProcess = null;
-    startButton.disabled = false;
-    stopButton.disabled = true;
-    setStatus("Stopped", event.code === 0 ? "idle" : "error");
-    renderLocalReadinessChecklist();
-    const detail = startupOutput.filter(Boolean).join("\n");
-    startupFailure = new Error(detail || `Runner exited with code ${event.code ?? "unknown"} before listening.`);
-    markStartupFailure(startupFailure);
-  });
-  command.on("error", (error) => {
-    appendLog(`Runner process error: ${error}`);
-    childProcess = null;
-    startButton.disabled = false;
-    stopButton.disabled = true;
-    setStatus("Failed", "error");
-    renderLocalReadinessChecklist();
-    startupFailure = new Error(String(error || "Runner process error."));
-    markStartupFailure(startupFailure);
-  });
-
-  childProcess = await command.spawn();
+  const plan = output?.plan || {};
+  const runner = plan.runner_id ? ` for ${plan.runner_id}` : "";
+  appendLog(
+    `Runner start plan: ${plan.execution_mode || "default mode"} using ${credentialSourceLabel(plan.credential_source)}${runner}.`
+  );
+  childProcess = { rustManaged: true, pid: output?.pid || null };
   stopButton.disabled = false;
   setStatus("Listening", "good");
   renderLocalReadinessChecklist();
   appendLog(`Started infergrade listener for ${apiUrl}.`);
   if (confirmStarted) {
-    const earlyFailure = await Promise.race([
-      startupFailurePromise,
-      new Promise((resolve) => setTimeout(() => resolve(null), 900)),
-    ]);
-    if (earlyFailure || startupFailure) {
-      throw earlyFailure || startupFailure;
+    const earlyFailure = await waitForEarlyRunnerFailure();
+    if (earlyFailure) {
+      throw earlyFailure;
     }
   }
 }
@@ -728,7 +814,12 @@ async function stopRunner() {
     return;
   }
 
-  await childProcess.kill();
+  const invoke = await loadTauriInvoke();
+  if (invoke && childProcess.rustManaged) {
+    await invoke("stop_runner_listener");
+  } else if (typeof childProcess.kill === "function") {
+    await childProcess.kill();
+  }
   appendLog("Stop requested.");
 }
 

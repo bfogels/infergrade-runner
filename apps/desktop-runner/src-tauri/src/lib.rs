@@ -1,16 +1,93 @@
+use infergrade_runner_engine::{
+    build_hub_json_request, build_listener_start_plan, build_pairing_redeem_request,
+    complete_pairing_response, desktop_environment, hostname,
+    llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, normalize_api_url,
+    pairing_error_detail, pairing_status_payload, preferred_execution_mode, profile_string,
+    redact_listener_text, redact_worker_response, reset_pairing_state, runner_id_from_profile,
+    selected_llama_cpp_runtime_path, worker_request_url, HubMethod, PairingInput, ProfileStore,
+    RunnerError, RunnerProfile, RunnerProtocolPingInput, RunnerProtocolPreviewInput, TokenStore,
+};
 use keyring::{Entry, Error as KeyringError};
-use reqwest::Url;
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
-use std::net::IpAddr;
 use std::path::PathBuf;
-use std::process::Command;
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_shell::{
+    process::{CommandChild, CommandEvent},
+    ShellExt,
+};
 
 const KEYRING_SERVICE: &str = "com.infergrade.runner";
 const KEYRING_USER: &str = "hub-runner-token";
-const LLAMA_CPP_RUNTIME_ID: &str = "llama-cpp-homebrew-stable-2026-04";
-const RUNTIME_MANIFEST_VERSION: &str = "2026-04-22";
+
+#[derive(Default)]
+struct ListenerProcess {
+    child: Mutex<Option<CommandChild>>,
+}
+
+struct DesktopProfileStore;
+
+impl ProfileStore for DesktopProfileStore {
+    fn save_profile(&self, profile: &RunnerProfile) -> Result<(), RunnerError> {
+        let value = serde_json::to_value(profile).map_err(|error| {
+            RunnerError::new(
+                "profile_serialize_failed",
+                format!("could not serialize Runner profile: {error}"),
+            )
+        })?;
+        save_runner_profile(&value)
+            .map(|_| ())
+            .map_err(|error| RunnerError::new("profile_save_failed", error))
+    }
+
+    fn load_profile(&self) -> Result<Option<RunnerProfile>, RunnerError> {
+        load_runner_profile()?
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| {
+                RunnerError::new(
+                    "profile_parse_failed",
+                    format!("could not parse Runner profile: {error}"),
+                )
+            })
+    }
+
+    fn clear_profile(&self) -> Result<bool, RunnerError> {
+        clear_runner_profile()
+            .and_then(|value| {
+                value
+                    .get("removed")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| {
+                        "profile reset result did not include removed status".to_string()
+                    })
+            })
+            .map_err(|error| RunnerError::new("profile_clear_failed", error))
+    }
+}
+
+struct DesktopTokenStore;
+
+impl TokenStore for DesktopTokenStore {
+    fn save_runner_token(&self, token: &str) -> Result<(), RunnerError> {
+        save_runner_token_value(token).map_err(|error| RunnerError::new("token_save_failed", error))
+    }
+
+    fn load_runner_token(&self) -> Result<Option<String>, RunnerError> {
+        load_runner_token_value().map_err(|error| RunnerError::new("token_load_failed", error))
+    }
+
+    fn clear_runner_token(&self) -> Result<bool, RunnerError> {
+        let had_token = load_runner_token_value()
+            .map_err(|error| RunnerError::new("token_load_failed", error))?
+            .is_some();
+        clear_runner_token()
+            .map(|_| had_token)
+            .map_err(|error| RunnerError::new("token_clear_failed", error))
+    }
+}
 
 fn runner_token_entry() -> Result<Entry, String> {
     Entry::new(KEYRING_SERVICE, KEYRING_USER)
@@ -20,75 +97,6 @@ fn runner_token_entry() -> Result<Entry, String> {
 fn is_user_canceled(error: &KeyringError) -> bool {
     let message = error.to_string().to_lowercase();
     message.contains("cancel") || message.contains("user interaction")
-}
-
-fn is_local_http_host(host: &str) -> bool {
-    if host == "localhost" {
-        return true;
-    }
-    host.parse::<IpAddr>()
-        .map(|address| address.is_loopback())
-        .unwrap_or(false)
-}
-
-fn normalize_desktop_api_url(raw: &str) -> Result<String, String> {
-    let trimmed = raw.trim();
-    let with_scheme = if trimmed.is_empty() {
-        "https://api.infergrade.com".to_string()
-    } else if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-        trimmed.to_string()
-    } else if trimmed.starts_with("localhost")
-        || trimmed.starts_with("127.")
-        || trimmed.starts_with("[::1]")
-    {
-        format!("http://{trimmed}")
-    } else {
-        format!("https://{trimmed}")
-    };
-
-    let parsed = Url::parse(&with_scheme).map_err(|_| {
-        "Hub URL is invalid. Use https://api.infergrade.com or a local http://localhost URL."
-            .to_string()
-    })?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "Hub URL must include a host.".to_string())?
-        .to_lowercase();
-    match parsed.scheme() {
-        "https" => Ok(parsed.to_string()),
-        "http" if is_local_http_host(&host) => Ok(parsed.to_string()),
-        _ => Err("Hosted Hub URLs must use HTTPS. HTTP is allowed only for localhost or loopback addresses.".to_string()),
-    }
-}
-
-fn preferred_execution_mode() -> &'static str {
-    if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-        "local_native"
-    } else {
-        "local_container"
-    }
-}
-
-fn hostname() -> Option<String> {
-    env::var("HOSTNAME")
-        .or_else(|_| env::var("COMPUTERNAME"))
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn desktop_environment() -> Value {
-    json!({
-        "source": "desktop_rust_supervisor",
-        "os": env::consts::OS,
-        "arch": env::consts::ARCH,
-        "hardware_class": if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-            "apple_silicon"
-        } else {
-            "unknown"
-        },
-        "execution_mode": preferred_execution_mode(),
-    })
 }
 
 fn runner_config_dir() -> Result<PathBuf, String> {
@@ -122,28 +130,6 @@ fn runner_profile_path() -> Result<PathBuf, String> {
     Ok(runner_config_dir()?.join("runner_profile.json"))
 }
 
-fn runtime_cache_root() -> Result<PathBuf, String> {
-    if let Ok(value) = env::var("INFERGRADE_RUNTIME_CACHE_DIR") {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return Ok(PathBuf::from(trimmed));
-        }
-    }
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .map_err(|_| "Could not resolve a home directory for the runtime cache.".to_string())?;
-    Ok(PathBuf::from(home)
-        .join(".cache")
-        .join("infergrade")
-        .join("runtimes"))
-}
-
-fn selected_llama_cpp_runtime_path() -> Result<PathBuf, String> {
-    Ok(runtime_cache_root()?
-        .join("llama.cpp")
-        .join("selected_runtime.json"))
-}
-
 fn selected_llama_cpp_runtime() -> Value {
     match selected_llama_cpp_runtime_path()
         .ok()
@@ -155,146 +141,49 @@ fn selected_llama_cpp_runtime() -> Value {
     }
 }
 
-fn command_version(program: &str) -> Value {
-    match Command::new(program).arg("--version").output() {
-        Ok(output) if output.status.success() => {
-            let text = String::from_utf8_lossy(if output.stdout.is_empty() {
-                &output.stderr
-            } else {
-                &output.stdout
-            })
-            .trim()
-            .lines()
-            .next()
-            .unwrap_or("")
-            .to_string();
-            json!({"status": "found", "program": program, "version": text})
-        }
-        Ok(output) => json!({
-            "status": "error",
-            "program": program,
-            "detail": String::from_utf8_lossy(&output.stderr).trim().chars().take(300).collect::<String>(),
-        }),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            json!({"status": "not_found", "program": program})
-        }
-        Err(error) => json!({"status": "error", "program": program, "detail": error.to_string()}),
+fn load_runner_profile() -> Result<Option<Value>, String> {
+    let path = runner_profile_path()?;
+    match fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str::<Value>(&text)
+            .map(Some)
+            .map_err(|error| format!("could not parse Runner profile: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("could not read Runner profile: {error}")),
     }
 }
 
-fn recommended_llama_cpp_runtime() -> Value {
-    if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-        json!({
-            "runtime_id": LLAMA_CPP_RUNTIME_ID,
-            "backend": "llama.cpp",
-            "accelerator": "metal",
-            "platform": "macOS Apple Silicon",
-            "source": "homebrew",
-            "provenance": "Homebrew formula `llama.cpp`; inspect with `brew info llama.cpp` before executing.",
-            "install_command": ["brew", "install", "llama.cpp"],
-            "download_required": false,
-            "supported_on_this_platform": true,
-            "notes": [
-                "Recommended managed path for Apple Silicon native benchmarking.",
-                "No install command was run. Installation remains explicit."
-            ],
-        })
-    } else {
-        json!({
-            "runtime_id": "llama-cpp-native-manual",
-            "backend": "llama.cpp",
-            "accelerator": preferred_execution_mode(),
-            "platform": format!("{} {}", env::consts::OS, env::consts::ARCH),
-            "source": "manual",
-            "provenance": "Use an explicit llama.cpp build for this platform until InferGrade ships a verified runtime lane.",
-            "install_command": Value::Null,
-            "download_required": false,
-            "download_policy": verified_runtime_download_policy(),
-            "supported_on_this_platform": false,
-            "notes": [
-                "Verified GPU-specific runtime downloads are not implemented yet.",
-                "No install command was run. Installation remains explicit."
-            ],
-        })
+async fn send_worker_json_request(
+    api_url: &str,
+    path: &str,
+    payload: &Value,
+    token: &str,
+) -> Result<Value, String> {
+    let url = worker_request_url(api_url, path)?;
+    let token = token.trim();
+    let client = reqwest::Client::new();
+    let mut request = client.post(url).json(payload);
+    if !token.is_empty() {
+        request = request.bearer_auth(token);
     }
-}
-
-fn verified_runtime_download_policy() -> Value {
-    let verifier_status = if verify_runtime_download_manifest(&json!({
-        "runtime_id": "schema-check",
-        "archive_url": "https://downloads.infergrade.com/runtimes/schema-check.tar.zst",
-        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-        "signature_url": "https://downloads.infergrade.com/runtimes/schema-check.tar.zst.minisig",
-        "expected_binaries": ["llama-cli", "llama-server"],
-        "rollback_runtime_id": "previous-runtime",
-    }))
-    .is_ok()
-    {
-        "ready"
-    } else {
-        "unavailable"
-    };
-    json!({
-        "status": "not_configured",
-        "manifest_verifier": verifier_status,
-        "requires_explicit_user_action": true,
-        "required_fields": [
-            "runtime_id",
-            "archive_url",
-            "sha256",
-            "signature_url",
-            "expected_binaries",
-            "rollback_runtime_id"
-        ],
-        "message": "Runtime downloads are disabled until a manifest entry passes HTTPS, checksum, signature, expected-binary, and rollback validation.",
-    })
-}
-
-fn verify_runtime_download_manifest(entry: &Value) -> Result<(), String> {
-    let runtime_id = entry
-        .get("runtime_id")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
-    if runtime_id.is_empty() {
-        return Err("runtime_id is required".to_string());
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach Hub worker endpoint: {error}"))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("Could not read Hub worker response: {error}"))?;
+    let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"error": text}));
+    if !status.is_success() {
+        let redacted = redact_worker_response(parsed, &[token.to_string()]);
+        return Err(format!(
+            "Hub worker request failed: HTTP {}: {}",
+            status.as_u16(),
+            pairing_error_detail(&redacted).unwrap_or("no detail")
+        ));
     }
-    for key in ["archive_url", "signature_url"] {
-        let raw = entry.get(key).and_then(Value::as_str).unwrap_or("").trim();
-        let url = Url::parse(raw).map_err(|_| format!("{key} must be a valid HTTPS URL"))?;
-        if url.scheme() != "https" {
-            return Err(format!("{key} must use HTTPS"));
-        }
-    }
-    let sha256 = entry
-        .get("sha256")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
-    if sha256.len() != 64 || !sha256.chars().all(|ch| ch.is_ascii_hexdigit()) {
-        return Err("sha256 must be a 64-character hex digest".to_string());
-    }
-    let binaries = entry
-        .get("expected_binaries")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "expected_binaries must list required runtime binaries".to_string())?;
-    let has_binary = |name: &str| {
-        binaries
-            .iter()
-            .any(|item| item.as_str().map(|value| value == name).unwrap_or(false))
-    };
-    if !has_binary("llama-cli") || !has_binary("llama-server") {
-        return Err("expected_binaries must include llama-cli and llama-server".to_string());
-    }
-    let rollback = entry
-        .get("rollback_runtime_id")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
-    if rollback.is_empty() {
-        return Err("rollback_runtime_id is required".to_string());
-    }
-    Ok(())
+    Ok(redact_worker_response(parsed, &[token.to_string()]))
 }
 
 fn save_runner_profile(profile: &Value) -> Result<PathBuf, String> {
@@ -355,10 +244,16 @@ fn save_runner_token(token: String) -> Result<(), String> {
     save_runner_token_value(&token)
 }
 
-#[tauri::command]
-fn load_runner_token() -> Result<Option<String>, String> {
+fn runner_token_available() -> Result<bool, String> {
+    Ok(load_runner_token_value()?.is_some())
+}
+
+fn load_runner_token_value() -> Result<Option<String>, String> {
     match runner_token_entry()?.get_password() {
-        Ok(token) => Ok(Some(token)),
+        Ok(token) => {
+            let token = token.trim().to_string();
+            Ok(if token.is_empty() { None } else { Some(token) })
+        }
         Err(KeyringError::NoEntry) => Ok(None),
         Err(error) if is_user_canceled(&error) => Ok(None),
         Err(error) => Err(format!("could not load runner token: {error}")),
@@ -375,43 +270,239 @@ fn clear_runner_token() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn reset_runner_pairing() -> Result<Value, String> {
-    let token_cleared = match clear_runner_token() {
-        Ok(()) => true,
-        Err(error) => return Err(error),
-    };
-    let profile = clear_runner_profile()?;
+fn runner_pairing_status() -> Result<Value, String> {
+    let profile_path = runner_profile_path()?;
+    let profile = DesktopProfileStore
+        .load_profile()
+        .map_err(|error| error.message().to_string())?;
+    let token_available = runner_token_available()?;
+    pairing_status_payload(profile, token_available, profile_path.display().to_string())
+        .map_err(|error| error.message().to_string())
+}
+
+#[tauri::command]
+fn listener_start_plan(api_url: String, typed_token_present: bool) -> Result<Value, String> {
+    let profile = load_runner_profile()?;
+    let token_available = runner_token_available()?;
+    build_listener_start_plan(
+        &api_url,
+        typed_token_present,
+        profile.as_ref(),
+        token_available,
+    )
+}
+
+#[tauri::command]
+fn worker_protocol_preview(api_url: String) -> Result<Value, String> {
+    let profile = load_runner_profile()?;
+    let execution_mode = profile_string(profile.as_ref(), "preferred_execution_mode")
+        .unwrap_or_else(|| preferred_execution_mode().to_string());
+    let runner_id = runner_id_from_profile(profile.as_ref());
+    RunnerProtocolPreviewInput {
+        api_url,
+        runner_id,
+        execution_mode,
+        hostname: hostname(),
+    }
+    .build()
+    .and_then(|preview| {
+        serde_json::to_value(preview).map_err(|error| {
+            RunnerError::new(
+                "worker_protocol_preview_serialize_failed",
+                format!("could not serialize worker protocol preview: {error}"),
+            )
+        })
+    })
+    .map_err(|error| error.message().to_string())
+}
+
+#[tauri::command]
+async fn worker_protocol_ping(api_url: String) -> Result<Value, String> {
+    let profile = load_runner_profile()?
+        .ok_or_else(|| "Pair this machine before sending Runner register/heartbeat.".to_string())?;
+    let token = load_runner_token_value()?
+        .ok_or_else(|| "Pair this machine before sending Runner register/heartbeat.".to_string())?;
+    let execution_mode = profile_string(Some(&profile), "preferred_execution_mode")
+        .unwrap_or_else(|| preferred_execution_mode().to_string());
+    let runner_id = runner_id_from_profile(Some(&profile));
+    let plan = RunnerProtocolPingInput {
+        api_url,
+        runner_id,
+        execution_mode,
+        hostname: hostname(),
+    }
+    .build()
+    .map_err(|error| error.message().to_string())?;
+    let register_payload = serde_json::to_value(&plan.register)
+        .map_err(|error| format!("Could not serialize runner register payload: {error}"))?;
+    let heartbeat_payload = serde_json::to_value(&plan.heartbeat)
+        .map_err(|error| format!("Could not serialize runner heartbeat payload: {error}"))?;
+    let register = send_worker_json_request(
+        &plan.api_url,
+        &plan.register_endpoint,
+        &register_payload,
+        &token,
+    )
+    .await?;
+    let heartbeat = send_worker_json_request(
+        &plan.api_url,
+        &plan.heartbeat_endpoint,
+        &heartbeat_payload,
+        &token,
+    )
+    .await?;
     Ok(json!({
-        "reset": true,
-        "token_cleared": token_cleared,
-        "profile": profile,
+        "status": "sent",
+        "runner_id": plan.runner_id,
+        "execution_mode": plan.execution_mode,
+        "register": register,
+        "heartbeat": heartbeat,
+    }))
+}
+
+fn emit_listener_event(app: &AppHandle, payload: Value) {
+    let _ = app.emit("runner-listener-event", payload);
+}
+
+#[tauri::command]
+fn start_runner_listener(
+    app: AppHandle,
+    state: State<ListenerProcess>,
+    api_url: String,
+    typed_token: Option<String>,
+) -> Result<Value, String> {
+    if state
+        .child
+        .lock()
+        .map_err(|_| "listener state is unavailable".to_string())?
+        .is_some()
+    {
+        return Ok(json!({"status": "already_running"}));
+    }
+
+    let typed_token = typed_token.unwrap_or_default().trim().to_string();
+    let typed_token_present = !typed_token.is_empty();
+    let profile = load_runner_profile()?;
+    let stored_token = load_runner_token_value()?;
+    let plan = build_listener_start_plan(
+        &api_url,
+        typed_token_present,
+        profile.as_ref(),
+        stored_token.is_some(),
+    )?;
+    if plan["can_start"] != true {
+        return Err("Pair this machine before starting the local Runner listener.".to_string());
+    }
+    let normalized_api_url = plan
+        .get("api_url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "listener start plan did not include a Hub API URL".to_string())?
+        .to_string();
+    let token_for_child = if typed_token_present {
+        Some(typed_token)
+    } else {
+        stored_token
+    };
+    let sensitive_values = token_for_child
+        .as_ref()
+        .map(|token| vec![token.clone()])
+        .unwrap_or_default();
+
+    let mut command = app
+        .shell()
+        .sidecar("binaries/infergrade-sidecar")
+        .map_err(|error| format!("could not prepare Runner sidecar: {error}"))?
+        .args(["start", "--api-url", &normalized_api_url]);
+    if let Some(token) = token_for_child {
+        command = command.env("INFERGRADE_HUB_TOKEN", token);
+    }
+    let (mut events, child) = command
+        .spawn()
+        .map_err(|error| format!("could not start Runner listener: {error}"))?;
+    let pid = child.pid();
+    *state
+        .child
+        .lock()
+        .map_err(|_| "listener state is unavailable".to_string())? = Some(child);
+
+    let event_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = events.recv().await {
+            match event {
+                CommandEvent::Stdout(bytes) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    emit_listener_event(
+                        &event_app,
+                        json!({"type": "stdout", "line": redact_listener_text(line.trim_end(), &sensitive_values)}),
+                    );
+                }
+                CommandEvent::Stderr(bytes) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    emit_listener_event(
+                        &event_app,
+                        json!({"type": "stderr", "line": redact_listener_text(line.trim_end(), &sensitive_values)}),
+                    );
+                }
+                CommandEvent::Error(error) => emit_listener_event(
+                    &event_app,
+                    json!({"type": "error", "detail": redact_listener_text(&error, &sensitive_values)}),
+                ),
+                CommandEvent::Terminated(payload) => {
+                    let listener_state = event_app.state::<ListenerProcess>();
+                    if let Ok(mut child) = listener_state.child.lock() {
+                        *child = None;
+                    }
+                    emit_listener_event(
+                        &event_app,
+                        json!({"type": "terminated", "code": payload.code}),
+                    );
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    Ok(json!({
+        "status": "started",
+        "pid": pid,
+        "plan": plan,
     }))
 }
 
 #[tauri::command]
+fn stop_runner_listener(state: State<ListenerProcess>) -> Result<Value, String> {
+    let child = state
+        .child
+        .lock()
+        .map_err(|_| "listener state is unavailable".to_string())?
+        .take();
+    match child {
+        Some(child) => {
+            let pid = child.pid();
+            child
+                .kill()
+                .map_err(|error| format!("could not stop Runner listener: {error}"))?;
+            Ok(json!({"status": "stop_requested", "pid": pid}))
+        }
+        None => Ok(json!({"status": "not_running"})),
+    }
+}
+
+#[tauri::command]
+fn reset_runner_pairing() -> Result<Value, String> {
+    let profile_path = runner_profile_path()?;
+    reset_pairing_state(
+        &DesktopProfileStore,
+        &DesktopTokenStore,
+        profile_path.display().to_string(),
+    )
+    .map_err(|error| error.message().to_string())
+}
+
+#[tauri::command]
 fn llama_cpp_runtime_plan() -> Value {
-    let cli = command_version("llama-cli");
-    let server = command_version("llama-server");
-    let runtime_available = cli.get("status").and_then(Value::as_str) == Some("found")
-        && server.get("status").and_then(Value::as_str) == Some("found");
-    json!({
-        "manifest_version": RUNTIME_MANIFEST_VERSION,
-        "runtime_family": "llama.cpp",
-        "recommended_runtime": recommended_llama_cpp_runtime(),
-        "download_policy": verified_runtime_download_policy(),
-        "selected_runtime": selected_llama_cpp_runtime(),
-        "detected_binaries": {
-            "cli": cli,
-            "server": server,
-            "perplexity": command_version("llama-perplexity"),
-        },
-        "native_runtime_status": if runtime_available { "available" } else { "missing" },
-        "message": if runtime_available {
-            "llama.cpp binaries are available. Review provenance before running benchmark jobs."
-        } else {
-            "No install command was run. Select or install a native llama.cpp runtime before the first local benchmark."
-        },
-    })
+    engine_llama_cpp_runtime_plan(selected_llama_cpp_runtime())
 }
 
 #[tauri::command]
@@ -420,25 +511,27 @@ async fn redeem_runner_pairing(
     pair_code: String,
     label: Option<String>,
 ) -> Result<Value, String> {
-    let api_url = normalize_desktop_api_url(&api_url)?;
-    let pair_code = pair_code.trim();
-    if pair_code.is_empty() {
-        return Err("Paste the one-time pairing code from the Hub first.".to_string());
-    }
-    let label = label.unwrap_or_default().trim().to_string();
-    let payload = json!({
-        "pair_code": pair_code,
-        "label": if label.is_empty() { Value::Null } else { Value::String(label) },
-        "hostname": hostname(),
-        "preferred_execution_mode": preferred_execution_mode(),
-        "environment": desktop_environment(),
-    });
-    let url = format!(
-        "{}/v1/runner-pairings/redeem",
-        api_url.trim_end_matches('/')
-    );
+    let api_url = normalize_api_url(&api_url)?;
+    let payload = build_pairing_redeem_request(
+        PairingInput { pair_code, label },
+        hostname(),
+        preferred_execution_mode(),
+        desktop_environment(),
+    )
+    .map_err(|error| error.message().to_string())?;
+    let request = build_hub_json_request(
+        HubMethod::Post,
+        &api_url,
+        "/v1/runner-pairings/redeem",
+        Some(
+            serde_json::to_value(&payload)
+                .map_err(|error| format!("Could not serialize pairing request payload: {error}"))?,
+        ),
+        None,
+    )
+    .map_err(|error| error.message().to_string())?;
     let response = reqwest::Client::new()
-        .post(url)
+        .post(request.url)
         .json(&payload)
         .send()
         .await
@@ -462,40 +555,33 @@ async fn redeem_runner_pairing(
             status.as_u16()
         ));
     }
-    let mut body = parsed.ok_or_else(|| "Hub pairing response was not valid JSON.".to_string())?;
-    let profile = body
-        .get("runner_profile")
-        .cloned()
-        .ok_or_else(|| "Hub pairing response did not include a runner profile.".to_string())?;
-    let access_token = profile
-        .get("access_token")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "Hub pairing response did not include a runner token.".to_string())?;
-    let profile_path = save_runner_profile(&profile)?;
-    save_runner_token_value(access_token)?;
-    body["profile_path"] = Value::String(profile_path.display().to_string());
-    body["next_action"] = Value::String("start_runner".to_string());
-    body["commands"] = json!({ "start": "infergrade start" });
-    Ok(body)
-}
-
-fn pairing_error_detail(payload: &Value) -> Option<&str> {
-    payload
-        .get("detail")
-        .and_then(Value::as_str)
-        .or_else(|| payload.pointer("/error/message").and_then(Value::as_str))
-        .or_else(|| payload.get("error").and_then(Value::as_str))
+    let body = parsed.ok_or_else(|| "Hub pairing response was not valid JSON.".to_string())?;
+    let profile_path = runner_profile_path()?;
+    complete_pairing_response(
+        body,
+        &DesktopProfileStore,
+        &DesktopTokenStore,
+        profile_path.display().to_string(),
+    )
+    .map(|completion| completion.ui_response)
+    .map_err(|error| error.message().to_string())
 }
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(ListenerProcess::default())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             save_runner_token,
-            load_runner_token,
             clear_runner_token,
+            runner_pairing_status,
+            listener_start_plan,
+            worker_protocol_preview,
+            worker_protocol_ping,
+            start_runner_listener,
+            stop_runner_listener,
             reset_runner_pairing,
             llama_cpp_runtime_plan,
             redeem_runner_pairing
@@ -507,31 +593,42 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use infergrade_runner_engine::{
+        claim_run_job_payload, runner_heartbeat_payload, runner_register_payload,
+        sanitized_runner_profile, ui_pairing_response, verify_runtime_download_manifest,
+        worker_request_preview, LLAMA_CPP_RUNTIME_ID,
+    };
+    use std::sync::{Mutex as TestMutex, OnceLock};
+
+    fn env_test_lock() -> &'static TestMutex<()> {
+        static LOCK: OnceLock<TestMutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| TestMutex::new(()))
+    }
 
     #[test]
     fn normalizes_hosted_and_local_api_urls() {
         assert_eq!(
-            normalize_desktop_api_url("").expect("hosted default"),
+            normalize_api_url("").expect("hosted default"),
             "https://api.infergrade.com/"
         );
         assert_eq!(
-            normalize_desktop_api_url("api.infergrade.com").expect("hosted shorthand"),
+            normalize_api_url("api.infergrade.com").expect("hosted shorthand"),
             "https://api.infergrade.com/"
         );
         assert_eq!(
-            normalize_desktop_api_url("localhost:8000").expect("local shorthand"),
+            normalize_api_url("localhost:8000").expect("local shorthand"),
             "http://localhost:8000/"
         );
         assert_eq!(
-            normalize_desktop_api_url("127.0.0.1:8000").expect("loopback shorthand"),
+            normalize_api_url("127.0.0.1:8000").expect("loopback shorthand"),
             "http://127.0.0.1:8000/"
         );
     }
 
     #[test]
     fn rejects_cleartext_hosted_api_urls() {
-        let error = normalize_desktop_api_url("http://api.infergrade.com")
-            .expect_err("cleartext hosted rejected");
+        let error =
+            normalize_api_url("http://api.infergrade.com").expect_err("cleartext hosted rejected");
         assert!(error.contains("HTTPS"));
     }
 
@@ -614,6 +711,7 @@ mod tests {
 
     #[test]
     fn reset_pairing_clears_runner_profile_without_requiring_existing_file() {
+        let _guard = env_test_lock().lock().expect("env test lock");
         let temp = env::temp_dir().join(format!("infergrade-reset-test-{}", std::process::id()));
         env::set_var("INFERGRADE_CONFIG_DIR", &temp);
         let first = clear_runner_profile().expect("missing profile is ok");
@@ -627,5 +725,261 @@ mod tests {
 
         env::remove_var("INFERGRADE_CONFIG_DIR");
         let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn pairing_status_reads_profile_without_exposing_token() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "access_token": "qbhr_secret",
+            "runner_id": "runner_123",
+            "label": "Test runner",
+            "preferred_execution_mode": "local_native",
+        });
+        let sanitized = sanitized_runner_profile(&profile);
+        assert_eq!(sanitized["runner_id"], "runner_123");
+        assert_eq!(sanitized["has_access_token"], true);
+        assert_eq!(sanitized.get("access_token"), None);
+    }
+
+    #[test]
+    fn pairing_response_does_not_return_runner_token_to_ui() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "access_token": "qbhr_secret",
+            "runner_id": "runner_123",
+            "label": "Test runner",
+        });
+        let response = ui_pairing_response(
+            json!({
+                "runner_profile": profile.clone(),
+                "other": "unchanged",
+            }),
+            &profile,
+            PathBuf::from("/tmp/infergrade/runner_profile.json"),
+        );
+
+        assert_eq!(response["runner_profile"]["runner_id"], "runner_123");
+        assert_eq!(response["runner_profile"]["has_access_token"], true);
+        assert_eq!(response["other"], "unchanged");
+        assert!(!response.to_string().contains("qbhr_secret"));
+        assert_eq!(response["runner_profile"].get("access_token"), None);
+    }
+
+    #[test]
+    fn desktop_profile_store_does_not_write_token_to_runner_profile_file() {
+        let _guard = env_test_lock().lock().expect("env test lock");
+        let temp = env::temp_dir().join(format!(
+            "infergrade-profile-store-test-{}",
+            std::process::id()
+        ));
+        env::set_var("INFERGRADE_CONFIG_DIR", &temp);
+        let profile = RunnerProfile {
+            api_url: "https://api.infergrade.com/".to_string(),
+            access_token: Some("qbhr_secret".to_string()),
+            runner_id: "runner_123".to_string(),
+            label: Some("Test runner".to_string()),
+            preferred_execution_mode: Some("local_native".to_string()),
+            paired_at: None,
+            expires_at: None,
+            user: None,
+        };
+
+        DesktopProfileStore
+            .save_profile(&profile)
+            .expect("profile saved");
+        let path = temp.join("runner_profile.json");
+        let text = fs::read_to_string(&path).expect("profile text");
+        assert!(!text.contains("qbhr_secret"));
+        assert!(!text.contains("access_token"));
+
+        env::remove_var("INFERGRADE_CONFIG_DIR");
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn pairing_status_requires_profile_and_os_token_to_be_ready() {
+        let profile = RunnerProfile {
+            api_url: "https://api.infergrade.com/".to_string(),
+            access_token: None,
+            runner_id: "runner_123".to_string(),
+            label: Some("Test runner".to_string()),
+            preferred_execution_mode: None,
+            paired_at: None,
+            expires_at: None,
+            user: None,
+        };
+        let path = PathBuf::from("/tmp/infergrade/runner_profile.json");
+
+        let stale_profile =
+            pairing_status_payload(Some(profile.clone()), false, path.display().to_string())
+                .expect("status");
+        assert_eq!(stale_profile["paired"], false);
+        assert_eq!(stale_profile["profile"]["status"], "present");
+        assert_eq!(stale_profile["token"]["status"], "missing");
+
+        let token_without_profile =
+            pairing_status_payload(None, true, path.display().to_string()).expect("status");
+        assert_eq!(token_without_profile["paired"], false);
+        assert_eq!(token_without_profile["profile"]["status"], "missing");
+        assert_eq!(token_without_profile["token"]["status"], "present");
+
+        let ready = pairing_status_payload(Some(profile), true, path.display().to_string())
+            .expect("status");
+        assert_eq!(ready["paired"], true);
+    }
+
+    #[test]
+    fn listener_start_plan_prefers_os_token_without_exposing_secret() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "access_token": "qbhr_secret",
+            "runner_id": "runner_123",
+            "preferred_execution_mode": "local_native",
+        });
+        let plan = build_listener_start_plan("api.infergrade.com", false, Some(&profile), true)
+            .expect("listener plan");
+
+        assert_eq!(plan["api_url"], "https://api.infergrade.com/");
+        assert_eq!(plan["runner_id"], "runner_123");
+        assert_eq!(plan["execution_mode"], "local_native");
+        assert_eq!(plan["credential_source"], "saved_pairing");
+        assert_eq!(plan["can_start"], true);
+        assert!(!plan.to_string().contains("qbhr_secret"));
+    }
+
+    #[test]
+    fn listener_start_plan_rejects_stale_profile_without_os_token() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "access_token": "qbhr_secret",
+            "runner_id": "runner_123",
+        });
+        let stale = build_listener_start_plan("api.infergrade.com", false, Some(&profile), false)
+            .expect("listener plan");
+        assert_eq!(stale["credential_source"], "missing");
+        assert_eq!(stale["can_start"], false);
+        assert_eq!(stale["profile_token_status"], "present");
+        assert_eq!(stale["token_status"], "missing");
+
+        let typed = build_listener_start_plan("api.infergrade.com", true, None, false)
+            .expect("typed token plan");
+        assert_eq!(typed["credential_source"], "typed_input");
+        assert_eq!(typed["can_start"], true);
+    }
+
+    #[test]
+    fn listener_start_plan_allows_profile_without_embedded_token_when_os_token_exists() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "runner_id": "runner_123",
+        });
+        let plan = build_listener_start_plan("api.infergrade.com", false, Some(&profile), true)
+            .expect("listener plan");
+        assert_eq!(plan["credential_source"], "saved_pairing");
+        assert_eq!(plan["profile_token_status"], "missing");
+        assert_eq!(plan["token_status"], "present");
+        assert_eq!(plan["can_start"], true);
+    }
+
+    #[test]
+    fn listener_output_redacts_child_env_token_before_browser_event() {
+        let redacted = redact_listener_text(
+            "starting with qbhr_secret_token in stderr",
+            &[String::from("qbhr_secret_token")],
+        );
+
+        assert_eq!(redacted, "starting with [redacted] in stderr");
+        assert!(!redacted.contains("qbhr_secret_token"));
+    }
+
+    #[test]
+    fn rust_worker_protocol_payloads_match_python_bridge_contract_shape() {
+        let register =
+            runner_register_payload("runner_123", "local_native", Some("host-a".to_string()));
+        assert_eq!(register["runner_id"], "runner_123");
+        assert_eq!(register["execution_modes"][0], "local_native");
+        assert_eq!(register["status"], "starting");
+        assert_eq!(register["runner_kind"], "local_listener");
+        assert_eq!(register["capabilities"]["run_token_supported"], true);
+        assert_eq!(register["capabilities"]["auto_upload"], true);
+        assert_eq!(register["environment"]["source"], "desktop_rust_supervisor");
+
+        let heartbeat = runner_heartbeat_payload(
+            "listening",
+            None,
+            Some("host-a".to_string()),
+            Some("Runner is listening for jobs."),
+        );
+        assert_eq!(heartbeat["status"], "listening");
+        assert_eq!(
+            heartbeat["metadata"]["message"],
+            "Runner is listening for jobs."
+        );
+        assert_eq!(heartbeat["current_run_id"], Value::Null);
+
+        let claim = claim_run_job_payload(
+            "runner_123",
+            "local_native",
+            Some("run_1"),
+            None,
+            Some("host-a".to_string()),
+        );
+        assert_eq!(claim["worker_id"], "runner_123");
+        assert_eq!(claim["execution_mode"], "local_native");
+        assert_eq!(claim["run_id"], "run_1");
+        assert_eq!(claim["provider_id"], Value::Null);
+
+        let combined = json!({
+            "register": register,
+            "heartbeat": heartbeat,
+            "claim": claim,
+        })
+        .to_string();
+        assert!(!combined.contains("qbhr_"));
+        assert!(!combined.contains("Authorization"));
+    }
+
+    #[test]
+    fn rust_worker_request_preview_keeps_token_out_of_payload() {
+        let payload =
+            runner_register_payload("runner_123", "local_native", Some("host-a".to_string()));
+        let request = worker_request_preview(
+            "api.infergrade.com",
+            "/v1/runners/register",
+            payload,
+            "qbhr_secret_token",
+        )
+        .expect("request preview");
+
+        assert_eq!(
+            request["url"],
+            "https://api.infergrade.com/v1/runners/register"
+        );
+        assert_eq!(request["method"], "POST");
+        assert_eq!(request["has_authorization"], true);
+        assert!(!request["payload"].to_string().contains("qbhr_secret_token"));
+        assert!(!request.to_string().contains("Authorization"));
+    }
+
+    #[test]
+    fn rust_worker_response_redacts_header_and_token_echoes() {
+        let response = redact_worker_response(
+            json!({
+                "runner_id": "runner_123",
+                "access_token": "qbhr_secret_token",
+                "detail": "Authorization Bearer qbhr_secret_token failed",
+                "capabilities": {
+                    "run_token_supported": true
+                }
+            }),
+            &[String::from("qbhr_secret_token")],
+        );
+
+        let combined = response.to_string();
+        assert_eq!(response["access_token"], "[redacted]");
+        assert_eq!(response["capabilities"]["run_token_supported"], true);
+        assert!(!combined.contains("qbhr_secret_token"));
+        assert!(!combined.contains("Authorization"));
     }
 }

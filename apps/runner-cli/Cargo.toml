@@ -1,0 +1,13 @@
+[package]
+name = "infergrade-runner-cli"
+version = "0.1.38"
+edition = "2021"
+description = "Rust CLI frontend for the shared InferGrade runner engine"
+
+[[bin]]
+name = "infergrade-runner"
+path = "src/main.rs"
+
+[dependencies]
+infergrade_runner_engine = { path = "../../crates/runner-engine" }
+serde_json = "1.0.149"

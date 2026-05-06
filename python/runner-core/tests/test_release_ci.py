@@ -213,14 +213,14 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("./scripts/build_desktop_runner.sh --check-only", workflow)
         self.assertIn("./scripts/build_desktop_runner.sh --with-updater --skip-checks", workflow)
         self.assertIn("./scripts/verify_desktop_macos_release.sh", workflow)
-        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/dmg/*.dmg", workflow)
+        self.assertIn("target/release/bundle/dmg/*.dmg", workflow)
         self.assertIn("./scripts/notarize_desktop_dmg.sh", workflow)
         self.assertLess(
             workflow.index("./scripts/notarize_desktop_dmg.sh"),
             workflow.index("./scripts/verify_desktop_macos_release.sh"),
         )
         self.assertIn("./scripts/write_desktop_release_checksums.py", workflow)
-        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/macos/SHA256SUMS", workflow)
+        self.assertIn("target/release/bundle/macos/SHA256SUMS", workflow)
         self.assertIn("gh release upload", workflow)
 
     def test_desktop_release_workflow_smokes_windows_and_linux_packages(self):
@@ -255,12 +255,12 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("target/release/bundle/linux/SHA256SUMS", workflow)
         self.assertIn("actions/setup-python@v5", workflow)
         self.assertIn('python-version: "3.12"', workflow)
-        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/nsis/*.exe", workflow)
-        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/msi/*.msi", workflow)
-        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/deb/*.deb", workflow)
-        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/appimage/*.AppImage", workflow)
-        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/windows/SHA256SUMS", workflow)
-        self.assertIn("apps/desktop-runner/src-tauri/target/release/bundle/linux/SHA256SUMS", workflow)
+        self.assertIn("target/release/bundle/nsis/*.exe", workflow)
+        self.assertIn("target/release/bundle/msi/*.msi", workflow)
+        self.assertIn("target/release/bundle/deb/*.deb", workflow)
+        self.assertIn("target/release/bundle/appimage/*.AppImage", workflow)
+        self.assertIn("target/release/bundle/windows/SHA256SUMS", workflow)
+        self.assertIn("target/release/bundle/linux/SHA256SUMS", workflow)
 
     def test_desktop_release_docs_match_protected_signing_and_notarization_gate(self):
         docs = (ROOT / "docs" / "release_process.md").read_text(encoding="utf-8")

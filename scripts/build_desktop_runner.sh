@@ -4,8 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$ROOT_DIR/apps/desktop-runner"
 TAURI_DIR="$APP_DIR/src-tauri"
-DMG_DIR="$TAURI_DIR/target/release/bundle/dmg"
-MACOS_BUNDLE_DIR="$TAURI_DIR/target/release/bundle/macos"
+BUNDLE_DIR="$ROOT_DIR/target/release/bundle"
+DMG_DIR="$BUNDLE_DIR/dmg"
+MACOS_BUNDLE_DIR="$BUNDLE_DIR/macos"
 CREATE_UPDATER_ARTIFACTS=0
 CHECK_ONLY=0
 SKIP_CHECKS=0
