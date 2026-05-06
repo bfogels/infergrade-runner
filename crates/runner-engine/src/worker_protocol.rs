@@ -1,4 +1,4 @@
-use crate::desktop_environment;
+use crate::{desktop_environment, normalize_api_url, RunnerError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -123,6 +123,80 @@ impl ClaimRunJobRequest {
             instance_type_id: None,
             hostname,
         }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RunnerProtocolPreview {
+    pub api_url: String,
+    pub runner_id: String,
+    pub execution_mode: String,
+    pub endpoints: RunnerProtocolEndpoints,
+    pub register: RunnerRegisterRequest,
+    pub heartbeat: RunnerHeartbeatRequest,
+    pub claim: ClaimRunJobRequest,
+    pub secret_boundary: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RunnerProtocolEndpoints {
+    pub register: String,
+    pub heartbeat: String,
+    pub claim: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunnerProtocolPreviewInput {
+    pub api_url: String,
+    pub runner_id: String,
+    pub execution_mode: String,
+    pub hostname: Option<String>,
+}
+
+impl RunnerProtocolPreviewInput {
+    pub fn build(self) -> Result<RunnerProtocolPreview, RunnerError> {
+        let api_url = normalize_api_url(&self.api_url)
+            .map_err(|error| RunnerError::new("hub_url_invalid", error))?;
+        let runner_id = self.runner_id.trim().to_string();
+        if runner_id.is_empty() {
+            return Err(RunnerError::new(
+                "runner_id_missing",
+                "Runner protocol preview requires a runner id.",
+            ));
+        }
+        let execution_mode = self.execution_mode.trim().to_string();
+        if execution_mode.is_empty() {
+            return Err(RunnerError::new(
+                "execution_mode_missing",
+                "Runner protocol preview requires an execution mode.",
+            ));
+        }
+
+        Ok(RunnerProtocolPreview {
+            api_url,
+            runner_id: runner_id.clone(),
+            execution_mode: execution_mode.clone(),
+            endpoints: RunnerProtocolEndpoints {
+                register: "/v1/runners/register".to_string(),
+                heartbeat: format!("/v1/runners/{runner_id}/heartbeat"),
+                claim: "/v1/runs/claim".to_string(),
+            },
+            register: RunnerRegisterRequest::new(
+                &runner_id,
+                &execution_mode,
+                self.hostname.clone(),
+            ),
+            heartbeat: RunnerHeartbeatRequest::new(
+                "listening",
+                None,
+                self.hostname.clone(),
+                Some("Runner registered and is listening for jobs."),
+            ),
+            claim: ClaimRunJobRequest::new(&runner_id, &execution_mode, None, None, self.hostname),
+            secret_boundary:
+                "payload preview excludes bearer tokens; Rust attaches authorization only when sending requests"
+                    .to_string(),
+        })
     }
 }
 

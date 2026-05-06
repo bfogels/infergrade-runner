@@ -1,12 +1,12 @@
 use infergrade_runner_engine::{
     build_hub_json_request, build_listener_start_plan, build_pairing_redeem_request,
-    claim_run_job_payload, complete_pairing_response, desktop_environment, hostname,
+    complete_pairing_response, desktop_environment, hostname,
     llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, normalize_api_url,
     pairing_error_detail, pairing_status_payload, preferred_execution_mode, profile_string,
     redact_listener_text, redact_worker_response, reset_pairing_state, runner_heartbeat_payload,
     runner_id_from_profile, runner_register_payload, selected_llama_cpp_runtime_path,
     worker_request_url, HubMethod, PairingInput, ProfileStore, RunnerError, RunnerProfile,
-    TokenStore,
+    RunnerProtocolPreviewInput, TokenStore,
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
@@ -295,26 +295,26 @@ fn listener_start_plan(api_url: String, typed_token_present: bool) -> Result<Val
 
 #[tauri::command]
 fn worker_protocol_preview(api_url: String) -> Result<Value, String> {
-    let normalized_api_url = normalize_api_url(&api_url)?;
     let profile = load_runner_profile()?;
     let execution_mode = profile_string(profile.as_ref(), "preferred_execution_mode")
         .unwrap_or_else(|| preferred_execution_mode().to_string());
     let runner_id = runner_id_from_profile(profile.as_ref());
-    let host = hostname();
-    Ok(json!({
-        "api_url": normalized_api_url,
-        "runner_id": runner_id,
-        "execution_mode": execution_mode,
-        "endpoints": {
-            "register": "/v1/runners/register",
-            "heartbeat": format!("/v1/runners/{}/heartbeat", runner_id),
-            "claim": "/v1/runs/claim",
-        },
-        "register": runner_register_payload(&runner_id, &execution_mode, host.clone()),
-        "heartbeat": runner_heartbeat_payload("listening", None, host.clone(), Some("Runner registered and is listening for jobs.")),
-        "claim": claim_run_job_payload(&runner_id, &execution_mode, None, None, host),
-        "secret_boundary": "payload preview excludes bearer tokens; Rust attaches authorization only when sending requests",
-    }))
+    RunnerProtocolPreviewInput {
+        api_url,
+        runner_id,
+        execution_mode,
+        hostname: hostname(),
+    }
+    .build()
+    .and_then(|preview| {
+        serde_json::to_value(preview).map_err(|error| {
+            RunnerError::new(
+                "worker_protocol_preview_serialize_failed",
+                format!("could not serialize worker protocol preview: {error}"),
+            )
+        })
+    })
+    .map_err(|error| error.message().to_string())
 }
 
 #[tauri::command]
@@ -592,8 +592,8 @@ pub fn run() {
 mod tests {
     use super::*;
     use infergrade_runner_engine::{
-        sanitized_runner_profile, ui_pairing_response, verify_runtime_download_manifest,
-        worker_request_preview, LLAMA_CPP_RUNTIME_ID,
+        claim_run_job_payload, sanitized_runner_profile, ui_pairing_response,
+        verify_runtime_download_manifest, worker_request_preview, LLAMA_CPP_RUNTIME_ID,
     };
     use std::sync::{Mutex as TestMutex, OnceLock};
 

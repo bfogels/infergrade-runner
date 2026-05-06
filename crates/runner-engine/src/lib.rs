@@ -17,7 +17,8 @@ pub use profile::{MemoryProfileStore, ProfileStore, RunnerProfile, SanitizedRunn
 pub use token_store::{MemoryTokenStore, TokenStore};
 pub use worker_protocol::{
     claim_run_job_payload, runner_heartbeat_payload, runner_register_payload, ClaimRunJobRequest,
-    RunnerCapabilities, RunnerHeartbeatRequest, RunnerRegisterRequest,
+    RunnerCapabilities, RunnerHeartbeatRequest, RunnerProtocolEndpoints, RunnerProtocolPreview,
+    RunnerProtocolPreviewInput, RunnerRegisterRequest,
 };
 
 use serde_json::{json, Value};
