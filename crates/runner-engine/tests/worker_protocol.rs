@@ -1,6 +1,6 @@
 use infergrade_runner_engine::{
     claim_run_job_payload, desktop_environment, runner_heartbeat_payload, runner_register_payload,
-    ClaimRunJobRequest, RunnerHeartbeatRequest, RunnerRegisterRequest,
+    ClaimRunJobRequest, RunnerHeartbeatRequest, RunnerProtocolPreviewInput, RunnerRegisterRequest,
 };
 use serde_json::{json, Value};
 
@@ -102,6 +102,36 @@ fn typed_claim_request_matches_existing_payload_shape_and_stays_secret_free() {
     assert_eq!(serialized, expected);
     assert_eq!(serialized, legacy);
     let combined = json!({"claim": serialized}).to_string();
+    assert!(!combined.contains("qbhr_"));
+    assert!(!combined.contains("Authorization"));
+}
+
+#[test]
+fn worker_protocol_preview_uses_typed_protocol_and_stays_secret_free() {
+    let preview = RunnerProtocolPreviewInput {
+        api_url: "api.infergrade.com".to_string(),
+        runner_id: "runner_123".to_string(),
+        execution_mode: "local_native".to_string(),
+        hostname: Some("host-a".to_string()),
+    }
+    .build()
+    .expect("preview");
+    let serialized = serde_json::to_value(&preview).expect("preview json");
+
+    assert_eq!(serialized["api_url"], "https://api.infergrade.com/");
+    assert_eq!(
+        serialized["endpoints"]["heartbeat"],
+        "/v1/runners/runner_123/heartbeat"
+    );
+    assert_eq!(serialized["register"]["runner_id"], "runner_123");
+    assert_eq!(serialized["heartbeat"]["status"], "listening");
+    assert_eq!(serialized["claim"]["worker_id"], "runner_123");
+    assert_eq!(
+        serialized["secret_boundary"],
+        "payload preview excludes bearer tokens; Rust attaches authorization only when sending requests"
+    );
+
+    let combined = serialized.to_string();
     assert!(!combined.contains("qbhr_"));
     assert!(!combined.contains("Authorization"));
 }
