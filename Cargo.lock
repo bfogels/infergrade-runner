@@ -1608,6 +1608,7 @@ dependencies = [
 name = "infergrade_runner_engine"
 version = "0.1.37"
 dependencies = [
+ "serde",
  "serde_json",
  "url",
 ]
