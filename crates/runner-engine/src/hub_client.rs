@@ -25,6 +25,22 @@ pub struct HubJsonRequest {
     bearer_token: Option<String>,
 }
 
+#[derive(Clone, PartialEq)]
+pub struct HubJsonResponse {
+    pub status: u16,
+    pub body: Value,
+}
+
+impl fmt::Debug for HubJsonResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HubJsonResponse")
+            .field("status", &self.status)
+            .field("body", &"[redacted]")
+            .finish()
+    }
+}
+
 impl HubJsonRequest {
     pub fn authorization_header(&self) -> Option<String> {
         self.bearer_token
@@ -85,6 +101,44 @@ pub fn build_hub_json_request(
             .filter(|token| !token.is_empty())
             .map(str::to_string),
     })
+}
+
+pub async fn execute_hub_json_request(
+    request: &HubJsonRequest,
+) -> Result<HubJsonResponse, RunnerError> {
+    let client = reqwest::Client::new();
+    let mut builder = match request.method {
+        HubMethod::Get => client.get(&request.url),
+        HubMethod::Post => client.post(&request.url),
+    };
+    if let Some(authorization) = request.authorization_header() {
+        builder = builder.header("Authorization", authorization);
+    }
+    if let Some(body) = &request.body {
+        builder = builder.json(body);
+    }
+    let response = builder.send().await.map_err(|error| {
+        RunnerError::new(
+            "hub_request_failed",
+            format!("Could not reach Hub endpoint: {error}"),
+        )
+    })?;
+    let status = response.status().as_u16();
+    let text = response.text().await.map_err(|error| {
+        RunnerError::new(
+            "hub_request_failed",
+            format!("Could not read Hub response: {error}"),
+        )
+    })?;
+    let body = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"error": text}));
+    if !(200..300).contains(&status) {
+        let detail = response_detail(&body, request.bearer_token.as_deref());
+        return Err(RunnerError::new(
+            "hub_request_failed",
+            format!("Hub request failed with HTTP {status}: {detail}"),
+        ));
+    }
+    Ok(HubJsonResponse { status, body })
 }
 
 pub fn build_run_bundle_upload_request(
@@ -167,4 +221,33 @@ fn validate_hub_path_id<'a>(value: &'a str, field_name: &str) -> Result<&'a str,
         ));
     }
     Ok(trimmed)
+}
+
+fn response_detail(body: &Value, token: Option<&str>) -> String {
+    let raw = body
+        .get("detail")
+        .or_else(|| body.get("error"))
+        .map(|value| {
+            if let Some(message) = value.get("message").and_then(Value::as_str) {
+                message.to_string()
+            } else if let Some(text) = value.as_str() {
+                text.to_string()
+            } else {
+                value.to_string()
+            }
+        })
+        .unwrap_or_else(|| "no detail".to_string());
+    redact_response_detail(raw, token)
+        .chars()
+        .take(300)
+        .collect()
+}
+
+fn redact_response_detail(detail: String, token: Option<&str>) -> String {
+    let Some(token) = token.map(str::trim).filter(|value| !value.is_empty()) else {
+        return detail;
+    };
+    detail
+        .replace(token, "[redacted]")
+        .replace(&format!("Bearer {token}"), "Bearer [redacted]")
 }
