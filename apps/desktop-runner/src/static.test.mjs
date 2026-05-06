@@ -133,6 +133,7 @@ test("desktop first-run UI calls runner-engine through Tauri and keeps upload to
   assert.ok(html.includes("name=\"firstRunRuntimePath\""));
   assert.ok(html.includes("name=\"firstRunUploadRunId\""));
   assert.ok(html.includes("name=\"firstRunUploadWorkerId\""));
+  assert.ok(html.includes("data-first-run-handoff-status"));
   assert.ok(html.includes("Run native first benchmark"));
   assert.ok(html.includes("write local result"));
   assert.ok(html.includes("Tokens are not shown in this browser UI."));
@@ -140,6 +141,10 @@ test("desktop first-run UI calls runner-engine through Tauri and keeps upload to
   assert.ok(js.includes('invoke("run_desktop_native_first_run"'));
   assert.ok(js.includes("readFirstRunModelPath"));
   assert.ok(js.includes("readFirstRunUploadRunId"));
+  assert.ok(js.includes("firstRunHandoffFromUrl"));
+  assert.ok(js.includes("URLSearchParams(window.location.search"));
+  assert.ok(js.includes("FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY"));
+  assert.ok(js.includes("applyFirstRunHandoff();"));
   assert.ok(js.includes(".endsWith(\".gguf\")"));
   assert.ok(js.includes("native_first_run evidence"));
   assert.ok(js.includes("payload?.artifact?.path"));

@@ -9,6 +9,8 @@ import {
 
 const SIDECAR_NAME = "binaries/infergrade-sidecar";
 const API_URL_STORAGE_KEY = "infergrade.runner.apiUrl";
+const FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY = "infergrade.runner.firstRun.runId";
+const FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY = "infergrade.runner.firstRun.workerId";
 const THEME_STORAGE_KEY = "infergrade.runner.theme";
 const APP_VERSION_FALLBACK = packageInfo.version;
 const UPDATE_CHANNEL = "release";
@@ -27,6 +29,7 @@ const runtimePlanButton = document.querySelector("[data-runtime-plan]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
 const firstRunStartButton = document.querySelector("[data-first-run-start]");
 const firstRunStatus = document.querySelector("[data-first-run-status]");
+const firstRunHandoffStatus = document.querySelector("[data-first-run-handoff-status]");
 const runnerSelfTestButton = document.querySelector("[data-runner-self-test]");
 const checkUpdateButton = document.querySelector("[data-check-update]");
 const installUpdateButton = document.querySelector("[data-install-update]");
@@ -741,12 +744,74 @@ function readFirstRunRuntimePath() {
   return form.elements.firstRunRuntimePath?.value.trim() || null;
 }
 
+function firstRunHandoffFromUrl() {
+  const params = new URLSearchParams(window.location.search || "");
+  const runId =
+    params.get("first_run_run_id") ||
+    params.get("firstRunRunId") ||
+    params.get("run_id") ||
+    params.get("runId") ||
+    "";
+  const workerId = params.get("first_run_worker_id") || params.get("worker_id") || params.get("workerId") || "";
+  return {
+    runId: runId.trim(),
+    workerId: workerId.trim(),
+  };
+}
+
+function applyFirstRunHandoff() {
+  const urlHandoff = firstRunHandoffFromUrl();
+  const storedRunId = window.localStorage.getItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY) || "";
+  const storedWorkerId = window.localStorage.getItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY) || "";
+  const runId = urlHandoff.runId || storedRunId;
+  const workerId = urlHandoff.workerId || storedWorkerId;
+  if (runId && form.elements.firstRunUploadRunId && !form.elements.firstRunUploadRunId.value.trim()) {
+    form.elements.firstRunUploadRunId.value = runId;
+  }
+  if (workerId && form.elements.firstRunUploadWorkerId && !form.elements.firstRunUploadWorkerId.value.trim()) {
+    form.elements.firstRunUploadWorkerId.value = workerId;
+  }
+  if (urlHandoff.runId) {
+    window.localStorage.setItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY, urlHandoff.runId);
+    if (urlHandoff.workerId) {
+      window.localStorage.setItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY, urlHandoff.workerId);
+    }
+  }
+  if (firstRunHandoffStatus) {
+    firstRunHandoffStatus.textContent = runId
+      ? `Ready to upload this first-run result to Hub run ${runId}.`
+      : "If Hub opened Desktop with a run handoff, this fills automatically.";
+  }
+}
+
 function readFirstRunUploadRunId() {
-  return form.elements.firstRunUploadRunId?.value.trim() || null;
+  const runId = form.elements.firstRunUploadRunId?.value.trim() || "";
+  if (runId) {
+    window.localStorage.setItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY, runId);
+  }
+  return runId || null;
 }
 
 function readFirstRunUploadWorkerId() {
-  return form.elements.firstRunUploadWorkerId?.value.trim() || null;
+  const workerId = form.elements.firstRunUploadWorkerId?.value.trim() || "";
+  if (workerId) {
+    window.localStorage.setItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY, workerId);
+  }
+  return workerId || null;
+}
+
+function clearFirstRunHandoff() {
+  window.localStorage.removeItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY);
+  window.localStorage.removeItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY);
+  if (form.elements.firstRunUploadRunId) {
+    form.elements.firstRunUploadRunId.value = "";
+  }
+  if (form.elements.firstRunUploadWorkerId) {
+    form.elements.firstRunUploadWorkerId.value = "";
+  }
+  if (firstRunHandoffStatus) {
+    firstRunHandoffStatus.textContent = "Hub upload complete. Start another run from Hub when you want to add more evidence.";
+  }
 }
 
 async function startRunner({ confirmStarted = false } = {}) {
@@ -928,6 +993,11 @@ async function runNativeFirstRun() {
       : payload?.upload?.error
         ? "Native first-run evidence exists locally; Hub upload still needs a valid paired runner and run ID."
         : "Native first-run completed locally with native_first_run evidence and a Hub-compatible bundle preview.";
+    if (payload?.upload?.uploaded) {
+      clearFirstRunHandoff();
+    } else {
+      applyFirstRunHandoff();
+    }
     setStatus("First benchmark complete", "good");
     renderLocalReadinessChecklist();
     appendLog(`Native first-run result: ${JSON.stringify(payload)}`);
@@ -1093,6 +1163,7 @@ relaunchUpdateButton?.addEventListener("click", () => {
 });
 
 initTheme();
+applyFirstRunHandoff();
 renderReleaseStatus().catch((error) => appendLog(`Could not render release status: ${error.message || error}`));
 refreshRunnerCliVersion().catch((error) => appendLog(`Could not check Runner CLI version: ${error.message || error}`));
 checkRunnerStartupSelfTest().catch((error) => appendLog(`Could not run startup self-test: ${error.message || error}`));
