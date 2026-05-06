@@ -62,6 +62,9 @@ test("desktop runtime panel shows local readiness without owning model selection
   assert.ok(js.includes('invoke("llama_cpp_runtime_plan"'));
   assert.ok(rust.includes("fn llama_cpp_runtime_plan"));
   assert.ok(rust.includes("No install command was run"));
+  assert.ok(rust.includes("fn verify_runtime_download_manifest"));
+  assert.ok(rust.includes("signature_url"));
+  assert.ok(rust.includes("rollback_runtime_id"));
 });
 
 test("desktop runtime panel makes native first-run readiness primary and Docker optional", () => {
