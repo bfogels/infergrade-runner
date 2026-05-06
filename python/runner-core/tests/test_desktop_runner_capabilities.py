@@ -136,6 +136,25 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
                 allowed_args.append(command.get("args"))
         self.assertIn(["--version"], allowed_args)
 
+    def test_desktop_docs_keep_native_first_and_docker_optional(self):
+        root = self._repo_root()
+
+        def read(relative_path):
+            with open(os.path.join(root, relative_path), "r", encoding="utf-8") as handle:
+                return handle.read()
+
+        runner_readme = read("README.md")
+        desktop_readme = read("apps/desktop-runner/README.md")
+        first_user_path = read("docs/first_outside_user_path.md")
+
+        self.assertIn("Docker is not required for your first local benchmark.", runner_readme)
+        self.assertIn("Docker is not required for your first local benchmark.", desktop_readme)
+        self.assertIn("Docker is not required for your first local benchmark.", first_user_path)
+        self.assertIn("Docker remains supported for advanced sandboxed benchmarks", runner_readme)
+        self.assertIn("Docker remains supported for advanced sandboxed benchmarks", desktop_readme)
+        self.assertIn("Docker remains supported for advanced sandboxed benchmarks", first_user_path)
+        self.assertNotIn("containerized golden path", runner_readme.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

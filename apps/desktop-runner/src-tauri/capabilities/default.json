@@ -87,6 +87,11 @@
         {
           "name": "binaries/infergrade-sidecar",
           "sidecar": true,
+          "args": ["desktop-readiness"]
+        },
+        {
+          "name": "binaries/infergrade-sidecar",
+          "sidecar": true,
           "args": [
             "install-runtime",
             "--runtime",

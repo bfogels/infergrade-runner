@@ -1,6 +1,6 @@
 [package]
 name = "infergrade_desktop_runner"
-version = "0.1.35"
+version = "0.1.36"
 description = "Desktop companion app for the InferGrade Runner"
 authors = ["Brian Fogelson"]
 edition = "2021"
