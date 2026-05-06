@@ -251,12 +251,14 @@ function renderLocalReadinessChecklist() {
   if (pairingReadinessStatus) {
     if (childProcess) {
       pairingReadinessStatus.textContent = "Paired and listening for Hub runs.";
-    } else if (savedTokenAvailable || previewToken || form.elements.hubToken.value.trim()) {
-      pairingReadinessStatus.textContent = savedTokenAvailable
+    } else if ((savedTokenAvailable && runnerProfileAvailable) || previewToken || form.elements.hubToken.value.trim()) {
+      pairingReadinessStatus.textContent = savedTokenAvailable && runnerProfileAvailable
         ? "Pairing token and profile are saved. Start listening when ready."
         : "Pairing token is available. Start listening when ready.";
     } else if (runnerProfileAvailable) {
       pairingReadinessStatus.textContent = "Runner profile is saved, but the token is unavailable. Pair again or reset pairing.";
+    } else if (savedTokenAvailable) {
+      pairingReadinessStatus.textContent = "Runner token is saved, but the profile is unavailable. Pair again or reset pairing.";
     } else {
       pairingReadinessStatus.textContent = "Paste a Hub pairing code to save this machine.";
     }
@@ -407,7 +409,7 @@ async function loadTauriInvoke() {
 async function loadStoredToken() {
   const invoke = await loadTauriInvoke();
   if (invoke) {
-    return invoke("load_runner_token");
+    return null;
   }
   return previewToken;
 }
@@ -440,9 +442,15 @@ async function updateTokenState() {
       savedTokenAvailable = hasToken;
       runnerProfileAvailable = status?.profile?.status === "present";
       const profile = status?.profile?.profile || {};
-      tokenState.textContent = runnerProfileAvailable
-        ? `Runner profile saved${profile.label ? ` for ${profile.label}` : ""}.`
-        : "No runner profile saved. Paste a Hub pairing code before listening for Hub runs.";
+      if (runnerProfileAvailable && hasToken) {
+        tokenState.textContent = `Runner profile and OS token saved${profile.label ? ` for ${profile.label}` : ""}.`;
+      } else if (runnerProfileAvailable) {
+        tokenState.textContent = `Runner profile saved${profile.label ? ` for ${profile.label}` : ""}, but the OS token is unavailable.`;
+      } else if (hasToken) {
+        tokenState.textContent = "Runner token is saved in the OS credential store, but no runner profile is saved.";
+      } else {
+        tokenState.textContent = "No runner profile saved. Paste a Hub pairing code before listening for Hub runs.";
+      }
       renderLocalReadinessChecklist();
       return;
     }
@@ -543,9 +551,7 @@ async function runnerEnvironment() {
   if (typedToken) {
     return { INFERGRADE_HUB_TOKEN: typedToken };
   }
-
-  const savedToken = await loadStoredToken();
-  return savedToken ? { INFERGRADE_HUB_TOKEN: savedToken } : {};
+  return {};
 }
 
 function readApiUrl() {

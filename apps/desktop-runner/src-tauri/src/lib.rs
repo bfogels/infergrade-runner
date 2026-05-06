@@ -379,12 +379,11 @@ fn save_runner_token(token: String) -> Result<(), String> {
     save_runner_token_value(&token)
 }
 
-#[tauri::command]
-fn load_runner_token() -> Result<Option<String>, String> {
+fn runner_token_available() -> Result<bool, String> {
     match runner_token_entry()?.get_password() {
-        Ok(token) => Ok(Some(token)),
-        Err(KeyringError::NoEntry) => Ok(None),
-        Err(error) if is_user_canceled(&error) => Ok(None),
+        Ok(token) => Ok(!token.trim().is_empty()),
+        Err(KeyringError::NoEntry) => Ok(false),
+        Err(error) if is_user_canceled(&error) => Ok(false),
         Err(error) => Err(format!("could not load runner token: {error}")),
     }
 }
@@ -402,7 +401,19 @@ fn clear_runner_token() -> Result<(), String> {
 fn runner_pairing_status() -> Result<Value, String> {
     let profile_path = runner_profile_path()?;
     let profile = load_runner_profile()?;
-    let token_available = load_runner_token()?.is_some();
+    let token_available = runner_token_available()?;
+    Ok(runner_pairing_status_payload(
+        profile,
+        token_available,
+        profile_path,
+    ))
+}
+
+fn runner_pairing_status_payload(
+    profile: Option<Value>,
+    token_available: bool,
+    profile_path: PathBuf,
+) -> Value {
     let profile_status = match profile {
         Some(profile) => json!({
             "status": "present",
@@ -413,15 +424,16 @@ fn runner_pairing_status() -> Result<Value, String> {
             "profile": Value::Null,
         }),
     };
-    Ok(json!({
-        "paired": profile_status["status"] == "present" || token_available,
+    let profile_available = profile_status["status"] == "present";
+    json!({
+        "paired": profile_available && token_available,
         "profile_path": profile_path.display().to_string(),
         "profile": profile_status,
         "token": {
             "status": if token_available { "present" } else { "missing" },
             "stored_in": "os_credential_store",
         },
-    }))
+    })
 }
 
 #[tauri::command]
@@ -544,7 +556,6 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             save_runner_token,
-            load_runner_token,
             clear_runner_token,
             runner_pairing_status,
             reset_runner_pairing,
@@ -693,5 +704,29 @@ mod tests {
         assert_eq!(sanitized["runner_id"], "runner_123");
         assert_eq!(sanitized["has_access_token"], true);
         assert_eq!(sanitized.get("access_token"), None);
+    }
+
+    #[test]
+    fn pairing_status_requires_profile_and_os_token_to_be_ready() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "runner_id": "runner_123",
+            "label": "Test runner",
+        });
+        let path = PathBuf::from("/tmp/infergrade/runner_profile.json");
+
+        let stale_profile =
+            runner_pairing_status_payload(Some(profile.clone()), false, path.clone());
+        assert_eq!(stale_profile["paired"], false);
+        assert_eq!(stale_profile["profile"]["status"], "present");
+        assert_eq!(stale_profile["token"]["status"], "missing");
+
+        let token_without_profile = runner_pairing_status_payload(None, true, path.clone());
+        assert_eq!(token_without_profile["paired"], false);
+        assert_eq!(token_without_profile["profile"]["status"], "missing");
+        assert_eq!(token_without_profile["token"]["status"], "present");
+
+        let ready = runner_pairing_status_payload(Some(profile), true, path);
+        assert_eq!(ready["paired"], true);
     }
 }
