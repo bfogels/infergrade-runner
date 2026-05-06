@@ -2,8 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAURI_DIR="$ROOT_DIR/apps/desktop-runner/src-tauri"
-DMG_DIR="$TAURI_DIR/target/release/bundle/dmg"
+DMG_DIR="$ROOT_DIR/target/release/bundle/dmg"
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "macOS DMG notarization must run on macOS." >&2
