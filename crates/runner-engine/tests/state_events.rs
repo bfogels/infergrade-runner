@@ -26,6 +26,28 @@ fn typed_runner_profile_sanitizes_token_before_ui_use() {
 }
 
 #[test]
+fn typed_runner_profile_does_not_serialize_or_debug_token() {
+    let profile = RunnerProfile {
+        api_url: "https://api.infergrade.com/".to_string(),
+        access_token: Some("qbhr_secret".to_string()),
+        runner_id: "runner_123".to_string(),
+        label: Some("Test Runner".to_string()),
+        preferred_execution_mode: Some("local_native".to_string()),
+        paired_at: Some("2026-05-06T00:00:00Z".to_string()),
+        expires_at: None,
+        user: None,
+    };
+
+    let serialized = serde_json::to_string(&profile).unwrap();
+    let debug = format!("{profile:?}");
+
+    assert!(!serialized.contains("access_token"));
+    assert!(!serialized.contains("qbhr_secret"));
+    assert!(debug.contains("has_access_token: true"));
+    assert!(!debug.contains("qbhr_secret"));
+}
+
+#[test]
 fn token_and_profile_store_traits_define_frontend_storage_boundary() {
     let tokens = MemoryTokenStore::default();
     let profiles = MemoryProfileStore::default();
