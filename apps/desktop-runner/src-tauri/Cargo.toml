@@ -3,6 +3,7 @@ name = "infergrade_desktop_runner"
 version = "0.1.37"
 description = "Desktop companion app for the InferGrade Runner"
 authors = ["Brian Fogelson"]
+license = "Apache-2.0"
 edition = "2021"
 
 [lib]

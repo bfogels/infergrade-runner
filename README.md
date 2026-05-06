@@ -13,6 +13,18 @@ It is responsible for:
 - capturing deployment telemetry and capability evidence
 - writing reproducible run bundles that can be uploaded to InferGrade Hub
 
+## Project Status
+
+InferGrade Runner is moving toward a public open-source release. Treat the current code as preview software:
+
+- Complete enough today: Runner-owned schemas, benchmark catalog metadata, local/native and container-aware execution paths, result bundle generation, support export, and signed macOS desktop release wiring.
+- Actively being hardened: the first-run desktop experience, release packaging, hosted Hub handoff, and broader clean-machine install smoke tests.
+- Planned or limited today: Windows and Linux public desktop installers, fully managed cloud worker provisioning, and heavier reference/gold benchmark lanes that need stronger dataset, sandbox, or cost controls before becoming default local paths.
+
+Security-sensitive release credentials, Apple signing materials, Hub tokens, local runner profiles, and `.env` files should never be committed. See [SECURITY.md](SECURITY.md) before reporting vulnerabilities or sharing security-sensitive logs.
+
+Before the repository is made public, maintainers should run the [Public Release Checklist](docs/public_release_checklist.md), including the third-party license audit.
+
 ## First Path
 
 The clearest first path is:
@@ -242,6 +254,10 @@ Run the runner test suite:
 ./scripts/test_all.sh
 ```
 
+## License
+
+InferGrade Runner is licensed under the [Apache License 2.0](LICENSE).
+
 ## Key Docs
 
 - [Decision Workflow](docs/decision_workflow.md)
@@ -254,6 +270,8 @@ Run the runner test suite:
 - [Input/Output Spec](docs/input_output_spec.md)
 - [Schema Draft](docs/schema_draft.md)
 - [Capability Benchmarks](docs/capability_benchmarks.md)
+- [Public Release Checklist](docs/public_release_checklist.md)
+- [Third-Party License Audit](docs/third_party_license_audit.md)
 
 ## Relationship To InferGrade Hub
 
