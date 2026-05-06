@@ -38,11 +38,6 @@
         {
           "name": "binaries/infergrade-sidecar",
           "sidecar": true,
-          "args": ["install-runtime", "--runtime", "llama.cpp"]
-        },
-        {
-          "name": "binaries/infergrade-sidecar",
-          "sidecar": true,
           "args": ["--version"]
         },
         {
@@ -54,19 +49,6 @@
           "name": "binaries/infergrade-sidecar",
           "sidecar": true,
           "args": ["desktop-readiness"]
-        },
-        {
-          "name": "binaries/infergrade-sidecar",
-          "sidecar": true,
-          "args": [
-            "install-runtime",
-            "--runtime",
-            "llama.cpp",
-            "--runtime-id",
-            {
-              "validator": "[A-Za-z0-9._-]{1,120}"
-            }
-          ]
         },
         {
           "name": "binaries/infergrade-sidecar",

@@ -545,6 +545,15 @@ function runtimeCommandArgs(extraArgs = []) {
   return [...args, ...extraArgs];
 }
 
+function runtimePlanSummary(plan = {}) {
+  const recommended = plan.recommended_runtime || {};
+  const selected = plan.selected_runtime || {};
+  const selectedText = selected.status === "selected" ? "Selected runtime is recorded." : "No managed runtime is selected yet.";
+  const runtimeText = plan.message || "No install command was run. Review the runtime plan before selecting a runtime.";
+  const lane = recommended.platform || recommended.accelerator || "this machine";
+  return `${runtimeText} Recommended lane: ${lane}. ${selectedText}`;
+}
+
 async function startRunner({ confirmStarted = false } = {}) {
   const apiUrl = readApiUrl();
   window.localStorage.setItem(API_URL_STORAGE_KEY, apiUrl);
@@ -783,10 +792,22 @@ themeChoiceButtons.forEach((button) => {
 runtimePlanButton?.addEventListener("click", () => {
   llamaRuntimeReadiness = "Checking the llama.cpp runtime plan...";
   renderLocalReadinessChecklist();
-  executeSidecar(runtimeCommandArgs())
-    .then(() => {
-      llamaRuntimeReadiness = "Runtime plan checked. Review logs before explicitly installing or selecting a runtime.";
+  loadTauriInvoke()
+    .then((invoke) => {
+      if (!invoke) {
+        appendLog("Open the desktop app to inspect the native llama.cpp runtime plan.");
+        llamaRuntimeReadiness = "Runtime plan is available inside the desktop app.";
+        return null;
+      }
+      return invoke("llama_cpp_runtime_plan");
+    })
+    .then((plan) => {
+      if (!plan) {
+        return;
+      }
+      llamaRuntimeReadiness = runtimePlanSummary(plan);
       renderLocalReadinessChecklist();
+      appendLog(`llama.cpp runtime plan: ${JSON.stringify(plan)}`);
     })
     .catch((error) => {
       llamaRuntimeReadiness = "Runtime plan unavailable. See logs for the technical detail.";
