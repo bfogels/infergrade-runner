@@ -13,6 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+infergrade_runner_engine = { path = "../../../crates/runner-engine" }
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "linux-native-sync-persistent"] }
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1.0.149"
