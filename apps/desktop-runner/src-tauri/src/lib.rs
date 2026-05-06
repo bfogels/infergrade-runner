@@ -1,10 +1,11 @@
 use infergrade_runner_engine::{
-    build_listener_start_plan, claim_run_job_payload, desktop_environment, hostname,
+    build_listener_start_plan, build_pairing_redeem_request, claim_run_job_payload,
+    complete_pairing_response, desktop_environment, hostname,
     llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, normalize_api_url,
     pairing_error_detail, preferred_execution_mode, profile_string, redact_listener_text,
     redact_worker_response, runner_heartbeat_payload, runner_id_from_profile,
     runner_register_payload, sanitized_runner_profile, selected_llama_cpp_runtime_path,
-    ui_pairing_response, worker_request_url,
+    worker_request_url, PairingInput, ProfileStore, RunnerError, RunnerProfile, TokenStore,
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
@@ -24,6 +25,56 @@ const KEYRING_USER: &str = "hub-runner-token";
 #[derive(Default)]
 struct ListenerProcess {
     child: Mutex<Option<CommandChild>>,
+}
+
+struct DesktopProfileStore;
+
+impl ProfileStore for DesktopProfileStore {
+    fn save_profile(&self, profile: &RunnerProfile) -> Result<(), RunnerError> {
+        let value = serde_json::to_value(profile).map_err(|error| {
+            RunnerError::new(
+                "profile_serialize_failed",
+                format!("could not serialize Runner profile: {error}"),
+            )
+        })?;
+        save_runner_profile(&value)
+            .map(|_| ())
+            .map_err(|error| RunnerError::new("profile_save_failed", error))
+    }
+
+    fn load_profile(&self) -> Result<Option<RunnerProfile>, RunnerError> {
+        load_runner_profile()?
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| {
+                RunnerError::new(
+                    "profile_parse_failed",
+                    format!("could not parse Runner profile: {error}"),
+                )
+            })
+    }
+
+    fn clear_profile(&self) -> Result<(), RunnerError> {
+        clear_runner_profile()
+            .map(|_| ())
+            .map_err(|error| RunnerError::new("profile_clear_failed", error))
+    }
+}
+
+struct DesktopTokenStore;
+
+impl TokenStore for DesktopTokenStore {
+    fn save_runner_token(&self, token: &str) -> Result<(), RunnerError> {
+        save_runner_token_value(token).map_err(|error| RunnerError::new("token_save_failed", error))
+    }
+
+    fn load_runner_token(&self) -> Result<Option<String>, RunnerError> {
+        load_runner_token_value().map_err(|error| RunnerError::new("token_load_failed", error))
+    }
+
+    fn clear_runner_token(&self) -> Result<(), RunnerError> {
+        clear_runner_token().map_err(|error| RunnerError::new("token_clear_failed", error))
+    }
 }
 
 fn runner_token_entry() -> Result<Entry, String> {
@@ -477,18 +528,13 @@ async fn redeem_runner_pairing(
     label: Option<String>,
 ) -> Result<Value, String> {
     let api_url = normalize_api_url(&api_url)?;
-    let pair_code = pair_code.trim();
-    if pair_code.is_empty() {
-        return Err("Paste the one-time pairing code from the Hub first.".to_string());
-    }
-    let label = label.unwrap_or_default().trim().to_string();
-    let payload = json!({
-        "pair_code": pair_code,
-        "label": if label.is_empty() { Value::Null } else { Value::String(label) },
-        "hostname": hostname(),
-        "preferred_execution_mode": preferred_execution_mode(),
-        "environment": desktop_environment(),
-    });
+    let payload = build_pairing_redeem_request(
+        PairingInput { pair_code, label },
+        hostname(),
+        preferred_execution_mode(),
+        desktop_environment(),
+    )
+    .map_err(|error| error.message().to_string())?;
     let url = format!(
         "{}/v1/runner-pairings/redeem",
         api_url.trim_end_matches('/')
@@ -519,17 +565,15 @@ async fn redeem_runner_pairing(
         ));
     }
     let body = parsed.ok_or_else(|| "Hub pairing response was not valid JSON.".to_string())?;
-    let profile = body
-        .get("runner_profile")
-        .cloned()
-        .ok_or_else(|| "Hub pairing response did not include a runner profile.".to_string())?;
-    let access_token = profile
-        .get("access_token")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "Hub pairing response did not include a runner token.".to_string())?;
-    let profile_path = save_runner_profile(&profile)?;
-    save_runner_token_value(access_token)?;
-    Ok(ui_pairing_response(body, &profile, profile_path))
+    let profile_path = runner_profile_path()?;
+    complete_pairing_response(
+        body,
+        &DesktopProfileStore,
+        &DesktopTokenStore,
+        profile_path.display().to_string(),
+    )
+    .map(|completion| completion.ui_response)
+    .map_err(|error| error.message().to_string())
 }
 
 pub fn run() {
@@ -559,8 +603,15 @@ pub fn run() {
 mod tests {
     use super::*;
     use infergrade_runner_engine::{
-        verify_runtime_download_manifest, worker_request_preview, LLAMA_CPP_RUNTIME_ID,
+        ui_pairing_response, verify_runtime_download_manifest, worker_request_preview,
+        LLAMA_CPP_RUNTIME_ID,
     };
+    use std::sync::{Mutex as TestMutex, OnceLock};
+
+    fn env_test_lock() -> &'static TestMutex<()> {
+        static LOCK: OnceLock<TestMutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| TestMutex::new(()))
+    }
 
     #[test]
     fn normalizes_hosted_and_local_api_urls() {
@@ -668,6 +719,7 @@ mod tests {
 
     #[test]
     fn reset_pairing_clears_runner_profile_without_requiring_existing_file() {
+        let _guard = env_test_lock().lock().expect("env test lock");
         let temp = env::temp_dir().join(format!("infergrade-reset-test-{}", std::process::id()));
         env::set_var("INFERGRADE_CONFIG_DIR", &temp);
         let first = clear_runner_profile().expect("missing profile is ok");
@@ -720,6 +772,37 @@ mod tests {
         assert_eq!(response["other"], "unchanged");
         assert!(!response.to_string().contains("qbhr_secret"));
         assert_eq!(response["runner_profile"].get("access_token"), None);
+    }
+
+    #[test]
+    fn desktop_profile_store_does_not_write_token_to_runner_profile_file() {
+        let _guard = env_test_lock().lock().expect("env test lock");
+        let temp = env::temp_dir().join(format!(
+            "infergrade-profile-store-test-{}",
+            std::process::id()
+        ));
+        env::set_var("INFERGRADE_CONFIG_DIR", &temp);
+        let profile = RunnerProfile {
+            api_url: "https://api.infergrade.com/".to_string(),
+            access_token: Some("qbhr_secret".to_string()),
+            runner_id: "runner_123".to_string(),
+            label: Some("Test runner".to_string()),
+            preferred_execution_mode: Some("local_native".to_string()),
+            paired_at: None,
+            expires_at: None,
+            user: None,
+        };
+
+        DesktopProfileStore
+            .save_profile(&profile)
+            .expect("profile saved");
+        let path = temp.join("runner_profile.json");
+        let text = fs::read_to_string(&path).expect("profile text");
+        assert!(!text.contains("qbhr_secret"));
+        assert!(!text.contains("access_token"));
+
+        env::remove_var("INFERGRADE_CONFIG_DIR");
+        let _ = fs::remove_dir_all(temp);
     }
 
     #[test]
