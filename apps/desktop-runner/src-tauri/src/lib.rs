@@ -6,9 +6,10 @@ use infergrade_runner_engine::{
     redact_listener_text, redact_worker_response, reset_pairing_state,
     run_native_first_run_with_events as engine_run_native_first_run_with_events,
     runner_id_from_profile, selected_llama_cpp_runtime_path, worker_request_url,
-    write_native_first_run_artifact, HubMethod, LlamaCppRuntime, NativeFirstRunInput, PairingInput,
-    ProfileStore, RunnerError, RunnerEvent, RunnerProfile, RunnerProtocolPingInput,
-    RunnerProtocolPreviewInput, TokenStore,
+    write_native_first_run_artifact, write_native_first_run_bundle_payload, HubMethod,
+    LlamaCppRuntime, NativeFirstRunBundleOptions, NativeFirstRunInput, PairingInput, ProfileStore,
+    RunnerError, RunnerEvent, RunnerProfile, RunnerProtocolPingInput, RunnerProtocolPreviewInput,
+    TokenStore,
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
@@ -539,6 +540,13 @@ fn desktop_native_first_run_response(
 ) -> Result<Value, String> {
     let result = engine_run_native_first_run_with_events(input, runtime, &mut emit)
         .map_err(|error| error.message().to_string())?;
+    let bundle_payload = infergrade_runner_engine::native_first_run_bundle_payload(
+        &result,
+        NativeFirstRunBundleOptions {
+            submission_channel: "infergrade_desktop_runner".to_string(),
+            ..NativeFirstRunBundleOptions::default()
+        },
+    );
     let mut payload = json!({
         "status": "completed",
         "uploaded": false,
@@ -548,6 +556,11 @@ fn desktop_native_first_run_response(
         .map_err(|error| error.message().to_string())?;
     payload["artifact"] = serde_json::to_value(artifact).map_err(|error| {
         format!("Could not serialize native first-run artifact metadata: {error}")
+    })?;
+    let bundle_artifact = write_native_first_run_bundle_payload(artifact_dir, &bundle_payload)
+        .map_err(|error| error.message().to_string())?;
+    payload["bundle_artifact"] = serde_json::to_value(bundle_artifact).map_err(|error| {
+        format!("Could not serialize native first-run bundle artifact metadata: {error}")
     })?;
     Ok(payload)
 }
@@ -795,6 +808,28 @@ mod tests {
         assert_eq!(artifact_json["result"]["evidence_kind"], "native_first_run");
         assert_eq!(artifact_json["result"]["uploaded"], false);
         assert_eq!(artifact_json.get("artifact"), None);
+        assert_eq!(response["bundle_artifact"]["uploaded"], false);
+        assert_eq!(
+            response["bundle_artifact"]["format"],
+            "infergrade.bundle_upload.v1"
+        );
+        let bundle_path = response["bundle_artifact"]["path"]
+            .as_str()
+            .expect("bundle artifact path");
+        let bundle_text = fs::read_to_string(bundle_path).expect("bundle text");
+        let bundle_json: Value = serde_json::from_str(&bundle_text).expect("bundle JSON");
+        assert_eq!(
+            bundle_json["results"][0]["provenance"]["source_bundle_origin"],
+            "infergrade_native_first_run"
+        );
+        assert_eq!(
+            bundle_json["results"][0]["verification"]["verification_level"],
+            "experimental"
+        );
+        assert_eq!(
+            bundle_json["results"][0]["derived"]["comparison_grade"],
+            "informational_only"
+        );
         assert!(events.iter().any(|event| matches!(
             event,
             RunnerEvent::BenchmarkStarted { benchmark_id } if benchmark_id == "native_first_run"
