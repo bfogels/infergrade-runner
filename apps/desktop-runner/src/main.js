@@ -764,7 +764,7 @@ function applyFirstRunHandoff() {
   const storedRunId = window.localStorage.getItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY) || "";
   const storedWorkerId = window.localStorage.getItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY) || "";
   const runId = urlHandoff.runId || storedRunId;
-  const workerId = urlHandoff.workerId || storedWorkerId;
+  const workerId = urlHandoff.runId ? urlHandoff.workerId : storedWorkerId;
   if (runId && form.elements.firstRunUploadRunId && !form.elements.firstRunUploadRunId.value.trim()) {
     form.elements.firstRunUploadRunId.value = runId;
   }
@@ -775,6 +775,11 @@ function applyFirstRunHandoff() {
     window.localStorage.setItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY, urlHandoff.runId);
     if (urlHandoff.workerId) {
       window.localStorage.setItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY, urlHandoff.workerId);
+    } else {
+      window.localStorage.removeItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY);
+      if (form.elements.firstRunUploadWorkerId) {
+        form.elements.firstRunUploadWorkerId.value = "";
+      }
     }
   }
   if (firstRunHandoffStatus) {
