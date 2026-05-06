@@ -86,3 +86,84 @@ pub fn build_hub_json_request(
             .map(str::to_string),
     })
 }
+
+pub fn build_run_bundle_upload_request(
+    api_url: &str,
+    run_id: &str,
+    bundle_payload: Value,
+    bearer_token: Option<&str>,
+) -> Result<HubJsonRequest, RunnerError> {
+    validate_hub_path_id(run_id, "run_id")?;
+    validate_bundle_upload_payload(&bundle_payload)?;
+    build_hub_json_request(
+        HubMethod::Post,
+        api_url,
+        &format!("/v1/runs/{run_id}/bundle"),
+        Some(bundle_payload),
+        bearer_token,
+    )
+}
+
+pub fn build_run_completion_request(
+    api_url: &str,
+    run_id: &str,
+    worker_id: &str,
+    bundle_id: &str,
+    upload_response: Option<Value>,
+    bearer_token: Option<&str>,
+) -> Result<HubJsonRequest, RunnerError> {
+    validate_hub_path_id(run_id, "run_id")?;
+    validate_hub_path_id(worker_id, "worker_id")?;
+    validate_hub_path_id(bundle_id, "bundle_id")?;
+    build_hub_json_request(
+        HubMethod::Post,
+        api_url,
+        &format!("/v1/runs/{run_id}/complete"),
+        Some(json!({
+            "worker_id": worker_id,
+            "bundle_id": bundle_id,
+            "upload": upload_response,
+        })),
+        bearer_token,
+    )
+}
+
+fn validate_bundle_upload_payload(payload: &Value) -> Result<(), RunnerError> {
+    let Some(object) = payload.as_object() else {
+        return Err(RunnerError::new(
+            "hub_bundle_payload_invalid",
+            "Bundle upload payload must be a JSON object.",
+        ));
+    };
+    if !object.get("manifest").is_some_and(Value::is_object) {
+        return Err(RunnerError::new(
+            "hub_bundle_payload_invalid",
+            "Bundle upload payload is missing a manifest object.",
+        ));
+    }
+    if !object.get("results").is_some_and(Value::is_array) {
+        return Err(RunnerError::new(
+            "hub_bundle_payload_invalid",
+            "Bundle upload payload is missing a results array.",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_hub_path_id(value: &str, field_name: &str) -> Result<(), RunnerError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > 160
+        || !trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.')
+        || trimmed == "."
+        || trimmed == ".."
+    {
+        return Err(RunnerError::new(
+            "hub_path_id_invalid",
+            format!("{field_name} must be a safe Hub identifier."),
+        ));
+    }
+    Ok(())
+}
