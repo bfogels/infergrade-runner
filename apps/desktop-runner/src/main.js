@@ -1,5 +1,11 @@
 import "./styles.css";
 import packageInfo from "../package.json";
+import {
+  normalizeDesktopApiUrl,
+  userSafeStartFailure,
+  userSafeTokenFailure,
+  userSafeUpdateFailure,
+} from "./desktopHelpers.js";
 
 const SIDECAR_NAME = "binaries/infergrade-sidecar";
 const API_URL_STORAGE_KEY = "infergrade.runner.apiUrl";
@@ -14,10 +20,12 @@ const stopButton = document.querySelector("[data-stop-runner]");
 const pairButton = document.querySelector("[data-pair-runner]");
 const saveTokenButton = document.querySelector("[data-save-token]");
 const clearTokenButton = document.querySelector("[data-clear-token]");
+const resetPairingButton = document.querySelector("[data-reset-pairing]");
 const clearLogsButton = document.querySelector("[data-clear-logs]");
 const themeChoiceButtons = [...document.querySelectorAll("[data-theme-choice]")];
 const runtimePlanButton = document.querySelector("[data-runtime-plan]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
+const runnerSelfTestButton = document.querySelector("[data-runner-self-test]");
 const checkUpdateButton = document.querySelector("[data-check-update]");
 const installUpdateButton = document.querySelector("[data-install-update]");
 const relaunchUpdateButton = document.querySelector("[data-relaunch-update]");
@@ -29,6 +37,10 @@ const updateAvailable = document.querySelector("[data-update-available]");
 const updateDetail = document.querySelector("[data-update-detail]");
 const runnerCliVersion = document.querySelector("[data-runner-cli-version]");
 const runtimeRunnerVersion = document.querySelector("[data-runtime-runner-version]");
+const hubConnectionStatus = document.querySelector("[data-hub-connection-status]");
+const pairingReadinessStatus = document.querySelector("[data-pairing-readiness-status]");
+const runtimeLlamaStatus = document.querySelector("[data-runtime-llama-status]");
+const modelPathStatus = document.querySelector("[data-model-path-status]");
 const statusText = document.querySelector("[data-runner-status]");
 const statusDot = document.querySelector("[data-status-dot]");
 const pairState = document.querySelector("[data-pair-state]");
@@ -40,6 +52,9 @@ let logLines = [];
 let tauriInvoke = null;
 let previewToken = "";
 let pendingUpdate = null;
+let lastNormalizedApiUrl = "https://api.infergrade.com/";
+let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp jobs.";
+let savedTokenAvailable = false;
 
 function systemTheme() {
   if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
@@ -172,7 +187,7 @@ async function checkForAppUpdate() {
     }
     appendLog(`Desktop Runner update ${update.version} is available.`);
   } catch (error) {
-    setUpdateStatus("Could not check updates.");
+    setUpdateStatus(userSafeUpdateFailure(error.message || error));
     appendLog(`Update check failed: ${error.message || error}`);
   } finally {
     checkUpdateButton.disabled = false;
@@ -221,6 +236,27 @@ function renderRunnerCliVersion(label) {
   }
 }
 
+function renderLocalReadinessChecklist() {
+  if (hubConnectionStatus) {
+    hubConnectionStatus.textContent = `Hub API: ${lastNormalizedApiUrl}`;
+  }
+  if (pairingReadinessStatus) {
+    if (childProcess) {
+      pairingReadinessStatus.textContent = "Paired and listening for Hub runs.";
+    } else if (savedTokenAvailable || previewToken || form.elements.hubToken.value.trim()) {
+      pairingReadinessStatus.textContent = "Pairing token is available. Start listening when ready.";
+    } else {
+      pairingReadinessStatus.textContent = "Paste a Hub pairing code to save this machine.";
+    }
+  }
+  if (runtimeLlamaStatus) {
+    runtimeLlamaStatus.textContent = llamaRuntimeReadiness;
+  }
+  if (modelPathStatus) {
+    modelPathStatus.textContent = "Chosen in Hub run plans; Desktop validates runtime and listener readiness.";
+  }
+}
+
 async function refreshRunnerCliVersion() {
   const Command = await loadTauriShell();
   if (!Command) {
@@ -240,6 +276,35 @@ async function refreshRunnerCliVersion() {
   }
 }
 
+async function checkRunnerStartupSelfTest() {
+  if (runtimeRunnerVersion) {
+    runtimeRunnerVersion.textContent = "Checking Runner startup self-test...";
+  }
+  const Command = await loadTauriShell();
+  if (!Command) {
+    if (runtimeRunnerVersion) {
+      runtimeRunnerVersion.textContent = "Startup self-test runs inside the desktop app.";
+    }
+    return;
+  }
+  try {
+    const output = await Command.sidecar(SIDECAR_NAME, ["desktop-self-test"]).execute();
+    if (output.code !== 0) {
+      throw new Error(output.stderr || output.stdout || `self-test exited with code ${output.code}`);
+    }
+    const detail = output.stdout?.trim() || "Runner core is available.";
+    if (runtimeRunnerVersion) {
+      runtimeRunnerVersion.textContent = "Runner core available.";
+    }
+    appendLog(`Startup self-test passed: ${detail}`);
+  } catch (error) {
+    if (runtimeRunnerVersion) {
+      runtimeRunnerVersion.textContent = "Runner core unavailable. Run startup self-test for details.";
+    }
+    appendLog(`Startup self-test failed: ${error.message || error}`);
+  }
+}
+
 function chooseThemeMode(mode) {
   const themeMode = mode === "dark" || mode === "light" || mode === "system" ? mode : "system";
   window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
@@ -254,10 +319,12 @@ async function restoreFormState() {
   const savedApiUrl = window.localStorage.getItem(API_URL_STORAGE_KEY);
 
   if (savedApiUrl) {
-    form.elements.apiUrl.value = savedApiUrl;
+    form.elements.apiUrl.value = normalizeDesktopApiUrl(savedApiUrl);
+    lastNormalizedApiUrl = form.elements.apiUrl.value;
   }
 
   await updateTokenState();
+  renderLocalReadinessChecklist();
 }
 
 async function loadTauriInvoke() {
@@ -298,11 +365,23 @@ async function clearStoredToken() {
 }
 
 async function updateTokenState() {
-  const hasToken = Boolean(await loadStoredToken());
+  let hasToken = false;
+  try {
+    hasToken = Boolean(await loadStoredToken());
+  } catch (error) {
+    savedTokenAvailable = false;
+    tokenState.textContent = userSafeTokenFailure(error.message || error);
+    appendLog(`Could not read saved token: ${error.message || error}`);
+    return;
+  }
+  savedTokenAvailable = hasToken;
   if (isTauriRuntime()) {
     tokenState.textContent = hasToken
       ? "Runner token saved in the OS credential store."
       : "No token saved. Paste a paired runner token before listening for Hub runs.";
+    if (hasToken && pairingReadinessStatus) {
+      pairingReadinessStatus.textContent = "Pairing token is saved. Start listening when ready.";
+    }
     return;
   }
 
@@ -389,17 +468,11 @@ async function runnerEnvironment() {
 }
 
 function readApiUrl() {
-  const rawApiUrl = form.elements.apiUrl.value.trim() || "http://127.0.0.1:8000";
-  const parsed = new URL(rawApiUrl);
-  const host = parsed.hostname.toLowerCase();
-  const ipv4Octet = "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
-  const isLocalHttp =
-    parsed.protocol === "http:" &&
-    (host === "localhost" || host === "::1" || host === "[::1]" || new RegExp(`^127(?:\\.${ipv4Octet}){3}$`).test(host));
-  if (parsed.protocol !== "https:" && !isLocalHttp) {
-    throw new Error("Hub URL must use HTTPS, except local development URLs on localhost or 127.x.x.x.");
-  }
-  return parsed.href;
+  const normalized = normalizeDesktopApiUrl(form.elements.apiUrl.value);
+  form.elements.apiUrl.value = normalized;
+  lastNormalizedApiUrl = normalized;
+  renderLocalReadinessChecklist();
+  return normalized;
 }
 
 function runtimeCommandArgs(extraArgs = []) {
@@ -411,7 +484,7 @@ function runtimeCommandArgs(extraArgs = []) {
   return [...args, ...extraArgs];
 }
 
-async function startRunner() {
+async function startRunner({ confirmStarted = false } = {}) {
   const apiUrl = readApiUrl();
   window.localStorage.setItem(API_URL_STORAGE_KEY, apiUrl);
 
@@ -435,14 +508,37 @@ async function startRunner() {
     env: await runnerEnvironment()
   });
 
-  command.stdout.on("data", (line) => appendLog(line));
-  command.stderr.on("data", (line) => appendLog(line));
+  const startupOutput = [];
+  const rememberStartupLine = (line) => {
+    startupOutput.push(String(line || "").trim());
+    if (startupOutput.length > 8) {
+      startupOutput.shift();
+    }
+  };
+  let startupFailure = null;
+  let markStartupFailure = null;
+  const startupFailurePromise = new Promise((resolve) => {
+    markStartupFailure = resolve;
+  });
+
+  command.stdout.on("data", (line) => {
+    rememberStartupLine(line);
+    appendLog(line);
+  });
+  command.stderr.on("data", (line) => {
+    rememberStartupLine(line);
+    appendLog(line);
+  });
   command.on("close", (event) => {
     appendLog(`Runner exited with code ${event.code ?? "unknown"}.`);
     childProcess = null;
     startButton.disabled = false;
     stopButton.disabled = true;
     setStatus("Stopped", event.code === 0 ? "idle" : "error");
+    renderLocalReadinessChecklist();
+    const detail = startupOutput.filter(Boolean).join("\n");
+    startupFailure = new Error(detail || `Runner exited with code ${event.code ?? "unknown"} before listening.`);
+    markStartupFailure(startupFailure);
   });
   command.on("error", (error) => {
     appendLog(`Runner process error: ${error}`);
@@ -450,12 +546,25 @@ async function startRunner() {
     startButton.disabled = false;
     stopButton.disabled = true;
     setStatus("Failed", "error");
+    renderLocalReadinessChecklist();
+    startupFailure = new Error(String(error || "Runner process error."));
+    markStartupFailure(startupFailure);
   });
 
   childProcess = await command.spawn();
   stopButton.disabled = false;
   setStatus("Listening", "good");
+  renderLocalReadinessChecklist();
   appendLog(`Started infergrade listener for ${apiUrl}.`);
+  if (confirmStarted) {
+    const earlyFailure = await Promise.race([
+      startupFailurePromise,
+      new Promise((resolve) => setTimeout(() => resolve(null), 900)),
+    ]);
+    if (earlyFailure || startupFailure) {
+      throw earlyFailure || startupFailure;
+    }
+  }
 }
 
 async function pairRunner() {
@@ -494,14 +603,53 @@ async function pairRunner() {
     form.elements.pairCode.value = "";
     pairState.textContent = "Paired. Starting the local Runner listener...";
     setStatus("Paired", "good");
-    await startRunner();
-    pairState.textContent = "Paired and listening for Hub runs.";
+    if (pairingReadinessStatus) {
+      pairingReadinessStatus.textContent = "Pairing saved. Starting the listener...";
+    }
+    try {
+      await startRunner({ confirmStarted: true });
+      pairState.textContent = "Paired and listening for Hub runs.";
+    } catch (startError) {
+      const safeMessage = userSafeStartFailure(startError.message || startError);
+      pairState.textContent = `Paired. Runner could not start automatically. ${safeMessage}`;
+      setStatus("Paired; start blocked", "warning");
+      appendLog(`Could not start Runner after pairing: ${startError.message || startError}`);
+      await checkRunnerStartupSelfTest();
+    }
   } finally {
     pairButton.disabled = false;
     if (!childProcess) {
       startButton.disabled = false;
     }
   }
+}
+
+async function resetPairing() {
+  const wasListening = Boolean(childProcess);
+  if (wasListening) {
+    await stopRunner();
+    childProcess = null;
+    startButton.disabled = false;
+    stopButton.disabled = true;
+  }
+  form.elements.pairCode.value = "";
+  form.elements.hubToken.value = "";
+  await clearStoredToken().catch((error) => appendLog(`Reset pairing could not clear stored token: ${error.message || error}`));
+  window.localStorage.setItem(API_URL_STORAGE_KEY, readApiUrl());
+  pairState.textContent = wasListening
+    ? "Pairing reset. Listener stop requested. Paste a fresh one-time code from Hub."
+    : "Pairing reset. Paste a fresh one-time code from Hub.";
+  setStatus("Idle", "idle");
+  await updateTokenState();
+  renderLocalReadinessChecklist();
+}
+
+async function runDesktopSelfTest() {
+  const output = await executeSidecar(["desktop-self-test"]);
+  if (!output) {
+    return;
+  }
+  setStatus("Runner self-test passed", "good");
 }
 
 async function stopRunner() {
@@ -516,7 +664,7 @@ async function stopRunner() {
 pairButton.addEventListener("click", () => {
   pairRunner().catch((error) => {
     setStatus("Pairing failed", "error");
-    pairState.textContent = "Pairing failed. Check that the code has not expired, then try again.";
+    pairState.textContent = "Pairing failed before this machine was saved. Check that the code has not expired, then try again.";
     appendLog(`Could not pair Runner: ${error.message || error}`);
   });
 });
@@ -529,7 +677,10 @@ saveTokenButton.addEventListener("click", () => {
       window.localStorage.setItem(API_URL_STORAGE_KEY, form.elements.apiUrl.value.trim());
       return updateTokenState();
     })
-    .catch((error) => appendLog(`Could not save token: ${error.message || error}`));
+    .catch((error) => {
+      tokenState.textContent = userSafeTokenFailure(error.message || error);
+      appendLog(`Could not save token: ${error.message || error}`);
+    });
 });
 
 clearTokenButton.addEventListener("click", () => {
@@ -538,7 +689,17 @@ clearTokenButton.addEventListener("click", () => {
       form.elements.hubToken.value = "";
       return updateTokenState();
     })
-    .catch((error) => appendLog(`Could not clear token: ${error.message || error}`));
+    .catch((error) => {
+      tokenState.textContent = userSafeTokenFailure(error.message || error);
+      appendLog(`Could not clear token: ${error.message || error}`);
+    });
+});
+
+resetPairingButton?.addEventListener("click", () => {
+  resetPairing().catch((error) => {
+    pairState.textContent = "Reset pairing could not finish. You can still paste a fresh code and try again.";
+    appendLog(`Could not reset pairing: ${error.message || error}`);
+  });
 });
 
 startButton.addEventListener("click", () => {
@@ -564,16 +725,41 @@ themeChoiceButtons.forEach((button) => {
 });
 
 runtimePlanButton?.addEventListener("click", () => {
-  executeSidecar(runtimeCommandArgs()).catch((error) => {
-    setStatus("Runtime check failed", "error");
-    appendLog(`Could not inspect llama.cpp runtime plan: ${error.message || error}`);
-  });
+  llamaRuntimeReadiness = "Checking the llama.cpp runtime plan...";
+  renderLocalReadinessChecklist();
+  executeSidecar(runtimeCommandArgs())
+    .then(() => {
+      llamaRuntimeReadiness = "Runtime plan checked. Review logs before explicitly installing or selecting a runtime.";
+      renderLocalReadinessChecklist();
+    })
+    .catch((error) => {
+      llamaRuntimeReadiness = "Runtime plan unavailable. See logs for the technical detail.";
+      renderLocalReadinessChecklist();
+      setStatus("Runtime check failed", "error");
+      appendLog(`Could not inspect llama.cpp runtime plan: ${error.message || error}`);
+    });
 });
 
 runtimeSelectExistingButton?.addEventListener("click", () => {
-  executeSidecar(runtimeCommandArgs(["--select-existing"])).catch((error) => {
-    setStatus("Runtime selection failed", "error");
-    appendLog(`Could not select installed llama.cpp runtime: ${error.message || error}`);
+  llamaRuntimeReadiness = "Looking for an installed llama.cpp runtime...";
+  renderLocalReadinessChecklist();
+  executeSidecar(runtimeCommandArgs(["--select-existing"]))
+    .then(() => {
+      llamaRuntimeReadiness = "Installed llama.cpp runtime selected. Start listening when paired.";
+      renderLocalReadinessChecklist();
+    })
+    .catch((error) => {
+      llamaRuntimeReadiness = "No installed llama.cpp runtime selected. See logs for the technical detail.";
+      renderLocalReadinessChecklist();
+      setStatus("Runtime selection failed", "error");
+      appendLog(`Could not select installed llama.cpp runtime: ${error.message || error}`);
+    });
+});
+
+runnerSelfTestButton?.addEventListener("click", () => {
+  runDesktopSelfTest().catch((error) => {
+    setStatus("Runner self-test failed", "error");
+    appendLog(`Runner self-test failed: ${error.message || error}`);
   });
 });
 
@@ -592,5 +778,7 @@ relaunchUpdateButton?.addEventListener("click", () => {
 initTheme();
 renderReleaseStatus().catch((error) => appendLog(`Could not render release status: ${error.message || error}`));
 refreshRunnerCliVersion().catch((error) => appendLog(`Could not check Runner CLI version: ${error.message || error}`));
+checkRunnerStartupSelfTest().catch((error) => appendLog(`Could not run startup self-test: ${error.message || error}`));
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");
+renderLocalReadinessChecklist();

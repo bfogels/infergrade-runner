@@ -43,12 +43,12 @@
           <h2>Pairing</h2>
           <label>
             <span>Hub URL</span>
-            <input name="apiUrl" type="url" value="http://127.0.0.1:8000" autocomplete="url" />
+            <input name="apiUrl" type="url" value="https://api.infergrade.com" autocomplete="url" />
           </label>
           <p class="hint compact-hint">Use HTTPS for hosted Hubs. Local development can use localhost or 127.x.x.x.</p>
           <label>
             <span>Pairing code</span>
-            <input name="pairCode" type="text" autocomplete="off" placeholder="igrp_..." />
+            <input name="pairCode" type="text" autocomplete="off" placeholder="Paste the one-time code from Hub" />
           </label>
           <label>
             <span>Runner label</span>
@@ -56,6 +56,7 @@
           </label>
           <div class="button-row">
             <button type="button" data-pair-runner>Pair and start</button>
+            <button type="button" class="button-secondary" data-reset-pairing>Reset Pairing</button>
           </div>
           <p class="hint" data-pair-state>Click Pair Local Runner in the Hub, then paste the one-time code here.</p>
           <details class="advanced-token-panel">
@@ -115,6 +116,34 @@
             <button type="button" data-runtime-plan>Inspect plan</button>
             <button type="button" data-runtime-select-existing>Select installed</button>
           </div>
+          <div class="readiness-checklist" aria-label="Local readiness checklist">
+            <h3>Local readiness checklist</h3>
+            <div class="status-list">
+              <div>
+                <strong>Hub connection</strong>
+                <span data-hub-connection-status>Hosted Hub: https://api.infergrade.com</span>
+              </div>
+              <div>
+                <strong>Pairing</strong>
+                <span data-pairing-readiness-status>Paste a Hub pairing code to save this machine.</span>
+              </div>
+              <div>
+                <strong>Runner core</strong>
+                <span data-runtime-runner-version>Checking bundled Runner version...</span>
+                <div class="button-row compact-actions">
+                  <button type="button" class="button-secondary compact-button" data-runner-self-test>Run startup self-test</button>
+                </div>
+              </div>
+              <div>
+                <strong>llama.cpp runtime</strong>
+                <span data-runtime-llama-status>Inspect the plan before running local llama.cpp jobs.</span>
+              </div>
+              <div>
+                <strong>Model path</strong>
+                <span data-model-path-status>Chosen in Hub run plans; Desktop validates runtime and listener readiness.</span>
+              </div>
+            </div>
+          </div>
           <details class="advanced-token-panel">
             <summary>Update and platform status</summary>
             <div class="status-list">
@@ -129,10 +158,6 @@
                   <button type="button" data-install-update>Install update</button>
                   <button type="button" data-relaunch-update disabled>Relaunch</button>
                 </div>
-              </div>
-              <div>
-                <strong>Bundled Runner</strong>
-                <span data-runtime-runner-version>Checking bundled Runner version...</span>
               </div>
               <div>
                 <strong>macOS</strong>

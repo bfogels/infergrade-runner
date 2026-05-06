@@ -78,19 +78,25 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         root = self._repo_root()
         html_path = os.path.join(root, "apps/desktop-runner/index.html")
         js_path = os.path.join(root, "apps/desktop-runner/src/main.js")
+        helper_path = os.path.join(root, "apps/desktop-runner/src/desktopHelpers.js")
 
         with open(html_path, "r", encoding="utf-8") as handle:
             html = handle.read()
         with open(js_path, "r", encoding="utf-8") as handle:
             js = handle.read()
+        with open(helper_path, "r", encoding="utf-8") as handle:
+            helper_js = handle.read()
 
         self.assertIn("Use HTTPS for hosted Hubs", html)
         self.assertIn("function readApiUrl()", js)
-        self.assertIn('parsed.protocol !== "https:" && !isLocalHttp', js)
-        self.assertIn("localhost", js)
-        self.assertIn("ipv4Octet", js)
-        self.assertIn("^127", js)
-        self.assertIn("Hub URL must use HTTPS", js)
+        self.assertIn("normalizeDesktopApiUrl(form.elements.apiUrl.value)", js)
+        self.assertIn('const HOSTED_API_URL = "https://api.infergrade.com";', helper_js)
+        self.assertIn('parsed.protocol !== "https:"', helper_js)
+        self.assertIn('parsed.protocol === "http:" && isLocalHost(parsed.hostname)', helper_js)
+        self.assertIn("localhost", helper_js)
+        self.assertIn("ipv4Octet", helper_js)
+        self.assertIn("^127", helper_js)
+        self.assertIn("Hosted Hub URLs must use HTTPS", helper_js)
 
     def test_desktop_runner_has_explicit_system_theme_mode(self):
         root = self._repo_root()

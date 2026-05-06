@@ -1,10 +1,14 @@
 use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus, Output, Stdio};
 
 fn runner_core_src(repo_root: &Path) -> PathBuf {
     repo_root.join("python").join("runner-core").join("src")
+}
+
+fn bundled_runner_core_src(bundle_root: &Path) -> PathBuf {
+    bundle_root.join("src")
 }
 
 fn find_repo_root_from(start: &Path) -> Option<PathBuf> {
@@ -18,7 +22,44 @@ fn find_repo_root_from(start: &Path) -> Option<PathBuf> {
     None
 }
 
+fn find_bundled_runner_core_from(start: &Path) -> Option<PathBuf> {
+    let mut current = Some(start);
+    while let Some(path) = current {
+        for candidate in [
+            path.join("runner-core"),
+            path.join("Resources").join("runner-core"),
+            path.join("..").join("Resources").join("runner-core"),
+            path.join("..")
+                .join("..")
+                .join("Resources")
+                .join("runner-core"),
+        ] {
+            if bundled_runner_core_src(&candidate)
+                .join("infergrade")
+                .is_dir()
+            {
+                return candidate.canonicalize().ok().or(Some(candidate));
+            }
+        }
+        current = path.parent();
+    }
+    None
+}
+
 fn fallback_repo_root() -> Option<PathBuf> {
+    if let Some(value) = env::var_os("INFERGRADE_BUNDLED_RUNNER_CORE") {
+        let path = PathBuf::from(value);
+        if bundled_runner_core_src(&path).join("infergrade").is_dir() {
+            return Some(path);
+        }
+    }
+
+    let executable = env::current_exe().ok()?;
+    let executable_dir = executable.parent()?;
+    if let Some(path) = find_bundled_runner_core_from(executable_dir) {
+        return Some(path);
+    }
+
     if let Some(value) = env::var_os("INFERGRADE_RUNNER_REPO") {
         let path = PathBuf::from(value);
         if runner_core_src(&path).join("infergrade").is_dir() {
@@ -26,12 +67,20 @@ fn fallback_repo_root() -> Option<PathBuf> {
         }
     }
 
-    let executable = env::current_exe().ok()?;
-    find_repo_root_from(executable.parent()?)
+    find_repo_root_from(executable_dir)
 }
 
-fn pythonpath_with_runner(repo_root: &Path, existing: Option<OsString>) -> Result<OsString, String> {
-    let runner_src = runner_core_src(repo_root);
+fn pythonpath_with_runner(
+    repo_root: &Path,
+    existing: Option<OsString>,
+) -> Result<OsString, String> {
+    let repo_src = runner_core_src(repo_root);
+    let bundled_src = bundled_runner_core_src(repo_root);
+    let runner_src = if repo_src.join("infergrade").is_dir() {
+        repo_src
+    } else {
+        bundled_src
+    };
     if !runner_src.join("infergrade").is_dir() {
         return Err(format!(
             "Runner core source was not found at {}",
@@ -46,7 +95,11 @@ fn pythonpath_with_runner(repo_root: &Path, existing: Option<OsString>) -> Resul
     env::join_paths(paths).map_err(|error| format!("could not build PYTHONPATH: {error}"))
 }
 
-fn run_command(program: &str, args: &[OsString], pythonpath: Option<OsString>) -> std::io::Result<ExitStatus> {
+fn run_command(
+    program: &str,
+    args: &[OsString],
+    pythonpath: Option<OsString>,
+) -> std::io::Result<ExitStatus> {
     let mut command = Command::new(program);
     command.args(args);
     command.stdin(Stdio::inherit());
@@ -58,10 +111,102 @@ fn run_command(program: &str, args: &[OsString], pythonpath: Option<OsString>) -
     command.status()
 }
 
+fn run_command_output(
+    program: &str,
+    args: &[OsString],
+    pythonpath: Option<OsString>,
+) -> std::io::Result<Output> {
+    let mut command = Command::new(program);
+    command.args(args);
+    if let Some(value) = pythonpath {
+        command.env("PYTHONPATH", value);
+    }
+    command.output()
+}
+
 fn repo_python_args(args: &[OsString]) -> Vec<OsString> {
     let mut python_args = vec![OsString::from("-m"), OsString::from("infergrade")];
     python_args.extend(args.iter().cloned());
     python_args
+}
+
+fn command_exists(program: &str) -> bool {
+    let args = vec![OsString::from("--version")];
+    matches!(run_command(program, &args, None), Ok(status) if status.success())
+}
+
+fn json_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
+fn verify_repo_python_invocation(repo_root: &Path) -> Result<String, String> {
+    let pythonpath = pythonpath_with_runner(repo_root, env::var_os("PYTHONPATH"))?;
+    let args = repo_python_args(&[OsString::from("--version")]);
+    let mut last_not_found = None;
+    let mut failures = Vec::new();
+    for program in python_programs() {
+        match run_command_output(program, &args, Some(pythonpath.clone())) {
+            Ok(output) if output.status.success() => {
+                let detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                return Ok(if detail.is_empty() {
+                    format!("{program} -m infergrade --version")
+                } else {
+                    detail
+                });
+            }
+            Ok(output) => {
+                let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                failures.push(format!(
+                    "{program} exited with code {}{}",
+                    output.status.code().unwrap_or(1),
+                    if detail.is_empty() {
+                        String::new()
+                    } else {
+                        format!(": {detail}")
+                    }
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                last_not_found = Some(error);
+            }
+            Err(error) => failures.push(format!("{program} could not launch: {error}")),
+        }
+    }
+
+    if !failures.is_empty() {
+        return Err(failures.join("; "));
+    }
+    Err(format!(
+        "could not find a Python interpreter to run the bundled Runner core: {}",
+        last_not_found
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "no interpreter candidates were tried".to_string())
+    ))
+}
+
+fn desktop_self_test() -> Result<String, String> {
+    if let Some(repo_root) = fallback_repo_root() {
+        let pythonpath = pythonpath_with_runner(&repo_root, env::var_os("PYTHONPATH"))?;
+        let first_path = env::split_paths(&pythonpath)
+            .next()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let version = verify_repo_python_invocation(&repo_root)?;
+        return Ok(format!(
+            "{{\"status\":\"ok\",\"runner_core\":\"bundled_or_repo\",\"invocation\":\"ok\",\"path\":\"{}\",\"version\":\"{}\"}}",
+            json_escape(&first_path),
+            json_escape(&version)
+        ));
+    }
+    if command_exists("infergrade") {
+        return Ok("{\"status\":\"ok\",\"runner_core\":\"path\",\"detail\":\"infergrade is available on PATH\"}".to_string());
+    }
+    Err(
+        "Packaged Runner core is unavailable. The desktop app could not find its bundled runner-core resource, and infergrade is not on PATH.".to_string(),
+    )
 }
 
 fn run_repo_python(repo_root: &Path, args: &[OsString]) -> Result<ExitStatus, String> {
@@ -95,26 +240,39 @@ fn python_programs() -> &'static [&'static str] {
 
 fn main() {
     let args = env::args_os().skip(1).collect::<Vec<_>>();
-    match run_command("infergrade", &args, None) {
-        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            eprintln!("could not launch infergrade from PATH: {error}");
-            std::process::exit(1);
+    if args == [OsString::from("desktop-self-test")] {
+        match desktop_self_test() {
+            Ok(payload) => {
+                println!("{payload}");
+                std::process::exit(0);
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
         }
     }
 
-    let Some(repo_root) = fallback_repo_root() else {
-        eprintln!(
-            "infergrade was not found on PATH and INFERGRADE_RUNNER_REPO does not point to a Runner checkout."
-        );
-        std::process::exit(1);
-    };
+    if let Some(repo_root) = fallback_repo_root() {
+        match run_repo_python(&repo_root, &args) {
+            Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
 
-    match run_repo_python(&repo_root, &args) {
+    match run_command("infergrade", &args, None) {
         Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!(
+                "infergrade was not found on PATH, no bundled Runner core resource was found, and INFERGRADE_RUNNER_REPO does not point to a Runner checkout."
+            );
+            std::process::exit(1);
+        }
         Err(error) => {
-            eprintln!("{error}");
+            eprintln!("could not launch infergrade from PATH: {error}");
             std::process::exit(1);
         }
     }
@@ -175,5 +333,45 @@ mod tests {
         } else {
             assert_eq!(python_programs()[0], "python3");
         }
+    }
+
+    #[test]
+    fn finds_bundled_runner_core_resource_near_packaged_sidecar() {
+        let temp = env::temp_dir().join(format!("infergrade-sidecar-test-{}", std::process::id()));
+        let sidecar_dir = temp
+            .join("InferGrade Runner.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("binaries");
+        let bundled_src = temp
+            .join("InferGrade Runner.app")
+            .join("Contents")
+            .join("Resources")
+            .join("runner-core")
+            .join("src")
+            .join("infergrade");
+        std::fs::create_dir_all(&sidecar_dir).expect("sidecar dir");
+        std::fs::create_dir_all(&bundled_src).expect("bundled infergrade package");
+
+        let resolved = find_bundled_runner_core_from(&sidecar_dir).expect("bundled runner core");
+        assert_eq!(
+            resolved,
+            temp.join("InferGrade Runner.app")
+                .join("Contents")
+                .join("Resources")
+                .join("runner-core")
+                .canonicalize()
+                .expect("canonical bundled runner core")
+        );
+
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn desktop_self_test_reports_invocable_runner_core() {
+        let payload = desktop_self_test().expect("desktop self-test");
+
+        assert!(payload.contains("\"runner_core\":\"bundled_or_repo\""));
+        assert!(payload.contains("\"invocation\":\"ok\""));
     }
 }
