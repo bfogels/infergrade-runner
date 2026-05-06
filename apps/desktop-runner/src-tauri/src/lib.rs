@@ -524,6 +524,18 @@ fn native_first_run_input(model_path: &str) -> NativeFirstRunInput {
     }
 }
 
+fn desktop_native_first_run_response(
+    input: NativeFirstRunInput,
+    runtime: &dyn infergrade_runner_engine::NativeFirstRunRuntime,
+    mut emit: impl FnMut(RunnerEvent),
+) -> Result<Value, String> {
+    let result = engine_run_native_first_run_with_events(input, runtime, &mut emit)
+        .map_err(|error| error.message().to_string())?;
+    serde_json::to_value(result)
+        .map(|result| json!({"status": "completed", "uploaded": false, "result": result}))
+        .map_err(|error| format!("Could not serialize native first-run result: {error}"))
+}
+
 #[tauri::command]
 async fn run_desktop_native_first_run(
     app: AppHandle,
@@ -558,16 +570,13 @@ async fn run_desktop_native_first_run(
                 return Err(message);
             }
         };
-        engine_run_native_first_run_with_events(input, &runtime, |event| {
+        desktop_native_first_run_response(input, &runtime, |event| {
             emit_first_run_event(&event_app, event);
         })
-        .map_err(|error| error.message().to_string())
     })
     .await
     .map_err(|error| format!("Native first-run task failed: {error}"))??;
-    serde_json::to_value(result)
-        .map(|result| json!({"status": "completed", "uploaded": false, "result": result}))
-        .map_err(|error| format!("Could not serialize native first-run result: {error}"))
+    Ok(result)
 }
 
 #[tauri::command]
@@ -662,7 +671,7 @@ mod tests {
     use infergrade_runner_engine::{
         claim_run_job_payload, runner_heartbeat_payload, runner_register_payload,
         sanitized_runner_profile, ui_pairing_response, verify_runtime_download_manifest,
-        worker_request_preview, LLAMA_CPP_RUNTIME_ID,
+        worker_request_preview, NativeFirstRunRuntime, NativeRuntimeOutput, LLAMA_CPP_RUNTIME_ID,
     };
     use std::sync::{Mutex as TestMutex, OnceLock};
 
@@ -700,6 +709,63 @@ mod tests {
         assert_eq!(input.max_tokens, 32);
         assert_eq!(input.upload, false);
         assert!(input.prompt.contains("InferGrade runner"));
+    }
+
+    struct DesktopFirstRunFakeRuntime;
+
+    impl NativeFirstRunRuntime for DesktopFirstRunFakeRuntime {
+        fn run(&self, _input: &NativeFirstRunInput) -> Result<NativeRuntimeOutput, String> {
+            Ok(NativeRuntimeOutput {
+                runtime_id: "llama.cpp-desktop-test".to_string(),
+                stdout: "hello from desktop first-run".to_string(),
+                stderr: String::new(),
+                exit_code: 0,
+                load_time_ms: 10,
+                time_to_first_token_ms: 5,
+                decode_tokens_per_second: 20.5,
+                generated_tokens: 3,
+                peak_memory_bytes: None,
+            })
+        }
+    }
+
+    #[test]
+    fn desktop_first_run_response_forwards_events_and_keeps_upload_disabled() {
+        let model_path = env::temp_dir().join(format!(
+            "infergrade-desktop-first-run-{}.gguf",
+            std::process::id()
+        ));
+        fs::write(&model_path, b"fake gguf").expect("model file");
+        let input = NativeFirstRunInput {
+            model_path: model_path.clone(),
+            runtime_hint: Some("auto".to_string()),
+            prompt: "hello".to_string(),
+            max_tokens: 8,
+            upload: false,
+        };
+        let mut events = Vec::new();
+
+        let response =
+            desktop_native_first_run_response(input, &DesktopFirstRunFakeRuntime, |event| {
+                events.push(event);
+            })
+            .expect("desktop response");
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["uploaded"], false);
+        assert_eq!(response["result"]["uploaded"], false);
+        assert_eq!(response["result"]["evidence_kind"], "native_first_run");
+        assert_eq!(response["result"]["runtime_id"], "llama.cpp-desktop-test");
+        assert!(events.iter().any(|event| matches!(
+            event,
+            RunnerEvent::BenchmarkStarted { benchmark_id } if benchmark_id == "native_first_run"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            RunnerEvent::BenchmarkCompleted { benchmark_id } if benchmark_id == "native_first_run"
+        )));
+
+        let _ = fs::remove_file(model_path);
     }
 
     #[test]
