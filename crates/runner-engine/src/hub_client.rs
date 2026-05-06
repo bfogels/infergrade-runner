@@ -25,10 +25,20 @@ pub struct HubJsonRequest {
     bearer_token: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct HubJsonResponse {
     pub status: u16,
     pub body: Value,
+}
+
+impl fmt::Debug for HubJsonResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HubJsonResponse")
+            .field("status", &self.status)
+            .field("body", &"[redacted]")
+            .finish()
+    }
 }
 
 impl HubJsonRequest {
@@ -122,8 +132,7 @@ pub async fn execute_hub_json_request(
     })?;
     let body = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"error": text}));
     if !(200..300).contains(&status) {
-        let detail =
-            redact_response_detail(response_detail(&body), request.bearer_token.as_deref());
+        let detail = response_detail(&body, request.bearer_token.as_deref());
         return Err(RunnerError::new(
             "hub_request_failed",
             format!("Hub request failed with HTTP {status}: {detail}"),
@@ -214,7 +223,7 @@ fn validate_hub_path_id<'a>(value: &'a str, field_name: &str) -> Result<&'a str,
     Ok(trimmed)
 }
 
-fn response_detail(body: &Value) -> String {
+fn response_detail(body: &Value, token: Option<&str>) -> String {
     let raw = body
         .get("detail")
         .or_else(|| body.get("error"))
@@ -228,7 +237,10 @@ fn response_detail(body: &Value) -> String {
             }
         })
         .unwrap_or_else(|| "no detail".to_string());
-    raw.chars().take(300).collect()
+    redact_response_detail(raw, token)
+        .chars()
+        .take(300)
+        .collect()
 }
 
 fn redact_response_detail(detail: String, token: Option<&str>) -> String {

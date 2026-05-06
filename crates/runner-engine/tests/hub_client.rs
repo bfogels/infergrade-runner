@@ -174,11 +174,37 @@ async fn execute_run_bundle_upload_posts_json_to_hub() {
     assert_eq!(response.status, 200);
     assert_eq!(response.body["stored"], true);
     assert_eq!(response.body["bundle_id"], "nfr_bundle_1");
+    assert!(!format!("{response:?}").contains("nfr_bundle_1"));
     let raw_request = received.recv().expect("server request");
     assert!(raw_request.starts_with("POST /v1/runs/run_cfg_abc_123/bundle HTTP/1.1"));
     assert!(raw_request.contains("authorization: Bearer rtok_secret_for_run"));
     assert!(raw_request.contains("\"manifest\""));
     assert!(raw_request.contains("\"results\""));
+}
+
+#[tokio::test]
+async fn execute_hub_json_response_debug_does_not_expose_body_tokens() {
+    let (api_url, _received) =
+        spawn_json_server(200, r#"{"stored":true,"echo":"rtok_secret_for_run"}"#);
+    let request = build_run_bundle_upload_request(
+        &api_url,
+        "run_cfg_abc_123",
+        json!({
+            "manifest": {"bundle_id": "nfr_bundle_1"},
+            "results": [{"bundle_id": "nfr_bundle_1", "result_id": "nfr_result_1"}],
+        }),
+        Some("rtok_secret_for_run"),
+    )
+    .expect("upload request");
+
+    let response = execute_hub_json_request(&request)
+        .await
+        .expect("upload response");
+
+    assert_eq!(response.body["echo"], "rtok_secret_for_run");
+    let debug = format!("{response:?}");
+    assert!(!debug.contains("rtok_secret_for_run"));
+    assert!(!debug.contains("echo"));
 }
 
 #[tokio::test]
@@ -208,15 +234,40 @@ async fn execute_run_bundle_upload_redacts_token_from_hub_error() {
     assert!(!error.message().contains("rtok_secret_for_run"));
 }
 
+#[tokio::test]
+async fn execute_hub_json_error_redacts_before_truncating() {
+    let echoed = format!(
+        "{{\"detail\":{{\"message\":\"{}rtok_secret_for_run\"}}}}",
+        "x".repeat(295)
+    );
+    let body: &'static str = Box::leak(echoed.into_boxed_str());
+    let (api_url, _received) = spawn_json_server(403, body);
+    let request = build_run_bundle_upload_request(
+        &api_url,
+        "run_cfg_abc_123",
+        json!({
+            "manifest": {"bundle_id": "nfr_bundle_1"},
+            "results": [{"bundle_id": "nfr_bundle_1", "result_id": "nfr_result_1"}],
+        }),
+        Some("rtok_secret_for_run"),
+    )
+    .expect("upload request");
+
+    let error = execute_hub_json_request(&request)
+        .await
+        .expect_err("Hub rejected upload");
+
+    assert!(!error.message().contains("rtok"));
+    assert!(!error.message().contains("rtok_secret_for_run"));
+}
+
 fn spawn_json_server(status: u16, body: &'static str) -> (String, mpsc::Receiver<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
     let address = listener.local_addr().expect("server address");
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept request");
-        let mut buffer = [0_u8; 8192];
-        let bytes_read = stream.read(&mut buffer).expect("read request");
-        let request = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+        let request = read_http_request(&mut stream);
         sender.send(request).expect("send request");
         let reason = if status >= 400 { "Forbidden" } else { "OK" };
         let response = format!(
@@ -228,4 +279,33 @@ fn spawn_json_server(status: u16, body: &'static str) -> (String, mpsc::Receiver
             .expect("write response");
     });
     (format!("http://{address}"), receiver)
+}
+
+fn read_http_request(stream: &mut impl Read) -> String {
+    let mut bytes = Vec::new();
+    let mut buffer = [0_u8; 1024];
+    let header_end = loop {
+        let bytes_read = stream.read(&mut buffer).expect("read request");
+        assert!(bytes_read > 0, "connection closed before headers");
+        bytes.extend_from_slice(&buffer[..bytes_read]);
+        if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+            break index + 4;
+        }
+    };
+    let headers = String::from_utf8_lossy(&bytes[..header_end]).to_string();
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0);
+    while bytes.len().saturating_sub(header_end) < content_length {
+        let bytes_read = stream.read(&mut buffer).expect("read body");
+        assert!(bytes_read > 0, "connection closed before body");
+        bytes.extend_from_slice(&buffer[..bytes_read]);
+    }
+    String::from_utf8_lossy(&bytes).to_string()
 }
