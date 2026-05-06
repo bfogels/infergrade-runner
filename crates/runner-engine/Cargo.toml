@@ -5,5 +5,6 @@ edition = "2021"
 description = "Shared Rust runner engine logic for InferGrade desktop and CLI frontends"
 
 [dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 url = "2.5.4"
