@@ -12,7 +12,7 @@ Keep Hub as the decision and evidence surface. Keep Runner as execution truth. M
 - Python runner-core as a packaged transition sidecar only where existing benchmark logic has not moved yet.
 - Docker or Podman as optional sandbox providers for advanced/code/reference benchmarks.
 
-The default user-facing promise is: Docker is not required for your first local benchmark.
+The target user-facing promise is: Docker is not required for your first local benchmark. Until the native first-run executor exists, Desktop readiness must describe that path as in progress rather than ready.
 
 ## Migration Plan
 
@@ -65,13 +65,13 @@ Docker and Podman are capability enhancers, not onboarding gates.
 
 Readiness should report:
 
-- Native benchmark suite: ready or blocked by native runtime/model path.
+- Native benchmark suite: ready only after a native first-run executor exists; until then, report executor support as in progress rather than ready.
 - llama.cpp runtime: selected, available, missing, or incompatible.
 - Docker: found or not found.
 - Podman: found or not found.
-- First run: ready only when native runtime and model selection are ready.
+- First run: ready only when native runtime, model selection, and native executor support are ready.
 
-When Docker or Podman is missing, the app should say advanced sandboxed benchmarks are disabled, while native benchmarks remain available.
+When Docker or Podman is missing, the app should say advanced sandboxed benchmarks are disabled, while native runtime checks and first-run executor setup can continue.
 
 ## PR-Sized Implementation Phases
 
@@ -103,10 +103,10 @@ macOS Apple Silicon:
 - App launches and shows hosted Hub URL.
 - Pair code flow succeeds.
 - Reset Pairing recovers from stale token/code state.
-- Readiness says native benchmark suite is available and Docker is optional.
+- Readiness says native benchmark suite support is in progress until the native executor exists, and Docker is optional.
 - Metal runtime recommendation is visible.
 - First native benchmark runs and uploads evidence.
-- Docker missing does not block first run.
+- Docker missing does not block native runtime setup or first-run executor setup.
 - Signed/notarized artifact passes Gatekeeper.
 
 Windows:
@@ -123,5 +123,5 @@ Linux:
 - AppImage or `.deb` launches on a clean desktop.
 - CPU/Vulkan fallback is presented if no GPU runtime is supported.
 - Podman detection is advisory.
-- Docker absence does not block native first-run readiness.
+- Docker absence does not block native runtime setup or first-run executor setup.
 - Logs and support export are readable without terminal access.

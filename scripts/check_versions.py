@@ -48,6 +48,10 @@ CHECKS = {
         "apps/desktop-runner/src-tauri/Cargo.lock",
         r'name = "infergrade_desktop_runner"\nversion = "([^"]+)"',
     ),
+    "apps/desktop-runner/src-tauri/Cargo.lock infergrade_runner_engine": lambda: regex_version(
+        "apps/desktop-runner/src-tauri/Cargo.lock",
+        r'name = "infergrade_runner_engine"\nversion = "([^"]+)"',
+    ),
 }
 
 
