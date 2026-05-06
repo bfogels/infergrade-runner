@@ -241,7 +241,9 @@ fn optional_container_status(program: &str) -> (&'static str, String) {
     }
 }
 
-fn native_suite_status(runtime_first_run: &str) -> (&'static str, &'static str, &'static str, &'static str) {
+fn native_suite_status(
+    runtime_first_run: &str,
+) -> (&'static str, &'static str, &'static str, &'static str) {
     if runtime_first_run == "ready" {
         (
             "executor_missing",
@@ -261,8 +263,10 @@ fn native_suite_status(runtime_first_run: &str) -> (&'static str, &'static str, 
 
 fn desktop_readiness() -> String {
     let (hardware_class, accelerator_api) = desktop_hardware_hint();
-    let (runtime_status, runtime_message, runtime_first_run) = llama_runtime_status(accelerator_api);
-    let (native_suite, native_message, first_run, first_run_message) = native_suite_status(runtime_first_run);
+    let (runtime_status, runtime_message, runtime_first_run) =
+        llama_runtime_status(accelerator_api);
+    let (native_suite, native_message, first_run, first_run_message) =
+        native_suite_status(runtime_first_run);
     let (docker_status, docker_message) = optional_container_status("docker");
     let (podman_status, podman_message) = optional_container_status("podman");
     format!(

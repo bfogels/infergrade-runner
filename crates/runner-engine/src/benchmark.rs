@@ -12,6 +12,7 @@ const NATIVE_FIRST_RUN_BUNDLE_PAYLOAD_FORMAT: &str = "infergrade.bundle_upload.v
 const METRIC_ENVELOPE_PREFIX: &str = "INFERGRADE_NATIVE_FIRST_RUN_METRICS ";
 const DEFAULT_NATIVE_RUNTIME_TIMEOUT: Duration = Duration::from_secs(120);
 const PREVIEW_CHAR_LIMIT: usize = 2_000;
+const PREVIEW_TRUNCATED_MARKER: &str = "\n[preview truncated]";
 const MAX_FIRST_RUN_DURATION_MS: u64 = 86_400_000;
 const MAX_DECODE_TOKENS_PER_SECOND: f64 = 1_000_000.0;
 const MAX_PEAK_MEMORY_BYTES: u64 = 1 << 44;
@@ -263,7 +264,11 @@ fn duration_ms(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
-fn run_process_with_timeout(mut command: Command, timeout: Duration) -> Result<ProcessRun, String> {
+fn run_process_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+    extra_sensitive_values: &[String],
+) -> Result<ProcessRun, String> {
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -295,8 +300,8 @@ fn run_process_with_timeout(mut command: Command, timeout: Duration) -> Result<P
             return Err(format!(
                 "native runtime timed out after {} seconds. stdout preview: `{}` stderr preview: `{}`",
                 timeout.as_secs(),
-                preview(&stdout.text),
-                preview(&stderr.text)
+                preview(&stdout.text, extra_sensitive_values),
+                preview(&stderr.text, extra_sensitive_values)
             ));
         }
         std::thread::sleep(Duration::from_millis(25));
@@ -323,12 +328,15 @@ impl NativeFirstRunRuntime for NativeCommandRuntime {
             .arg(&input.prompt)
             .arg("--max-tokens")
             .arg(input.max_tokens.to_string());
-        let output = run_process_with_timeout(command, self.timeout).map_err(|error| {
-            format!(
-                "could not invoke native runtime `{}`: {error}",
-                self.command_path.display()
-            )
-        })?;
+        let prompt_redactions = [input.prompt.clone()];
+        let output = run_process_with_timeout(command, self.timeout, &prompt_redactions).map_err(
+            |error| {
+                format!(
+                    "could not invoke native runtime `{}`: {error}",
+                    self.command_path.display()
+                )
+            },
+        )?;
         let metrics = if output.exit_code == 0 {
             Some(parse_metric_envelope(&output.stdout)?)
         } else {
@@ -370,7 +378,8 @@ impl NativeFirstRunRuntime for NativeCommandRuntime {
 
 impl NativeFirstRunRuntime for LlamaCppRuntime {
     fn run(&self, input: &NativeFirstRunInput) -> Result<NativeRuntimeOutput, String> {
-        let mut command = Command::new(&self.command_path);
+        let command_path = first_run_llama_cpp_command_path(&self.command_path);
+        let mut command = Command::new(&command_path);
         command
             .arg("-m")
             .arg(&input.model_path)
@@ -378,13 +387,22 @@ impl NativeFirstRunRuntime for LlamaCppRuntime {
             .arg(&input.prompt)
             .arg("-n")
             .arg(input.max_tokens.to_string())
-            .arg("--no-display-prompt");
-        let output = run_process_with_timeout(command, self.timeout).map_err(|error| {
-            format!(
-                "could not invoke llama.cpp runtime `{}`: {error}",
-                self.command_path.display()
-            )
-        })?;
+            .arg("--no-display-prompt")
+            .arg("--single-turn")
+            .arg("--simple-io")
+            .arg("--perf");
+        if should_request_llama_cpp_metal_offload() {
+            command.arg("-ngl").arg("999");
+        }
+        let prompt_redactions = [input.prompt.clone()];
+        let output = run_process_with_timeout(command, self.timeout, &prompt_redactions).map_err(
+            |error| {
+                format!(
+                    "could not invoke llama.cpp runtime `{}`: {error}",
+                    command_path.display()
+                )
+            },
+        )?;
         if output.exit_code != 0 {
             return Ok(NativeRuntimeOutput {
                 runtime_id: self.runtime_id.clone(),
@@ -400,7 +418,10 @@ impl NativeFirstRunRuntime for LlamaCppRuntime {
         }
         let combined_log = format!("{}\n{}", output.stdout, output.stderr);
         let timings = parse_llama_timings(&combined_log);
-        let generated_tokens = timing_u32(timings.eval_tokens, "eval tokens")?;
+        let generated_tokens = match timings.eval_tokens {
+            Some(value) => timing_u32(Some(value), "eval tokens")?,
+            None => return Err("llama.cpp output did not include eval tokens".to_string()),
+        };
         let decode_tokens_per_second = timing_decode_tokens_per_second(&timings, generated_tokens)?;
         Ok(NativeRuntimeOutput {
             runtime_id: self.runtime_id.clone(),
@@ -416,6 +437,27 @@ impl NativeFirstRunRuntime for LlamaCppRuntime {
             generated_tokens,
             peak_memory_bytes: None,
         })
+    }
+}
+
+fn should_request_llama_cpp_metal_offload() -> bool {
+    cfg!(target_os = "macos") && cfg!(target_arch = "aarch64")
+}
+
+fn first_run_llama_cpp_command_path(cli_path: &Path) -> PathBuf {
+    let Some(parent) = cli_path.parent() else {
+        return cli_path.to_path_buf();
+    };
+    let extension = cli_path.extension().and_then(|value| value.to_str());
+    let completion_name = match extension {
+        Some(extension) if !extension.is_empty() => format!("llama-completion.{extension}"),
+        _ => "llama-completion".to_string(),
+    };
+    let completion_path = parent.join(completion_name);
+    if completion_path.is_file() {
+        completion_path
+    } else {
+        cli_path.to_path_buf()
     }
 }
 
@@ -545,31 +587,59 @@ fn timing_decode_tokens_per_second(
     Ok(generated_tokens as f64 / (eval_time_ms / 1000.0))
 }
 
-fn preview(text: &str) -> String {
-    let mut redacted = text.to_string();
-    for (key, value) in env::vars() {
-        let key = key.to_ascii_lowercase();
-        if value.len() >= 8
-            && (key.contains("token")
-                || key.contains("secret")
-                || key.contains("password")
-                || key.contains("credential")
-                || key.contains("authorization"))
-        {
-            redacted = redacted.replace(&value, "[redacted]");
+fn preview(text: &str, extra_sensitive_values: &[String]) -> String {
+    let mut sensitive_values = sensitive_env_values();
+    sensitive_values.extend(
+        extra_sensitive_values
+            .iter()
+            .map(|value| value.trim())
+            .filter(|value| value.len() >= 8)
+            .map(|value| (value.to_string(), "[redacted prompt]")),
+    );
+    let mut output = String::new();
+    let mut remaining = PREVIEW_CHAR_LIMIT;
+    let mut truncated = false;
+    let mut lines = text.lines().peekable();
+    while let Some(line) = lines.next() {
+        let redacted = redact_sensitive_line_with_env(line, &sensitive_values);
+        if !output.is_empty() {
+            if remaining == 0 {
+                truncated = true;
+                break;
+            }
+            output.push('\n');
+            remaining = remaining.saturating_sub(1);
+        }
+        let mut chars = redacted.chars();
+        let fragment: String = chars.by_ref().take(remaining).collect();
+        output.push_str(&fragment);
+        remaining = remaining.saturating_sub(fragment.chars().count());
+        if chars.next().is_some() {
+            truncated = true;
+            break;
+        }
+        if remaining == 0 && lines.peek().is_some() {
+            truncated = true;
+            break;
         }
     }
-    redacted
-        .lines()
-        .map(redact_sensitive_line)
-        .collect::<Vec<_>>()
-        .join("\n")
-        .chars()
-        .take(PREVIEW_CHAR_LIMIT)
-        .collect()
+    if truncated {
+        let marker_len = PREVIEW_TRUNCATED_MARKER.chars().count();
+        if output.chars().count() + marker_len > PREVIEW_CHAR_LIMIT {
+            output = output
+                .chars()
+                .take(PREVIEW_CHAR_LIMIT.saturating_sub(marker_len))
+                .collect();
+        }
+        output.push_str(PREVIEW_TRUNCATED_MARKER);
+    }
+    output
 }
 
-fn redact_sensitive_line(line: &str) -> String {
+fn redact_sensitive_line_with_env(
+    line: &str,
+    sensitive_values: &[(String, &'static str)],
+) -> String {
     let lower = line.to_ascii_lowercase();
     let sensitive_markers = [
         "authorization:",
@@ -594,8 +664,31 @@ fn redact_sensitive_line(line: &str) -> String {
     {
         "[redacted sensitive output line]".to_string()
     } else {
-        line.to_string()
+        let mut redacted = line.to_string();
+        for (value, replacement) in sensitive_values {
+            redacted = redacted.replace(value, replacement);
+        }
+        redacted
     }
+}
+
+fn sensitive_env_values() -> Vec<(String, &'static str)> {
+    env::vars()
+        .filter_map(|(key, value)| {
+            let key = key.to_ascii_lowercase();
+            if value.len() >= 8
+                && (key.contains("token")
+                    || key.contains("secret")
+                    || key.contains("password")
+                    || key.contains("credential")
+                    || key.contains("authorization"))
+            {
+                Some((value, "[redacted]"))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn validate_runtime_output(
@@ -720,6 +813,7 @@ where
         });
         error
     })?;
+    let prompt_redactions = [input.prompt.clone()];
     emit(RunnerEvent::BenchmarkProgress {
         benchmark_id: NATIVE_FIRST_RUN_BENCHMARK_ID.to_string(),
         message: "Native runtime completed; validating metrics.".to_string(),
@@ -731,8 +825,8 @@ where
             format!(
                 "Native first-run runtime exited with code {}. stdout preview: `{}` stderr preview: `{}`",
                 output.exit_code,
-                preview(&output.stdout),
-                preview(&output.stderr)
+                preview(&output.stdout, &prompt_redactions),
+                preview(&output.stderr, &prompt_redactions)
             ),
         );
         emit(RunnerEvent::Error {
@@ -760,8 +854,8 @@ where
         runtime_id: output.runtime_id,
         runtime_hint: input.runtime_hint,
         metrics,
-        stdout_preview: preview(&output.stdout),
-        stderr_preview: preview(&output.stderr),
+        stdout_preview: preview(&output.stdout, &prompt_redactions),
+        stderr_preview: preview(&output.stderr, &prompt_redactions),
     };
     emit(RunnerEvent::BenchmarkCompleted {
         benchmark_id: NATIVE_FIRST_RUN_BENCHMARK_ID.to_string(),
@@ -1094,4 +1188,26 @@ fn native_first_run_hardware_summary() -> Value {
         "memory_gb": Value::Null,
         "os": env::consts::OS,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_is_bounded_and_redacts_sensitive_large_runtime_output() {
+        let sensitive_line = "Authorization: Bearer igrt_runtime_preview_secret";
+        let mut output = String::new();
+        for index in 0..20_000 {
+            output.push_str(&format!("llama.cpp diagnostic line {index}\n"));
+        }
+        output.push_str(sensitive_line);
+
+        let preview = preview(&output, &[]);
+
+        assert!(preview.len() <= PREVIEW_CHAR_LIMIT);
+        assert!(preview.contains("[preview truncated]"));
+        assert!(!preview.contains("igrt_runtime_preview_secret"));
+        assert!(!preview.contains("Authorization: Bearer"));
+    }
 }
