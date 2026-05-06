@@ -4,7 +4,7 @@ use std::sync::Mutex;
 pub trait TokenStore {
     fn save_runner_token(&self, token: &str) -> Result<(), RunnerError>;
     fn load_runner_token(&self) -> Result<Option<String>, RunnerError>;
-    fn clear_runner_token(&self) -> Result<(), RunnerError>;
+    fn clear_runner_token(&self) -> Result<bool, RunnerError>;
 }
 
 #[derive(Default)]
@@ -35,10 +35,13 @@ impl TokenStore for MemoryTokenStore {
             .clone())
     }
 
-    fn clear_runner_token(&self) -> Result<(), RunnerError> {
-        *self.token.lock().map_err(|_| {
-            RunnerError::new("token_store_unavailable", "token store lock failed")
-        })? = None;
-        Ok(())
+    fn clear_runner_token(&self) -> Result<bool, RunnerError> {
+        let mut token = self
+            .token
+            .lock()
+            .map_err(|_| RunnerError::new("token_store_unavailable", "token store lock failed"))?;
+        let removed = token.is_some();
+        *token = None;
+        Ok(removed)
     }
 }

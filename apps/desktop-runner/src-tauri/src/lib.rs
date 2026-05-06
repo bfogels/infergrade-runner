@@ -2,9 +2,9 @@ use infergrade_runner_engine::{
     build_listener_start_plan, build_pairing_redeem_request, claim_run_job_payload,
     complete_pairing_response, desktop_environment, hostname,
     llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, normalize_api_url,
-    pairing_error_detail, preferred_execution_mode, profile_string, redact_listener_text,
-    redact_worker_response, runner_heartbeat_payload, runner_id_from_profile,
-    runner_register_payload, sanitized_runner_profile, selected_llama_cpp_runtime_path,
+    pairing_error_detail, pairing_status_payload, preferred_execution_mode, profile_string,
+    redact_listener_text, redact_worker_response, reset_pairing_state, runner_heartbeat_payload,
+    runner_id_from_profile, runner_register_payload, selected_llama_cpp_runtime_path,
     worker_request_url, PairingInput, ProfileStore, RunnerError, RunnerProfile, TokenStore,
 };
 use keyring::{Entry, Error as KeyringError};
@@ -54,9 +54,16 @@ impl ProfileStore for DesktopProfileStore {
             })
     }
 
-    fn clear_profile(&self) -> Result<(), RunnerError> {
+    fn clear_profile(&self) -> Result<bool, RunnerError> {
         clear_runner_profile()
-            .map(|_| ())
+            .and_then(|value| {
+                value
+                    .get("removed")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| {
+                        "profile reset result did not include removed status".to_string()
+                    })
+            })
             .map_err(|error| RunnerError::new("profile_clear_failed", error))
     }
 }
@@ -72,8 +79,13 @@ impl TokenStore for DesktopTokenStore {
         load_runner_token_value().map_err(|error| RunnerError::new("token_load_failed", error))
     }
 
-    fn clear_runner_token(&self) -> Result<(), RunnerError> {
-        clear_runner_token().map_err(|error| RunnerError::new("token_clear_failed", error))
+    fn clear_runner_token(&self) -> Result<bool, RunnerError> {
+        let had_token = load_runner_token_value()
+            .map_err(|error| RunnerError::new("token_load_failed", error))?
+            .is_some();
+        clear_runner_token()
+            .map(|_| had_token)
+            .map_err(|error| RunnerError::new("token_clear_failed", error))
     }
 }
 
@@ -260,40 +272,12 @@ fn clear_runner_token() -> Result<(), String> {
 #[tauri::command]
 fn runner_pairing_status() -> Result<Value, String> {
     let profile_path = runner_profile_path()?;
-    let profile = load_runner_profile()?;
+    let profile = DesktopProfileStore
+        .load_profile()
+        .map_err(|error| error.message().to_string())?;
     let token_available = runner_token_available()?;
-    Ok(runner_pairing_status_payload(
-        profile,
-        token_available,
-        profile_path,
-    ))
-}
-
-fn runner_pairing_status_payload(
-    profile: Option<Value>,
-    token_available: bool,
-    profile_path: PathBuf,
-) -> Value {
-    let profile_status = match profile {
-        Some(profile) => json!({
-            "status": "present",
-            "profile": sanitized_runner_profile(&profile),
-        }),
-        None => json!({
-            "status": "missing",
-            "profile": Value::Null,
-        }),
-    };
-    let profile_available = profile_status["status"] == "present";
-    json!({
-        "paired": profile_available && token_available,
-        "profile_path": profile_path.display().to_string(),
-        "profile": profile_status,
-        "token": {
-            "status": if token_available { "present" } else { "missing" },
-            "stored_in": "os_credential_store",
-        },
-    })
+    pairing_status_payload(profile, token_available, profile_path.display().to_string())
+        .map_err(|error| error.message().to_string())
 }
 
 #[tauri::command]
@@ -504,16 +488,13 @@ fn stop_runner_listener(state: State<ListenerProcess>) -> Result<Value, String> 
 
 #[tauri::command]
 fn reset_runner_pairing() -> Result<Value, String> {
-    let token_cleared = match clear_runner_token() {
-        Ok(()) => true,
-        Err(error) => return Err(error),
-    };
-    let profile = clear_runner_profile()?;
-    Ok(json!({
-        "reset": true,
-        "token_cleared": token_cleared,
-        "profile": profile,
-    }))
+    let profile_path = runner_profile_path()?;
+    reset_pairing_state(
+        &DesktopProfileStore,
+        &DesktopTokenStore,
+        profile_path.display().to_string(),
+    )
+    .map_err(|error| error.message().to_string())
 }
 
 #[tauri::command]
@@ -603,8 +584,8 @@ pub fn run() {
 mod tests {
     use super::*;
     use infergrade_runner_engine::{
-        ui_pairing_response, verify_runtime_download_manifest, worker_request_preview,
-        LLAMA_CPP_RUNTIME_ID,
+        sanitized_runner_profile, ui_pairing_response, verify_runtime_download_manifest,
+        worker_request_preview, LLAMA_CPP_RUNTIME_ID,
     };
     use std::sync::{Mutex as TestMutex, OnceLock};
 
@@ -807,25 +788,33 @@ mod tests {
 
     #[test]
     fn pairing_status_requires_profile_and_os_token_to_be_ready() {
-        let profile = json!({
-            "api_url": "https://api.infergrade.com/",
-            "runner_id": "runner_123",
-            "label": "Test runner",
-        });
+        let profile = RunnerProfile {
+            api_url: "https://api.infergrade.com/".to_string(),
+            access_token: None,
+            runner_id: "runner_123".to_string(),
+            label: Some("Test runner".to_string()),
+            preferred_execution_mode: None,
+            paired_at: None,
+            expires_at: None,
+            user: None,
+        };
         let path = PathBuf::from("/tmp/infergrade/runner_profile.json");
 
         let stale_profile =
-            runner_pairing_status_payload(Some(profile.clone()), false, path.clone());
+            pairing_status_payload(Some(profile.clone()), false, path.display().to_string())
+                .expect("status");
         assert_eq!(stale_profile["paired"], false);
         assert_eq!(stale_profile["profile"]["status"], "present");
         assert_eq!(stale_profile["token"]["status"], "missing");
 
-        let token_without_profile = runner_pairing_status_payload(None, true, path.clone());
+        let token_without_profile =
+            pairing_status_payload(None, true, path.display().to_string()).expect("status");
         assert_eq!(token_without_profile["paired"], false);
         assert_eq!(token_without_profile["profile"]["status"], "missing");
         assert_eq!(token_without_profile["token"]["status"], "present");
 
-        let ready = runner_pairing_status_payload(Some(profile), true, path);
+        let ready = pairing_status_payload(Some(profile), true, path.display().to_string())
+            .expect("status");
         assert_eq!(ready["paired"], true);
     }
 

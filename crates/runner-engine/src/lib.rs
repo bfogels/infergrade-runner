@@ -7,8 +7,8 @@ mod token_store;
 pub use errors::RunnerError;
 pub use events::{RunnerEvent, RuntimeInfo};
 pub use pairing::{
-    build_pairing_redeem_request, complete_pairing_response, PairingCompletion, PairingInput,
-    PairingRedeemRequest,
+    build_pairing_redeem_request, complete_pairing_response, pairing_status_payload,
+    reset_pairing_state, PairingCompletion, PairingInput, PairingRedeemRequest,
 };
 pub use profile::{MemoryProfileStore, ProfileStore, RunnerProfile, SanitizedRunnerProfile};
 pub use token_store::{MemoryTokenStore, TokenStore};
