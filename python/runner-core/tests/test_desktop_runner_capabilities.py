@@ -26,7 +26,7 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
 
     def test_api_url_validators_allow_https_and_local_http_only(self):
         validators = self._api_url_validators()
-        self.assertEqual(len(validators), 3)
+        self.assertEqual(len(validators), 1)
         for validator in validators:
             pattern = re.compile(validator)
             self.assertRegex("https://hub.example.com", pattern)

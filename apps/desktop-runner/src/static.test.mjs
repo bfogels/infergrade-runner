@@ -12,13 +12,14 @@ test("desktop shell permission shapes keep version separate from URL-scoped comm
   assert.ok(shapes.includes(JSON.stringify(["--version"])));
   assert.ok(shapes.includes(JSON.stringify(["desktop-self-test"])));
   assert.ok(shapes.some((shape) => shape.includes('"start"') && shape.includes('"--api-url"')));
-  assert.ok(shapes.some((shape) => shape.includes('"pair"') && shape.includes('"--api-url"')));
+  assert.equal(shapes.some((shape) => shape.includes('"pair"') && shape.includes('"--api-url"')), false);
   assert.ok(shapes.some((shape) => shape.includes('"install-runtime"') && !shape.includes('"--api-url"')));
 });
 
 test("desktop onboarding exposes paste-code pairing, reset, and bundled runner self-test", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 
   assert.ok(html.includes('value="https://api.infergrade.com"'));
   assert.ok(html.includes("Paste the one-time code from Hub"));
@@ -26,6 +27,9 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(html.includes("data-runner-self-test"));
   assert.ok(js.includes("normalizeDesktopApiUrl"));
   assert.ok(js.includes("desktop-self-test"));
+  assert.ok(js.includes('invoke("redeem_runner_pairing"'));
+  assert.ok(rust.includes("fn redeem_runner_pairing"));
+  assert.ok(rust.includes("save_runner_profile"));
 });
 
 test("desktop pairing keeps successful pairing when automatic start fails", () => {

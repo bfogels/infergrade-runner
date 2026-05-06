@@ -637,8 +637,8 @@ async function pairRunner() {
   }
   window.localStorage.setItem(API_URL_STORAGE_KEY, apiUrl);
 
-  const Command = await loadTauriShell();
-  if (!Command) {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
     setStatus("Development view", "warning");
     pairState.textContent = "Open the desktop app to redeem pairing codes and pair this machine.";
     appendLog("Open the desktop app to pair this machine.");
@@ -648,20 +648,15 @@ async function pairRunner() {
   pairButton.disabled = true;
   startButton.disabled = true;
   pairState.textContent = "Redeeming pairing code...";
-  const args = ["pair", "--api-url", apiUrl, "--pair-code", pairCode];
-  if (runnerLabel) {
-    args.push("--label", runnerLabel);
-  }
   try {
-    const output = await Command.sidecar(SIDECAR_NAME, args).execute();
-    if (output.code !== 0) {
-      throw new Error(redactSecrets(output.stderr || output.stdout || `Pairing command exited with code ${output.code}.`));
-    }
-    if (output.stderr) {
-      appendLog(output.stderr);
-    }
-    appendLog(pairingSummary(output.stdout));
+    const output = await invoke("redeem_runner_pairing", {
+      apiUrl,
+      pairCode,
+      label: runnerLabel || null,
+    });
+    appendLog(pairingSummary(JSON.stringify(output || {})));
     form.elements.pairCode.value = "";
+    await updateTokenState();
     pairState.textContent = "Paired. Starting the local Runner listener...";
     setStatus("Paired", "good");
     if (pairingReadinessStatus) {
