@@ -1583,7 +1583,7 @@ version = "0.1.0"
 
 [[package]]
 name = "infergrade-runner-cli"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "infergrade_runner_engine",
  "serde_json",
@@ -1591,7 +1591,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_desktop_runner"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "infergrade_runner_engine",
  "keyring",
@@ -1606,7 +1606,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_runner_engine"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "serde",
  "serde_json",
