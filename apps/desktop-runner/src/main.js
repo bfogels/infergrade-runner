@@ -59,6 +59,7 @@ let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp job
 let nativeSuiteReadiness = "Docker is not required for your first local benchmark.";
 let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxed benchmarks.";
 let savedTokenAvailable = false;
+let runnerProfileAvailable = false;
 
 function systemTheme() {
   if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
@@ -250,8 +251,14 @@ function renderLocalReadinessChecklist() {
   if (pairingReadinessStatus) {
     if (childProcess) {
       pairingReadinessStatus.textContent = "Paired and listening for Hub runs.";
-    } else if (savedTokenAvailable || previewToken || form.elements.hubToken.value.trim()) {
-      pairingReadinessStatus.textContent = "Pairing token is available. Start listening when ready.";
+    } else if ((savedTokenAvailable && runnerProfileAvailable) || previewToken || form.elements.hubToken.value.trim()) {
+      pairingReadinessStatus.textContent = savedTokenAvailable && runnerProfileAvailable
+        ? "Pairing token and profile are saved. Start listening when ready."
+        : "Pairing token is available. Start listening when ready.";
+    } else if (runnerProfileAvailable) {
+      pairingReadinessStatus.textContent = "Runner profile is saved, but the token is unavailable. Pair again or reset pairing.";
+    } else if (savedTokenAvailable) {
+      pairingReadinessStatus.textContent = "Runner token is saved, but the profile is unavailable. Pair again or reset pairing.";
     } else {
       pairingReadinessStatus.textContent = "Paste a Hub pairing code to save this machine.";
     }
@@ -402,7 +409,7 @@ async function loadTauriInvoke() {
 async function loadStoredToken() {
   const invoke = await loadTauriInvoke();
   if (invoke) {
-    return invoke("load_runner_token");
+    return null;
   }
   return previewToken;
 }
@@ -428,14 +435,35 @@ async function clearStoredToken() {
 async function updateTokenState() {
   let hasToken = false;
   try {
+    const invoke = await loadTauriInvoke();
+    if (invoke) {
+      const status = await invoke("runner_pairing_status");
+      hasToken = status?.token?.status === "present";
+      savedTokenAvailable = hasToken;
+      runnerProfileAvailable = status?.profile?.status === "present";
+      const profile = status?.profile?.profile || {};
+      if (runnerProfileAvailable && hasToken) {
+        tokenState.textContent = `Runner profile and OS token saved${profile.label ? ` for ${profile.label}` : ""}.`;
+      } else if (runnerProfileAvailable) {
+        tokenState.textContent = `Runner profile saved${profile.label ? ` for ${profile.label}` : ""}, but the OS token is unavailable.`;
+      } else if (hasToken) {
+        tokenState.textContent = "Runner token is saved in the OS credential store, but no runner profile is saved.";
+      } else {
+        tokenState.textContent = "No runner profile saved. Paste a Hub pairing code before listening for Hub runs.";
+      }
+      renderLocalReadinessChecklist();
+      return;
+    }
     hasToken = Boolean(await loadStoredToken());
   } catch (error) {
     savedTokenAvailable = false;
+    runnerProfileAvailable = false;
     tokenState.textContent = userSafeTokenFailure(error.message || error);
     appendLog(`Could not read saved token: ${error.message || error}`);
     return;
   }
   savedTokenAvailable = hasToken;
+  runnerProfileAvailable = false;
   if (isTauriRuntime()) {
     tokenState.textContent = hasToken
       ? "Runner token saved in the OS credential store."
@@ -523,9 +551,7 @@ async function runnerEnvironment() {
   if (typedToken) {
     return { INFERGRADE_HUB_TOKEN: typedToken };
   }
-
-  const savedToken = await loadStoredToken();
-  return savedToken ? { INFERGRADE_HUB_TOKEN: savedToken } : {};
+  return {};
 }
 
 function readApiUrl() {

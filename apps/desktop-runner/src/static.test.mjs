@@ -30,10 +30,18 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(js.includes("desktop-self-test"));
   assert.ok(js.includes('invoke("redeem_runner_pairing"'));
   assert.ok(js.includes('invoke("reset_runner_pairing"'));
+  assert.ok(js.includes('invoke("runner_pairing_status"'));
+  assert.equal(js.includes('invoke("load_runner_token"'), false);
+  assert.ok(js.includes("Runner profile and OS token saved"));
+  assert.ok(js.includes("Runner profile is saved, but the token is unavailable. Pair again or reset pairing."));
+  assert.ok(js.includes("Runner token is saved, but the profile is unavailable. Pair again or reset pairing."));
   assert.ok(rust.includes("fn redeem_runner_pairing"));
   assert.ok(rust.includes("fn reset_runner_pairing"));
+  assert.ok(rust.includes("fn runner_pairing_status"));
+  assert.equal(rust.includes("fn load_runner_token"), false);
   assert.ok(rust.includes("save_runner_profile"));
   assert.ok(rust.includes("clear_runner_profile"));
+  assert.ok(rust.includes("load_runner_profile"));
 });
 
 test("desktop pairing keeps successful pairing when automatic start fails", () => {

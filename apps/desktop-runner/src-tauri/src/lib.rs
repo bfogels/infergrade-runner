@@ -155,6 +155,30 @@ fn selected_llama_cpp_runtime() -> Value {
     }
 }
 
+fn load_runner_profile() -> Result<Option<Value>, String> {
+    let path = runner_profile_path()?;
+    match fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str::<Value>(&text)
+            .map(Some)
+            .map_err(|error| format!("could not parse Runner profile: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("could not read Runner profile: {error}")),
+    }
+}
+
+fn sanitized_runner_profile(profile: &Value) -> Value {
+    json!({
+        "api_url": profile.get("api_url").and_then(Value::as_str).unwrap_or(""),
+        "runner_id": profile.get("runner_id").and_then(Value::as_str).unwrap_or(""),
+        "label": profile.get("label").and_then(Value::as_str).unwrap_or(""),
+        "preferred_execution_mode": profile.get("preferred_execution_mode").and_then(Value::as_str).unwrap_or(""),
+        "paired_at": profile.get("paired_at").and_then(Value::as_str).unwrap_or(""),
+        "expires_at": profile.get("expires_at").and_then(Value::as_str).unwrap_or(""),
+        "user": profile.get("user").cloned().unwrap_or(Value::Null),
+        "has_access_token": profile.get("access_token").and_then(Value::as_str).map(|token| !token.trim().is_empty()).unwrap_or(false),
+    })
+}
+
 fn command_version(program: &str) -> Value {
     match Command::new(program).arg("--version").output() {
         Ok(output) if output.status.success() => {
@@ -355,12 +379,11 @@ fn save_runner_token(token: String) -> Result<(), String> {
     save_runner_token_value(&token)
 }
 
-#[tauri::command]
-fn load_runner_token() -> Result<Option<String>, String> {
+fn runner_token_available() -> Result<bool, String> {
     match runner_token_entry()?.get_password() {
-        Ok(token) => Ok(Some(token)),
-        Err(KeyringError::NoEntry) => Ok(None),
-        Err(error) if is_user_canceled(&error) => Ok(None),
+        Ok(token) => Ok(!token.trim().is_empty()),
+        Err(KeyringError::NoEntry) => Ok(false),
+        Err(error) if is_user_canceled(&error) => Ok(false),
         Err(error) => Err(format!("could not load runner token: {error}")),
     }
 }
@@ -372,6 +395,45 @@ fn clear_runner_token() -> Result<(), String> {
         Err(error) if is_user_canceled(&error) => Ok(()),
         Err(error) => Err(format!("could not clear runner token: {error}")),
     }
+}
+
+#[tauri::command]
+fn runner_pairing_status() -> Result<Value, String> {
+    let profile_path = runner_profile_path()?;
+    let profile = load_runner_profile()?;
+    let token_available = runner_token_available()?;
+    Ok(runner_pairing_status_payload(
+        profile,
+        token_available,
+        profile_path,
+    ))
+}
+
+fn runner_pairing_status_payload(
+    profile: Option<Value>,
+    token_available: bool,
+    profile_path: PathBuf,
+) -> Value {
+    let profile_status = match profile {
+        Some(profile) => json!({
+            "status": "present",
+            "profile": sanitized_runner_profile(&profile),
+        }),
+        None => json!({
+            "status": "missing",
+            "profile": Value::Null,
+        }),
+    };
+    let profile_available = profile_status["status"] == "present";
+    json!({
+        "paired": profile_available && token_available,
+        "profile_path": profile_path.display().to_string(),
+        "profile": profile_status,
+        "token": {
+            "status": if token_available { "present" } else { "missing" },
+            "stored_in": "os_credential_store",
+        },
+    })
 }
 
 #[tauri::command]
@@ -494,8 +556,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             save_runner_token,
-            load_runner_token,
             clear_runner_token,
+            runner_pairing_status,
             reset_runner_pairing,
             llama_cpp_runtime_plan,
             redeem_runner_pairing
@@ -627,5 +689,44 @@ mod tests {
 
         env::remove_var("INFERGRADE_CONFIG_DIR");
         let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn pairing_status_reads_profile_without_exposing_token() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "access_token": "qbhr_secret",
+            "runner_id": "runner_123",
+            "label": "Test runner",
+            "preferred_execution_mode": "local_native",
+        });
+        let sanitized = sanitized_runner_profile(&profile);
+        assert_eq!(sanitized["runner_id"], "runner_123");
+        assert_eq!(sanitized["has_access_token"], true);
+        assert_eq!(sanitized.get("access_token"), None);
+    }
+
+    #[test]
+    fn pairing_status_requires_profile_and_os_token_to_be_ready() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "runner_id": "runner_123",
+            "label": "Test runner",
+        });
+        let path = PathBuf::from("/tmp/infergrade/runner_profile.json");
+
+        let stale_profile =
+            runner_pairing_status_payload(Some(profile.clone()), false, path.clone());
+        assert_eq!(stale_profile["paired"], false);
+        assert_eq!(stale_profile["profile"]["status"], "present");
+        assert_eq!(stale_profile["token"]["status"], "missing");
+
+        let token_without_profile = runner_pairing_status_payload(None, true, path.clone());
+        assert_eq!(token_without_profile["paired"], false);
+        assert_eq!(token_without_profile["profile"]["status"], "missing");
+        assert_eq!(token_without_profile["token"]["status"], "present");
+
+        let ready = runner_pairing_status_payload(Some(profile), true, path);
+        assert_eq!(ready["paired"], true);
     }
 }
