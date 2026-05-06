@@ -29,6 +29,24 @@ impl NativeFirstRunRuntime for PanicRuntime {
     }
 }
 
+struct InvalidMetricsRuntime;
+
+impl NativeFirstRunRuntime for InvalidMetricsRuntime {
+    fn run(&self, _input: &NativeFirstRunInput) -> Result<NativeRuntimeOutput, String> {
+        Ok(NativeRuntimeOutput {
+            runtime_id: "fake-llama-cpp-metal".to_string(),
+            stdout: "generated text".to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+            load_time_ms: 1200,
+            time_to_first_token_ms: 180,
+            decode_tokens_per_second: f64::INFINITY,
+            generated_tokens: 33,
+            peak_memory_bytes: Some(2_147_483_648),
+        })
+    }
+}
+
 fn temp_model_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "infergrade-runner-engine-test-{name}-{}-{}.gguf",
@@ -83,4 +101,27 @@ fn native_first_run_rejects_missing_model_before_runtime_execution() {
 
     assert_eq!(error.code(), "model_path_missing");
     assert!(error.message().contains("Select a local GGUF model"));
+}
+
+#[test]
+fn native_first_run_rejects_invalid_runtime_metrics() {
+    let model_path = temp_model_path("invalid-metrics");
+    std::fs::write(&model_path, b"not a real model, only path validation").expect("model file");
+
+    let error = run_native_first_run(
+        NativeFirstRunInput {
+            model_path: model_path.clone(),
+            runtime_hint: Some("llama.cpp-metal".to_string()),
+            prompt: "Say hello in one sentence.".to_string(),
+            max_tokens: 32,
+            upload: false,
+        },
+        &InvalidMetricsRuntime,
+    )
+    .expect_err("invalid runtime metrics are rejected");
+
+    assert_eq!(error.code(), "native_runtime_invalid_metrics");
+    assert!(error.message().contains("decode speed"));
+
+    let _ = std::fs::remove_file(model_path);
 }
