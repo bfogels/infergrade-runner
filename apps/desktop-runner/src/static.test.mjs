@@ -20,6 +20,7 @@ test("desktop shell permission shapes keep version separate from URL-scoped comm
 test("desktop onboarding exposes paste-code pairing, reset, and bundled runner self-test", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const helpers = readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8");
   const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 
   assert.ok(html.includes('value="https://api.infergrade.com"'));
@@ -126,7 +127,11 @@ test("desktop readiness copy does not overclaim when native runtime is missing",
 test("desktop first-run UI calls runner-engine through Tauri and keeps upload token out of browser state", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const helpers = readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8");
   const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const tauriConfig = readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8");
+  const tauriCargo = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
+  const packageJson = readFileSync(new URL("../package.json", import.meta.url), "utf8");
 
   assert.ok(html.includes("First local benchmark"));
   assert.ok(html.includes("name=\"firstRunModelPath\""));
@@ -142,6 +147,13 @@ test("desktop first-run UI calls runner-engine through Tauri and keeps upload to
   assert.ok(js.includes("readFirstRunModelPath"));
   assert.ok(js.includes("readFirstRunUploadRunId"));
   assert.ok(js.includes("firstRunHandoffFromUrl"));
+  assert.ok(js.includes("firstRunHandoffFromDeepLink"));
+  assert.ok(js.includes("initFirstRunDeepLinkHandoff"));
+  assert.ok(helpers.includes("infergrade-runner:"));
+  assert.ok(js.includes("@tauri-apps/plugin-deep-link"));
+  assert.ok(helpers.includes("first_run_run_id"));
+  assert.ok(helpers.includes("first_run_worker_id"));
+  assert.ok(helpers.includes("sensitive handoff parameter"));
   assert.ok(js.includes("URLSearchParams(window.location.search"));
   assert.ok(js.includes("FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY"));
   assert.ok(js.includes("urlHandoff.runId ? urlHandoff.workerId : storedWorkerId"));
@@ -153,6 +165,12 @@ test("desktop first-run UI calls runner-engine through Tauri and keeps upload to
   assert.ok(js.includes("payload?.bundle_artifact?.path"));
   assert.equal(html.includes("firstRunUploadToken"), false);
   assert.equal(js.includes("firstRunUploadToken"), false);
+  assert.equal(js.includes('params.get("access_token")'), false);
+  assert.equal(js.includes("FIRST_RUN_HANDOFF_TOKEN"), false);
+  assert.ok(tauriConfig.includes('"deep-link"'));
+  assert.ok(tauriConfig.includes('"schemes": ["infergrade-runner"]'));
+  assert.ok(tauriCargo.includes("tauri-plugin-deep-link"));
+  assert.ok(packageJson.includes("@tauri-apps/plugin-deep-link"));
   assert.ok(rust.includes("fn native_first_run_input"));
   assert.ok(rust.includes("async fn run_desktop_native_first_run"));
   assert.ok(rust.includes("fn desktop_first_run_artifact_dir"));
@@ -166,6 +184,7 @@ test("desktop first-run UI calls runner-engine through Tauri and keeps upload to
   assert.ok(rust.includes("DesktopTokenStore"));
   assert.ok(rust.includes("RunnerEvent::Error"));
   assert.ok(rust.includes("upload: false"));
+  assert.ok(rust.includes("tauri_plugin_deep_link::init()"));
 });
 
 test("desktop runner engine logic is separated from the Tauri adapter", () => {

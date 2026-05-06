@@ -1,6 +1,8 @@
 import "./styles.css";
 import packageInfo from "../package.json";
 import {
+  firstRunHandoffFromDeepLink,
+  firstRunHandoffFromParams,
   normalizeDesktopApiUrl,
   userSafeStartFailure,
   userSafeTokenFailure,
@@ -745,22 +747,26 @@ function readFirstRunRuntimePath() {
 }
 
 function firstRunHandoffFromUrl() {
-  const params = new URLSearchParams(window.location.search || "");
-  const runId =
-    params.get("first_run_run_id") ||
-    params.get("firstRunRunId") ||
-    params.get("run_id") ||
-    params.get("runId") ||
-    "";
-  const workerId = params.get("first_run_worker_id") || params.get("worker_id") || params.get("workerId") || "";
-  return {
-    runId: runId.trim(),
-    workerId: workerId.trim(),
-  };
+  return firstRunHandoffFromParams(new URLSearchParams(window.location.search || ""), (reason) => {
+    appendLog(`Ignored first-run handoff with ${reason}.`);
+  });
 }
 
-function applyFirstRunHandoff() {
-  const urlHandoff = firstRunHandoffFromUrl();
+function firstRunHandoffFromDeepLinks(urls) {
+  const values = Array.isArray(urls) ? urls : [];
+  for (const value of values) {
+    const handoff = firstRunHandoffFromDeepLink(value, (reason) => {
+      appendLog(`Ignored first-run handoff with ${reason}.`);
+    });
+    if (handoff.runId) {
+      return handoff;
+    }
+  }
+  return { runId: "", workerId: "" };
+}
+
+function applyFirstRunHandoff(incomingHandoff = null) {
+  const urlHandoff = incomingHandoff || firstRunHandoffFromUrl();
   const storedRunId = window.localStorage.getItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY) || "";
   const storedWorkerId = window.localStorage.getItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY) || "";
   const runId = urlHandoff.runId || storedRunId;
@@ -786,6 +792,32 @@ function applyFirstRunHandoff() {
     firstRunHandoffStatus.textContent = runId
       ? `Ready to upload this first-run result to Hub run ${runId}.`
       : "If Hub opened Desktop with a run handoff, this fills automatically.";
+  }
+}
+
+async function initFirstRunDeepLinkHandoff() {
+  applyFirstRunHandoff();
+  if (!isTauriRuntime()) {
+    return;
+  }
+  try {
+    const { getCurrent, onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
+    const startHandoff = firstRunHandoffFromDeepLinks(await getCurrent());
+    if (startHandoff.runId) {
+      applyFirstRunHandoff(startHandoff);
+      appendLog(`Received Hub first-run handoff for run ${startHandoff.runId}.`);
+    }
+    await onOpenUrl((urls) => {
+      const handoff = firstRunHandoffFromDeepLinks(urls);
+      if (!handoff.runId) {
+        return;
+      }
+      applyFirstRunHandoff(handoff);
+      setStatus("Hub run handoff received", "good");
+      appendLog(`Received Hub first-run handoff for run ${handoff.runId}.`);
+    });
+  } catch (error) {
+    appendLog(`Could not initialize Hub first-run handoff links: ${error.message || error}`);
   }
 }
 
@@ -1168,7 +1200,7 @@ relaunchUpdateButton?.addEventListener("click", () => {
 });
 
 initTheme();
-applyFirstRunHandoff();
+initFirstRunDeepLinkHandoff().catch((error) => appendLog(`Could not initialize first-run handoff: ${error.message || error}`));
 renderReleaseStatus().catch((error) => appendLog(`Could not render release status: ${error.message || error}`));
 refreshRunnerCliVersion().catch((error) => appendLog(`Could not check Runner CLI version: ${error.message || error}`));
 checkRunnerStartupSelfTest().catch((error) => appendLog(`Could not run startup self-test: ${error.message || error}`));

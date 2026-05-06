@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  firstRunHandoffFromDeepLink,
+  firstRunHandoffFromParams,
   normalizeDesktopApiUrl,
   userSafeStartFailure,
   userSafeUpdateFailure,
@@ -26,6 +28,57 @@ test("rejects invalid or unsafe desktop API URLs with user-facing guidance", () 
     () => normalizeDesktopApiUrl("http://api.infergrade.com"),
     /Hosted Hub URLs must use HTTPS/
   );
+});
+
+test("parses token-free first-run handoff URLs", () => {
+  assert.deepEqual(
+    firstRunHandoffFromDeepLink("infergrade-runner://first-run?first_run_run_id=run_123&first_run_worker_id=worker_456"),
+    { runId: "run_123", workerId: "worker_456" }
+  );
+  assert.deepEqual(
+    firstRunHandoffFromParams(new URLSearchParams("run_id=run_abc&workerId=worker_def")),
+    { runId: "run_abc", workerId: "worker_def" }
+  );
+});
+
+test("rejects first-run handoffs with sensitive parameters", () => {
+  const rejected = [];
+  assert.deepEqual(
+    firstRunHandoffFromDeepLink(
+      "infergrade-runner://first-run?first_run_run_id=run_123&upload_token=secret",
+      (reason) => rejected.push(reason)
+    ),
+    { runId: "", workerId: "" }
+  );
+  assert.equal(rejected[0], "sensitive handoff parameter");
+});
+
+test("rejects first-run handoffs with unsafe or sensitive identifier values", () => {
+  const rejected = [];
+  assert.deepEqual(
+    firstRunHandoffFromDeepLink(
+      "infergrade-runner://first-run?first_run_run_id=igrt_secret_token&first_run_worker_id=worker_456",
+      (reason) => rejected.push(reason)
+    ),
+    { runId: "", workerId: "" }
+  );
+  assert.deepEqual(
+    firstRunHandoffFromParams(new URLSearchParams("run_id=run_abc/../../secret&workerId=worker_def")),
+    { runId: "", workerId: "" }
+  );
+  assert.equal(rejected[0], "unsafe handoff identifier");
+});
+
+test("rejects first-run handoffs from unexpected URL schemes", () => {
+  const rejected = [];
+  assert.deepEqual(
+    firstRunHandoffFromDeepLink(
+      "https://example.com/first-run?first_run_run_id=run_123",
+      (reason) => rejected.push(reason)
+    ),
+    { runId: "", workerId: "" }
+  );
+  assert.equal(rejected[0], "unexpected first-run handoff URL scheme");
 });
 
 test("maps noisy update and token storage failures to recoverable UI copy", () => {
