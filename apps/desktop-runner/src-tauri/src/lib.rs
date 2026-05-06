@@ -209,6 +209,7 @@ fn recommended_llama_cpp_runtime() -> Value {
             "provenance": "Use an explicit llama.cpp build for this platform until InferGrade ships a verified runtime lane.",
             "install_command": Value::Null,
             "download_required": false,
+            "download_policy": verified_runtime_download_policy(),
             "supported_on_this_platform": false,
             "notes": [
                 "Verified GPU-specific runtime downloads are not implemented yet.",
@@ -216,6 +217,84 @@ fn recommended_llama_cpp_runtime() -> Value {
             ],
         })
     }
+}
+
+fn verified_runtime_download_policy() -> Value {
+    let verifier_status = if verify_runtime_download_manifest(&json!({
+        "runtime_id": "schema-check",
+        "archive_url": "https://downloads.infergrade.com/runtimes/schema-check.tar.zst",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "signature_url": "https://downloads.infergrade.com/runtimes/schema-check.tar.zst.minisig",
+        "expected_binaries": ["llama-cli", "llama-server"],
+        "rollback_runtime_id": "previous-runtime",
+    }))
+    .is_ok()
+    {
+        "ready"
+    } else {
+        "unavailable"
+    };
+    json!({
+        "status": "not_configured",
+        "manifest_verifier": verifier_status,
+        "requires_explicit_user_action": true,
+        "required_fields": [
+            "runtime_id",
+            "archive_url",
+            "sha256",
+            "signature_url",
+            "expected_binaries",
+            "rollback_runtime_id"
+        ],
+        "message": "Runtime downloads are disabled until a manifest entry passes HTTPS, checksum, signature, expected-binary, and rollback validation.",
+    })
+}
+
+fn verify_runtime_download_manifest(entry: &Value) -> Result<(), String> {
+    let runtime_id = entry
+        .get("runtime_id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if runtime_id.is_empty() {
+        return Err("runtime_id is required".to_string());
+    }
+    for key in ["archive_url", "signature_url"] {
+        let raw = entry.get(key).and_then(Value::as_str).unwrap_or("").trim();
+        let url = Url::parse(raw).map_err(|_| format!("{key} must be a valid HTTPS URL"))?;
+        if url.scheme() != "https" {
+            return Err(format!("{key} must use HTTPS"));
+        }
+    }
+    let sha256 = entry
+        .get("sha256")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if sha256.len() != 64 || !sha256.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return Err("sha256 must be a 64-character hex digest".to_string());
+    }
+    let binaries = entry
+        .get("expected_binaries")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "expected_binaries must list required runtime binaries".to_string())?;
+    let has_binary = |name: &str| {
+        binaries
+            .iter()
+            .any(|item| item.as_str().map(|value| value == name).unwrap_or(false))
+    };
+    if !has_binary("llama-cli") || !has_binary("llama-server") {
+        return Err("expected_binaries must include llama-cli and llama-server".to_string());
+    }
+    let rollback = entry
+        .get("rollback_runtime_id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if rollback.is_empty() {
+        return Err("rollback_runtime_id is required".to_string());
+    }
+    Ok(())
 }
 
 fn save_runner_profile(profile: &Value) -> Result<PathBuf, String> {
@@ -292,6 +371,7 @@ fn llama_cpp_runtime_plan() -> Value {
         "manifest_version": RUNTIME_MANIFEST_VERSION,
         "runtime_family": "llama.cpp",
         "recommended_runtime": recommended_llama_cpp_runtime(),
+        "download_policy": verified_runtime_download_policy(),
         "selected_runtime": selected_llama_cpp_runtime(),
         "detected_binaries": {
             "cli": cli,
@@ -453,6 +533,10 @@ mod tests {
     fn runtime_plan_is_inspection_only_and_recommends_platform_lane() {
         let plan = llama_cpp_runtime_plan();
         assert_eq!(plan["runtime_family"], "llama.cpp");
+        assert_eq!(
+            plan["download_policy"]["requires_explicit_user_action"],
+            true
+        );
         assert!(
             plan["message"]
                 .as_str()
@@ -467,5 +551,36 @@ mod tests {
             );
             assert_eq!(plan["recommended_runtime"]["accelerator"], "metal");
         }
+    }
+
+    #[test]
+    fn runtime_download_manifest_requires_supply_chain_and_rollback_fields() {
+        let valid = json!({
+            "runtime_id": "llama-cpp-metal-2026-05",
+            "archive_url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "signature_url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst.minisig",
+            "expected_binaries": ["llama-cli", "llama-server", "llama-perplexity"],
+            "rollback_runtime_id": "llama-cpp-homebrew-stable-2026-04",
+        });
+        assert!(verify_runtime_download_manifest(&valid).is_ok());
+
+        let mut insecure = valid.clone();
+        insecure["archive_url"] = Value::String("http://example.com/runtime.tar.zst".to_string());
+        assert!(verify_runtime_download_manifest(&insecure)
+            .expect_err("insecure runtime url rejected")
+            .contains("HTTPS"));
+
+        let mut missing_checksum = valid.clone();
+        missing_checksum["sha256"] = Value::String("abc".to_string());
+        assert!(verify_runtime_download_manifest(&missing_checksum)
+            .expect_err("short checksum rejected")
+            .contains("sha256"));
+
+        let mut missing_rollback = valid;
+        missing_rollback["rollback_runtime_id"] = Value::String(String::new());
+        assert!(verify_runtime_download_manifest(&missing_rollback)
+            .expect_err("rollback required")
+            .contains("rollback"));
     }
 }
