@@ -4,14 +4,16 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from infergrade import __version__
 from infergrade.benchmark_catalog import (
     capability_benchmark_ids_for_request,
     resolve_request_selection,
     selection_metadata_for_request,
 )
+from infergrade.capability_contract import validate_capability_run_artifact
 from infergrade.images import install_image
 from infergrade.models import CapabilityExecution, RunRequest
-from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, write_json
+from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcnow_iso, write_json
 
 CAPABILITY_REGISTRY_VERSION = "2026-04-multiturn-preview"
 _DOMINANT_GENERATION_FAILURE_RATE = 0.5
@@ -434,7 +436,23 @@ def execute_capability_suite(
                     "Most generations failed before evaluation completed. "
                     "Treat this capability benchmark as degraded rather than a healthy score."
                 )
+            elif failure_severity == "partial":
+                summary["status"] = "partial"
+                summary["warning"] = (
+                    "Some generations failed before evaluation completed. "
+                    "Treat this capability benchmark as partial rather than a complete score."
+                )
             write_json(os.path.join(benchmark_dir, "summary.json"), summary)
+            capability_run_path = None
+            if spec.execution_mode == "native":
+                capability_run_path = _write_native_capability_run_artifact(
+                    request=request,
+                    spec=spec,
+                    benchmark_dir=benchmark_dir,
+                    cases=cases,
+                    predictions=predictions,
+                    summary=summary,
+                )
             if progress_callback:
                 progress_callback(
                     {
@@ -464,11 +482,13 @@ def execute_capability_suite(
                 "predictions_path": os.path.join(benchmark_dir, "predictions.jsonl"),
                 "summary_path": os.path.join(benchmark_dir, "summary.json"),
             }
+            if capability_run_path:
+                benchmark_artifacts[benchmark_id]["capability_run_path"] = capability_run_path
             primary_value = summary.get("primary_metric", {}).get("value")
             if primary_value is not None and failure_severity == "none":
                 component_scores[benchmark_id] = round(float(primary_value), 6)
                 completed += 1
-            elif failure_severity == "dominant":
+            elif failure_severity in {"dominant", "partial"}:
                 degraded += 1
             elif failure_severity == "all_failed":
                 hard_failed += 1
@@ -540,6 +560,196 @@ def _generation_failure_severity(total_cases: int, failure_count: int) -> str:
     if (failure_count / float(total_cases)) >= _DOMINANT_GENERATION_FAILURE_RATE:
         return "dominant"
     return "partial"
+
+
+def _write_native_capability_run_artifact(
+    request: RunRequest,
+    spec: CapabilityBenchmarkSpec,
+    benchmark_dir: str,
+    cases: List[Dict[str, Any]],
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> str:
+    if spec.benchmark_id != "multiturn_chat_memory_v1":
+        raise ValueError("Unsupported native capability artifact: %s" % spec.benchmark_id)
+    check_metadata = _selected_check_metadata(request, spec.benchmark_id)
+    primary_metric = dict(summary.get("primary_metric") or {})
+    score = primary_metric.get("value")
+    summary_state = _capability_artifact_state(summary.get("status"), score, summary.get("generation_failure_severity"))
+    task_scores = {
+        str(item.get("case_id") or ""): item
+        for item in list(summary.get("case_results") or [])
+    }
+    tasks = []
+    for prediction in predictions:
+        case_id = str(prediction.get("case_id") or "")
+        case = _case_by_id(cases, case_id)
+        case_score = task_scores.get(case_id, {})
+        generation_status = str(prediction.get("generation_status") or "")
+        task_state = "scored" if generation_status == "completed" and case_score.get("score") is not None else "failed"
+        tasks.append(
+            {
+                "task_id": str(case.get("task_id") or case_id),
+                "task_family": spec.benchmark_kind,
+                "state": task_state,
+                "score": case_score.get("score") if task_state == "scored" else None,
+                "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
+                "scorer_type": "exact_match" if task_state == "scored" else None,
+                "scoring_policy": summary.get("scoring_policy") if task_state == "scored" else None,
+                "output_artifact": "predictions.jsonl#%s" % case_id,
+                "error_class": None if task_state == "scored" else "generation_failed",
+                "latency_ms": None,
+                "time_to_first_token_ms": None,
+                "tokens_per_second": None,
+                "input_tokens": None,
+                "output_tokens": None,
+            }
+        )
+    artifact = {
+        "artifact_spec_version": "0.1.0",
+        "artifact_kind": "capability_run",
+        "capability_run_id": "caprun_%s_%s" % (
+            spec.benchmark_id,
+            stable_hash(
+                {
+                    "model": request.model,
+                    "benchmark_id": spec.benchmark_id,
+                    "summary": summary,
+                },
+                length=10,
+            ),
+        ),
+        "created_at": utcnow_iso(),
+        "runner": {
+            "name": "infergrade-runner",
+            "version": __version__,
+            "contract_version": "0.1.0",
+        },
+        "evidence": {
+            "lane": check_metadata.get("evidence_lane_id") or "decision",
+            "surface": check_metadata.get("surface_id") or "local_assistant_capability",
+            "grade": "thin_local_sample",
+            "experimental": True,
+            "confidence_label": "thin_local_sample",
+        },
+        "subject": {
+            "model": {
+                "model": request.model,
+                "quant_artifact": request.quant_artifact,
+                "quant_artifact_sha256": request.quant_artifact_sha256,
+                "quant_artifact_filename": request.quant_artifact_filename,
+            },
+            "runtime": {
+                "backend": request.backend,
+                "execution_mode": request.execution_mode,
+                "llama_cpp_cli_path": request.llama_cpp_cli_path,
+            },
+            "hardware": {
+                "source": "run_bundle_environment",
+            },
+            "generation_preset": {
+                "generation_preset_id": request.generation_preset,
+                "max_tokens": spec.generation_max_tokens,
+            },
+        },
+        "protocol": {
+            "task_family": spec.benchmark_kind,
+            "prompt_version": "multiturn_chat_memory_v1",
+            "task_version": "multiturn_chat_memory_v1",
+            "fixture_revision": CAPABILITY_REGISTRY_VERSION,
+            "dataset_revision": None,
+            "scorer_type": "exact_match",
+            "scoring_policy": summary.get("scoring_policy") or "deterministic_required_phrase_match_v1",
+            "repetitions": 1,
+        },
+        "summary": {
+            "state": summary_state,
+            "score": score if summary_state in ("scored", "partial") else None,
+            "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
+            "passed_count": summary.get("metrics", {}).get("passed_constraints"),
+            "failed_count": summary.get("generation_failure_count"),
+            "partial_count": 0,
+            "skipped_count": 0,
+            "not_comparable_count": 0,
+            "duration_seconds": None,
+            "time_to_first_token_ms": None,
+            "tokens_per_second": None,
+            "input_tokens": None,
+            "output_tokens": None,
+        },
+        "tasks": tasks,
+        "artifacts": {
+            "manifest": "capability_run.json",
+            "raw_outputs": ["predictions.jsonl"],
+            "scoring_outputs": ["summary.json"],
+            "supporting_files": ["cases.jsonl"],
+        },
+        "claim_boundary": _assistant_artifact_claim_boundary(summary_state),
+    }
+    errors = validate_capability_run_artifact(artifact)
+    if errors:
+        raise ValueError("Invalid capability_run artifact: %s" % "; ".join(errors))
+    path = os.path.join(benchmark_dir, "capability_run.json")
+    write_json(path, artifact)
+    return path
+
+
+def _selected_check_metadata(request: RunRequest, benchmark_id: str) -> Dict[str, Any]:
+    metadata = selection_metadata_for_request(request)
+    for check in list(metadata.get("benchmark_checks") or []):
+        if check.get("check_id") == benchmark_id:
+            return dict(check)
+    return {}
+
+
+def _case_by_id(cases: List[Dict[str, Any]], case_id: str) -> Dict[str, Any]:
+    for case in cases:
+        candidate = str(case.get("case_id") or case.get("task_id") or stable_hash(case, length=12))
+        if candidate == case_id:
+            return dict(case)
+    return {}
+
+
+def _assistant_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    unsupported = [
+        "This is not a global assistant capability score.",
+        "This is not public leaderboard evidence.",
+        "This does not prove broad factual accuracy or reasoning ability.",
+    ]
+    if state == "scored":
+        supported = [
+            "This local setup completed the pinned multi-turn assistant memory fixture set.",
+            "The score reports deterministic phrase-retention checks for this thin local sample.",
+        ]
+    elif state == "partial":
+        supported = [
+            "This local setup attempted the pinned multi-turn assistant memory fixture set with partial generation failures.",
+            "The artifact preserves scored and failed task rows separately for this thin local sample.",
+        ]
+    elif state == "failed":
+        supported = [
+            "This local setup attempted the pinned multi-turn assistant memory fixture set.",
+            "The artifact preserves generation failures as failed task rows without converting them to zero scores.",
+        ]
+    else:
+        supported = [
+            "This artifact records that the pinned multi-turn assistant memory fixture set was not yet scored.",
+        ]
+    return {"supported_claims": supported, "unsupported_claims": unsupported}
+
+
+def _capability_artifact_state(status: Any, score: Any, generation_failure_severity: Any = None) -> str:
+    if str(generation_failure_severity or "") == "all_failed":
+        return "failed"
+    if str(generation_failure_severity or "") in {"partial", "dominant"}:
+        return "partial"
+    if str(status or "") == "failed":
+        return "failed"
+    if str(status or "") in {"degraded", "partial"}:
+        return "partial"
+    if score is not None:
+        return "scored"
+    return "not_yet_benchmarked"
 
 
 def _planned_benchmark_ids(execution: CapabilityExecution, suite: Optional[Dict[str, Any]], request: RunRequest) -> List[str]:

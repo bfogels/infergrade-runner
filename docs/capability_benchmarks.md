@@ -151,6 +151,8 @@ Those are the lanes we expect to keep locally regression-tested and operationall
 
 The schema is `schemas/json/capability_run.schema.json`; the methodology is [Local Benchmark Methodology](local_benchmark_methodology.md).
 
+The first local assistant artifact path is `multiturn_chat_memory_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. This is a thin local sample and remains experimental decision evidence.
+
 ## Container Contract
 
 Each benchmark container follows the same basic contract:
