@@ -114,6 +114,18 @@ class CapabilityTests(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(benchmark_dir, "cases.jsonl")))
         self.assertTrue(os.path.exists(os.path.join(benchmark_dir, "predictions.jsonl")))
         self.assertTrue(os.path.exists(os.path.join(benchmark_dir, "summary.json")))
+        capability_run_path = execution.artifacts["multiturn_chat_memory_v1"]["capability_run_path"]
+        self.assertTrue(os.path.exists(capability_run_path))
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["artifact_kind"], "capability_run")
+        self.assertEqual(artifact["evidence"]["lane"], "decision")
+        self.assertEqual(artifact["evidence"]["surface"], "local_assistant_capability")
+        self.assertEqual(artifact["summary"]["state"], "scored")
+        self.assertEqual(artifact["summary"]["score"], 1.0)
+        self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored"})
+        self.assertEqual(artifact["protocol"]["scorer_type"], "exact_match")
+        self.assertIn("This is not a global assistant capability score.", artifact["claim_boundary"]["unsupported_claims"])
 
     def test_native_multiturn_preserves_generation_failures_without_docker(self):
         class _FailingMemoryAdapter(object):
@@ -145,9 +157,50 @@ class CapabilityTests(unittest.TestCase):
         self.assertTrue(predictions)
         self.assertEqual({item["generation_status"] for item in predictions}, {"failed"})
         self.assertEqual({item["generation_error"] for item in predictions}, {"native adapter unavailable"})
+        capability_run_path = execution.artifacts["multiturn_chat_memory_v1"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["summary"]["state"], "failed")
+        self.assertEqual(artifact["summary"]["score"], None)
+        self.assertEqual({task["state"] for task in artifact["tasks"]}, {"failed"})
+        self.assertEqual({task["error_class"] for task in artifact["tasks"]}, {"generation_failed"})
+        self.assertIn("attempted the pinned multi-turn assistant", artifact["claim_boundary"]["supported_claims"][0])
+        self.assertNotIn("completed the pinned multi-turn assistant", " ".join(artifact["claim_boundary"]["supported_claims"]))
         summary = summarize_capability_execution(request, execution, completed_at="2026-04-29T12:00:00Z")
         self.assertEqual(summary["capability_state"], "failed")
         self.assertIn("generation_failures_exhausted", summary["capability_reason_codes"])
+
+    def test_native_multiturn_partial_generation_failures_emit_partial_artifact(self):
+        class _PartiallyFailingMemoryAdapter(object):
+            def generate_text(self, request, prompt, max_tokens):
+                if "HARBOR-17" in prompt:
+                    raise RuntimeError("one native generation failed")
+                return _MemoryPassingAdapter().generate_text(request, prompt, max_tokens)
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="general_assistant",
+            benchmark_check_ids=["multiturn_chat_memory_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        execution = execute_capability_suite(_PartiallyFailingMemoryAdapter(), request)
+
+        self.assertEqual(execution.status, "partial")
+        result = execution.benchmark_results["multiturn_chat_memory_v1"]
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["generation_failure_severity"], "partial")
+        capability_run_path = execution.artifacts["multiturn_chat_memory_v1"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["summary"]["state"], "partial")
+        self.assertIsNotNone(artifact["summary"]["score"])
+        self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored", "failed"})
+        self.assertIn("partial generation failures", artifact["claim_boundary"]["supported_claims"][0])
+        self.assertNotIn("completed the pinned multi-turn assistant", " ".join(artifact["claim_boundary"]["supported_claims"]))
 
     def test_execute_capability_suite_aggregates_primary_scores(self):
         def fake_prepare(spec, benchmark_dir, tier):
