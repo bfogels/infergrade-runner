@@ -1,7 +1,7 @@
 use infergrade_runner_engine::{
     build_hub_json_request, build_listener_start_plan, build_pairing_redeem_request,
-    build_run_bundle_upload_request, build_run_completion_request, complete_pairing_response,
-    desktop_environment, execute_hub_json_request, hostname,
+    build_run_bundle_upload_request, build_run_claim_request, build_run_completion_request,
+    complete_pairing_response, desktop_environment, execute_hub_json_request, hostname,
     llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, native_first_run_bundle_payload,
     normalize_api_url, pairing_error_detail, pairing_status_payload, preferred_execution_mode,
     profile_string, redact_listener_text, redact_worker_response, reset_pairing_state,
@@ -596,6 +596,14 @@ async fn upload_desktop_native_first_run(
         .unwrap_or_else(|| runner_id_from_profile(profile.as_ref()));
     let result: NativeFirstRunResult = serde_json::from_value(payload["result"].clone())
         .map_err(|error| format!("Could not rebuild native first-run result: {error}"))?;
+    let claim_request =
+        build_run_claim_request(&api_url, run_id, &worker_id, "local_native", Some(&token))
+            .map_err(|error| error.message().to_string())?;
+    let claim_response = execute_hub_json_request(&claim_request)
+        .await
+        .map_err(|error| error.message().to_string())?;
+    let redacted_claim_body =
+        redact_worker_response(claim_response.body.clone(), &[token.to_string()]);
     let bundle_payload = native_first_run_bundle_payload(
         &result,
         NativeFirstRunBundleOptions {
@@ -638,6 +646,7 @@ async fn upload_desktop_native_first_run(
         "run_id": run_id,
         "worker_id": worker_id,
         "bundle_id": bundle_id,
+        "claim": redacted_claim_body,
         "server": redacted_upload_body,
         "completion": redacted_completion_body,
     });

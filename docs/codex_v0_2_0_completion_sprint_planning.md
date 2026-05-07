@@ -34,7 +34,7 @@ This is the live Codex planning file for the Runner v0.2.0 installer-and-go comp
 - Hub pairing UX is code-first on the release lane.
 - Shared `runner-engine` owns native first-run inputs/results, typed events, local artifact writer, bundle-preview writer, run-scoped upload request builders, and native Hub JSON executor.
 - CLI can run local native first-run with `--no-upload`.
-- CLI can explicitly upload native first-run evidence with a run-scoped token and complete the run.
+- CLI can explicitly upload native first-run evidence with a paired runner token and complete the run.
 - Desktop can run the native first-run engine and write local result and bundle-preview artifacts.
 - Desktop can upload native first-run evidence for a Hub run handoff; Rust loads the saved token and JS never receives an upload token field.
 - Hub keeps native first-run evidence experimental, informational-only, and private to the run owner across the tested read surfaces.
@@ -47,7 +47,8 @@ This is the live Codex planning file for the Runner v0.2.0 installer-and-go comp
 ## Remaining Blockers
 
 1. Desktop upload needs full end-to-end smoke.
-   - The normal browser-to-packaged-Desktop path still needs validation with a real run, real saved token, real local artifact, and Hub evidence display.
+   - A real local Hub smoke now proves token-free run creation, runner-session claim, native first-run upload, run completion, owner-visible evidence, and public 404 privacy through the Rust CLI path.
+   - The Desktop adapter uses the same runner-engine claim/upload/complete helpers and secure token-loading path; packaged app UI smoke is still needed.
 
 2. Runtime selection/provisioning is not yet installer-and-go.
    - A real Apple Silicon Metal CLI smoke succeeded using `/opt/homebrew/bin/llama-cli` and `/Users/brianfogelson/Desktop/Code/ext/models/open_llama_3b_v2/ggml-model-f16-q4_0.gguf`.
@@ -71,7 +72,8 @@ This is the live Codex planning file for the Runner v0.2.0 installer-and-go comp
    - Keep downloads/provisioning explicit and provenance-gated.
 
 2. Desktop + Hub end-to-end first-run upload smoke.
-   - Use a real paired Desktop profile, Hub handoff run ID, selected runtime, and GGUF.
+   - Land the claim-before-upload fix so token-free Hub handoff runs can complete through runner-session credentials.
+   - Use a real paired runner profile, token-free Hub run ID, selected runtime, and GGUF.
    - Confirm artifact path, upload status, Hub owner-visible evidence, and public/private boundaries.
 
 3. macOS package candidate validation.
@@ -121,6 +123,17 @@ Current live checks before this file:
   - `cargo fmt --all --check`: pass.
   - `git diff --check`: pass.
   - `gitleaks detect --source=. --redact --no-banner --exit-code 0`: pass.
+- `codex/runner-v020-release-gates` local checks for the claim-before-upload fix:
+  - `cargo test --manifest-path crates/runner-engine/Cargo.toml --locked`: pass; includes `build_run_claim_request` coverage.
+  - `cargo test --manifest-path apps/runner-cli/Cargo.toml --locked`: pass; upload now posts claim, bundle, then completion.
+  - `npm ci --prefix apps/desktop-runner`: pass.
+  - `npm run check --prefix apps/desktop-runner`: pass after adding static assertion for Desktop claim wiring.
+  - `./scripts/build_desktop_sidecar.sh`: pass.
+  - `cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked`: pass after building sidecar.
+  - Real local Hub upload smoke using `/opt/homebrew/bin/llama-cli` and `/Users/brianfogelson/Desktop/Code/ext/models/open_llama_3b_v2/ggml-model-f16-q4_0.gguf`: pass. The smoke created a signed-in Hub user, created and redeemed a pairing code, queued a `local_native` run with `include_execution_token: false`, ran native first-run through the Rust CLI binary with the runner-session token, claimed the run, uploaded `nfr_unix1778117631_ggml_model_f16_q4_0`, completed the run, verified owner-visible result `nfr_unix1778117631_ggml_model_f16_q4_0_interactive_chat_v1`, verified public 404, and verified Recommend wizard `personal_informational_count: 1`.
+  - `cargo fmt --all --check`: pass.
+  - `git diff --check`: pass.
+  - `gitleaks detect --source=. --redact --no-banner --exit-code 0`: pass.
 
 ## Reviewer Findings
 
@@ -134,11 +147,12 @@ Current live checks before this file:
 - #140 reviewer caught unsafe handoff identifier acceptance; fixed by requiring safe Hub identifier-shaped run/worker values and rejecting token/secret/authorization/bearer-like values.
 - #205 reviewer found no blockers and validated that normal local-native browser queueing returns no `execution_token` while explicit advanced minting still works.
 - #141 reviewer caught runtime selection accepting arbitrary regular files such as `/etc/hosts` and mixing explicit CLI selections with PATH-discovered optional binaries. Fixed by requiring executable/runnable llama.cpp binaries before persisting selection and by resolving optional binaries from the explicit CLI sibling directory unless explicitly provided.
+- Release-gate smoke caught that token-free Hub-created runs remained `awaiting_execution` while Desktop/CLI upload paths tried to complete without claiming first. Fixed by adding a shared `build_run_claim_request` helper and making CLI/Desktop claim the run with runner-session credentials before bundle upload and completion.
 
 ## Release-Gate Status
 
 Not ready for v0.2.0.
 
-The product has meaningful native first-run/upload primitives, and the Rust CLI can now complete a real local Apple Silicon Metal llama.cpp first-run with a GGUF model. Desktop end-to-end upload, visual Hub evidence validation, runtime selection without PATH assumptions, and package/fresh-machine proof remain release blockers.
+The product has meaningful native first-run/upload primitives, and the Rust CLI can now complete a real local Apple Silicon Metal llama.cpp first-run with a GGUF model against a token-free Hub handoff run. Runtime selection without PATH assumptions is on `develop`; owner-visible Hub evidence display is validated through API/read-model smoke.
 
-v0.2.0 remains blocked until the full Desktop-Hub upload/evidence loop and macOS package proof are validated.
+v0.2.0 remains blocked until packaged Desktop UI smoke and macOS package/fresh-environment proof are validated, and final release docs/UI honesty are updated.
