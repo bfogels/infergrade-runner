@@ -42,11 +42,11 @@ The desktop app exposes the pieces that a non-terminal user needs first:
 - pair with a Hub code and start listening
 - inspect process logs without a shell
 - switch between light and dark modes
-- inspect or select an explicit `llama.cpp` runtime through `runner-engine`
+- inspect, install, or select a `llama.cpp` runtime through `runner-engine`
 - select a local GGUF model and run the native first-run lane without Docker
 - upload native-first-run evidence to Hub through the saved paired runner token
 
-The runtime controls are deliberately conservative. They validate and record an existing runnable `llama-cli` path; they do not silently install or upgrade anything. A true version dropdown should wait for a broader managed-runtime manifest with per-platform support, compatibility labels, signed artifacts, checksums, and rollback policy.
+The runtime controls are deliberately conservative. The macOS Apple Silicon lane can explicitly install the recommended checksum-verified `llama.cpp` Metal runtime from the Runner-owned manifest, or validate and record an existing runnable `llama-cli` path. The app does not silently install, upgrade, or switch runtimes. The current managed runtime provenance is SHA-256 verified against the pinned manifest; it is not independently signed until a separate signature/minisign/cosign lane exists.
 
 ## Windows And Linux Build Prerequisites
 
@@ -132,12 +132,12 @@ For each candidate build, record:
 
 ## Latest Local Candidate Evidence
 
-The current local macOS Apple Silicon candidate was built from the v0.2.1 stabilization train with ad-hoc signing:
+The current local macOS Apple Silicon candidate was built from the v0.2.2 managed-runtime train with ad-hoc signing:
 
 ```text
-artifact: target/release/bundle/dmg/InferGrade Runner_0.2.1_aarch64.dmg
-size: 6900725 bytes
-sha256: 90755cdb91efc255d22ae8c978887d6087649fcf95a862cdb6371cf5613c8041
+artifact: target/release/bundle/dmg/InferGrade Runner_0.2.2_aarch64.dmg
+size: 7004499 bytes
+sha256: c94f4eda1bd541053a828eea0ebd58b4e3beaa856673f37eae630ebaf0d4ea57
 signing: ad-hoc local signing
 notarization: skipped locally because Apple notarization credentials were not present
 ```
@@ -145,7 +145,7 @@ notarization: skipped locally because Apple notarization credentials were not pr
 Local package smoke mounted the DMG, verified the app with `codesign --verify --deep --strict`, launched `InferGrade Runner.app`, observed the packaged `infergrade_desktop_runner` process, and confirmed the bundled sidecar responds under a clean shell environment with only `/usr/bin:/bin` on `PATH`:
 
 ```text
-infergrade 0.2.1
+infergrade 0.2.2
 ```
 
 This proves the local package opens and carries the sidecar without a global `infergrade` command, repo checkout, or Docker. It does not replace public-release gates: Developer ID signing, notarization, Gatekeeper assessment, clean-machine token storage, and full Desktop UI first-run upload smoke still need protected-release validation.
@@ -153,7 +153,7 @@ This proves the local package opens and carries the sidecar without a global `in
 To repeat the local DMG smoke for a release candidate, run:
 
 ```bash
-scripts/smoke_desktop_dmg.sh --dmg "target/release/bundle/dmg/InferGrade Runner_0.2.1_aarch64.dmg"
+scripts/smoke_desktop_dmg.sh --dmg "target/release/bundle/dmg/InferGrade Runner_0.2.2_aarch64.dmg"
 ```
 
 The script prints stable `desktop_dmg_*` evidence lines for the artifact path, size, SHA-256 digest, code-signature verification, clean-`PATH` sidecar version, app launch observation, and the fact that local smoke does not check notarization.
@@ -163,4 +163,4 @@ The script prints stable `desktop_dmg_*` evidence lines for the artifact path, s
 - no signing secrets in the repo
 - no auto-update keys in the repo
 - no claim that Windows/Linux installers are supported until a build has been attempted
-- no claim that managed runtime downloads are complete until signed/checksummed runtime manifests and rollback are implemented
+- no claim that managed runtime downloads are independently signed until a signature verification lane is implemented

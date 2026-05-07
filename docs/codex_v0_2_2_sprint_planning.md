@@ -93,3 +93,79 @@ For release promotion, run the full release validation set from `docs/codex_v0_2
 ## Release Criteria
 
 v0.2.2 can promote only if the release has a user-visible, reviewed, and validated runtime-management improvement that does not overclaim supply-chain strength. A manifest/status-only release is acceptable only if it clearly prepares the next install slice and documents why managed install remains blocked.
+
+## v0.2.2 Release Candidate Evidence
+
+- Feature train landed in `develop`:
+  - PR #150: managed runtime manifest/status groundwork.
+  - PR #151: explicit checksum-verified managed runtime install and first-run runtime provenance.
+  - PR #152: Desktop managed runtime install adapter/action.
+- Release branch `codex/runner-v022-release` bumps version to `0.2.2` only after the feature PRs landed in `develop`.
+- CI remained blocked by GitHub Actions jobs failing before steps/logs on feature PRs; local validation and reviewer approval were used for feature merges.
+
+### Release Validation Snapshot
+
+- `cargo test --workspace --locked` passed after rebuilding the Desktop sidecar for the Tauri bundle contract.
+- Focused Rust gates passed:
+  - `cargo test --manifest-path crates/runner-engine/Cargo.toml --locked`
+  - `cargo test --manifest-path apps/runner-cli/Cargo.toml --locked`
+  - `cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked`
+  - `cargo test --manifest-path apps/desktop-runner/sidecar/Cargo.toml --locked`
+- Desktop web/package gates passed:
+  - `npm ci --prefix apps/desktop-runner`
+  - `npm run check --prefix apps/desktop-runner`
+  - `./scripts/build_desktop_runner.sh --check-only`
+  - `./scripts/build_desktop_runner.sh`
+- Python/release compatibility gates passed:
+  - `python3 -m unittest python/runner-core/tests/test_desktop_runner_capabilities.py python/runner-core/tests/test_release_ci.py`
+  - `./scripts/test_all.sh`
+  - `python3 ./scripts/sync_versions.py --check`
+  - `python3 ./scripts/check_versions.py`
+- Safety/format gates passed:
+  - `gitleaks detect --source=. --redact --no-banner --exit-code 0`
+  - `git diff --check`
+
+### Managed Runtime Smoke
+
+Release smoke used a fresh temporary `INFERGRADE_RUNTIME_CACHE_DIR`, installed the managed macOS arm64 Metal runtime, and ran native first-run with `--runtime auto` against the local TinyLlama GGUF model.
+
+```text
+install_runtime_id=llama-cpp-b9050-macos-arm64-metal
+checksum_verified=True
+signature_verified=False
+server=True
+perplexity=True
+first_run_status=completed
+first_run_runtime_id=llama-cpp-b9050-macos-arm64-metal
+evidence_kind=native_first_run
+generated_tokens=31
+decode_tps=156.05
+artifact=/tmp/infergrade-v022-first-run-release-72506/native-first-run-result.json
+```
+
+This proves the release branch can download, checksum-verify, extract, select, and use the managed runtime without Homebrew or PATH runtime discovery. It does not prove independent runtime signatures because upstream does not publish a separate signature asset for the selected archive.
+
+### Local Package Smoke
+
+`./scripts/build_desktop_runner.sh` emitted:
+
+```text
+artifact=target/release/bundle/dmg/InferGrade Runner_0.2.2_aarch64.dmg
+size=7004499 bytes
+sha256=c94f4eda1bd541053a828eea0ebd58b4e3beaa856673f37eae630ebaf0d4ea57
+signing=ad-hoc local signing
+notarization=skipped locally because Apple notarization credentials were not present
+```
+
+`scripts/smoke_desktop_dmg.sh --dmg "target/release/bundle/dmg/InferGrade Runner_0.2.2_aarch64.dmg"` passed:
+
+```text
+desktop_dmg_smoke=pass
+desktop_dmg_codesign=pass
+desktop_dmg_sidecar_version=infergrade 0.2.2
+desktop_dmg_launch_observed=true
+desktop_dmg_clean_path=/usr/bin:/bin
+desktop_dmg_notarization=not_checked_by_local_smoke
+```
+
+The package smoke verifies the local DMG opens and carries the sidecar under a clean PATH. It does not replace public Developer ID signing, notarization, Gatekeeper, or clean-machine Desktop UI upload validation.
