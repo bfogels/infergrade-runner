@@ -2,6 +2,7 @@ use infergrade_runner_engine::{
     build_hub_json_request, build_listener_start_plan, build_pairing_redeem_request,
     build_run_bundle_upload_request, build_run_claim_request, build_run_completion_request,
     complete_pairing_response, desktop_environment, execute_hub_json_request, hostname,
+    install_managed_llama_cpp_runtime as engine_install_managed_llama_cpp_runtime,
     llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, native_first_run_bundle_payload,
     normalize_api_url, pairing_error_detail, pairing_status_payload, preferred_execution_mode,
     profile_string, redact_listener_text, redact_worker_response, reset_pairing_state,
@@ -9,9 +10,10 @@ use infergrade_runner_engine::{
     runner_id_from_profile,
     select_existing_llama_cpp_runtime as engine_select_existing_llama_cpp_runtime,
     selected_llama_cpp_runtime_path, worker_request_url, write_native_first_run_artifact,
-    write_native_first_run_bundle_payload, HubMethod, LlamaCppRuntime, NativeFirstRunBundleOptions,
-    NativeFirstRunInput, NativeFirstRunResult, PairingInput, ProfileStore, RunnerError,
-    RunnerEvent, RunnerProfile, RunnerProtocolPingInput, RunnerProtocolPreviewInput, TokenStore,
+    write_native_first_run_bundle_payload, HubMethod, LlamaCppRuntime,
+    ManagedRuntimeInstallOptions, NativeFirstRunBundleOptions, NativeFirstRunInput,
+    NativeFirstRunResult, PairingInput, ProfileStore, RunnerError, RunnerEvent, RunnerProfile,
+    RunnerProtocolPingInput, RunnerProtocolPreviewInput, TokenStore,
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
@@ -532,6 +534,20 @@ fn select_existing_llama_cpp_runtime(runtime_path: Option<String>) -> Result<Val
     engine_select_existing_llama_cpp_runtime(None, cli_path, None, None)
 }
 
+#[tauri::command]
+async fn install_managed_llama_cpp_runtime(runtime_id: Option<String>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        engine_install_managed_llama_cpp_runtime(ManagedRuntimeInstallOptions {
+            runtime_id: runtime_id
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            archive_bytes: None,
+        })
+    })
+    .await
+    .map_err(|error| format!("managed runtime install task failed: {error}"))?
+}
+
 fn native_first_run_input(model_path: &str) -> NativeFirstRunInput {
     NativeFirstRunInput {
         model_path: PathBuf::from(model_path.trim()),
@@ -815,6 +831,7 @@ pub fn run() {
             stop_runner_listener,
             reset_runner_pairing,
             llama_cpp_runtime_plan,
+            install_managed_llama_cpp_runtime,
             select_existing_llama_cpp_runtime,
             run_desktop_native_first_run,
             redeem_runner_pairing
