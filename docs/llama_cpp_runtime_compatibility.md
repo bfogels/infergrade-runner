@@ -8,14 +8,16 @@ For container execution, Runner uses the configured runtime image, defaulting to
 
 For native execution, Runner resolves binaries in this order:
 
-- CLI flag or run-config runtime field, such as `--llama-cpp-cli-path` or `runtime.llama_cpp_cli_path`
+- CLI flag or Desktop form value, such as `--runtime-path /path/to/llama-cli`
+- selected runtime manifest written by `infergrade-runner runtime select-existing --runtime-path /path/to/llama-cli`
+- run-config runtime field, such as `--llama-cpp-cli-path` or `runtime.llama_cpp_cli_path`
 - environment variables: `INFERGRADE_LLAMA_CPP_CLI`, `INFERGRADE_LLAMA_CPP_SERVER`, `INFERGRADE_LLAMA_CPP_PERPLEXITY`
-- system `PATH` defaults: `llama-cli`, `llama-server`, `llama-perplexity`
+- system `PATH` defaults: `llama-cli`, `llama-server`, `llama-perplexity` as development and advanced-user fallbacks
 
-Custom native paths are advanced-user runtime choices. Doctor reports them as `custom_path`; it does not imply that InferGrade has verified or endorsed that build.
+Custom native paths are explicit user runtime choices. The selector requires a runnable `llama.cpp` binary before recording it, but it does not imply that InferGrade has endorsed that build or supplied it as a managed runtime.
 
 ## Compatibility Preflight
 
 Runner checks known model/runtime incompatibilities before deployment and capability phases. It uses ontology hints when present and can read `general.architecture` from local GGUF metadata when practical. Known unsupported architectures fail early with an actionable message instead of producing misleading partial benchmark output.
 
-This compatibility check does not install or upgrade `llama.cpp`. Managed installation remains explicit and inspectable.
+This compatibility check does not install or upgrade `llama.cpp`. Managed installation remains explicit and inspectable; signed/checksummed runtime downloads remain planned.

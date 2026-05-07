@@ -4,17 +4,18 @@ InferGrade Desktop Runner is the local companion app for people who want to pair
 
 The Hub remains the model selection, benchmark planning, recommendation, and results surface. This app should stay focused on pairing, readiness, Runner lifecycle, local runtime controls, logs, updates, and support export.
 
-The desktop happy path is being built so Docker will not be required for the first local benchmark. In the current preview, the app pairs the machine, shows native `llama.cpp` readiness, and supervises the Runner process, but the full installer-and-go native first-run executor is still in progress. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
+The desktop happy path is now native-first for macOS Apple Silicon: Docker is not required for the first local benchmark, and the app can run a local GGUF through a selected `llama.cpp` runtime, write local artifacts, and upload `native_first_run` evidence back to Hub. Managed runtime downloads are not enabled yet, so users must explicitly select an existing trusted `llama-cli` binary before the native first-run button is ready. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
 
 ## What It Includes
 
 - Tauri 2 desktop shell with a vanilla JavaScript frontend
-- Sidecar wrapper for the existing `infergrade` CLI
-- Pair-code redemption through the sidecar
+- Sidecar wrapper for compatibility self-tests and legacy Python runner-core bridge paths
+- Pair-code redemption through the Rust/Tauri command adapter
 - Start, stop, status, and log streaming controls for the local Runner process
 - OS-backed token storage through the Rust `keyring` crate
 - System, light, and dark UI modes
-- Advanced `llama.cpp` runtime inspection and selection controls
+- Explicit `llama.cpp` runtime inspection and selection controls
+- Native first-run model selection, progress events, local artifacts, and Hub upload handoff
 - Signed Tauri updater wiring for the macOS release lane
 - Source-built sidecar wrapper that can emit Tauri platform-specific binaries for macOS, Windows, and Linux build hosts
 
@@ -48,15 +49,14 @@ Tauri expects the generated file to use the target-triple suffix, for example `s
 
 ## Runtime Selection
 
-The app does not install or upgrade `llama.cpp` silently. The Runtime panel shells out through the existing CLI:
+The app does not install or upgrade `llama.cpp` silently. The Runtime panel records an explicit user-selected `llama-cli` path through `runner-engine`, validates that it is runnable, and stores a selected-runtime manifest in the InferGrade runtime cache. The same engine path is used by the Rust CLI:
 
 ```text
-infergrade install-runtime --runtime llama.cpp
-infergrade install-runtime --runtime llama.cpp --runtime-id <runtime id>
-infergrade install-runtime --runtime llama.cpp --select-existing
+infergrade-runner runtime plan
+infergrade-runner runtime select-existing --runtime-path /path/to/llama-cli
 ```
 
-The default path stays on the Runner-pinned compatibility lane. Advanced support sessions can inspect a named runtime lane or select an existing `llama-cli` / `llama-server` binary.
+The default path stays on the Runner-pinned compatibility lane. Advanced support sessions can inspect a named runtime lane or select existing sibling `llama-cli` / `llama-server` / `llama-perplexity` binaries. Managed downloads remain planned until runtime manifests include checksums, signatures, compatibility metadata, and rollback information.
 
 ## Build And Release
 
@@ -125,3 +125,13 @@ infergrade-sidecar desktop-self-test
 ```
 
 The self-test reports whether the desktop app can find its bundled/app-managed Runner core without relying on a globally installed `infergrade` command.
+
+## Native First-Run Status
+
+The native first-run lane is intentionally narrow:
+
+- macOS Apple Silicon with selected `llama.cpp` runtime: supported for local GGUF smoke and Hub upload.
+- Docker/Podman: optional; missing containers only disable advanced sandboxed benchmarks.
+- Python runner-core: still present for legacy/advanced execution bridge paths, but not required for the Rust native first-run benchmark itself.
+- Windows/Linux Desktop: preview until packaging and launch smoke are proven on those platforms.
+- Managed runtime downloads: planned, not silently enabled.

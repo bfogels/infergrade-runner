@@ -6,16 +6,17 @@ InferGrade Runner v0.2.0 should prove a normal Desktop user can run a first usef
 
 Use a Rust-owned native first-run engine path for v0.2.0. Keep Python runner-core as the transition bridge for existing advanced and legacy benchmark execution until each path has a tested Rust replacement or a packaged sidecar bridge that does not require user-installed Python.
 
-The first Rust slice is intentionally small:
+The current Rust slice is intentionally small:
 
 - validate a local model path
-- accept a runtime hint such as `llama.cpp-metal`
-- execute through an injectable native runtime adapter
+- accept `--runtime auto`, an explicit runtime path, or a selected `llama.cpp` runtime manifest
+- execute through the built-in `llama.cpp` native runtime adapter
 - return typed load, TTFT, decode speed, token count, and memory metrics
 - label results as `native_first_run`
-- do not upload yet
+- write local artifacts and Hub-compatible bundle previews
+- upload through a paired Hub runner token when a Hub handoff run is supplied
 
-This gives Desktop and CLI a shared contract without pretending the installer-and-go loop is complete.
+This gives Desktop and CLI a shared contract without pretending the broader installer-and-go loop is complete. Runtime downloads are still explicit/planned, so a fresh Mac needs a selected existing runtime until managed artifacts are implemented.
 
 ## Evidence Boundary
 
@@ -25,7 +26,7 @@ Native first-run evidence is useful decision evidence, not reference/gold eviden
 - advanced sandboxed/code-execution benchmark evidence
 - stronger reference or decision-grade evidence
 
-The first slice must not claim v0.2.0 readiness and must not imply upload support exists.
+The first-run upload path must not claim decision-grade or reference/gold trust. Uploaded native-first-run evidence stays `experimental`, `informational_only`, owner-visible, and labeled as needing confirmation until stronger gates exist.
 
 ## Runtime Boundary
 
@@ -41,15 +42,13 @@ For tests, the engine uses a fake runtime adapter. Later PRs can add a real llam
 
 ## Follow-On PRs
 
-1. Add a Rust CLI `first-run --model <path> --runtime auto --no-upload` command that uses this engine contract with a fake or dry-run adapter first.
-2. Add a real local llama.cpp runtime adapter for Apple Silicon Metal.
-3. Add JSONL progress events that Desktop and CLI can render differently.
-4. Add local result artifact writing.
-5. Add Hub-compatible upload only after bundle shape and evidence labels are reviewed.
+1. Add a managed runtime manifest/download path with checksum, signature, compatibility, and rollback metadata.
+2. Add package/fresh-machine Desktop UI smoke for the complete Hub handoff flow.
+3. Expand native first-run metrics only where they can be measured honestly and portably.
+4. Keep stronger decision/reference suites separate from native-first-run smoke evidence.
 
 ## Non-Goals
 
-- no v0.2.0 label
 - no runtime downloads
 - no silent install or upgrade
 - no Docker requirement for this native lane
