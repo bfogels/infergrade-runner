@@ -17,9 +17,9 @@ It is responsible for:
 
 InferGrade Runner is moving toward a public open-source release. Treat the current code as preview software:
 
-- Complete enough today: Runner-owned schemas, benchmark catalog metadata, local/native and container-aware execution paths, result bundle generation, support export, and signed macOS desktop release wiring.
-- Actively being hardened: the installer-and-go desktop first-run experience, release packaging, hosted Hub handoff, and broader clean-machine install smoke tests.
-- Planned or limited today: Windows and Linux public desktop installers, fully managed cloud worker provisioning, and heavier reference/gold benchmark lanes that need stronger dataset, sandbox, or cost controls before becoming default local paths.
+- Complete enough today: Runner-owned schemas, benchmark catalog metadata, local/native and container-aware execution paths, Rust native first-run execution for selected `llama.cpp` GGUF runs, native-first-run Hub upload, result bundle generation, support export, and signed macOS desktop release wiring.
+- Actively being hardened: macOS installer-and-go smoke, app-guided runtime selection, hosted Hub handoff, and broader clean-machine install validation.
+- Planned or limited today: managed `llama.cpp` runtime downloads, Windows and Linux public desktop installers, fully managed cloud worker provisioning, and heavier reference/gold benchmark lanes that need stronger dataset, sandbox, or cost controls before becoming default local paths.
 
 Security-sensitive release credentials, Apple signing materials, Hub tokens, local runner profiles, and `.env` files should never be committed. See [SECURITY.md](SECURITY.md) before reporting vulnerabilities or sharing security-sensitive logs.
 
@@ -39,7 +39,7 @@ The clearest first path is:
 
 The broader Runner architecture remains available, but the current default is intentionally narrower than a general benchmark platform.
 
-The Desktop Runner product path is being built so Docker will not be required for the first local benchmark. In the current preview, native `llama.cpp` readiness is visible but the full installer-and-go first-run executor is still in progress; Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
+The Desktop Runner product path now has a native first-run lane for macOS Apple Silicon with a user-selected `llama.cpp` runtime and local GGUF model. Docker is not required for that first local benchmark. Managed runtime downloads are not enabled yet, so a fresh Mac still needs an explicit app-guided runtime selection before the native run is ready. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
 
 ## Decision Suite vs Reference Suite
 

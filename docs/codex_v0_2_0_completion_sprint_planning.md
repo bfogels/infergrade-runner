@@ -58,7 +58,8 @@ This is the live Codex planning file for the Runner v0.2.0 installer-and-go comp
    - Hub API tests prove privacy and informational labeling, but the visual evidence/recommendation surfaces still need an end-to-end smoke with uploaded native-first-run evidence.
 
 4. Package/fresh-machine proof is missing.
-   - No clean macOS Apple Silicon proof yet for: no Docker, no user Python, no Rust, no global CLI, no repo checkout, no terminal, no `INFERGRADE_RUNNER_REPO`.
+   - A local DMG package build, mount, code-signature verification, app launch smoke, and bundled sidecar clean-`PATH` smoke now pass.
+   - Remaining release-lane gap: full clean-machine Desktop UI first-run upload smoke and Developer ID notarized Gatekeeper validation.
 
 5. Release docs and UI support labels still need a final honesty pass.
    - Windows/Linux should remain preview unless package proof exists.
@@ -123,6 +124,13 @@ Current live checks before this file:
   - `cargo fmt --all --check`: pass.
   - `git diff --check`: pass.
   - `gitleaks detect --source=. --redact --no-banner --exit-code 0`: pass.
+- `codex/runner-v020-package-gates` local package/honesty checks:
+  - `npm ci --prefix apps/desktop-runner`: pass.
+  - `./scripts/build_desktop_runner.sh --skip-checks`: pass; emitted `target/release/bundle/dmg/InferGrade Runner_0.1.45_aarch64.dmg`, size `6755315`, SHA-256 `784f648d0726855e38b3152f4b81baaa19beefdcbcdd62063268c973c7556d73`.
+  - Mounted the DMG and ran `codesign --verify --deep --strict --verbose=2` on `InferGrade Runner.app`: pass.
+  - Ran packaged sidecar from the mounted app under `env -i HOME="$HOME" PATH="/usr/bin:/bin"`: pass, printed `infergrade 0.1.45`.
+  - Launched mounted `InferGrade Runner.app` with `open -n`; `pgrep` observed packaged `infergrade_desktop_runner` process.
+  - Updated README, Desktop README, distribution docs, native first-run strategy, and llama.cpp compatibility docs to reflect the actual support boundary: macOS Apple Silicon native first-run/upload with explicit selected runtime is real; managed runtime downloads and Windows/Linux public installers remain preview/planned.
 - `codex/runner-v020-release-gates` local checks for the claim-before-upload fix:
   - `cargo test --manifest-path crates/runner-engine/Cargo.toml --locked`: pass; includes `build_run_claim_request` coverage.
   - `cargo test --manifest-path apps/runner-cli/Cargo.toml --locked`: pass; upload now posts claim, bundle, then completion.
@@ -153,6 +161,6 @@ Current live checks before this file:
 
 Not ready for v0.2.0.
 
-The product has meaningful native first-run/upload primitives, and the Rust CLI can now complete a real local Apple Silicon Metal llama.cpp first-run with a GGUF model against a token-free Hub handoff run. Runtime selection without PATH assumptions is on `develop`; owner-visible Hub evidence display is validated through API/read-model smoke.
+The product has meaningful native first-run/upload primitives, and the Rust CLI can now complete a real local Apple Silicon Metal llama.cpp first-run with a GGUF model against a token-free Hub handoff run. Runtime selection without PATH assumptions is on `develop`; owner-visible Hub evidence display is validated through API/read-model smoke. A local ad-hoc signed DMG can be built, mounted, code-signature verified, launched, and smoke-tested for bundled sidecar availability without global `infergrade`, Docker, or a repo checkout.
 
-v0.2.0 remains blocked until packaged Desktop UI smoke and macOS package/fresh-environment proof are validated, and final release docs/UI honesty are updated.
+v0.2.0 remains blocked until the release train is promoted with a version bump and reviewed. Managed runtime downloads are explicitly not complete; the v0.2.0 claim should be scoped to app-guided selected runtime on macOS Apple Silicon, not silent runtime provisioning.
