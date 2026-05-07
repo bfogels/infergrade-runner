@@ -1,11 +1,14 @@
 use infergrade_runner_engine::{
     build_hub_json_request, build_listener_start_plan, build_pairing_redeem_request,
     build_run_bundle_upload_request, build_run_claim_request, build_run_completion_request,
-    complete_pairing_response, desktop_environment, execute_hub_json_request, hostname,
+    build_support_summary, complete_pairing_response, desktop_environment,
+    execute_hub_json_request, hostname,
     install_managed_llama_cpp_runtime as engine_install_managed_llama_cpp_runtime,
     llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, native_first_run_bundle_payload,
     normalize_api_url, pairing_error_detail, pairing_status_payload, preferred_execution_mode,
-    profile_string, redact_listener_text, redact_worker_response, reset_pairing_state,
+    profile_string, redact_listener_text, redact_worker_response,
+    remove_selected_llama_cpp_runtime as engine_remove_selected_llama_cpp_runtime,
+    reset_pairing_state,
     run_native_first_run_with_events as engine_run_native_first_run_with_events,
     runner_id_from_profile,
     select_existing_llama_cpp_runtime as engine_select_existing_llama_cpp_runtime,
@@ -19,7 +22,7 @@ use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_shell::{
@@ -548,6 +551,11 @@ async fn install_managed_llama_cpp_runtime(runtime_id: Option<String>) -> Result
     .map_err(|error| format!("managed runtime install task failed: {error}"))?
 }
 
+#[tauri::command]
+fn remove_selected_llama_cpp_runtime(remove_managed_files: Option<bool>) -> Result<Value, String> {
+    engine_remove_selected_llama_cpp_runtime(remove_managed_files.unwrap_or(true))
+}
+
 fn native_first_run_input(model_path: &str) -> NativeFirstRunInput {
     NativeFirstRunInput {
         model_path: PathBuf::from(model_path.trim()),
@@ -679,6 +687,85 @@ async fn upload_desktop_native_first_run(
     Ok(())
 }
 
+async fn upload_desktop_native_first_run_bundle_payload(
+    payload: &mut Value,
+    bundle_payload: Value,
+    artifact_dir: &PathBuf,
+    run_id: &str,
+    worker_id: Option<&str>,
+) -> Result<(), String> {
+    let token = DesktopTokenStore
+        .load_runner_token()
+        .map_err(|error| error.message().to_string())?
+        .ok_or_else(|| "Pair with Hub before uploading a native first-run result.".to_string())?;
+    let profile = load_runner_profile()?;
+    let api_url = profile_string(profile.as_ref(), "api_url")
+        .unwrap_or_else(|| "https://api.infergrade.com".to_string());
+    let worker_id = worker_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| runner_id_from_profile(profile.as_ref()));
+    let claim_request =
+        build_run_claim_request(&api_url, run_id, &worker_id, "local_native", Some(&token))
+            .map_err(|error| error.message().to_string())?;
+    let claim_response = execute_hub_json_request(&claim_request)
+        .await
+        .map_err(|error| error.message().to_string())?;
+    let redacted_claim_body =
+        redact_worker_response(claim_response.body.clone(), &[token.to_string()]);
+    let upload_request =
+        build_run_bundle_upload_request(&api_url, run_id, bundle_payload, Some(&token))
+            .map_err(|error| error.message().to_string())?;
+    let upload_response = execute_hub_json_request(&upload_request)
+        .await
+        .map_err(|error| error.message().to_string())?;
+    let redacted_upload_body =
+        redact_worker_response(upload_response.body.clone(), &[token.to_string()]);
+    let bundle_id = upload_response
+        .body
+        .get("bundle_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Hub upload response did not include bundle_id".to_string())?
+        .to_string();
+    let completion_request = build_run_completion_request(
+        &api_url,
+        run_id,
+        &worker_id,
+        &bundle_id,
+        Some(redacted_upload_body.clone()),
+        Some(&token),
+    )
+    .map_err(|error| error.message().to_string())?;
+    let completion_response = execute_hub_json_request(&completion_request)
+        .await
+        .map_err(|error| error.message().to_string())?;
+    let redacted_completion_body =
+        redact_worker_response(completion_response.body.clone(), &[token.to_string()]);
+    payload["uploaded"] = Value::Bool(true);
+    payload["result"]["uploaded"] = Value::Bool(true);
+    payload["upload"] = json!({
+        "uploaded": true,
+        "run_id": run_id,
+        "worker_id": worker_id,
+        "bundle_id": bundle_id,
+        "claim": redacted_claim_body,
+        "server": redacted_upload_body,
+        "completion": redacted_completion_body,
+    });
+    let mut persisted_payload = payload.clone();
+    if let Some(entries) = persisted_payload.as_object_mut() {
+        entries.remove("artifact");
+    }
+    let artifact = write_native_first_run_artifact(artifact_dir, &persisted_payload)
+        .map_err(|error| error.message().to_string())?;
+    payload["artifact"] = serde_json::to_value(artifact).map_err(|error| {
+        format!("Could not serialize native first-run artifact metadata: {error}")
+    })?;
+    payload["artifact"]["uploaded"] = Value::Bool(true);
+    Ok(())
+}
+
 fn mark_desktop_native_first_run_upload_failed(payload: &mut Value, run_id: &str, error: String) {
     payload["uploaded"] = Value::Bool(false);
     payload["result"]["uploaded"] = Value::Bool(false);
@@ -687,6 +774,134 @@ fn mark_desktop_native_first_run_upload_failed(payload: &mut Value, run_id: &str
         "run_id": run_id,
         "error": error,
     });
+}
+
+fn artifact_path_under_root(
+    path: &str,
+    artifact_root: &Path,
+    label: &str,
+) -> Result<PathBuf, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{label} path is required."));
+    }
+    let canonical_root = fs::canonicalize(artifact_root).map_err(|error| {
+        format!(
+            "Could not resolve native first-run artifact directory `{}`: {error}",
+            artifact_root.display()
+        )
+    })?;
+    let canonical_path = fs::canonicalize(trimmed)
+        .map_err(|error| format!("Could not resolve {label} `{trimmed}`: {error}"))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Err(format!(
+            "{label} must be inside the native first-run artifact directory."
+        ));
+    }
+    Ok(canonical_path)
+}
+
+fn load_json_file(path: &Path, label: &str) -> Result<Value, String> {
+    let text = fs::read_to_string(path)
+        .map_err(|error| format!("Could not read {label} `{}`: {error}", path.display()))?;
+    serde_json::from_str(&text).map_err(|error| format!("Could not parse {label}: {error}"))
+}
+
+fn load_retry_first_run_payload(path: &str, artifact_root: &Path) -> Result<Value, String> {
+    let path = artifact_path_under_root(path, artifact_root, "native first-run artifact")?;
+    let payload = load_json_file(&path, "native first-run artifact")?;
+    if payload
+        .pointer("/result/evidence_kind")
+        .and_then(Value::as_str)
+        != Some("native_first_run")
+    {
+        return Err(
+            "Native first-run retry requires a native_first_run result artifact.".to_string(),
+        );
+    }
+    if payload.get("artifact").is_some() {
+        return Err("Native first-run artifact must be the persisted local payload, not browser-enriched state.".to_string());
+    }
+    Ok(payload)
+}
+
+fn load_retry_bundle_payload(path: &str, artifact_root: &Path) -> Result<Value, String> {
+    let path = artifact_path_under_root(path, artifact_root, "native first-run bundle artifact")?;
+    let payload = load_json_file(&path, "native first-run bundle artifact")?;
+    if payload.get("results").and_then(Value::as_array).is_none() {
+        return Err(
+            "Native first-run retry requires a persisted bundle upload payload.".to_string(),
+        );
+    }
+    if payload
+        .pointer("/results/0/provenance/source_bundle_origin")
+        .and_then(Value::as_str)
+        != Some("infergrade_native_first_run")
+    {
+        return Err(
+            "Native first-run retry requires an InferGrade native-first-run bundle.".to_string(),
+        );
+    }
+    Ok(payload)
+}
+
+fn desktop_support_summary_for_payload(
+    pairing_status: Value,
+    first_run_artifact: Option<Value>,
+    recent_errors: Vec<String>,
+) -> Value {
+    build_support_summary(
+        Some(env!("CARGO_PKG_VERSION")),
+        pairing_status,
+        first_run_artifact,
+        &recent_errors,
+    )
+}
+
+#[tauri::command]
+fn desktop_support_summary(
+    first_run_artifact: Option<Value>,
+    recent_errors: Option<Vec<String>>,
+) -> Result<Value, String> {
+    let pairing_status = runner_pairing_status()?;
+    Ok(desktop_support_summary_for_payload(
+        pairing_status,
+        first_run_artifact,
+        recent_errors.unwrap_or_default(),
+    ))
+}
+
+#[tauri::command]
+async fn retry_desktop_native_first_run_upload(
+    artifact_path: String,
+    bundle_artifact_path: String,
+    upload_run_id: String,
+    upload_worker_id: Option<String>,
+) -> Result<Value, String> {
+    let run_id = upload_run_id.trim().to_string();
+    if run_id.is_empty() {
+        return Err("Enter a Hub run ID before retrying upload.".to_string());
+    }
+    let artifact_dir = desktop_first_run_artifact_dir()?;
+    let mut payload = load_retry_first_run_payload(&artifact_path, &artifact_dir)?;
+    let bundle_payload = load_retry_bundle_payload(&bundle_artifact_path, &artifact_dir)?;
+    payload["bundle_artifact"] = json!({
+        "path": bundle_artifact_path,
+        "format": "infergrade.bundle_upload.v1",
+        "uploaded": false,
+    });
+    if let Err(error) = upload_desktop_native_first_run_bundle_payload(
+        &mut payload,
+        bundle_payload,
+        &artifact_dir,
+        &run_id,
+        upload_worker_id.as_deref(),
+    )
+    .await
+    {
+        mark_desktop_native_first_run_upload_failed(&mut payload, &run_id, error);
+    }
+    Ok(payload)
 }
 
 #[tauri::command]
@@ -832,8 +1047,11 @@ pub fn run() {
             reset_runner_pairing,
             llama_cpp_runtime_plan,
             install_managed_llama_cpp_runtime,
+            remove_selected_llama_cpp_runtime,
             select_existing_llama_cpp_runtime,
             run_desktop_native_first_run,
+            retry_desktop_native_first_run_upload,
+            desktop_support_summary,
             redeem_runner_pairing
         ])
         .run(tauri::generate_context!())
@@ -1039,6 +1257,158 @@ mod tests {
     }
 
     #[test]
+    fn desktop_support_summary_uses_runner_engine_and_redacts_first_run_payload() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-desktop-support-runtime-cache-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let summary = desktop_support_summary_for_payload(
+            json!({
+                "profile": {"status": "present"},
+                "token": {"status": "present"}
+            }),
+            Some(json!({
+                "result": {
+                    "status": "completed",
+                    "evidence_kind": "native_first_run"
+                },
+                "artifact": {
+                    "path": "/tmp/qbhr_desktop_path_secret/native-first-run-result.json"
+                },
+                "upload": {
+                    "uploaded": false,
+                    "reason": "Bearer qbhr_desktop_reason_secret",
+                    "run_id": "run_desktop_retry"
+                }
+            })),
+            vec!["pairing code IGRP-8421 failed".to_string()],
+        );
+
+        assert_eq!(
+            summary["export_kind"],
+            "infergrade_runner_support_summary_v1"
+        );
+        assert_eq!(
+            summary["first_run"]["upload_status"],
+            "not_uploaded_or_failed"
+        );
+        assert!(summary["next_actions"]
+            .as_array()
+            .expect("next actions")
+            .iter()
+            .any(|action| action["action"] == "retry_upload"));
+        let rendered = serde_json::to_string(&summary).expect("summary JSON");
+        assert!(!rendered.contains("qbhr_desktop_path_secret"));
+        assert!(!rendered.contains("qbhr_desktop_reason_secret"));
+        assert!(!rendered.contains("IGRP-8421"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn retry_upload_loads_persisted_artifacts_and_rejects_browser_enriched_payloads() {
+        let artifact_dir = env::temp_dir().join(format!(
+            "infergrade-desktop-retry-artifacts-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&artifact_dir);
+        fs::create_dir_all(&artifact_dir).expect("artifact dir");
+        let result_path = artifact_dir.join("native-first-run-result.json");
+        let bundle_path = artifact_dir.join("native-first-run-bundle.json");
+        fs::write(
+            &result_path,
+            serde_json::to_string_pretty(&json!({
+                "status": "completed",
+                "uploaded": false,
+                "result": {
+                    "status": "completed",
+                    "uploaded": false,
+                    "evidence_kind": "native_first_run"
+                }
+            }))
+            .expect("result JSON"),
+        )
+        .expect("result artifact");
+        fs::write(
+            &bundle_path,
+            serde_json::to_string_pretty(&json!({
+                "results": [
+                    {
+                        "provenance": {
+                            "source_bundle_origin": "infergrade_native_first_run"
+                        }
+                    }
+                ]
+            }))
+            .expect("bundle JSON"),
+        )
+        .expect("bundle artifact");
+
+        let payload =
+            load_retry_first_run_payload(result_path.to_str().expect("result path"), &artifact_dir)
+                .expect("persisted result payload");
+        let bundle =
+            load_retry_bundle_payload(bundle_path.to_str().expect("bundle path"), &artifact_dir)
+                .expect("persisted bundle payload");
+        assert_eq!(payload["result"]["evidence_kind"], "native_first_run");
+        assert_eq!(
+            bundle["results"][0]["provenance"]["source_bundle_origin"],
+            "infergrade_native_first_run"
+        );
+
+        fs::write(
+            &result_path,
+            serde_json::to_string_pretty(&json!({
+                "result": {
+                    "evidence_kind": "native_first_run"
+                },
+                "artifact": {
+                    "path": "/tmp/browser-controlled.json"
+                }
+            }))
+            .expect("forged result JSON"),
+        )
+        .expect("forged result artifact");
+        let error =
+            load_retry_first_run_payload(result_path.to_str().expect("result path"), &artifact_dir)
+                .expect_err("browser-enriched payload rejected");
+        assert!(error.contains("persisted local payload"));
+
+        let outside_path = env::temp_dir().join(format!(
+            "infergrade-desktop-retry-outside-{}.json",
+            std::process::id()
+        ));
+        fs::write(
+            &outside_path,
+            serde_json::to_string_pretty(&json!({
+                "result": {
+                    "evidence_kind": "native_first_run"
+                }
+            }))
+            .expect("outside JSON"),
+        )
+        .expect("outside artifact");
+        let error = load_retry_first_run_payload(
+            outside_path.to_str().expect("outside path"),
+            &artifact_dir,
+        )
+        .expect_err("outside artifact rejected");
+        assert!(error.contains("native first-run artifact directory"));
+        let _ = fs::remove_file(outside_path);
+
+        let _ = fs::remove_dir_all(artifact_dir);
+    }
+
+    #[test]
     fn rejects_cleartext_hosted_api_urls() {
         let error =
             normalize_api_url("http://api.infergrade.com").expect_err("cleartext hosted rejected");
@@ -1116,6 +1486,43 @@ mod tests {
             .as_str()
             .unwrap_or("")
             .contains("No download or install command was run"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_file(runtime_path);
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn desktop_removes_selected_runtime_through_runner_engine() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-desktop-remove-runtime-cache-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let first = remove_selected_llama_cpp_runtime(Some(true)).expect("no selected runtime");
+        assert_eq!(first["status"], "not_selected");
+        assert_eq!(first["removed_selection"], false);
+
+        let runtime_path = env::temp_dir().join(format!(
+            "infergrade-desktop-remove-llama-cli-{}{}",
+            std::process::id(),
+            if cfg!(windows) { ".cmd" } else { "" }
+        ));
+        write_test_llama_binary(&runtime_path);
+        select_existing_llama_cpp_runtime(Some(runtime_path.display().to_string()))
+            .expect("runtime selected");
+        let removed = remove_selected_llama_cpp_runtime(Some(true)).expect("runtime removed");
+        assert_eq!(removed["status"], "removed");
+        assert_eq!(removed["removed_selection"], true);
+        assert_eq!(removed["removed_managed_files"], false);
+        assert!(runtime_path.exists());
 
         if let Some(previous_cache_dir) = previous_cache_dir {
             env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);

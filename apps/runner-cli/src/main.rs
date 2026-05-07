@@ -1,13 +1,14 @@
 use infergrade_runner_engine::{
     build_run_bundle_upload_request, build_run_claim_request, build_run_completion_request,
-    container_runtime_readiness, execute_hub_json_request, install_managed_llama_cpp_runtime,
-    llama_cpp_runtime_plan, llama_cpp_runtime_status, load_selected_llama_cpp_runtime,
-    managed_llama_cpp_runtime_channels, managed_llama_cpp_runtime_manifest,
-    native_first_run_bundle_payload, normalize_api_url, run_native_first_run_with_events,
-    select_existing_llama_cpp_runtime, write_native_first_run_artifact,
-    write_native_first_run_bundle_payload, LlamaCppRuntime, ManagedRuntimeInstallOptions,
-    NativeCommandRuntime, NativeFirstRunBundleOptions, NativeFirstRunInput, NativeFirstRunResult,
-    NativeFirstRunRuntime, NativeRuntimeOutput, RunnerEvent,
+    build_support_summary, container_runtime_readiness, execute_hub_json_request,
+    install_managed_llama_cpp_runtime, llama_cpp_runtime_plan, llama_cpp_runtime_status,
+    load_selected_llama_cpp_runtime, managed_llama_cpp_runtime_channels,
+    managed_llama_cpp_runtime_manifest, native_first_run_bundle_payload, normalize_api_url,
+    run_native_first_run_with_events, select_existing_llama_cpp_runtime,
+    write_native_first_run_artifact, write_native_first_run_bundle_payload, LlamaCppRuntime,
+    ManagedRuntimeInstallOptions, NativeCommandRuntime, NativeFirstRunBundleOptions,
+    NativeFirstRunInput, NativeFirstRunResult, NativeFirstRunRuntime, NativeRuntimeOutput,
+    RunnerEvent,
 };
 use serde_json::{json, Value};
 use std::env;
@@ -16,7 +17,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const HELP_TEXT: &str =
-    "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime list                               Show the managed llama.cpp runtime manifest as JSON\n    runtime channels                           Show managed/local/experimental runtime channel policy as JSON\n    runtime status                             Show selected/detected/managed runtime status as JSON\n    runtime install [--runtime-id <id>]        Explicitly download, verify, extract, smoke, and select a managed llama.cpp runtime\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> --runner-token <token> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence through a paired Hub runner token\n    first-run --model <path> --runtime auto --upload --run-id <id> --run-token <token> ...\n                                               Deprecated debug alias for --runner-token; normal Hub handoff is token-free\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration.";
+    "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime list                               Show the managed llama.cpp runtime manifest as JSON\n    runtime channels                           Show managed/local/experimental runtime channel policy as JSON\n    runtime status                             Show selected/detected/managed runtime status as JSON\n    runtime install [--runtime-id <id>]        Explicitly download, verify, extract, smoke, and select a managed llama.cpp runtime\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    support summary [--first-run-artifact <path>] [--error <text>]\n                                               Print a secret-free support summary with runtime, pairing, first-run, and upload recovery hints\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> --runner-token <token> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence through a paired Hub runner token\n    first-run --model <path> --runtime auto --upload --run-id <id> --run-token <token> ...\n                                               Deprecated debug alias for --runner-token; normal Hub handoff is token-free\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration.";
 
 fn print_help() {
     println!("{HELP_TEXT}");
@@ -125,6 +126,54 @@ fn command_containers(args: &[String]) -> Result<Value, String> {
         Some("check") => Ok(container_runtime_readiness()),
         Some(other) => Err(format!("unknown containers command: {other}")),
         None => Err("containers requires a subcommand: check".to_string()),
+    }
+}
+
+fn command_support(args: &[String]) -> Result<Value, String> {
+    match args.first().map(String::as_str) {
+        Some("summary") => {
+            let mut first_run_artifact: Option<Value> = None;
+            let mut recent_errors: Vec<String> = Vec::new();
+            let mut index = 1;
+            while index < args.len() {
+                match args[index].as_str() {
+                    "--first-run-artifact" => {
+                        index += 1;
+                        let path = args
+                            .get(index)
+                            .ok_or_else(|| "--first-run-artifact requires a path".to_string())?;
+                        let text = std::fs::read_to_string(path).map_err(|error| {
+                            format!("could not read first-run artifact `{path}`: {error}")
+                        })?;
+                        first_run_artifact =
+                            Some(serde_json::from_str(&text).map_err(|error| {
+                                format!("could not parse first-run artifact `{path}`: {error}")
+                            })?);
+                    }
+                    "--error" => {
+                        index += 1;
+                        recent_errors.push(
+                            args.get(index)
+                                .ok_or_else(|| "--error requires a value".to_string())?
+                                .to_string(),
+                        );
+                    }
+                    other => return Err(format!("unknown support summary option: {other}")),
+                }
+                index += 1;
+            }
+            Ok(build_support_summary(
+                Some(env!("CARGO_PKG_VERSION")),
+                json!({
+                    "status": "not_loaded_by_cli",
+                    "message": "The Rust CLI support summary does not read OS credential storage. Use Desktop support export for live pairing status.",
+                }),
+                first_run_artifact,
+                &recent_errors,
+            ))
+        }
+        Some(other) => Err(format!("unknown support command: {other}")),
+        None => Err("support requires a subcommand: summary".to_string()),
     }
 }
 
@@ -496,6 +545,7 @@ fn run(args: &[String]) -> Result<Option<Value>, String> {
         Some("doctor") => command_doctor(&args[1..]).map(Some),
         Some("runtime") => command_runtime(&args[1..]).map(Some),
         Some("containers") => command_containers(&args[1..]).map(Some),
+        Some("support") => command_support(&args[1..]).map(Some),
         Some("first-run") => command_first_run(&args[1..]).map(Some),
         Some(other) => Err(format!("unknown command: {other}")),
     }
@@ -698,6 +748,92 @@ mod tests {
         assert!(output["runtimes"]["docker"].get("cli").is_some());
         assert!(output["runtimes"]["docker"].get("daemon").is_some());
         assert_eq!(output["runtimes"]["podman"]["first_run_required"], false);
+    }
+
+    #[test]
+    fn support_summary_reports_retry_upload_without_token_echoes() {
+        let output_dir = env::temp_dir().join(format!(
+            "infergrade-runner-cli-support-summary-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&output_dir);
+        std::fs::create_dir_all(&output_dir).expect("support output dir");
+        let artifact_path = output_dir.join("native-first-run-result.json");
+        std::fs::write(
+            &artifact_path,
+            serde_json::to_string_pretty(&json!({
+                "result": {
+                    "status": "completed",
+                    "evidence_kind": "native_first_run"
+                },
+                "artifact": {
+                    "path": "/tmp/qbhr_cli_path_secret/native-first-run-result.json"
+                },
+                "bundle_artifact": {
+                    "path": "/tmp/infergrade/IGRP-8421-cli-bundle.json"
+                },
+                "upload": {
+                    "uploaded": false,
+                    "reason": "Bearer qbhr_cli_reason_secret",
+                    "run_id": "qbhr_cli_run_secret",
+                    "bundle_id": "igrp_cli_bundle_secret",
+                    "server": {
+                        "echo": "qbhr_cli_secret_token"
+                    }
+                }
+            }))
+            .expect("artifact JSON"),
+        )
+        .expect("artifact write");
+
+        let output = command_support(&[
+            "summary".to_string(),
+            "--first-run-artifact".to_string(),
+            artifact_path.display().to_string(),
+            "--error".to_string(),
+            "Authorization: Bearer qbhr_cli_secret_token for pairing code IGRP-8421".to_string(),
+        ])
+        .expect("support summary");
+
+        assert_eq!(
+            output["export_kind"],
+            "infergrade_runner_support_summary_v1"
+        );
+        assert_eq!(output["secrets_excluded"], true);
+        assert_eq!(
+            output["first_run"]["upload_status"],
+            "not_uploaded_or_failed"
+        );
+        assert_eq!(
+            output["first_run"]["upload_reason"],
+            "[redacted] [redacted]"
+        );
+        assert_eq!(output["first_run"]["run_id"], "[redacted]");
+        assert_eq!(output["first_run"]["bundle_id"], "[redacted]");
+        assert!(!output["first_run"]["artifact_path"]
+            .as_str()
+            .expect("artifact path")
+            .contains("qbhr_cli_path_secret"));
+        assert!(!output["first_run"]["bundle_artifact_path"]
+            .as_str()
+            .expect("bundle artifact path")
+            .contains("IGRP-8421"));
+        assert!(output["next_actions"]
+            .as_array()
+            .expect("next actions")
+            .iter()
+            .any(|action| action["action"] == "retry_upload"));
+        assert!(HELP_TEXT.contains("support summary"));
+        let rendered = serde_json::to_string(&output).expect("support JSON");
+        assert!(!rendered.contains("qbhr_cli_secret_token"));
+        assert!(!rendered.contains("qbhr_cli_reason_secret"));
+        assert!(!rendered.contains("qbhr_cli_run_secret"));
+        assert!(!rendered.contains("igrp_cli_bundle_secret"));
+        assert!(!rendered.contains("qbhr_cli_path_secret"));
+        assert!(!rendered.contains("IGRP-8421"));
+        assert!(!rendered.contains("Bearer qbhr"));
+
+        let _ = std::fs::remove_dir_all(output_dir);
     }
 
     #[test]

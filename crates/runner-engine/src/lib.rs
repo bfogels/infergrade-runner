@@ -956,6 +956,255 @@ pub fn llama_cpp_runtime_status() -> Value {
     plan
 }
 
+pub fn build_support_summary(
+    app_version: Option<&str>,
+    pairing_status: Value,
+    first_run_artifact: Option<Value>,
+    recent_errors: &[String],
+) -> Value {
+    let runtime_status = llama_cpp_runtime_status();
+    let selected_runtime = runtime_status
+        .get("selected_runtime")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let selected_channel = runtime_status
+        .get("selected_channel")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let selected_selection = selected_runtime.get("selection").unwrap_or(&Value::Null);
+    let first_run_status = support_first_run_status(first_run_artifact.as_ref());
+    let pairing = redact_support_value(pairing_status);
+    let errors = recent_errors
+        .iter()
+        .filter_map(|error| {
+            let sanitized = redact_support_text(error).trim().to_string();
+            if sanitized.is_empty() {
+                None
+            } else {
+                Some(Value::String(sanitized))
+            }
+        })
+        .take(8)
+        .collect::<Vec<_>>();
+    json!({
+        "export_kind": "infergrade_runner_support_summary_v1",
+        "secrets_excluded": true,
+        "app_version": app_version.unwrap_or(env!("CARGO_PKG_VERSION")),
+        "runner_engine_version": env!("CARGO_PKG_VERSION"),
+        "runtime": {
+            "family": "llama.cpp",
+            "native_runtime_status": runtime_status.get("native_runtime_status").cloned().unwrap_or(Value::Null),
+            "message": runtime_status.get("message").cloned().unwrap_or(Value::Null),
+            "selected_runtime_status": selected_runtime.get("status").cloned().unwrap_or(Value::Null),
+            "selected_runtime_id": selected_selection.get("runtime_id").cloned().unwrap_or(Value::Null),
+            "selected_channel": selected_channel,
+            "runtime_path": selected_selection.pointer("/binaries/cli").cloned().unwrap_or(Value::Null),
+            "provenance": selected_selection.get("provenance").cloned().unwrap_or_else(|| selected_selection.get("source").cloned().unwrap_or(Value::Null)),
+            "recovery": runtime_status.get("recovery").cloned().unwrap_or(Value::Null),
+            "update_policy": runtime_status.get("update_policy").cloned().unwrap_or(Value::Null),
+        },
+        "pairing": pairing,
+        "first_run": first_run_status,
+        "recent_errors": errors,
+        "next_actions": support_next_actions(&runtime_status, first_run_artifact.as_ref()),
+        "privacy": {
+            "browser_visible_tokens": false,
+            "excluded": [
+                "runner tokens",
+                "upload tokens",
+                "bearer tokens",
+                "authorization headers",
+                "pairing codes"
+            ],
+        },
+    })
+}
+
+fn support_first_run_status(first_run_artifact: Option<&Value>) -> Value {
+    let Some(payload) = first_run_artifact else {
+        return json!({
+            "status": "not_provided",
+            "upload_status": "unknown",
+            "message": "No first-run artifact was provided for this support summary.",
+        });
+    };
+    let artifact_path = payload
+        .pointer("/artifact/path")
+        .or_else(|| payload.pointer("/bundle_artifact/path"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let bundle_artifact_path = payload
+        .pointer("/bundle_artifact/path")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let uploaded = payload
+        .pointer("/upload/uploaded")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let upload_status = if uploaded {
+        "succeeded"
+    } else if payload.get("upload").is_some() {
+        "not_uploaded_or_failed"
+    } else {
+        "not_attempted"
+    };
+    json!({
+        "status": redact_support_value(payload.pointer("/result/status").cloned().unwrap_or_else(|| Value::String("completed_or_unknown".to_string()))),
+        "evidence_kind": redact_support_value(payload.pointer("/result/evidence_kind").cloned().unwrap_or(Value::Null)),
+        "artifact_path": redact_support_value(artifact_path),
+        "bundle_artifact_path": redact_support_value(bundle_artifact_path),
+        "upload_status": upload_status,
+        "upload_reason": redact_support_value(payload.pointer("/upload/reason").cloned().unwrap_or(Value::Null)),
+        "run_id": redact_support_value(payload.pointer("/upload/run_id").cloned().unwrap_or(Value::Null)),
+        "bundle_id": redact_support_value(payload.pointer("/upload/bundle_id").cloned().unwrap_or(Value::Null)),
+        "message": if uploaded {
+            "Local first-run completed and upload succeeded."
+        } else {
+            "Local first-run artifact is available; upload can be retried after pairing and Hub handoff are healthy."
+        },
+    })
+}
+
+fn support_next_actions(runtime_status: &Value, first_run_artifact: Option<&Value>) -> Value {
+    let mut actions = Vec::new();
+    match runtime_status
+        .get("native_runtime_status")
+        .and_then(Value::as_str)
+    {
+        Some("available") => {}
+        _ => actions.push(json!({
+            "area": "runtime",
+            "action": "install_or_select_runtime",
+            "message": "Install the recommended managed runtime or select a runnable llama.cpp binary before running native first-run.",
+        })),
+    }
+    if runtime_status
+        .pointer("/selected_runtime/status")
+        .and_then(Value::as_str)
+        == Some("stale")
+    {
+        actions.push(json!({
+            "area": "runtime",
+            "action": "repair_stale_selection",
+            "message": "The selected runtime path is stale. Reinstall the managed runtime or select an existing llama.cpp binary.",
+        }));
+    }
+    match first_run_artifact {
+        None => actions.push(json!({
+            "area": "first_run",
+            "action": "run_native_first_benchmark",
+            "message": "Run the native first benchmark after pairing, runtime selection, and model selection are ready.",
+        })),
+        Some(payload)
+            if payload
+                .pointer("/upload/uploaded")
+                .and_then(Value::as_bool)
+                .unwrap_or(false) => {}
+        Some(_) => actions.push(json!({
+            "area": "upload",
+            "action": "retry_upload",
+            "message": "A local first-run artifact exists. Retry upload after confirming the machine is paired with Hub.",
+        })),
+    }
+    Value::Array(actions)
+}
+
+pub fn redact_support_value(value: Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(redact_support_text(&text)),
+        Value::Array(items) => Value::Array(items.into_iter().map(redact_support_value).collect()),
+        Value::Object(entries) => Value::Object(
+            entries
+                .into_iter()
+                .map(|(key, item)| {
+                    let normalized_key = key.to_lowercase();
+                    let redacted_value = if normalized_key.contains("authorization")
+                        || normalized_key == "access_token"
+                        || normalized_key == "runner_token"
+                        || normalized_key == "upload_token"
+                        || normalized_key == "bearer_token"
+                        || normalized_key == "pairing_code"
+                    {
+                        Value::String("[redacted]".to_string())
+                    } else {
+                        redact_support_value(item)
+                    };
+                    (key, redacted_value)
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+pub fn redact_support_text(text: &str) -> String {
+    let mut redact_next = false;
+    text.split_whitespace()
+        .map(|part| {
+            if redact_next {
+                redact_next = false;
+                return "[redacted]".to_string();
+            }
+            let lower = part.to_lowercase();
+            let upper = part.to_uppercase();
+            let embedded_redacted = redact_embedded_support_patterns(part);
+            if embedded_redacted != part {
+                return embedded_redacted;
+            }
+            if lower.starts_with("bearer")
+                || lower.starts_with("qbhr_")
+                || lower.starts_with("igrt_")
+                || lower.starts_with("igrp_")
+                || lower.starts_with("igrp-")
+                || upper.starts_with("IGRP-")
+                || lower.contains("authorization:")
+            {
+                if lower == "bearer"
+                    || lower.ends_with("bearer")
+                    || lower.contains("authorization:")
+                {
+                    redact_next = true;
+                }
+                "[redacted]".to_string()
+            } else {
+                part.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn redact_embedded_support_patterns(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut redacted = String::with_capacity(text.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let suffix = text[index..].to_lowercase();
+        if ["qbhr_", "igrt_", "igrp_", "igrp-"]
+            .iter()
+            .any(|prefix| suffix.starts_with(prefix))
+        {
+            redacted.push_str("[redacted]");
+            index += sensitive_pattern_len(&bytes[index..]);
+            continue;
+        }
+        let ch = text[index..]
+            .chars()
+            .next()
+            .expect("index is always within string");
+        redacted.push(ch);
+        index += ch.len_utf8();
+    }
+    redacted
+}
+
+fn sensitive_pattern_len(bytes: &[u8]) -> usize {
+    bytes
+        .iter()
+        .take_while(|byte| byte.is_ascii_alphanumeric() || **byte == b'_' || **byte == b'-')
+        .count()
+}
+
 pub fn verify_runtime_download_manifest(entry: &Value) -> Result<(), String> {
     let runtime_id = entry
         .get("runtime_id")
@@ -1245,6 +1494,92 @@ pub fn install_managed_llama_cpp_runtime(
 ) -> Result<Value, String> {
     let entry = managed_llama_cpp_runtime_entry(options.runtime_id.as_deref())?;
     install_managed_llama_cpp_runtime_from_manifest_entry(entry, options)
+}
+
+fn managed_runtime_root_for_selection(selection: &Value) -> Result<Option<PathBuf>, String> {
+    if selection.get("source").and_then(Value::as_str) != Some("managed_download") {
+        return Ok(None);
+    }
+    let runtime_id = selection
+        .get("runtime_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "managed runtime selection is missing runtime_id".to_string())?;
+    let runtime_id = safe_runtime_id(Some(runtime_id))?;
+    managed_runtime_install_root(&runtime_id).map(Some)
+}
+
+pub fn remove_selected_llama_cpp_runtime(remove_managed_files: bool) -> Result<Value, String> {
+    let selected_path = selected_llama_cpp_runtime_path()?;
+    let selected_text = match fs::read_to_string(&selected_path) {
+        Ok(text) => Some(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!(
+                "could not read selected runtime `{}`: {error}",
+                selected_path.display()
+            ))
+        }
+    };
+    let selection = selected_text
+        .as_deref()
+        .map(|text| {
+            serde_json::from_str::<Value>(text)
+                .map_err(|error| format!("could not parse selected runtime: {error}"))
+        })
+        .transpose()?;
+    let managed_root = selection
+        .as_ref()
+        .and_then(|value| managed_runtime_root_for_selection(value).transpose())
+        .transpose()?;
+    let removed_selection = match fs::remove_file(&selected_path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(format!(
+                "could not remove selected runtime `{}`: {error}",
+                selected_path.display()
+            ))
+        }
+    };
+    let removed_managed_files = if remove_managed_files {
+        match managed_root.as_ref() {
+            Some(root) => match fs::remove_dir_all(root) {
+                Ok(()) => true,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                Err(error) => {
+                    return Err(format!(
+                        "could not remove managed runtime files `{}`: {error}",
+                        root.display()
+                    ))
+                }
+            },
+            None => false,
+        }
+    } else {
+        false
+    };
+    let selected_source = selection
+        .as_ref()
+        .and_then(|value| value.get("source"))
+        .and_then(Value::as_str)
+        .unwrap_or("not_selected");
+    Ok(json!({
+        "status": if removed_selection || removed_managed_files { "removed" } else { "not_selected" },
+        "removed_selection": removed_selection,
+        "removed_managed_files": removed_managed_files,
+        "selected_runtime_path": selected_path.display().to_string(),
+        "managed_runtime_root": managed_root.map(|path| path.display().to_string()),
+        "selected_source": selected_source,
+        "message": if removed_selection || removed_managed_files {
+            "Selected llama.cpp runtime cleared. Install the managed runtime again or select a runnable local binary before native first-run."
+        } else {
+            "No selected llama.cpp runtime was recorded. Install or select a runtime before native first-run."
+        },
+        "next_actions": [
+            "install_managed_runtime",
+            "select_existing_runtime"
+        ],
+    }))
 }
 
 pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
@@ -2043,6 +2378,103 @@ mod tests {
     }
 
     #[test]
+    fn support_summary_preserves_recovery_hints_without_secrets() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-support-cache-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let first_run = json!({
+            "result": {
+                "status": "completed",
+                "evidence_kind": "native_first_run"
+            },
+            "artifact": {
+                "path": "/tmp/qbhr_path_secret/native-first-run-result.json"
+            },
+            "bundle_artifact": {
+                "path": "/tmp/infergrade/IGRP-8421-bundle.json"
+            },
+            "upload": {
+                "uploaded": false,
+                "reason": "Bearer qbhr_reason_secret",
+                "run_id": "qbhr_run_secret",
+                "bundle_id": "igrp_bundle_secret",
+                "server": {
+                    "authorization": "Bearer qbhr_secret_token",
+                    "echo": "qbhr_secret_token"
+                }
+            }
+        });
+
+        let summary = build_support_summary(
+            Some("0.2.4-test"),
+            json!({
+                "profile": {"status": "present"},
+                "token": {"status": "present"},
+                "access_token": "qbhr_secret_token"
+            }),
+            Some(first_run),
+            &[
+                "Authorization: Bearer qbhr_secret_token".to_string(),
+                "pairing failed for code IGRP-8421".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            summary["export_kind"],
+            "infergrade_runner_support_summary_v1"
+        );
+        assert_eq!(summary["secrets_excluded"], true);
+        assert_eq!(summary["app_version"], "0.2.4-test");
+        assert_eq!(
+            summary["runtime"]["selected_channel"]["channel"],
+            "not_selected"
+        );
+        assert_eq!(summary["pairing"]["access_token"], "[redacted]");
+        assert_eq!(
+            summary["first_run"]["upload_status"],
+            "not_uploaded_or_failed"
+        );
+        assert_eq!(
+            summary["first_run"]["upload_reason"],
+            "[redacted] [redacted]"
+        );
+        assert_eq!(summary["first_run"]["run_id"], "[redacted]");
+        assert_eq!(summary["first_run"]["bundle_id"], "[redacted]");
+        assert!(!summary["first_run"]["artifact_path"]
+            .as_str()
+            .expect("artifact path")
+            .contains("qbhr_path_secret"));
+        assert!(!summary["first_run"]["bundle_artifact_path"]
+            .as_str()
+            .expect("bundle artifact path")
+            .contains("IGRP-8421"));
+        assert!(summary["next_actions"]
+            .as_array()
+            .expect("next actions")
+            .iter()
+            .any(|action| action["action"] == "retry_upload"));
+        let rendered = serde_json::to_string(&summary).expect("summary JSON");
+        assert!(!rendered.contains("qbhr_secret_token"));
+        assert!(!rendered.contains("qbhr_reason_secret"));
+        assert!(!rendered.contains("qbhr_run_secret"));
+        assert!(!rendered.contains("igrp_bundle_secret"));
+        assert!(!rendered.contains("qbhr_path_secret"));
+        assert!(!rendered.contains("IGRP-8421"));
+        assert!(!rendered.contains("Bearer qbhr"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
     fn runtime_plan_is_inspection_only_and_recommends_platform_lane() {
         let plan =
             llama_cpp_runtime_plan(json!({"status": "not_selected", "selection": Value::Null}));
@@ -2173,6 +2605,69 @@ mod tests {
         )
         .expect_err("unsafe runtime id rejected");
         assert!(error.contains("runtime_id"));
+    }
+
+    #[test]
+    fn removes_selected_managed_runtime_without_touching_local_binary_selections() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-remove-runtime-cache-{}",
+            std::process::id()
+        ));
+        let local_binary = env::temp_dir().join(format!(
+            "infergrade-runner-engine-local-binary-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&runtime_cache_dir).expect("runtime cache dir");
+        fs::write(&local_binary, b"local llama-cli").expect("local runtime binary");
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let local_selection = json!({
+            "runtime_id": "llama-cpp-local-test",
+            "source": "selected_existing",
+            "channel": "local_binary",
+            "binaries": {
+                "cli": local_binary.display().to_string(),
+            },
+        });
+        write_selected_llama_cpp_runtime(&local_selection).expect("selected local runtime");
+        let removed = remove_selected_llama_cpp_runtime(true).expect("local selection removed");
+        assert_eq!(removed["removed_selection"], true);
+        assert_eq!(removed["removed_managed_files"], false);
+        assert!(local_binary.exists());
+        assert_eq!(load_selected_llama_cpp_runtime()["status"], "not_selected");
+
+        let managed_root = managed_runtime_install_root(MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID)
+            .expect("managed root");
+        fs::create_dir_all(&managed_root).expect("managed runtime root");
+        fs::write(managed_root.join("llama-cli"), b"managed llama-cli")
+            .expect("managed runtime binary");
+        let managed_selection = json!({
+            "runtime_id": MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID,
+            "source": "managed_download",
+            "channel": "infergrade_stable",
+            "binaries": {
+                "cli": managed_root.join("llama-cli").display().to_string(),
+            },
+        });
+        write_selected_llama_cpp_runtime(&managed_selection).expect("selected managed runtime");
+        let removed = remove_selected_llama_cpp_runtime(true).expect("managed runtime removed");
+        assert_eq!(removed["removed_selection"], true);
+        assert_eq!(removed["removed_managed_files"], true);
+        assert!(!managed_root.exists());
+        assert!(removed["message"]
+            .as_str()
+            .expect("message")
+            .contains("Install the managed runtime again"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_file(local_binary);
+        let _ = fs::remove_dir_all(runtime_cache_dir);
     }
 
     #[test]

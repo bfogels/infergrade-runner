@@ -27,8 +27,13 @@ const clearLogsButton = document.querySelector("[data-clear-logs]");
 const themeChoiceButtons = [...document.querySelectorAll("[data-theme-choice]")];
 const runtimePlanButton = document.querySelector("[data-runtime-plan]");
 const runtimeInstallManagedButton = document.querySelector("[data-runtime-install-managed]");
+const runtimeReinstallManagedButton = document.querySelector("[data-runtime-reinstall-managed]");
+const runtimeRemoveSelectedButton = document.querySelector("[data-runtime-remove-selected]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
 const firstRunStartButton = document.querySelector("[data-first-run-start]");
+const retryFirstRunUploadButton = document.querySelector("[data-retry-first-run-upload]");
+const copyArtifactPathButton = document.querySelector("[data-copy-artifact-path]");
+const copySupportSummaryButton = document.querySelector("[data-copy-support-summary]");
 const firstRunStatus = document.querySelector("[data-first-run-status]");
 const firstRunHandoffStatus = document.querySelector("[data-first-run-handoff-status]");
 const runnerSelfTestButton = document.querySelector("[data-runner-self-test]");
@@ -71,6 +76,7 @@ let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxe
 let modelPathReadiness = "Select a local GGUF model for the first benchmark.";
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
+let lastFirstRunPayload = null;
 
 function systemTheme() {
   if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
@@ -720,6 +726,94 @@ function managedRuntimeInstallSummary(result = {}) {
   return `Managed runtime selected: ${runtimeId}. SHA-256 verified; ${signature}.`;
 }
 
+function runtimeRemovalSummary(result = {}) {
+  if (result.removed_selection || result.removed_managed_files) {
+    return result.message || "Selected llama.cpp runtime removed. Install or select a runtime before native first-run.";
+  }
+  return result.message || "No selected llama.cpp runtime was recorded. Install or select a runtime before native first-run.";
+}
+
+function setRuntimeActionDisabled(disabled) {
+  if (runtimeInstallManagedButton) {
+    runtimeInstallManagedButton.disabled = disabled;
+  }
+  if (runtimeReinstallManagedButton) {
+    runtimeReinstallManagedButton.disabled = disabled;
+  }
+  if (runtimeRemoveSelectedButton) {
+    runtimeRemoveSelectedButton.disabled = disabled;
+  }
+  if (runtimeSelectExistingButton) {
+    runtimeSelectExistingButton.disabled = disabled;
+  }
+}
+
+async function inspectRuntimePlan() {
+  llamaRuntimeReadiness = "Checking the llama.cpp runtime plan...";
+  renderLocalReadinessChecklist();
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    appendLog("Open the desktop app to inspect the native llama.cpp runtime plan.");
+    llamaRuntimeReadiness = "Runtime plan is available inside the desktop app.";
+    renderLocalReadinessChecklist();
+    return null;
+  }
+  const plan = await invoke("llama_cpp_runtime_plan");
+  llamaRuntimeReadiness = runtimePlanSummary(plan);
+  renderLocalReadinessChecklist();
+  appendLog(`llama.cpp runtime plan: ${JSON.stringify(plan)}`);
+  return plan;
+}
+
+async function installManagedRuntime({ reinstall = false } = {}) {
+  const runtimeId = form.elements.runtimeId?.value.trim() || null;
+  llamaRuntimeReadiness = reinstall
+    ? "Replacing the selected llama.cpp runtime with the managed runtime. Local binaries are not deleted."
+    : "Installing the recommended llama.cpp runtime. This can take a minute...";
+  renderLocalReadinessChecklist();
+  setRuntimeActionDisabled(true);
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    appendLog("Open the desktop app to install the managed llama.cpp runtime.");
+    llamaRuntimeReadiness = "Managed runtime install is available inside the desktop app.";
+    renderLocalReadinessChecklist();
+    return null;
+  }
+  if (reinstall) {
+    const removed = await invoke("remove_selected_llama_cpp_runtime", {
+      removeManagedFiles: true,
+    });
+    appendLog(`Cleared selected llama.cpp runtime before reinstall: ${JSON.stringify(removed)}`);
+  }
+  const result = await invoke("install_managed_llama_cpp_runtime", {
+    runtimeId,
+  });
+  llamaRuntimeReadiness = managedRuntimeInstallSummary(result);
+  renderLocalReadinessChecklist();
+  appendLog(`Installed managed llama.cpp runtime: ${JSON.stringify(result)}`);
+  return result;
+}
+
+async function removeSelectedRuntime() {
+  llamaRuntimeReadiness = "Removing the selected llama.cpp runtime record...";
+  renderLocalReadinessChecklist();
+  setRuntimeActionDisabled(true);
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    appendLog("Open the desktop app to remove the selected llama.cpp runtime.");
+    llamaRuntimeReadiness = "Runtime removal is available inside the desktop app.";
+    renderLocalReadinessChecklist();
+    return null;
+  }
+  const result = await invoke("remove_selected_llama_cpp_runtime", {
+    removeManagedFiles: true,
+  });
+  llamaRuntimeReadiness = runtimeRemovalSummary(result);
+  renderLocalReadinessChecklist();
+  appendLog(`Removed selected llama.cpp runtime: ${JSON.stringify(result)}`);
+  return result;
+}
+
 function readFirstRunModelPath() {
   const modelPath = form.elements.firstRunModelPath?.value.trim() || "";
   if (!modelPath) {
@@ -840,6 +934,93 @@ function clearFirstRunHandoff() {
   if (firstRunHandoffStatus) {
     firstRunHandoffStatus.textContent = "Hub upload complete. Start another run from Hub when you want to add more evidence.";
   }
+}
+
+function firstRunArtifactText(payload = lastFirstRunPayload) {
+  const paths = [
+    payload?.artifact?.path,
+    payload?.bundle_artifact?.path,
+  ].filter(Boolean);
+  return paths.join("\n");
+}
+
+function updateFirstRunSupportActions() {
+  const hasArtifact = Boolean(firstRunArtifactText());
+  if (copyArtifactPathButton) {
+    copyArtifactPathButton.disabled = !hasArtifact;
+  }
+  if (retryFirstRunUploadButton) {
+    const uploaded = lastFirstRunPayload?.upload?.uploaded === true;
+    retryFirstRunUploadButton.disabled = !lastFirstRunPayload || uploaded;
+  }
+}
+
+async function copyTextToClipboard(text, label) {
+  if (!text) {
+    throw new Error(`${label} is not available yet.`);
+  }
+  if (!navigator.clipboard?.writeText) {
+    throw new Error("Clipboard is unavailable in this view.");
+  }
+  await navigator.clipboard.writeText(text);
+  appendLog(`${label} copied.`);
+}
+
+async function copyArtifactPath() {
+  await copyTextToClipboard(firstRunArtifactText(), "Copy artifact path");
+}
+
+async function copySupportSummary() {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    appendLog("Open the desktop app to copy a support summary.");
+    return;
+  }
+  const payload = await invoke("desktop_support_summary", {
+    firstRunArtifact: lastFirstRunPayload,
+    recentErrors: logLines.slice(-8),
+  });
+  await copyTextToClipboard(JSON.stringify(payload, null, 2), "Copy support summary");
+}
+
+async function retryFirstRunUpload() {
+  if (!lastFirstRunPayload) {
+    throw new Error("Retry upload requires a completed native first benchmark.");
+  }
+  const uploadRunId = readFirstRunUploadRunId() || lastFirstRunPayload?.upload?.run_id;
+  if (!uploadRunId) {
+    throw new Error("Enter a Hub run ID before retrying upload.");
+  }
+  const artifactPath = lastFirstRunPayload?.artifact?.path || "";
+  const bundleArtifactPath = lastFirstRunPayload?.bundle_artifact?.path || "";
+  if (!artifactPath || !bundleArtifactPath) {
+    throw new Error("Retry upload requires saved local result and bundle artifacts.");
+  }
+  const uploadWorkerId = readFirstRunUploadWorkerId();
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    appendLog("Open the desktop app to retry upload.");
+    return;
+  }
+  retryFirstRunUploadButton.disabled = true;
+  firstRunStatus.textContent = "Retrying Hub upload from the local first-run artifact...";
+  const payload = await invoke("retry_desktop_native_first_run_upload", {
+    artifactPath,
+    bundleArtifactPath,
+    uploadRunId,
+    uploadWorkerId,
+  });
+  lastFirstRunPayload = payload;
+  updateFirstRunSupportActions();
+  if (payload?.upload?.uploaded) {
+    firstRunStatus.textContent = `Uploaded bundle ${payload.upload.bundle_id} to Hub run ${payload.upload.run_id}.`;
+    clearFirstRunHandoff();
+    setStatus("First benchmark uploaded", "good");
+  } else {
+    firstRunStatus.textContent = `Upload failed: ${payload?.upload?.error || "unknown Hub upload error"}`;
+    setStatus("Upload failed", "error");
+  }
+  appendLog(`Retried native first-run upload: ${JSON.stringify(payload)}`);
 }
 
 async function startRunner({ confirmStarted = false } = {}) {
@@ -994,6 +1175,8 @@ async function runNativeFirstRun() {
       uploadRunId,
       uploadWorkerId,
     });
+    lastFirstRunPayload = payload;
+    updateFirstRunSupportActions();
     const result = payload?.result || {};
     const metrics = result.metrics || {};
     const speed = Number.isFinite(metrics.decode_tokens_per_second)
@@ -1035,6 +1218,7 @@ async function runNativeFirstRun() {
     appendLog(`Native first-run failed: ${message}`);
   } finally {
     firstRunStartButton.disabled = false;
+    updateFirstRunSupportActions();
   }
 }
 
@@ -1090,65 +1274,50 @@ themeChoiceButtons.forEach((button) => {
 });
 
 runtimePlanButton?.addEventListener("click", () => {
-  llamaRuntimeReadiness = "Checking the llama.cpp runtime plan...";
-  renderLocalReadinessChecklist();
-  loadTauriInvoke()
-    .then((invoke) => {
-      if (!invoke) {
-        appendLog("Open the desktop app to inspect the native llama.cpp runtime plan.");
-        llamaRuntimeReadiness = "Runtime plan is available inside the desktop app.";
-        return null;
-      }
-      return invoke("llama_cpp_runtime_plan");
-    })
-    .then((plan) => {
-      if (!plan) {
-        return;
-      }
-      llamaRuntimeReadiness = runtimePlanSummary(plan);
-      renderLocalReadinessChecklist();
-      appendLog(`llama.cpp runtime plan: ${JSON.stringify(plan)}`);
-    })
-    .catch((error) => {
-      llamaRuntimeReadiness = "Runtime plan unavailable. See logs for the technical detail.";
-      renderLocalReadinessChecklist();
-      setStatus("Runtime check failed", "error");
-      appendLog(`Could not inspect llama.cpp runtime plan: ${error.message || error}`);
-    });
+  inspectRuntimePlan().catch((error) => {
+    llamaRuntimeReadiness = "Runtime plan unavailable. See logs for the technical detail.";
+    renderLocalReadinessChecklist();
+    setStatus("Runtime check failed", "error");
+    appendLog(`Could not inspect llama.cpp runtime plan: ${error.message || error}`);
+  });
 });
 
 runtimeInstallManagedButton?.addEventListener("click", () => {
-  const runtimeId = form.elements.runtimeId?.value.trim() || null;
-  llamaRuntimeReadiness = "Installing the recommended llama.cpp runtime. This can take a minute...";
-  renderLocalReadinessChecklist();
-  runtimeInstallManagedButton.disabled = true;
-  loadTauriInvoke()
-    .then((invoke) => {
-      if (!invoke) {
-        appendLog("Open the desktop app to install the managed llama.cpp runtime.");
-        llamaRuntimeReadiness = "Managed runtime install is available inside the desktop app.";
-        return null;
-      }
-      return invoke("install_managed_llama_cpp_runtime", {
-        runtimeId,
-      });
-    })
-    .then((result) => {
-      if (!result) {
-        return;
-      }
-      llamaRuntimeReadiness = managedRuntimeInstallSummary(result);
-      renderLocalReadinessChecklist();
-      appendLog(`Installed managed llama.cpp runtime: ${JSON.stringify(result)}`);
-    })
+  installManagedRuntime()
     .catch((error) => {
-      llamaRuntimeReadiness = "Managed runtime install failed. See logs for the technical detail.";
+      llamaRuntimeReadiness = "Managed runtime install failed. Retry install, remove the selected runtime, or select an existing llama.cpp binary.";
       renderLocalReadinessChecklist();
       setStatus("Runtime install failed", "error");
       appendLog(`Could not install managed llama.cpp runtime: ${error.message || error}`);
     })
     .finally(() => {
-      runtimeInstallManagedButton.disabled = false;
+      setRuntimeActionDisabled(false);
+    });
+});
+
+runtimeReinstallManagedButton?.addEventListener("click", () => {
+  installManagedRuntime({ reinstall: true })
+    .catch((error) => {
+      llamaRuntimeReadiness = "Managed runtime reinstall failed. Remove the selected runtime or select an existing llama.cpp binary.";
+      renderLocalReadinessChecklist();
+      setStatus("Runtime reinstall failed", "error");
+      appendLog(`Could not reinstall managed llama.cpp runtime: ${error.message || error}`);
+    })
+    .finally(() => {
+      setRuntimeActionDisabled(false);
+    });
+});
+
+runtimeRemoveSelectedButton?.addEventListener("click", () => {
+  removeSelectedRuntime()
+    .catch((error) => {
+      llamaRuntimeReadiness = "Runtime removal failed. See logs for the technical detail.";
+      renderLocalReadinessChecklist();
+      setStatus("Runtime removal failed", "error");
+      appendLog(`Could not remove selected llama.cpp runtime: ${error.message || error}`);
+    })
+    .finally(() => {
+      setRuntimeActionDisabled(false);
     });
 });
 
@@ -1191,6 +1360,26 @@ firstRunStartButton?.addEventListener("click", () => {
     setStatus("First benchmark blocked", "error");
     appendLog(`Could not start native first-run: ${message}`);
   });
+});
+
+retryFirstRunUploadButton?.addEventListener("click", () => {
+  retryFirstRunUpload().catch((error) => {
+    const message = error.message || String(error);
+    if (firstRunStatus) {
+      firstRunStatus.textContent = message;
+    }
+    setStatus("Upload retry blocked", "error");
+    appendLog(`Could not retry first-run upload: ${message}`);
+    updateFirstRunSupportActions();
+  });
+});
+
+copyArtifactPathButton?.addEventListener("click", () => {
+  copyArtifactPath().catch((error) => appendLog(`Could not copy artifact path: ${error.message || error}`));
+});
+
+copySupportSummaryButton?.addEventListener("click", () => {
+  copySupportSummary().catch((error) => appendLog(`Could not copy support summary: ${error.message || error}`));
 });
 
 runnerSelfTestButton?.addEventListener("click", () => {
