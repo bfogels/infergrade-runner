@@ -36,6 +36,8 @@ const firstRunRuntimePathInput = document.querySelector('[name="firstRunRuntimeP
 const firstRunUploadRunIdInput = document.querySelector('[name="firstRunUploadRunId"]');
 const firstRunUploadWorkerIdInput = document.querySelector('[name="firstRunUploadWorkerId"]');
 const firstRunStartButton = document.querySelector("[data-first-run-start]");
+const firstRunAgainButton = document.querySelector("[data-first-run-again]");
+const firstRunAnotherModelButton = document.querySelector("[data-first-run-another-model]");
 const retryFirstRunUploadButton = document.querySelector("[data-retry-first-run-upload]");
 const copyArtifactPathButton = document.querySelector("[data-copy-artifact-path]");
 const copySupportSummaryButton = document.querySelector("[data-copy-support-summary]");
@@ -1035,6 +1037,12 @@ function firstRunArtifactText(payload = lastFirstRunPayload) {
 
 function updateFirstRunSupportActions() {
   const hasArtifact = Boolean(firstRunArtifactText());
+  if (firstRunAgainButton) {
+    firstRunAgainButton.disabled = !lastFirstRunPayload;
+  }
+  if (firstRunAnotherModelButton) {
+    firstRunAnotherModelButton.disabled = !lastFirstRunPayload && !currentFirstRunModelPath();
+  }
   if (copyArtifactPathButton) {
     copyArtifactPathButton.disabled = !hasArtifact;
   }
@@ -1042,6 +1050,24 @@ function updateFirstRunSupportActions() {
     const uploaded = lastFirstRunPayload?.upload?.uploaded === true;
     retryFirstRunUploadButton.disabled = !lastFirstRunPayload || uploaded;
   }
+}
+
+function clearFirstRunLocalState({ clearModel = false } = {}) {
+  lastFirstRunPayload = null;
+  if (clearModel && firstRunModelPathInput) {
+    firstRunModelPathInput.value = "";
+  }
+  modelPathReadiness = currentFirstRunModelPath()
+    ? `First-run model selected: ${currentFirstRunModelPath()}`
+    : "Select a local GGUF model for the first benchmark.";
+  nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
+  if (firstRunStatus) {
+    firstRunStatus.textContent = clearModel
+      ? "Choose another local GGUF model before running."
+      : "Ready to run this local GGUF model again.";
+  }
+  updateFirstRunSupportActions();
+  renderLocalReadinessChecklist();
 }
 
 async function copyTextToClipboard(text, label) {
@@ -1448,6 +1474,7 @@ firstRunModelPathInput?.addEventListener("input", () => {
       ? `First-run model selected: ${modelPath}`
       : "Use a local GGUF model file for native first-run."
     : "Select a local GGUF model for the first benchmark.";
+  updateFirstRunSupportActions();
   renderLocalReadinessChecklist();
 });
 
@@ -1464,6 +1491,24 @@ firstRunStartButton?.addEventListener("click", () => {
     setStatus("First benchmark blocked", "error");
     appendLog(`Could not start native first-run: ${message}`);
   });
+});
+
+firstRunAgainButton?.addEventListener("click", () => {
+  clearFirstRunLocalState();
+  runNativeFirstRun().catch((error) => {
+    const message = error.message || String(error);
+    if (firstRunStatus) {
+      firstRunStatus.textContent = message;
+    }
+    setStatus("First benchmark blocked", "error");
+    appendLog(`Could not rerun native first-run: ${message}`);
+  });
+});
+
+firstRunAnotherModelButton?.addEventListener("click", () => {
+  clearFirstRunLocalState({ clearModel: true });
+  setStatus("Choose another model", "idle");
+  appendLog("Cleared local first-run result state; choose another GGUF model to run.");
 });
 
 retryFirstRunUploadButton?.addEventListener("click", () => {

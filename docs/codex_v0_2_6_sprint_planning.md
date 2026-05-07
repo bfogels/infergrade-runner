@@ -65,7 +65,7 @@ v0.2.6 can promote when a normal Mac user can understand the first-run loop stat
 ## PR A Local Evidence
 
 Branch: `codex/runner-v026-guided-checklist`
-PR: pending
+PR: #164, merged to `develop` as `45d38e2`.
 
 Implemented:
 
@@ -93,3 +93,33 @@ Browser smoke:
 - Desktop viewport rendered the new `First-run path` with all six steps and no page errors.
 - Mobile viewport at `390px` had no horizontal overflow.
 - Typing `/tmp/model.gguf` updated the model step to `done` and the local readiness model path text to the selected path.
+
+## PR B Local Evidence
+
+Branch: `codex/runner-v026-repeat-actions`
+PR: pending
+
+Implemented:
+
+- Added `Run again` and `Run another model` actions beside the existing first-run controls.
+- `Run again` is available after a completed local first-run payload and reuses the existing native first-run path.
+- `Run another model` clears local first-run result state and the model input without touching pairing, Hub handoff, or credential state.
+- The buttons do not add Hub URLs, file reveal permissions, or browser-visible token surfaces.
+
+Validation passed locally:
+
+```bash
+npm ci --prefix apps/desktop-runner
+npm run check --prefix apps/desktop-runner
+python3 ./scripts/sync_versions.py --check
+python3 ./scripts/check_versions.py
+git diff --check
+gitleaks detect --source=. --redact --no-banner --exit-code 0
+```
+
+Browser smoke:
+
+- Playwright opened `http://127.0.0.1:1424/`.
+- Typing `/tmp/model.gguf` marks the model step `done`.
+- `Run another model` becomes enabled after model input is present; `Run again` remains disabled until a completed first-run payload exists.
+- Mobile viewport at `390px` had no horizontal overflow.
