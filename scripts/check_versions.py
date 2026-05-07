@@ -44,9 +44,27 @@ CHECKS = {
     "apps/desktop-runner/src-tauri/Cargo.toml": lambda: regex_version(
         "apps/desktop-runner/src-tauri/Cargo.toml", r'^version = "([^"]+)"$'
     ),
+    "apps/runner-cli/Cargo.toml": lambda: regex_version(
+        "apps/runner-cli/Cargo.toml", r'^version = "([^"]+)"$'
+    ),
+    "crates/runner-engine/Cargo.toml": lambda: regex_version(
+        "crates/runner-engine/Cargo.toml", r'^version = "([^"]+)"$'
+    ),
     "apps/desktop-runner/src-tauri/Cargo.lock": lambda: regex_version(
         "apps/desktop-runner/src-tauri/Cargo.lock",
         r'name = "infergrade_desktop_runner"\nversion = "([^"]+)"',
+    ),
+    "Cargo.lock infergrade-runner-cli": lambda: regex_version(
+        "Cargo.lock",
+        r'name = "infergrade-runner-cli"\nversion = "([^"]+)"',
+    ),
+    "Cargo.lock infergrade_desktop_runner": lambda: regex_version(
+        "Cargo.lock",
+        r'name = "infergrade_desktop_runner"\nversion = "([^"]+)"',
+    ),
+    "Cargo.lock infergrade_runner_engine": lambda: regex_version(
+        "Cargo.lock",
+        r'name = "infergrade_runner_engine"\nversion = "([^"]+)"',
     ),
     "apps/desktop-runner/src-tauri/Cargo.lock infergrade_runner_engine": lambda: regex_version(
         "apps/desktop-runner/src-tauri/Cargo.lock",

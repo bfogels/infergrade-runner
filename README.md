@@ -39,7 +39,7 @@ The clearest first path is:
 
 The broader Runner architecture remains available, but the current default is intentionally narrower than a general benchmark platform.
 
-The Desktop Runner product path now has a native first-run lane for macOS Apple Silicon with a user-selected `llama.cpp` runtime and local GGUF model. Docker is not required for that first local benchmark. Managed runtime downloads are not enabled yet, so a fresh Mac still needs an explicit app-guided runtime selection before the native run is ready. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
+The Desktop Runner product path now has a native first-run lane for macOS Apple Silicon with a user-selected `llama.cpp` runtime and local GGUF model. Docker will not be required for the first local benchmark. Managed runtime downloads are not enabled yet, so a fresh Mac still needs an explicit app-guided runtime selection before the native run is ready. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
 
 ## Decision Suite vs Reference Suite
 

@@ -68,6 +68,8 @@ class ReleaseCiTests(unittest.TestCase):
                 root / "python/runner-core",
                 root / "python/runner-core/src/infergrade",
                 root / "apps/desktop-runner/src-tauri",
+                root / "apps/runner-cli",
+                root / "crates/runner-engine",
             ]
             for path in paths:
                 path.mkdir(parents=True)
@@ -91,7 +93,22 @@ class ReleaseCiTests(unittest.TestCase):
                 '[package]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n',
                 encoding="utf-8",
             )
+            (root / "apps/runner-cli/Cargo.toml").write_text(
+                '[package]\nname = "infergrade-runner-cli"\nversion = "0.0.1"\n',
+                encoding="utf-8",
+            )
+            (root / "crates/runner-engine/Cargo.toml").write_text(
+                '[package]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
+                encoding="utf-8",
+            )
             (root / "apps/desktop-runner/src-tauri/Cargo.lock").write_text(
+                '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
+                '[[package]]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n'
+                '[[package]]\nname = "schannel"\nversion = "0.1.29"\n',
+                encoding="utf-8",
+            )
+            (root / "Cargo.lock").write_text(
+                '[[package]]\nname = "infergrade-runner-cli"\nversion = "0.0.1"\n'
                 '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
                 '[[package]]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n'
                 '[[package]]\nname = "schannel"\nversion = "0.1.29"\n',
@@ -115,10 +132,17 @@ class ReleaseCiTests(unittest.TestCase):
                 ]["version"],
             )
             self.assertIn('version = "1.2.3"', (root / "apps/desktop-runner/src-tauri/Cargo.toml").read_text())
+            self.assertIn('version = "1.2.3"', (root / "apps/runner-cli/Cargo.toml").read_text())
+            self.assertIn('version = "1.2.3"', (root / "crates/runner-engine/Cargo.toml").read_text())
             cargo_lock = (root / "apps/desktop-runner/src-tauri/Cargo.lock").read_text()
             self.assertIn('name = "infergrade_desktop_runner"\nversion = "1.2.3"', cargo_lock)
             self.assertIn('name = "infergrade_runner_engine"\nversion = "1.2.3"', cargo_lock)
             self.assertIn('name = "schannel"\nversion = "0.1.29"', cargo_lock)
+            workspace_cargo_lock = (root / "Cargo.lock").read_text()
+            self.assertIn('name = "infergrade-runner-cli"\nversion = "1.2.3"', workspace_cargo_lock)
+            self.assertIn('name = "infergrade_desktop_runner"\nversion = "1.2.3"', workspace_cargo_lock)
+            self.assertIn('name = "infergrade_runner_engine"\nversion = "1.2.3"', workspace_cargo_lock)
+            self.assertIn('name = "schannel"\nversion = "0.1.29"', workspace_cargo_lock)
 
     def test_sync_versions_fails_instead_of_rewriting_dependency_lock_versions(self):
         with TemporaryDirectory() as tmp:
@@ -127,6 +151,8 @@ class ReleaseCiTests(unittest.TestCase):
                 root / "python/runner-core",
                 root / "python/runner-core/src/infergrade",
                 root / "apps/desktop-runner/src-tauri",
+                root / "apps/runner-cli",
+                root / "crates/runner-engine",
             ]
             for path in paths:
                 path.mkdir(parents=True)
@@ -153,7 +179,21 @@ class ReleaseCiTests(unittest.TestCase):
                 '[package]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n',
                 encoding="utf-8",
             )
+            (root / "apps/runner-cli/Cargo.toml").write_text(
+                '[package]\nname = "infergrade-runner-cli"\nversion = "0.0.1"\n',
+                encoding="utf-8",
+            )
+            (root / "crates/runner-engine/Cargo.toml").write_text(
+                '[package]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
+                encoding="utf-8",
+            )
             (root / "apps/desktop-runner/src-tauri/Cargo.lock").write_text(
+                '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
+                '[[package]]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
+                encoding="utf-8",
+            )
+            (root / "Cargo.lock").write_text(
+                '[[package]]\nname = "infergrade-runner-cli"\nversion = "0.0.1"\n'
                 '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
                 '[[package]]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
                 encoding="utf-8",
@@ -170,6 +210,8 @@ class ReleaseCiTests(unittest.TestCase):
                 root / "python/runner-core",
                 root / "python/runner-core/src/infergrade",
                 root / "apps/desktop-runner/src-tauri",
+                root / "apps/runner-cli",
+                root / "crates/runner-engine",
             ]
             for path in paths:
                 path.mkdir(parents=True)
@@ -193,7 +235,21 @@ class ReleaseCiTests(unittest.TestCase):
                 '[package]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n',
                 encoding="utf-8",
             )
+            (root / "apps/runner-cli/Cargo.toml").write_text(
+                '[package]\nname = "infergrade-runner-cli"\nversion = "0.0.1"\n',
+                encoding="utf-8",
+            )
+            (root / "crates/runner-engine/Cargo.toml").write_text(
+                '[package]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
+                encoding="utf-8",
+            )
             (root / "apps/desktop-runner/src-tauri/Cargo.lock").write_text(
+                '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
+                '[[package]]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
+                encoding="utf-8",
+            )
+            (root / "Cargo.lock").write_text(
+                '[[package]]\nname = "infergrade-runner-cli"\nversion = "0.0.1"\n'
                 '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
                 '[[package]]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
                 encoding="utf-8",

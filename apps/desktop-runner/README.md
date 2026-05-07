@@ -4,7 +4,7 @@ InferGrade Desktop Runner is the local companion app for people who want to pair
 
 The Hub remains the model selection, benchmark planning, recommendation, and results surface. This app should stay focused on pairing, readiness, Runner lifecycle, local runtime controls, logs, updates, and support export.
 
-The desktop happy path is now native-first for macOS Apple Silicon: Docker is not required for the first local benchmark, and the app can run a local GGUF through a selected `llama.cpp` runtime, write local artifacts, and upload `native_first_run` evidence back to Hub. Managed runtime downloads are not enabled yet, so users must explicitly select an existing trusted `llama-cli` binary before the native first-run button is ready. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
+The desktop happy path is now native-first for macOS Apple Silicon: Docker will not be required for the first local benchmark, and the app can run a local GGUF through a selected `llama.cpp` runtime, write local artifacts, and upload `native_first_run` evidence back to Hub. Managed runtime downloads are not enabled yet, so users must explicitly select an existing trusted `llama-cli` binary before the native first-run button is ready. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
 
 ## What It Includes
 

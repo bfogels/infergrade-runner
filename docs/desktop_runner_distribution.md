@@ -135,9 +135,9 @@ For each candidate build, record:
 The current local macOS Apple Silicon candidate was built from the v0.2.0 `develop` train with ad-hoc signing:
 
 ```text
-artifact: target/release/bundle/dmg/InferGrade Runner_0.1.45_aarch64.dmg
-size: 6755315 bytes
-sha256: 784f648d0726855e38b3152f4b81baaa19beefdcbcdd62063268c973c7556d73
+artifact: target/release/bundle/dmg/InferGrade Runner_0.2.0_aarch64.dmg
+size: 6897857 bytes
+sha256: 2cba43695b65500e8ac114f64d38a9be1fa760d18a8736fdbe55b29b84fab762
 signing: ad-hoc local signing
 notarization: skipped locally because Apple notarization credentials were not present
 ```
@@ -145,10 +145,10 @@ notarization: skipped locally because Apple notarization credentials were not pr
 Local package smoke mounted the DMG, verified the app with `codesign --verify --deep --strict`, launched `InferGrade Runner.app`, observed the packaged `infergrade_desktop_runner` process, and confirmed the bundled sidecar responds under a clean shell environment with only `/usr/bin:/bin` on `PATH`:
 
 ```text
-infergrade 0.1.45
+infergrade 0.2.0
 ```
 
-This proves the local package opens and carries the sidecar without a global `infergrade` command, repo checkout, or Docker. It does not replace public-release gates: Developer ID signing, notarization, Gatekeeper assessment, clean-machine token storage, and full Desktop UI first-run upload smoke still need release-lane validation.
+This proves the local package opens and carries the sidecar without a global `infergrade` command, repo checkout, or Docker. It does not replace public-release gates: Developer ID signing, notarization, Gatekeeper assessment, clean-machine token storage, and full Desktop UI first-run upload smoke still need protected-release validation.
 
 ## Non-Goals
 

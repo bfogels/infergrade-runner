@@ -131,6 +131,31 @@ Current live checks before this file:
   - Ran packaged sidecar from the mounted app under `env -i HOME="$HOME" PATH="/usr/bin:/bin"`: pass, printed `infergrade 0.1.45`.
   - Launched mounted `InferGrade Runner.app` with `open -n`; `pgrep` observed packaged `infergrade_desktop_runner` process.
   - Updated README, Desktop README, distribution docs, native first-run strategy, and llama.cpp compatibility docs to reflect the actual support boundary: macOS Apple Silicon native first-run/upload with explicit selected runtime is real; managed runtime downloads and Windows/Linux public installers remain preview/planned.
+- `codex/runner-v020-release` v0.2.0 promotion checks:
+  - Bumped `VERSION` and synced Python, Node, Tauri, root Cargo workspace, CLI, engine, and lockfile versions to `0.2.0`.
+  - Extended version sync/check scripts so root `apps/runner-cli`, `crates/runner-engine`, and root `Cargo.lock` cannot drift again.
+  - `cargo test --workspace --locked`: pass after building the desktop sidecar prerequisite.
+  - `cargo test --manifest-path crates/runner-engine/Cargo.toml --locked`: pass.
+  - `cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked`: pass.
+  - `cargo test --manifest-path apps/desktop-runner/sidecar/Cargo.toml --locked`: pass.
+  - `cargo test --manifest-path apps/runner-cli/Cargo.toml --locked`: pass.
+  - `npm ci --prefix apps/desktop-runner`: pass.
+  - `npm run check --prefix apps/desktop-runner`: pass.
+  - `python3 -m unittest python/runner-core/tests/test_desktop_runner_capabilities.py`: pass after updating stale docs assertions to the new native-first-run boundary.
+  - `./scripts/test_all.sh`: pass, 235 tests.
+  - `python3 ./scripts/sync_versions.py --check`: pass.
+  - `python3 ./scripts/check_versions.py`: pass.
+  - `./scripts/build_desktop_sidecar.sh`: pass.
+  - `./scripts/build_desktop_runner.sh --check-only`: pass.
+  - `./scripts/build_desktop_runner.sh`: pass; emitted `target/release/bundle/dmg/InferGrade Runner_0.2.0_aarch64.dmg`, size `6897857`, SHA-256 `2cba43695b65500e8ac114f64d38a9be1fa760d18a8736fdbe55b29b84fab762`.
+  - CLI smoke: `cargo run --manifest-path apps/runner-cli/Cargo.toml -- --help`: pass.
+  - CLI smoke: `cargo run --manifest-path apps/runner-cli/Cargo.toml -- doctor --api-url api.infergrade.com`: pass; normalized hosted API to `https://api.infergrade.com/`.
+  - CLI smoke: `cargo run --manifest-path apps/runner-cli/Cargo.toml -- runtime plan`: pass; selected Homebrew llama.cpp runtime detected, managed downloads remain `not_configured`.
+  - CLI smoke: `cargo run --manifest-path apps/runner-cli/Cargo.toml -- containers check || true`: pass; Docker daemon unavailable and Podman missing are reported as optional advanced sandbox limitations, not first-run blockers.
+  - Real native CLI smoke: `cargo run --manifest-path apps/runner-cli/Cargo.toml -- first-run --model /Users/brianfogelson/Desktop/Code/ext/models/open_llama_3b_v2/ggml-model-f16-q4_0.gguf --runtime auto --no-upload --max-tokens 4 --json --output-dir /tmp/infergrade-v020-release-cli-smoke`: pass; wrote `/tmp/infergrade-v020-release-cli-smoke/native-first-run-result.json`, loaded Metal backend, reported 3 generated tokens at about 38.27 tokens/sec, and did not upload.
+  - DMG smoke: mounted `InferGrade Runner_0.2.0_aarch64.dmg`, ran `codesign --verify --deep --strict --verbose=2`, launched `InferGrade Runner.app`, observed packaged `infergrade_desktop_runner`, and ran the packaged sidecar under `env -i HOME="$HOME" PATH="/usr/bin:/bin"`; sidecar printed `infergrade 0.2.0`. First detach hit a busy mount after launch; process cleanup and forced detach succeeded.
+  - `gitleaks detect --source=. --redact --no-banner --exit-code 0`: pass.
+  - `git diff --check`: pass.
 - `codex/runner-v020-release-gates` local checks for the claim-before-upload fix:
   - `cargo test --manifest-path crates/runner-engine/Cargo.toml --locked`: pass; includes `build_run_claim_request` coverage.
   - `cargo test --manifest-path apps/runner-cli/Cargo.toml --locked`: pass; upload now posts claim, bundle, then completion.
@@ -159,8 +184,8 @@ Current live checks before this file:
 
 ## Release-Gate Status
 
-Not ready for v0.2.0.
+Ready for v0.2.0 release review with scoped platform/support claims.
 
 The product has meaningful native first-run/upload primitives, and the Rust CLI can now complete a real local Apple Silicon Metal llama.cpp first-run with a GGUF model against a token-free Hub handoff run. Runtime selection without PATH assumptions is on `develop`; owner-visible Hub evidence display is validated through API/read-model smoke. A local ad-hoc signed DMG can be built, mounted, code-signature verified, launched, and smoke-tested for bundled sidecar availability without global `infergrade`, Docker, or a repo checkout.
 
-v0.2.0 remains blocked until the release train is promoted with a version bump and reviewed. Managed runtime downloads are explicitly not complete; the v0.2.0 claim should be scoped to app-guided selected runtime on macOS Apple Silicon, not silent runtime provisioning.
+v0.2.0 is ready for a `develop -> main` promotion review, provided the release PR preserves the scoped claim: macOS Apple Silicon native first-run with an app-guided selected llama.cpp runtime, local artifacts, Hub upload, and honest owner-visible evidence. Managed runtime downloads, Windows/Linux public desktop installers, Developer ID notarization/Gatekeeper proof, and full clean-machine Desktop UI upload smoke remain explicit limits/follow-ups rather than v0.2.0 claims.
