@@ -53,6 +53,7 @@ The GitHub release metadata does not expose an independent signature asset for t
    - Add explicit install recommended runtime action.
    - Render download/verify/select progress and provenance.
    - Keep select-existing as advanced.
+   - Status: in progress after PR B landed; first Desktop adapter slice adds an explicit install button and Tauri command over the shared engine installer.
 
 4. PR D: v0.2.2 release promotion if PRs A-C produce a coherent, honest managed runtime lane.
    - Bump version only in the release PR.
