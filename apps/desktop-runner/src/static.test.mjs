@@ -91,22 +91,29 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
   assert.ok(html.includes("data-hub-connection-status"));
   assert.ok(html.includes("data-pairing-readiness-status"));
   assert.ok(html.includes("data-runtime-llama-status"));
+  assert.ok(html.includes("data-runtime-install-managed"));
   assert.ok(html.includes("data-model-path-status"));
   assert.ok(html.includes("Select a local GGUF model for the first benchmark."));
   assert.ok(js.includes("renderLocalReadinessChecklist"));
   assert.ok(js.includes("await stopRunner()"));
   assert.ok(js.includes('invoke("llama_cpp_runtime_plan"'));
+  assert.ok(js.includes('invoke("install_managed_llama_cpp_runtime"'));
   assert.ok(js.includes('invoke("select_existing_llama_cpp_runtime"'));
+  assert.ok(js.includes("SHA-256 verified"));
+  assert.ok(js.includes("no independent signature"));
   assert.equal(js.includes("executeSidecar(runtimeCommandArgs([\"--select-existing\"])"), false);
   assert.ok(rust.includes("fn llama_cpp_runtime_plan"));
+  assert.ok(rust.includes("fn install_managed_llama_cpp_runtime"));
+  assert.ok(rust.includes("engine_install_managed_llama_cpp_runtime"));
   assert.ok(rust.includes("fn select_existing_llama_cpp_runtime"));
   assert.ok(rust.includes("engine_select_existing_llama_cpp_runtime"));
-  assert.ok(engine.includes("No install command was run"));
+  assert.ok(engine.includes("fn install_managed_llama_cpp_runtime"));
   assert.ok(engine.includes("fn select_existing_llama_cpp_runtime"));
   assert.ok(engine.includes("selected_existing"));
   assert.ok(engine.includes("fn verify_runtime_download_manifest"));
   assert.ok(engine.includes("signature_url"));
   assert.ok(engine.includes("rollback_runtime_id"));
+  assert.ok(js.includes("recommended.platform?.human"));
 });
 
 test("desktop runtime panel keeps native first-run readiness truthful and Docker optional", () => {

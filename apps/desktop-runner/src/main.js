@@ -26,6 +26,7 @@ const resetPairingButton = document.querySelector("[data-reset-pairing]");
 const clearLogsButton = document.querySelector("[data-clear-logs]");
 const themeChoiceButtons = [...document.querySelectorAll("[data-theme-choice]")];
 const runtimePlanButton = document.querySelector("[data-runtime-plan]");
+const runtimeInstallManagedButton = document.querySelector("[data-runtime-install-managed]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
 const firstRunStartButton = document.querySelector("[data-first-run-start]");
 const firstRunStatus = document.querySelector("[data-first-run-status]");
@@ -695,8 +696,18 @@ function runtimePlanSummary(plan = {}) {
   const selected = plan.selected_runtime || {};
   const selectedText = selected.status === "selected" ? "Selected runtime is recorded." : "No managed runtime is selected yet.";
   const runtimeText = plan.message || "No install command was run. Review the runtime plan before selecting a runtime.";
-  const lane = recommended.platform || recommended.accelerator || "this machine";
+  const lane = recommended.platform?.human || recommended.platform_label || recommended.platform || recommended.accelerator || "this machine";
   return `${runtimeText} Recommended lane: ${lane}. ${selectedText}`;
+}
+
+function managedRuntimeInstallSummary(result = {}) {
+  const selection = result.selection || {};
+  const archive = selection.archive || {};
+  const runtimeId = selection.runtime_id || "managed llama.cpp runtime";
+  const signature = archive.independent_signature_verified
+    ? "independent signature verified"
+    : "no independent signature";
+  return `Managed runtime selected: ${runtimeId}. SHA-256 verified; ${signature}.`;
 }
 
 function readFirstRunModelPath() {
@@ -1093,6 +1104,41 @@ runtimePlanButton?.addEventListener("click", () => {
       renderLocalReadinessChecklist();
       setStatus("Runtime check failed", "error");
       appendLog(`Could not inspect llama.cpp runtime plan: ${error.message || error}`);
+    });
+});
+
+runtimeInstallManagedButton?.addEventListener("click", () => {
+  const runtimeId = form.elements.runtimeId?.value.trim() || null;
+  llamaRuntimeReadiness = "Installing the recommended llama.cpp runtime. This can take a minute...";
+  renderLocalReadinessChecklist();
+  runtimeInstallManagedButton.disabled = true;
+  loadTauriInvoke()
+    .then((invoke) => {
+      if (!invoke) {
+        appendLog("Open the desktop app to install the managed llama.cpp runtime.");
+        llamaRuntimeReadiness = "Managed runtime install is available inside the desktop app.";
+        return null;
+      }
+      return invoke("install_managed_llama_cpp_runtime", {
+        runtimeId,
+      });
+    })
+    .then((result) => {
+      if (!result) {
+        return;
+      }
+      llamaRuntimeReadiness = managedRuntimeInstallSummary(result);
+      renderLocalReadinessChecklist();
+      appendLog(`Installed managed llama.cpp runtime: ${JSON.stringify(result)}`);
+    })
+    .catch((error) => {
+      llamaRuntimeReadiness = "Managed runtime install failed. See logs for the technical detail.";
+      renderLocalReadinessChecklist();
+      setStatus("Runtime install failed", "error");
+      appendLog(`Could not install managed llama.cpp runtime: ${error.message || error}`);
+    })
+    .finally(() => {
+      runtimeInstallManagedButton.disabled = false;
     });
 });
 

@@ -17,9 +17,9 @@ It is responsible for:
 
 InferGrade Runner is moving toward a public open-source release. Treat the current code as preview software:
 
-- Complete enough today: Runner-owned schemas, benchmark catalog metadata, local/native and container-aware execution paths, Rust native first-run execution for selected `llama.cpp` GGUF runs, native-first-run Hub upload, result bundle generation, support export, and signed macOS desktop release wiring.
-- Actively being hardened: macOS installer-and-go smoke, app-guided runtime selection, hosted Hub handoff, and broader clean-machine install validation.
-- Planned or limited today: managed `llama.cpp` runtime downloads, Windows and Linux public desktop installers, fully managed cloud worker provisioning, and heavier reference/gold benchmark lanes that need stronger dataset, sandbox, or cost controls before becoming default local paths.
+- Complete enough today: Runner-owned schemas, benchmark catalog metadata, local/native and container-aware execution paths, Rust native first-run execution for selected `llama.cpp` GGUF runs, native-first-run Hub upload, result bundle generation, support export, signed macOS desktop release wiring, and explicit checksum-verified macOS Apple Silicon managed `llama.cpp` runtime install.
+- Actively being hardened: macOS installer-and-go smoke, hosted Hub handoff, broader clean-machine install validation, and stronger runtime provenance/signature checks.
+- Planned or limited today: managed runtime lanes beyond macOS Apple Silicon Metal, Windows and Linux public desktop installers, fully managed cloud worker provisioning, and heavier reference/gold benchmark lanes that need stronger dataset, sandbox, or cost controls before becoming default local paths.
 
 Security-sensitive release credentials, Apple signing materials, Hub tokens, local runner profiles, and `.env` files should never be committed. See [SECURITY.md](SECURITY.md) before reporting vulnerabilities or sharing security-sensitive logs.
 
@@ -39,7 +39,7 @@ The clearest first path is:
 
 The broader Runner architecture remains available, but the current default is intentionally narrower than a general benchmark platform.
 
-The Desktop Runner product path now has a native first-run lane for macOS Apple Silicon with a user-selected `llama.cpp` runtime and local GGUF model. Docker will not be required for the first local benchmark. Managed runtime downloads are not enabled yet, so a fresh Mac still needs an explicit app-guided runtime selection before the native run is ready. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
+The Desktop Runner product path now has a native first-run lane for macOS Apple Silicon with a local GGUF model and either an explicit selected `llama.cpp` runtime or the recommended managed Metal runtime installed through the app. Docker will not be required for the first local benchmark. Runtime install is still intentional: the app does not silently download, upgrade, or switch runtimes, and the current managed runtime is checksum-verified rather than independently signed. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
 
 ## Decision Suite vs Reference Suite
 
@@ -160,7 +160,17 @@ infergrade install-runtime --runtime llama.cpp --select-existing \
   --llama-cpp-server-path /opt/homebrew/bin/llama-server
 ```
 
-InferGrade never silently installs or upgrades `llama.cpp`; `--execute` is required before any manifest install command is run.
+The Rust runner and Desktop app also expose the shared managed-runtime lane:
+
+```bash
+infergrade-runner runtime list
+infergrade-runner runtime status
+infergrade-runner runtime install
+```
+
+`infergrade-runner runtime install` is the explicit install action: it downloads the pinned macOS Apple Silicon Metal `llama.cpp` archive, verifies SHA-256, extracts it into the InferGrade runtime cache, checks expected binaries, runs a version smoke, and writes the selected-runtime record. The Desktop app exposes the same shared-engine behavior through its runtime install action.
+
+InferGrade never silently installs or upgrades `llama.cpp`. The legacy Python command still requires `--execute` before any manifest install command is run; the Rust `runtime install` command and Desktop install button are the explicit user consent path. The current managed runtime is checksum-verified, not independently signed.
 
 ### Containerized Local And Cloud Paths
 

@@ -2,6 +2,7 @@ use infergrade_runner_engine::{
     build_hub_json_request, build_listener_start_plan, build_pairing_redeem_request,
     build_run_bundle_upload_request, build_run_claim_request, build_run_completion_request,
     complete_pairing_response, desktop_environment, execute_hub_json_request, hostname,
+    install_managed_llama_cpp_runtime as engine_install_managed_llama_cpp_runtime,
     llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, native_first_run_bundle_payload,
     normalize_api_url, pairing_error_detail, pairing_status_payload, preferred_execution_mode,
     profile_string, redact_listener_text, redact_worker_response, reset_pairing_state,
@@ -9,9 +10,10 @@ use infergrade_runner_engine::{
     runner_id_from_profile,
     select_existing_llama_cpp_runtime as engine_select_existing_llama_cpp_runtime,
     selected_llama_cpp_runtime_path, worker_request_url, write_native_first_run_artifact,
-    write_native_first_run_bundle_payload, HubMethod, LlamaCppRuntime, NativeFirstRunBundleOptions,
-    NativeFirstRunInput, NativeFirstRunResult, PairingInput, ProfileStore, RunnerError,
-    RunnerEvent, RunnerProfile, RunnerProtocolPingInput, RunnerProtocolPreviewInput, TokenStore,
+    write_native_first_run_bundle_payload, HubMethod, LlamaCppRuntime,
+    ManagedRuntimeInstallOptions, NativeFirstRunBundleOptions, NativeFirstRunInput,
+    NativeFirstRunResult, PairingInput, ProfileStore, RunnerError, RunnerEvent, RunnerProfile,
+    RunnerProtocolPingInput, RunnerProtocolPreviewInput, TokenStore,
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
@@ -532,6 +534,20 @@ fn select_existing_llama_cpp_runtime(runtime_path: Option<String>) -> Result<Val
     engine_select_existing_llama_cpp_runtime(None, cli_path, None, None)
 }
 
+#[tauri::command]
+async fn install_managed_llama_cpp_runtime(runtime_id: Option<String>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        engine_install_managed_llama_cpp_runtime(ManagedRuntimeInstallOptions {
+            runtime_id: runtime_id
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            archive_bytes: None,
+        })
+    })
+    .await
+    .map_err(|error| format!("managed runtime install task failed: {error}"))?
+}
+
 fn native_first_run_input(model_path: &str) -> NativeFirstRunInput {
     NativeFirstRunInput {
         model_path: PathBuf::from(model_path.trim()),
@@ -815,6 +831,7 @@ pub fn run() {
             stop_runner_listener,
             reset_runner_pairing,
             llama_cpp_runtime_plan,
+            install_managed_llama_cpp_runtime,
             select_existing_llama_cpp_runtime,
             run_desktop_native_first_run,
             redeem_runner_pairing
@@ -829,7 +846,8 @@ mod tests {
     use infergrade_runner_engine::{
         claim_run_job_payload, runner_heartbeat_payload, runner_register_payload,
         sanitized_runner_profile, ui_pairing_response, verify_runtime_download_manifest,
-        worker_request_preview, NativeFirstRunRuntime, NativeRuntimeOutput, LLAMA_CPP_RUNTIME_ID,
+        worker_request_preview, NativeFirstRunRuntime, NativeRuntimeOutput,
+        MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID,
     };
     use std::sync::{Mutex as TestMutex, OnceLock};
 
@@ -1067,7 +1085,7 @@ mod tests {
         if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
             assert_eq!(
                 plan["recommended_runtime"]["runtime_id"],
-                LLAMA_CPP_RUNTIME_ID
+                MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID
             );
             assert_eq!(plan["recommended_runtime"]["accelerator"], "metal");
         }
@@ -1112,22 +1130,35 @@ mod tests {
     fn runtime_download_manifest_requires_supply_chain_and_rollback_fields() {
         let valid = json!({
             "runtime_id": "llama-cpp-metal-2026-05",
-            "archive_url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst",
-            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "signature_url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst.minisig",
+            "channel": "infergrade_stable",
+            "backend": "llama.cpp",
+            "upstream": {
+                "project": "ggml-org/llama.cpp",
+                "tag": "b9050"
+            },
+            "platform": {
+                "system": "macos",
+                "arch": "aarch64"
+            },
+            "archive": {
+                "url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst",
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "signature_url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst.minisig"
+            },
             "expected_binaries": ["llama-cli", "llama-server", "llama-perplexity"],
             "rollback_runtime_id": "llama-cpp-homebrew-stable-2026-04",
         });
         assert!(verify_runtime_download_manifest(&valid).is_ok());
 
         let mut insecure = valid.clone();
-        insecure["archive_url"] = Value::String("http://example.com/runtime.tar.zst".to_string());
+        insecure["archive"]["url"] =
+            Value::String("http://example.com/runtime.tar.zst".to_string());
         assert!(verify_runtime_download_manifest(&insecure)
             .expect_err("insecure runtime url rejected")
             .contains("HTTPS"));
 
         let mut missing_checksum = valid.clone();
-        missing_checksum["sha256"] = Value::String("abc".to_string());
+        missing_checksum["archive"]["sha256"] = Value::String("abc".to_string());
         assert!(verify_runtime_download_manifest(&missing_checksum)
             .expect_err("short checksum rejected")
             .contains("sha256"));

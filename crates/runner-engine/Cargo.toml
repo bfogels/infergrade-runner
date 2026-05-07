@@ -1,13 +1,16 @@
 [package]
 name = "infergrade_runner_engine"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "Shared Rust runner engine logic for InferGrade desktop and CLI frontends"
 
 [dependencies]
-reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+sha2 = "0.10.9"
+flate2 = "1.1.5"
+tar = "0.4.44"
 url = "2.5.4"
 
 [dev-dependencies]
