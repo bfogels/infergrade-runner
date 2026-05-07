@@ -47,8 +47,8 @@ v0.2.1 should stabilize the v0.2.0 promise instead of broadening it:
 
 ## Proposed PR Sequence
 
-1. PR A: post-release review and v0.2.1 sprint plan docs.
-2. PR B: CLI upload credential naming/profile-token cleanup.
+1. PR A: post-release review and v0.2.1 sprint plan docs. Landed as PR #145.
+2. PR B: CLI upload credential naming/profile-token cleanup. In progress: prefer `--runner-token`, keep `--run-token` as a deprecated debug alias, and validate upload credentials before runtime execution.
 3. PR C: package smoke script/runbook.
 4. PR D: Desktop first-run smoke/static test improvements.
 5. PR E: v0.2.1 release bump and promotion if the train is coherent.

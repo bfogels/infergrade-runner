@@ -13,10 +13,11 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+const HELP_TEXT: &str =
+    "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> --runner-token <token> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence through a paired Hub runner token\n    first-run --model <path> --runtime auto --upload --run-id <id> --run-token <token> ...\n                                               Deprecated debug alias for --runner-token; normal Hub handoff is token-free\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration.";
+
 fn print_help() {
-    println!(
-        "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> --run-token <token> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence through a paired Hub runner token\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration."
-    );
+    println!("{HELP_TEXT}");
 }
 
 fn print_json(value: Value) {
@@ -218,11 +219,12 @@ where
                         .to_string(),
                 );
             }
-            "--run-token" => {
+            "--runner-token" | "--run-token" => {
+                let flag = args[index].clone();
                 index += 1;
                 run_token = Some(
                     args.get(index)
-                        .ok_or_else(|| "--run-token requires a value".to_string())?
+                        .ok_or_else(|| format!("{flag} requires a value"))?
                         .to_string(),
                 );
             }
@@ -255,6 +257,14 @@ where
     }
     if upload && jsonl {
         return Err("first-run upload does not support --jsonl yet".to_string());
+    }
+    if upload {
+        if run_id.is_none() {
+            return Err("--upload requires --run-id".to_string());
+        }
+        if run_token.is_none() {
+            return Err("--upload requires --runner-token".to_string());
+        }
     }
     if dry_run && runtime_command.is_some() {
         return Err(
@@ -335,8 +345,9 @@ where
         payload["artifact"] = serde_json::to_value(artifact).map_err(|error| error.to_string())?;
     }
     if upload {
-        let run_id = run_id.ok_or_else(|| "--upload requires --run-id".to_string())?;
-        let run_token = run_token.ok_or_else(|| "--upload requires --run-token".to_string())?;
+        let run_id = run_id.expect("upload run_id was validated before runtime execution");
+        let run_token =
+            run_token.expect("upload runner token was validated before runtime execution");
         let result: NativeFirstRunResult = serde_json::from_value(payload["result"].clone())
             .map_err(|error| format!("Could not rebuild native first-run result: {error}"))?;
         let bundle_payload = native_first_run_bundle_payload(
@@ -608,6 +619,13 @@ mod tests {
         assert!(output["runtimes"]["docker"].get("cli").is_some());
         assert!(output["runtimes"]["docker"].get("daemon").is_some());
         assert_eq!(output["runtimes"]["podman"]["first_run_required"], false);
+    }
+
+    #[test]
+    fn help_prefers_runner_token_and_marks_run_token_deprecated() {
+        assert!(HELP_TEXT.contains("--runner-token <token>"));
+        assert!(HELP_TEXT.contains("Deprecated debug alias for --runner-token"));
+        assert!(HELP_TEXT.contains("normal Hub handoff is token-free"));
     }
 
     #[test]
@@ -945,7 +963,7 @@ mod tests {
             api_url,
             "--run-id".to_string(),
             "run_cli_upload_123".to_string(),
-            "--run-token".to_string(),
+            "--runner-token".to_string(),
             "rtok_cli_secret".to_string(),
             "--worker-id".to_string(),
             "worker-cli-upload".to_string(),
@@ -1020,6 +1038,31 @@ mod tests {
         ])
         .expect_err("upload mode required");
         assert!(missing_upload_choice.contains("requires either --no-upload or explicit --upload"));
+
+        let missing_runner_token = command_first_run(&[
+            "--model".to_string(),
+            model_path.display().to_string(),
+            "--runtime".to_string(),
+            "auto".to_string(),
+            "--upload".to_string(),
+            "--run-id".to_string(),
+            "run_cli_upload_123".to_string(),
+        ])
+        .expect_err("runner token required");
+        assert!(missing_runner_token.contains("--upload requires --runner-token"));
+
+        let missing_deprecated_alias_value = command_first_run(&[
+            "--model".to_string(),
+            model_path.display().to_string(),
+            "--runtime".to_string(),
+            "auto".to_string(),
+            "--upload".to_string(),
+            "--run-id".to_string(),
+            "run_cli_upload_123".to_string(),
+            "--run-token".to_string(),
+        ])
+        .expect_err("deprecated alias still requires value");
+        assert!(missing_deprecated_alias_value.contains("--run-token requires a value"));
 
         let _ = std::fs::remove_file(model_path);
     }
