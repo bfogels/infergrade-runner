@@ -231,3 +231,66 @@ Evidence honesty notes:
 - Runtime recovery remains manual and explicit.
 - Managed runtime downloads are still SHA-256 verified but not independently signed.
 - Removing a selected runtime is supportability state cleanup; it does not change benchmark evidence strength.
+
+## v0.2.4 Release Candidate Evidence
+
+Branch: `codex/runner-v024-release`
+PR: pending
+
+Release scope:
+
+- Promote the reviewed v0.2.4 supportability train from `develop` to `main`.
+- Bump version declarations from `0.2.3` to `0.2.4` only in the release branch.
+- Preserve the release boundary: support summary, Desktop support actions, and explicit runtime recovery only.
+
+Included reviewed feature commits on `develop`:
+
+- `f158235` - Runner support summary contract and CLI support summary.
+- `f704f4f` - Desktop support summary/copy/retry upload actions.
+- `e5d5b39` - Explicit runtime recovery actions.
+
+Branch-distance proof before release branch:
+
+```bash
+git rev-list --left-right --count origin/main...origin/develop
+# 0 3
+
+git diff --name-status origin/main...origin/develop
+# M apps/desktop-runner/index.html
+# M apps/desktop-runner/src-tauri/src/lib.rs
+# M apps/desktop-runner/src/main.js
+# M apps/desktop-runner/src/static.test.mjs
+# M apps/runner-cli/src/main.rs
+# M crates/runner-engine/src/lib.rs
+# A docs/codex_v0_2_4_sprint_planning.md
+```
+
+Release honesty notes:
+
+- v0.2.4 does not add benchmark lanes, capability scoring, public leaderboard mechanics, or decision-grade claims.
+- v0.2.4 does not add notarization, Developer ID signing, Windows/Linux managed runtimes, CUDA/ROCm, cloud execution, or automatic runtime updates.
+- Managed runtime recovery remains explicit and manual.
+- Native first-run evidence remains smoke/informational.
+
+Validation passed locally on the release branch:
+
+```bash
+python3 ./scripts/sync_versions.py --check
+python3 ./scripts/check_versions.py
+git diff --check
+cargo test --manifest-path crates/runner-engine/Cargo.toml --locked
+cargo test --manifest-path apps/runner-cli/Cargo.toml --locked
+./scripts/build_desktop_sidecar.sh
+cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked
+npm ci --prefix apps/desktop-runner
+npm run check --prefix apps/desktop-runner
+python3 -m unittest python/runner-core/tests/test_support.py
+gitleaks detect --source=. --redact --no-banner --exit-code 0
+```
+
+GitHub Actions:
+
+- PR #160 checks failed before executing workflow steps:
+  - CI `test` run `25525136794`, job `74918811976`, `steps: []`, `log not found`.
+  - Secret Scan `Gitleaks` run `25525136837`, job `74918811915`, `steps: []`, `log not found`.
+- This matches the existing Runner infra/pre-run failure shape seen throughout the v0.2.4 train; local validation and reviewer signoff are the release evidence.
