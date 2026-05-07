@@ -1134,7 +1134,8 @@ mod tests {
         assert!(verify_runtime_download_manifest(&valid).is_ok());
 
         let mut insecure = valid.clone();
-        insecure["archive"]["url"] = Value::String("http://example.com/runtime.tar.zst".to_string());
+        insecure["archive"]["url"] =
+            Value::String("http://example.com/runtime.tar.zst".to_string());
         assert!(verify_runtime_download_manifest(&insecure)
             .expect_err("insecure runtime url rejected")
             .contains("HTTPS"));

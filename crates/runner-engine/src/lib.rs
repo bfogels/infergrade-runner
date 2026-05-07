@@ -34,12 +34,15 @@ pub use worker_protocol::{
     RunnerRegisterRequest,
 };
 
+use flate2::read::GzDecoder;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+use tar::Archive;
 use url::Url;
 
 pub const LLAMA_CPP_RUNTIME_ID: &str = "llama-cpp-homebrew-stable-2026-04";
@@ -193,9 +196,9 @@ pub fn managed_llama_cpp_runtime_manifest() -> Value {
                     ],
                 },
                 "download": {
-                    "enabled": false,
+                    "enabled": true,
                     "requires_explicit_user_action": true,
-                    "blocked_reason": "Managed runtime download remains disabled until checksum verification, extraction, rollback, and independent signature policy are reviewed.",
+                    "message": "Download only runs after explicit user action. InferGrade verifies SHA-256, expected binaries, and version smoke before selecting this runtime.",
                 },
                 "expected_binaries": ["llama-cli", "llama-server", "llama-perplexity"],
                 "binary_names": {
@@ -467,7 +470,7 @@ pub fn verified_runtime_download_policy() -> Value {
         "unavailable"
     };
     json!({
-        "status": "not_configured",
+        "status": "configured",
         "manifest_verifier": verifier_status,
         "requires_explicit_user_action": true,
         "required_fields": [
@@ -480,7 +483,7 @@ pub fn verified_runtime_download_policy() -> Value {
             "expected_binaries",
             "rollback_runtime_id"
         ],
-        "message": "Runtime downloads are disabled until checksum verification, extraction, rollback, and signature policy are reviewed.",
+        "message": "Runtime downloads require explicit user action and must pass HTTPS, SHA-256, expected-binary, version-smoke, and rollback checks before selection.",
     })
 }
 
@@ -908,10 +911,405 @@ pub fn verify_runtime_download_manifest(entry: &Value) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+pub struct ManagedRuntimeInstallOptions {
+    pub runtime_id: Option<String>,
+    pub archive_bytes: Option<Vec<u8>>,
+}
+
+fn managed_llama_cpp_runtime_entry(runtime_id: Option<&str>) -> Result<Value, String> {
+    let manifest = managed_llama_cpp_runtime_manifest();
+    let runtimes = manifest["runtimes"]
+        .as_array()
+        .ok_or_else(|| "managed runtime manifest is missing runtimes".to_string())?;
+    let runtime_id = runtime_id.unwrap_or(MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID);
+    runtimes
+        .iter()
+        .find(|entry| entry["runtime_id"].as_str() == Some(runtime_id))
+        .cloned()
+        .ok_or_else(|| format!("unknown managed llama.cpp runtime: {runtime_id}"))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
+fn managed_runtime_install_root(runtime_id: &str) -> Result<PathBuf, String> {
+    Ok(runtime_cache_root()?
+        .join("llama.cpp")
+        .join("managed")
+        .join(runtime_id))
+}
+
+fn runtime_archive_url(entry: &Value) -> Result<&str, String> {
+    entry
+        .pointer("/archive/url")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "managed runtime manifest is missing archive.url".to_string())
+}
+
+fn runtime_archive_sha256(entry: &Value) -> Result<&str, String> {
+    entry
+        .pointer("/archive/sha256")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "managed runtime manifest is missing archive.sha256".to_string())
+}
+
+fn fetch_runtime_archive(url: &str) -> Result<Vec<u8>, String> {
+    let response = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|error| format!("could not initialize runtime downloader: {error}"))?
+        .get(url)
+        .send()
+        .map_err(|error| format!("could not download managed runtime archive: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "managed runtime archive download failed with HTTP {}",
+            response.status()
+        ));
+    }
+    response
+        .bytes()
+        .map(|bytes| bytes.to_vec())
+        .map_err(|error| format!("could not read managed runtime archive: {error}"))
+}
+
+fn set_executable_if_needed(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(path)
+            .map_err(|error| format!("could not read `{}` permissions: {error}", path.display()))?
+            .permissions();
+        permissions.set_mode(permissions.mode() | 0o755);
+        fs::set_permissions(path, permissions)
+            .map_err(|error| format!("could not mark `{}` executable: {error}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn safe_extract_targz(bytes: &[u8], destination: &Path) -> Result<(), String> {
+    fs::create_dir_all(destination).map_err(|error| {
+        format!(
+            "could not create managed runtime directory `{}`: {error}",
+            destination.display()
+        )
+    })?;
+    let decoder = GzDecoder::new(bytes);
+    let mut archive = Archive::new(decoder);
+    for entry in archive
+        .entries()
+        .map_err(|error| format!("could not read managed runtime archive: {error}"))?
+    {
+        let mut entry = entry
+            .map_err(|error| format!("could not read managed runtime archive entry: {error}"))?;
+        let entry_path = entry
+            .path()
+            .map_err(|error| format!("could not read managed runtime archive path: {error}"))?;
+        let entry_type = entry.header().entry_type();
+        if !entry_type.is_file() && !entry_type.is_dir() && !entry_type.is_symlink() {
+            return Err(
+                "managed runtime archive contains a link or special file entry".to_string(),
+            );
+        }
+        if entry_path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        }) {
+            return Err("managed runtime archive contains an unsafe path".to_string());
+        }
+        let output = destination.join(&entry_path);
+        if !output.starts_with(destination) {
+            return Err(
+                "managed runtime archive attempted to write outside the runtime cache".to_string(),
+            );
+        }
+        if entry_type.is_symlink() {
+            let link_name = entry
+                .link_name()
+                .map_err(|error| {
+                    format!("could not read managed runtime archive link target: {error}")
+                })?
+                .ok_or_else(|| "managed runtime archive symlink is missing a target".to_string())?;
+            if link_name.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir
+                        | std::path::Component::RootDir
+                        | std::path::Component::Prefix(_)
+                )
+            }) {
+                return Err("managed runtime archive contains an unsafe symlink target".to_string());
+            }
+        }
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "could not create managed runtime extraction directory `{}`: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+        entry
+            .unpack(&output)
+            .map_err(|error| format!("could not extract managed runtime archive: {error}"))?;
+    }
+    Ok(())
+}
+
+fn find_runtime_binary(root: &Path, binary_name: &str) -> Result<Option<PathBuf>, String> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        let metadata = fs::metadata(&path).map_err(|error| {
+            format!(
+                "could not inspect extracted runtime path `{}`: {error}",
+                path.display()
+            )
+        })?;
+        if metadata.is_dir() {
+            for entry in fs::read_dir(&path)
+                .map_err(|error| format!("could not scan `{}`: {error}", path.display()))?
+            {
+                stack.push(
+                    entry
+                        .map_err(|error| format!("could not scan `{}`: {error}", path.display()))?
+                        .path(),
+                );
+            }
+        } else if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| {
+                name == binary_name || (cfg!(windows) && name == format!("{binary_name}.exe"))
+            })
+            .unwrap_or(false)
+            && fs::symlink_metadata(&path)
+                .map(|metadata| metadata.file_type().is_file())
+                .unwrap_or(false)
+        {
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
+}
+
+fn smoke_runtime_binary(path: &Path) -> Result<String, String> {
+    let output = StdCommand::new(path)
+        .arg("--version")
+        .output()
+        .map_err(|error| format!("could not run managed llama.cpp version smoke: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "managed llama.cpp version smoke failed with exit code {:?}",
+            output.status.code()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !stdout.is_empty() {
+        return Ok(stdout);
+    }
+    Ok(String::from_utf8_lossy(&output.stderr).trim().to_string())
+}
+
+pub fn install_managed_llama_cpp_runtime(
+    options: ManagedRuntimeInstallOptions,
+) -> Result<Value, String> {
+    let entry = managed_llama_cpp_runtime_entry(options.runtime_id.as_deref())?;
+    install_managed_llama_cpp_runtime_from_manifest_entry(entry, options)
+}
+
+pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
+    entry: Value,
+    options: ManagedRuntimeInstallOptions,
+) -> Result<Value, String> {
+    verify_runtime_download_manifest(&entry)?;
+    let runtime_id = entry["runtime_id"]
+        .as_str()
+        .ok_or_else(|| "managed runtime id missing".to_string())?;
+    if entry["download"]["requires_explicit_user_action"] != true {
+        return Err("managed runtime install requires explicit user action".to_string());
+    }
+    let archive_url = runtime_archive_url(&entry)?;
+    let expected_sha256 = runtime_archive_sha256(&entry)?;
+    let bytes = match options.archive_bytes {
+        Some(bytes) => bytes,
+        None => fetch_runtime_archive(archive_url)?,
+    };
+    let actual_sha256 = sha256_hex(&bytes);
+    if actual_sha256 != expected_sha256 {
+        return Err(format!(
+            "managed runtime checksum mismatch: expected {expected_sha256}, got {actual_sha256}"
+        ));
+    }
+
+    let install_root = managed_runtime_install_root(runtime_id)?;
+    let staging_root = install_root.with_extension(format!("staging-{}", std::process::id()));
+    let previous_root = install_root.with_extension(format!("previous-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&staging_root);
+    let _ = fs::remove_dir_all(&previous_root);
+    safe_extract_targz(&bytes, &staging_root)?;
+
+    let cli_name = entry
+        .pointer("/binary_names/cli")
+        .and_then(Value::as_str)
+        .unwrap_or("llama-cli");
+    let server_name = entry
+        .pointer("/binary_names/server")
+        .and_then(Value::as_str)
+        .unwrap_or("llama-server");
+    let perplexity_name = entry
+        .pointer("/binary_names/perplexity")
+        .and_then(Value::as_str)
+        .unwrap_or("llama-perplexity");
+    let expected_binaries = entry["expected_binaries"]
+        .as_array()
+        .ok_or_else(|| "managed runtime manifest is missing expected_binaries".to_string())?;
+    let cli = find_runtime_binary(&staging_root, cli_name)?
+        .ok_or_else(|| "managed runtime archive did not contain llama-cli".to_string())?;
+    let server = find_runtime_binary(&staging_root, server_name)?;
+    let perplexity = find_runtime_binary(&staging_root, perplexity_name)?;
+    for expected in expected_binaries {
+        let Some(name) = expected.as_str() else {
+            return Err("expected_binaries must contain only binary names".to_string());
+        };
+        let found = if name == cli_name {
+            Some(cli.clone())
+        } else if name == server_name {
+            server.clone()
+        } else if name == perplexity_name {
+            perplexity.clone()
+        } else {
+            find_runtime_binary(&staging_root, name)?
+        };
+        if found.is_none() {
+            return Err(format!(
+                "managed runtime archive did not contain expected binary `{name}`"
+            ));
+        }
+    }
+    set_executable_if_needed(&cli)?;
+    let version_output = smoke_runtime_binary(&cli)?;
+
+    if install_root.exists() {
+        fs::rename(&install_root, &previous_root).map_err(|error| {
+            format!(
+                "could not prepare rollback for managed runtime `{}`: {error}",
+                install_root.display()
+            )
+        })?;
+    }
+    if let Err(error) = fs::rename(&staging_root, &install_root) {
+        if previous_root.exists() {
+            let _ = fs::rename(&previous_root, &install_root);
+        }
+        return Err(format!("could not activate managed runtime: {error}"));
+    }
+    let installed_cli = install_root.join(
+        cli.strip_prefix(&staging_root)
+            .map_err(|error| format!("could not resolve installed llama-cli path: {error}"))?,
+    );
+    let installed_server = server.and_then(|path| {
+        path.strip_prefix(&staging_root)
+            .ok()
+            .map(|relative| install_root.join(relative).display().to_string())
+    });
+    let installed_perplexity = perplexity.and_then(|path| {
+        path.strip_prefix(&staging_root)
+            .ok()
+            .map(|relative| install_root.join(relative).display().to_string())
+    });
+    let selection = json!({
+        "runtime_id": runtime_id,
+        "backend": "llama.cpp",
+        "version_label": entry["version_label"].clone(),
+        "source": "managed_download",
+        "channel": entry["channel"].clone(),
+        "provenance": entry["provenance"].clone(),
+        "manifest_version": RUNTIME_MANIFEST_VERSION,
+        "upstream": entry["upstream"].clone(),
+        "archive": {
+            "url": archive_url,
+            "sha256": expected_sha256,
+            "checksum_verified": true,
+            "independent_signature_verified": false,
+        },
+        "binaries": {
+            "cli": installed_cli.display().to_string(),
+            "server": installed_server,
+            "perplexity": installed_perplexity,
+        },
+        "version_smoke": {
+            "command": "--version",
+            "output": version_output,
+        },
+        "selected_at_platform": {
+            "system": env::consts::OS,
+            "machine": env::consts::ARCH,
+        },
+    });
+    let selected_path = match write_selected_llama_cpp_runtime(&selection) {
+        Ok(path) => path,
+        Err(error) => {
+            restore_previous_runtime_root(&install_root, &previous_root);
+            return Err(error);
+        }
+    };
+    let _ = fs::remove_dir_all(&previous_root);
+
+    Ok(json!({
+        "status": "selected",
+        "selection": selection,
+        "path": selected_path.display().to_string(),
+        "install_root": install_root.display().to_string(),
+        "message": "Managed llama.cpp runtime installed and selected. The archive checksum was verified; no independent signature was verified.",
+    }))
+}
+
+fn restore_previous_runtime_root(install_root: &Path, previous_root: &Path) {
+    let _ = fs::remove_dir_all(install_root);
+    if previous_root.exists() {
+        let _ = fs::rename(previous_root, install_root);
+    }
+}
+
+fn write_selected_llama_cpp_runtime(selection: &Value) -> Result<PathBuf, String> {
+    let selected_path = selected_llama_cpp_runtime_path()?;
+    fs::create_dir_all(selected_path.parent().ok_or_else(|| {
+        format!(
+            "could not resolve selected runtime directory for `{}`",
+            selected_path.display()
+        )
+    })?)
+    .map_err(|error| format!("could not create selected runtime directory: {error}"))?;
+    let body = serde_json::to_string_pretty(selection)
+        .map_err(|error| format!("could not serialize selected runtime: {error}"))?;
+    let temp_path = selected_path.with_extension(format!("json.tmp-{}", std::process::id()));
+    fs::write(&temp_path, format!("{body}\n"))
+        .map_err(|error| format!("could not write selected runtime: {error}"))?;
+    fs::rename(&temp_path, &selected_path)
+        .map_err(|error| format!("could not activate selected runtime: {error}"))?;
+    Ok(selected_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
     use std::sync::{Mutex, OnceLock};
+    use tar::{Builder, Header};
 
     fn env_test_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -939,6 +1337,157 @@ mod tests {
             permissions.set_mode(0o755);
             fs::set_permissions(path, permissions).expect("test binary executable");
         }
+    }
+
+    fn test_runtime_manifest_entry(archive_bytes: &[u8]) -> Value {
+        json!({
+            "runtime_id": "llama-cpp-managed-test",
+            "channel": "infergrade_stable",
+            "backend": "llama.cpp",
+            "version_label": "llama.cpp managed test",
+            "upstream": {
+                "project": "ggml-org/llama.cpp",
+                "tag": "test"
+            },
+            "platform": {
+                "system": env::consts::OS,
+                "arch": env::consts::ARCH
+            },
+            "archive": {
+                "url": "https://downloads.infergrade.test/llama-cpp-managed-test.tar.gz",
+                "sha256": sha256_hex(archive_bytes),
+                "signature_url": Value::Null
+            },
+            "download": {
+                "requires_explicit_user_action": true
+            },
+            "expected_binaries": ["llama-cli", "llama-server", "llama-perplexity"],
+            "binary_names": {
+                "cli": "llama-cli",
+                "server": "llama-server",
+                "perplexity": "llama-perplexity"
+            },
+            "rollback_runtime_id": LLAMA_CPP_RUNTIME_ID,
+            "provenance": "Test archive with checksum verification only.",
+        })
+    }
+
+    fn append_tar_file(
+        builder: &mut Builder<GzEncoder<Vec<u8>>>,
+        path: &str,
+        body: &[u8],
+        mode: u32,
+    ) {
+        let mut header = Header::new_gnu();
+        header.set_size(body.len() as u64);
+        header.set_mode(mode);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, path, body)
+            .expect("append test archive file");
+    }
+
+    fn test_runtime_archive() -> Vec<u8> {
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = Builder::new(encoder);
+        append_tar_file(
+            &mut builder,
+            "llama-test/bin/llama-cli",
+            b"#!/bin/sh\necho 'llama-cli version managed-test'\n",
+            0o755,
+        );
+        append_tar_file(
+            &mut builder,
+            "llama-test/bin/llama-server",
+            b"#!/bin/sh\necho 'llama-server version managed-test'\n",
+            0o755,
+        );
+        append_tar_file(
+            &mut builder,
+            "llama-test/bin/llama-perplexity",
+            b"#!/bin/sh\necho 'llama-perplexity version managed-test'\n",
+            0o755,
+        );
+        let encoder = builder.into_inner().expect("finish tar");
+        encoder.finish().expect("finish gzip")
+    }
+
+    fn test_runtime_archive_without_perplexity() -> Vec<u8> {
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = Builder::new(encoder);
+        append_tar_file(
+            &mut builder,
+            "llama-test/bin/llama-cli",
+            b"#!/bin/sh\necho 'llama-cli version managed-test'\n",
+            0o755,
+        );
+        append_tar_file(
+            &mut builder,
+            "llama-test/bin/llama-server",
+            b"#!/bin/sh\necho 'llama-server version managed-test'\n",
+            0o755,
+        );
+        let encoder = builder.into_inner().expect("finish tar");
+        encoder.finish().expect("finish gzip")
+    }
+
+    fn symlink_runtime_archive() -> Vec<u8> {
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = Builder::new(encoder);
+        let mut header = Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_size(0);
+        header.set_mode(0o777);
+        header.set_cksum();
+        builder
+            .append_link(
+                &mut header,
+                "llama-test/bin/llama-cli",
+                "/tmp/outside-llama-cli",
+            )
+            .expect("append symlink");
+        let encoder = builder.into_inner().expect("finish tar");
+        encoder.finish().expect("finish gzip")
+    }
+
+    fn unsafe_runtime_archive() -> Vec<u8> {
+        fn write_octal(field: &mut [u8], value: u64) {
+            for byte in field.iter_mut() {
+                *byte = b'0';
+            }
+            let text = format!("{value:o}");
+            let start = field.len().saturating_sub(text.len() + 1);
+            field[start..start + text.len()].copy_from_slice(text.as_bytes());
+            field[field.len() - 1] = 0;
+        }
+
+        let body = b"escape";
+        let mut tar_bytes = Vec::new();
+        let mut header = [0u8; 512];
+        header[..16].copy_from_slice(b"../outside-cache");
+        write_octal(&mut header[100..108], 0o644);
+        write_octal(&mut header[108..116], 0);
+        write_octal(&mut header[116..124], 0);
+        write_octal(&mut header[124..136], body.len() as u64);
+        write_octal(&mut header[136..148], 0);
+        for byte in &mut header[148..156] {
+            *byte = b' ';
+        }
+        header[156] = b'0';
+        header[257..263].copy_from_slice(b"ustar\0");
+        header[263..265].copy_from_slice(b"00");
+        let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+        let checksum_text = format!("{checksum:06o}\0 ");
+        header[148..156].copy_from_slice(checksum_text.as_bytes());
+        tar_bytes.extend_from_slice(&header);
+        tar_bytes.extend_from_slice(body);
+        let padding = (512 - (body.len() % 512)) % 512;
+        tar_bytes.extend(std::iter::repeat_n(0, padding));
+        tar_bytes.extend([0u8; 1024]);
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&tar_bytes).expect("write unsafe tar");
+        encoder.finish().expect("finish gzip")
     }
 
     #[test]
@@ -1009,7 +1558,8 @@ mod tests {
         assert!(verify_runtime_download_manifest(&valid).is_ok());
 
         let mut insecure = valid.clone();
-        insecure["archive"]["url"] = Value::String("http://example.com/runtime.tar.zst".to_string());
+        insecure["archive"]["url"] =
+            Value::String("http://example.com/runtime.tar.zst".to_string());
         assert!(verify_runtime_download_manifest(&insecure)
             .expect_err("insecure runtime url rejected")
             .contains("HTTPS"));
@@ -1028,8 +1578,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_runtime_manifest_lists_checksum_verified_macos_metal_lane_without_enabling_download()
-    {
+    fn managed_runtime_manifest_lists_checksum_verified_macos_metal_lane_with_explicit_download() {
         let manifest = managed_llama_cpp_runtime_manifest();
         assert_eq!(manifest["runtime_family"], "llama.cpp");
         assert_eq!(manifest["manifest_version"], RUNTIME_MANIFEST_VERSION);
@@ -1052,12 +1601,12 @@ mod tests {
             macos["archive"]["sha256"],
             "d334fa44e42a143ec6e49924f9630136c0b5fedc5a615508636ba9c8d08eb5d3"
         );
-        assert_eq!(macos["download"]["enabled"], false);
+        assert_eq!(macos["download"]["enabled"], true);
         assert_eq!(macos["download"]["requires_explicit_user_action"], true);
-        assert!(macos["download"]["blocked_reason"]
+        assert!(macos["download"]["message"]
             .as_str()
             .unwrap_or("")
-            .contains("independent signature"));
+            .contains("explicit user action"));
         assert_eq!(macos["verification"]["independent_signature"], false);
         assert_eq!(macos["expected_binaries"][0], "llama-cli");
         assert_eq!(
@@ -1065,6 +1614,217 @@ mod tests {
             "llama-cpp-homebrew-stable-2026-04"
         );
         assert!(verify_runtime_download_manifest(macos).is_ok());
+    }
+
+    #[test]
+    fn managed_runtime_install_verifies_checksum_extracts_and_selects_runtime() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-managed-install-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let archive = test_runtime_archive();
+        let entry = test_runtime_manifest_entry(&archive);
+
+        let result = install_managed_llama_cpp_runtime_from_manifest_entry(
+            entry,
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive),
+            },
+        )
+        .expect("managed runtime install");
+
+        assert_eq!(result["status"], "selected");
+        assert_eq!(result["selection"]["source"], "managed_download");
+        assert_eq!(result["selection"]["archive"]["checksum_verified"], true);
+        assert_eq!(
+            result["selection"]["archive"]["independent_signature_verified"],
+            false
+        );
+        let cli = result["selection"]["binaries"]["cli"]
+            .as_str()
+            .expect("selected cli path");
+        assert!(Path::new(cli).is_file());
+        assert!(result["selection"]["version_smoke"]["output"]
+            .as_str()
+            .unwrap_or("")
+            .contains("managed-test"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn managed_runtime_install_rejects_checksum_mismatch_before_extracting() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-managed-checksum-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let archive = test_runtime_archive();
+        let mut entry = test_runtime_manifest_entry(&archive);
+        entry["archive"]["sha256"] = Value::String(
+            "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+        );
+
+        let error = install_managed_llama_cpp_runtime_from_manifest_entry(
+            entry,
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive),
+            },
+        )
+        .expect_err("checksum mismatch rejected");
+
+        assert!(error.contains("checksum mismatch"));
+        assert!(!runtime_cache_dir.join("llama.cpp").join("managed").exists());
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn managed_runtime_install_rejects_path_traversal_archive() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-managed-traversal-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let archive = unsafe_runtime_archive();
+        let entry = test_runtime_manifest_entry(&archive);
+
+        let error = install_managed_llama_cpp_runtime_from_manifest_entry(
+            entry,
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive),
+            },
+        )
+        .expect_err("path traversal rejected");
+
+        assert!(error.contains("unsafe path") || error.contains("outside the runtime cache"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn managed_runtime_install_rejects_link_entries() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-managed-link-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let archive = symlink_runtime_archive();
+        let entry = test_runtime_manifest_entry(&archive);
+
+        let error = install_managed_llama_cpp_runtime_from_manifest_entry(
+            entry,
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive),
+            },
+        )
+        .expect_err("link entry rejected");
+
+        assert!(error.contains("unsafe symlink target") || error.contains("link or special file"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn managed_runtime_install_requires_declared_expected_binaries() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-managed-missing-binary-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let archive = test_runtime_archive_without_perplexity();
+        let entry = test_runtime_manifest_entry(&archive);
+
+        let error = install_managed_llama_cpp_runtime_from_manifest_entry(
+            entry,
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive),
+            },
+        )
+        .expect_err("missing expected binary rejected");
+
+        assert!(error.contains("llama-perplexity"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn managed_runtime_install_restores_previous_root_when_selection_write_fails() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-managed-rollback-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let archive = test_runtime_archive();
+        let entry = test_runtime_manifest_entry(&archive);
+        let install_root =
+            managed_runtime_install_root("llama-cpp-managed-test").expect("install root");
+        fs::create_dir_all(&install_root).expect("existing install root");
+        fs::write(install_root.join("old-runtime-marker"), "old").expect("old marker");
+        let selected_path = selected_llama_cpp_runtime_path().expect("selected path");
+        fs::create_dir_all(&selected_path).expect("directory blocks selection file");
+
+        let error = install_managed_llama_cpp_runtime_from_manifest_entry(
+            entry,
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive),
+            },
+        )
+        .expect_err("selection write failure rejected");
+
+        assert!(error.contains("selected runtime"));
+        assert!(install_root.join("old-runtime-marker").is_file());
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
     }
 
     #[test]
