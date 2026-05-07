@@ -88,6 +88,13 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
   const engine = readFileSync(new URL("../../../crates/runner-engine/src/lib.rs", import.meta.url), "utf8");
 
   assert.ok(html.includes("Local readiness checklist"));
+  assert.ok(html.includes("First-run path"));
+  assert.ok(html.includes("data-first-run-step=\"paired\""));
+  assert.ok(html.includes("data-first-run-step=\"runtime\""));
+  assert.ok(html.includes("data-first-run-step=\"model\""));
+  assert.ok(html.includes("data-first-run-step=\"ready\""));
+  assert.ok(html.includes("data-first-run-step=\"upload\""));
+  assert.ok(html.includes("data-first-run-step=\"result\""));
   assert.ok(html.includes("data-hub-connection-status"));
   assert.ok(html.includes("data-pairing-readiness-status"));
   assert.ok(html.includes("data-runtime-llama-status"));
@@ -97,6 +104,16 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
   assert.ok(html.includes("data-model-path-status"));
   assert.ok(html.includes("Select a local GGUF model for the first benchmark."));
   assert.ok(js.includes("renderLocalReadinessChecklist"));
+  assert.ok(js.includes("renderFirstRunChecklist"));
+  assert.ok(js.includes("firstRunStepNodes"));
+  assert.ok(js.includes("firstRunModelPathInput"));
+  assert.ok(js.includes("firstRunUploadRunIdInput"));
+  assert.equal(js.includes("form.elements.firstRunModelPath"), false);
+  assert.equal(js.includes("form.elements.firstRunUploadRunId"), false);
+  assert.equal(js.includes("form.elements.runtimeId"), false);
+  assert.ok(js.includes("Paired through the OS credential store. Tokens stay out of this browser UI."));
+  assert.ok(js.includes("Ready to run a native first-run smoke benchmark."));
+  assert.ok(js.includes("Result availability starts after a successful upload."));
   assert.ok(js.includes("await stopRunner()"));
   assert.ok(js.includes('invoke("llama_cpp_runtime_plan"'));
   assert.ok(js.includes('invoke("install_managed_llama_cpp_runtime"'));

@@ -332,9 +332,68 @@ label {
   padding-top: 14px;
 }
 
+.first-run-checklist {
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--surface);
+}
+
 .readiness-checklist h3 {
   margin: 0 0 8px;
   font-size: 0.95rem;
+}
+
+.first-run-checklist h3 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+}
+
+.flow-list {
+  display: grid;
+  gap: 8px;
+}
+
+.flow-list div {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px 10px 34px;
+  background: var(--surface-muted);
+  position: relative;
+}
+
+.flow-list div::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  left: 12px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.flow-list div[data-state="done"]::before {
+  border-color: #159885;
+  background: #159885;
+}
+
+.flow-list div[data-state="current"] {
+  border-color: var(--border-strong);
+}
+
+.flow-list div[data-state="blocked"]::before {
+  border-color: #c7832c;
+  background: #c7832c;
+}
+
+.flow-list div span {
+  color: var(--text-muted);
+  line-height: 1.35;
 }
 
 .status-list {
