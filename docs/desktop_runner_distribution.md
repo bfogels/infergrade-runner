@@ -101,6 +101,17 @@ The GitHub Actions workflow publishes the latest DMG and updater artifacts on ea
 
 The protected workflow also runs `scripts/verify_desktop_macos_release.sh` before upload. That script verifies the built app bundle with `codesign`, assesses the app and DMG with Gatekeeper, and validates stapled notarization tickets for both artifacts. If any of those checks fail, the workflow must stop before updating the downloadable release.
 
+After downloading release artifacts from GitHub, maintainers can verify the published files against the checksum and updater manifests:
+
+```bash
+scripts/verify_desktop_release_artifacts.py \
+  --directory /path/to/downloaded/desktop-runner-latest \
+  --require-dmg \
+  --require-updater
+```
+
+This verifies `SHA256SUMS`, confirms the updater manifest references local updater archives and signature artifacts, and prints stable evidence lines. It does not check Developer ID signing, notarization, or Gatekeeper behavior; use `scripts/verify_desktop_macos_release.sh` on the built macOS artifacts and clean-machine DMG smoke before treating a release as public-user-ready.
+
 The updater manifest writer can already emit a multi-platform Tauri manifest when separate signed updater archives exist:
 
 ```bash

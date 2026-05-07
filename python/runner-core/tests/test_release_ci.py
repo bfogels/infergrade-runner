@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from pathlib import Path
 
 from scripts.sync_versions import sync_versions
+from scripts.verify_desktop_release_artifacts import main as verify_desktop_release_artifacts
 from scripts.write_desktop_release_checksums import main as write_desktop_release_checksums
 from scripts.write_desktop_update_manifest import main as write_desktop_update_manifest
 
@@ -556,6 +557,209 @@ class ReleaseCiTests(unittest.TestCase):
 
             self.assertIn("Missing release artifact", str(raised.exception))
             self.assertFalse(output.exists())
+
+    def test_desktop_release_artifact_verifier_checks_checksums_and_updater_manifest(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dmg = root / "InferGrade Runner_0.2.5_aarch64.dmg"
+            archive = root / "InferGrade Runner.app.tar.gz"
+            signature = root / "InferGrade Runner.app.tar.gz.sig"
+            manifest = root / "infergrade-runner-desktop-latest.json"
+            checksums = root / "SHA256SUMS"
+            dmg.write_bytes(b"dmg")
+            archive.write_bytes(b"archive")
+            signature.write_text("trusted-signature\n", encoding="utf-8")
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "version": "0.2.5",
+                        "platforms": {
+                            "darwin-aarch64": {
+                                "signature": "trusted-signature",
+                                "url": "https://example.test/releases/InferGrade%20Runner.app.tar.gz",
+                            }
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "write_desktop_release_checksums",
+                    "--output",
+                    str(checksums),
+                    str(dmg),
+                    str(archive),
+                    str(signature),
+                    str(manifest),
+                ]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(write_desktop_release_checksums(), 0)
+                sys.argv = [
+                    "verify_desktop_release_artifacts",
+                    "--directory",
+                    str(root),
+                    "--require-dmg",
+                    "--require-updater",
+                ]
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    self.assertEqual(verify_desktop_release_artifacts(), 0)
+            finally:
+                sys.argv = old_argv
+
+            output = stdout.getvalue()
+            self.assertIn("desktop_release_artifacts_verified=4", output)
+            self.assertIn("desktop_release_notarization=not_checked_by_artifact_manifest", output)
+
+    def test_desktop_release_artifact_verifier_rejects_bad_checksums_and_missing_signatures(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dmg = root / "InferGrade Runner_0.2.5_aarch64.dmg"
+            archive = root / "InferGrade Runner.app.tar.gz"
+            manifest = root / "infergrade-runner-desktop-latest.json"
+            checksums = root / "SHA256SUMS"
+            dmg.write_bytes(b"dmg")
+            archive.write_bytes(b"archive")
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "version": "0.2.5",
+                        "platforms": {
+                            "darwin-aarch64": {
+                                "signature": "trusted-signature",
+                                "url": "https://example.test/releases/InferGrade%20Runner.app.tar.gz",
+                            }
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            checksums.write_text("%s  %s\n" % ("0" * 64, dmg.name), encoding="utf-8")
+
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "verify_desktop_release_artifacts",
+                    "--directory",
+                    str(root),
+                    "--require-dmg",
+                ]
+                with self.assertRaises(SystemExit) as raised:
+                    verify_desktop_release_artifacts()
+                self.assertIn("Checksum mismatch", str(raised.exception))
+
+                checksums.write_text(
+                    "%s  %s\n%s  %s\n%s  %s\n"
+                    % (
+                        __import__("hashlib").sha256(dmg.read_bytes()).hexdigest(),
+                        dmg.name,
+                        __import__("hashlib").sha256(archive.read_bytes()).hexdigest(),
+                        archive.name,
+                        __import__("hashlib").sha256(manifest.read_bytes()).hexdigest(),
+                        manifest.name,
+                    ),
+                    encoding="utf-8",
+                )
+                sys.argv = [
+                    "verify_desktop_release_artifacts",
+                    "--directory",
+                    str(root),
+                    "--require-updater",
+                ]
+                with self.assertRaises(SystemExit) as raised:
+                    verify_desktop_release_artifacts()
+                self.assertIn("Updater signature artifact is missing", str(raised.exception))
+            finally:
+                sys.argv = old_argv
+
+    def test_desktop_release_artifact_verifier_rejects_signature_mismatch_and_unchecksummed_updater_files(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dmg = root / "InferGrade Runner_0.2.5_aarch64.dmg"
+            archive = root / "InferGrade Runner.app.tar.gz"
+            signature = root / "InferGrade Runner.app.tar.gz.sig"
+            manifest = root / "infergrade-runner-desktop-latest.json"
+            checksums = root / "SHA256SUMS"
+            dmg.write_bytes(b"dmg")
+            archive.write_bytes(b"archive")
+            signature.write_text("actual-signature\n", encoding="utf-8")
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "version": "0.2.5",
+                        "platforms": {
+                            "darwin-aarch64": {
+                                "signature": "manifest-signature",
+                                "url": "https://example.test/releases/InferGrade%20Runner.app.tar.gz",
+                            }
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            old_argv = sys.argv
+            try:
+                checksums.write_text(
+                    "%s  %s\n%s  %s\n%s  %s\n%s  %s\n"
+                    % (
+                        __import__("hashlib").sha256(dmg.read_bytes()).hexdigest(),
+                        dmg.name,
+                        __import__("hashlib").sha256(archive.read_bytes()).hexdigest(),
+                        archive.name,
+                        __import__("hashlib").sha256(signature.read_bytes()).hexdigest(),
+                        signature.name,
+                        __import__("hashlib").sha256(manifest.read_bytes()).hexdigest(),
+                        manifest.name,
+                    ),
+                    encoding="utf-8",
+                )
+                sys.argv = [
+                    "verify_desktop_release_artifacts",
+                    "--directory",
+                    str(root),
+                    "--require-updater",
+                ]
+                with self.assertRaises(SystemExit) as raised:
+                    verify_desktop_release_artifacts()
+                self.assertIn("signature does not match", str(raised.exception))
+
+                manifest.write_text(
+                    json.dumps(
+                        {
+                            "version": "0.2.5",
+                            "platforms": {
+                                "darwin-aarch64": {
+                                    "signature": "actual-signature",
+                                    "url": "https://example.test/releases/InferGrade%20Runner.app.tar.gz",
+                                }
+                            },
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                checksums.write_text(
+                    "%s  %s\n%s  %s\n"
+                    % (
+                        __import__("hashlib").sha256(dmg.read_bytes()).hexdigest(),
+                        dmg.name,
+                        __import__("hashlib").sha256(manifest.read_bytes()).hexdigest(),
+                        manifest.name,
+                    ),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(SystemExit) as raised:
+                    verify_desktop_release_artifacts()
+                self.assertIn("not covered by SHA256SUMS", str(raised.exception))
+            finally:
+                sys.argv = old_argv
 
     def test_desktop_update_manifest_quotes_archive_url_and_preserves_metadata(self):
         with TemporaryDirectory() as tmp:
