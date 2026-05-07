@@ -8,6 +8,7 @@ Run from the Runner repo root:
 
 ```bash
 git fetch origin --prune
+python3 ./scripts/check_public_release_readiness.py
 gitleaks detect --source=. --redact --no-banner --exit-code 1
 git log --all --name-only --pretty=format: | sort -u | rg '(^|/)(\.env|\.env\.|.*\.(pem|p12|pfx|cer|crt|key|mobileprovision|provisionprofile)|AuthKey_.*\.p8|.*signing.*|.*notary.*|secrets?/)($|/)'
 rg -n 'pull_request_target|secrets\.|TAURI_SIGNING_PRIVATE_KEY|APPLE_CERTIFICATE|APPLE_API_PRIVATE_KEY|APPLE_PASSWORD' .github/workflows
@@ -17,6 +18,7 @@ rg -n 'pull_request_target|secrets\.|TAURI_SIGNING_PRIVATE_KEY|APPLE_CERTIFICATE
 Expected results:
 
 - `gitleaks` finds no leaks.
+- `check_public_release_readiness.py` runs from a clean Git worktree and returns `manual_required`, not `fail`; its manual gates are expected because local checks cannot inspect GitHub release-environment settings, Apple Developer ID credentials, notarization credentials, or published artifacts.
 - The filename-history scan finds no committed secrets, certs, keys, `.env` files, Apple signing materials, or notary materials.
 - Secret references appear only in trusted release or publishing workflows that do not run on untrusted pull-request code.
 - Tests pass or failures are documented as unrelated release blockers.
@@ -34,6 +36,8 @@ Verify after the repository is public:
 - Apple signing, App Store Connect, and Tauri updater secrets exist only in the `release` environment, not as broad repository secrets.
 
 GitHub required reviewers may be unavailable for private repositories on some plans. If GitHub rejects the rule before the public flip, configure it immediately after the repository becomes public.
+
+Local readiness automation intentionally reports GitHub settings as a manual gate. Do not treat a local `manual_required` result as public-release proof until the release environment restrictions, required reviewers, branch protection, secret scanning, and published-artifact verification have been checked in GitHub.
 
 ## Documentation And Policy
 
@@ -59,3 +63,16 @@ Before the first public release, rotate or reissue credentials that previously e
 - Apple certificate password, and preferably the exported certificate if practical
 
 Do not paste replacement values into issues, PRs, docs, screenshots, or local committed files.
+
+## Published Artifact Verification
+
+After the protected desktop workflow publishes `desktop-runner-latest`, download the DMG, updater archive, updater `.sig`, updater manifest, and `SHA256SUMS` into one directory and run:
+
+```bash
+python3 ./scripts/verify_desktop_release_artifacts.py \
+  --directory /path/to/downloaded/desktop-runner-latest \
+  --require-dmg \
+  --require-updater
+```
+
+This proves local artifact-manifest consistency only. It does not replace Developer ID signing, notarization, Gatekeeper assessment, stapled-ticket checks, or a clean-machine launch smoke. Windows and Linux package smoke artifacts are not supported public installers.

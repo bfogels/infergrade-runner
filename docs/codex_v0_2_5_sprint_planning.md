@@ -5,7 +5,7 @@ Date: 2026-05-07
 ## Branch State
 
 - Runner `origin/main`: v0.2.4 at `a8528ca`.
-- Runner `origin/develop`: synced to `origin/main` at `a8528ca`.
+- Runner `origin/develop`: one reviewed public-release hardening PR ahead of `origin/main` at `b5078d6`.
 - Runner open PRs at sprint start: none.
 - Hub open PRs at sprint start: none observed from the Hub checkout.
 
@@ -25,7 +25,7 @@ Target maintainer promise:
    - Add release CI unit coverage for positive and negative verifier paths.
 
 2. PR B: release checklist automation and docs hardening.
-   - Add a consolidated local release evidence command if useful after PR A.
+   - Add a consolidated local release evidence command.
    - Tighten public release checklist wording around unavailable credentials and GitHub Actions infra/pre-run failures.
 
 3. PR C: v0.2.5 release promotion if PR A/B produce a coherent public-release hardening slice.
@@ -45,6 +45,7 @@ Use the relevant subset per PR:
 
 ```bash
 python3 -m unittest python/runner-core/tests/test_release_ci.py
+python3 ./scripts/check_public_release_readiness.py
 python3 ./scripts/sync_versions.py --check
 python3 ./scripts/check_versions.py
 git diff --check
@@ -87,6 +88,31 @@ Validation passed locally:
 ```bash
 python3 -m unittest python/runner-core/tests/test_release_ci.py
 python3 scripts/verify_desktop_release_artifacts.py --help
+python3 ./scripts/sync_versions.py --check
+python3 ./scripts/check_versions.py
+git diff --check
+gitleaks detect --source=. --redact --no-banner --exit-code 0
+```
+
+PR: #161, merged to `develop` as `b5078d6`.
+
+## PR B Local Evidence
+
+Branch: `codex/runner-v025-release-checks`
+PR: pending
+
+Implemented:
+
+- `scripts/check_public_release_readiness.py` emits a repository-local public-release readiness report.
+- The readiness report checks clean Git state, required policy/docs/scripts, protected Desktop release workflow posture, absence of `pull_request_target`, suspicious local secret-looking filenames, and release-doc honesty.
+- The report deliberately returns `manual_required` when local checks pass because GitHub settings, release-environment secrets, Apple Developer ID credentials, notarization credentials, and published artifact verification must still be checked outside the local workspace.
+- `docs/public_release_checklist.md` and `docs/release_process.md` now tell maintainers to expect `manual_required`, not a false all-clear, before public macOS distribution.
+
+Validation passed locally:
+
+```bash
+python3 -m unittest python/runner-core/tests/test_release_ci.py
+python3 ./scripts/check_public_release_readiness.py
 python3 ./scripts/sync_versions.py --check
 python3 ./scripts/check_versions.py
 git diff --check
