@@ -84,6 +84,19 @@ When the workflow fails at `Validate Apple signing certificate password`, fix th
 
 After you update the certificate and password secrets together, rerun the `Desktop Runner Release` workflow from `main`. A passing preflight only proves the certificate opens; the workflow must still complete signing, notarization, Gatekeeper assessment, and stapled-ticket checks before the DMG is user-ready.
 
+### Verify Published Desktop Artifacts
+
+After the protected workflow publishes `desktop-runner-latest`, download the release files into one directory and verify the local manifests:
+
+```bash
+scripts/verify_desktop_release_artifacts.py \
+  --directory /path/to/downloaded/desktop-runner-latest \
+  --require-dmg \
+  --require-updater
+```
+
+This check verifies `SHA256SUMS`, confirms the updater manifest points at a local updater archive, and confirms the updater signature artifact exists and is non-empty. It is a manifest consistency check only. It does not replace Developer ID signing, notarization, Gatekeeper assessment, stapled-ticket checks, or clean-machine launch smoke.
+
 ## Prepare The Release Images
 
 Build the release-tagged local images:
