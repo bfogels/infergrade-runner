@@ -829,6 +829,23 @@ mod tests {
         LOCK.get_or_init(|| TestMutex::new(()))
     }
 
+    fn write_test_llama_binary(path: &std::path::Path) {
+        #[cfg(windows)]
+        fs::write(path, "@echo off\r\necho llama-cli version 0.0-test\r\n")
+            .expect("test llama binary");
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::write(path, "#!/bin/sh\necho 'llama-cli version 0.0-test'\n")
+                .expect("test llama binary");
+            let mut permissions = fs::metadata(path)
+                .expect("test binary metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(path, permissions).expect("test binary executable");
+        }
+    }
+
     #[test]
     fn normalizes_hosted_and_local_api_urls() {
         assert_eq!(
@@ -1055,10 +1072,11 @@ mod tests {
             std::process::id()
         ));
         let runtime_path = env::temp_dir().join(format!(
-            "infergrade-desktop-llama-cli-{}",
-            std::process::id()
+            "infergrade-desktop-llama-cli-{}{}",
+            std::process::id(),
+            if cfg!(windows) { ".cmd" } else { "" }
         ));
-        fs::write(&runtime_path, b"fake llama-cli").expect("runtime file");
+        write_test_llama_binary(&runtime_path);
         let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
         env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
 

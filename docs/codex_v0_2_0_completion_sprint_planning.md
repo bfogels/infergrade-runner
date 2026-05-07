@@ -110,6 +110,14 @@ Current live checks before this file:
   - `./scripts/build_desktop_sidecar.sh`: pass.
   - `cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked`: pass after building the sidecar.
   - `cargo run --manifest-path apps/runner-cli/Cargo.toml -- runtime select-existing --runtime-path /opt/homebrew/bin/llama-cli`: pass; wrote canonical selected Homebrew llama.cpp binary paths to `~/.cache/infergrade/runtimes/llama.cpp/selected_runtime.json`.
+  - Reviewer follow-up validation:
+    - `cargo test --manifest-path crates/runner-engine/Cargo.toml --locked`: pass after rejecting non-executable/non-llama selections.
+    - `cargo test --manifest-path apps/runner-cli/Cargo.toml --locked`: pass after updating CLI test runtime shim.
+    - `cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked`: pass after updating Desktop test runtime shim.
+    - `npm run check --prefix apps/desktop-runner`: pass.
+    - `cargo run --manifest-path apps/runner-cli/Cargo.toml -- runtime select-existing --runtime-path /etc/hosts; test $? -ne 0`: pass; `/etc/hosts` is rejected before selection.
+    - `cargo run --manifest-path apps/runner-cli/Cargo.toml -- runtime select-existing --runtime-path /opt/homebrew/bin/llama-cli`: pass with runnable llama.cpp validation.
+    - `gitleaks detect --source=. --redact --no-banner --exit-code 0`: pass.
   - `cargo fmt --all --check`: pass.
   - `git diff --check`: pass.
   - `gitleaks detect --source=. --redact --no-banner --exit-code 0`: pass.
@@ -125,6 +133,7 @@ Current live checks before this file:
 - #139 reviewer caught prompt echo leakage and generated-token overclaim; fixed by exact prompt redaction, sibling `llama-completion` preference, and rejecting summary-only output without observed token counts.
 - #140 reviewer caught unsafe handoff identifier acceptance; fixed by requiring safe Hub identifier-shaped run/worker values and rejecting token/secret/authorization/bearer-like values.
 - #205 reviewer found no blockers and validated that normal local-native browser queueing returns no `execution_token` while explicit advanced minting still works.
+- #141 reviewer caught runtime selection accepting arbitrary regular files such as `/etc/hosts` and mixing explicit CLI selections with PATH-discovered optional binaries. Fixed by requiring executable/runnable llama.cpp binaries before persisting selection and by resolving optional binaries from the explicit CLI sibling directory unless explicitly provided.
 
 ## Release-Gate Status
 
