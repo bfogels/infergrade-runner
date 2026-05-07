@@ -296,3 +296,33 @@ test("desktop first-run UI renders progress, artifacts, upload state, and select
   assert.ok(rust.includes("mark_desktop_native_first_run_upload_failed"));
   assert.ok(js.includes("Native first-run completed locally, but Hub upload failed."));
 });
+
+test("desktop first-run support actions stay token-free and reuse local artifacts", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+
+  assert.ok(html.includes("data-copy-support-summary"));
+  assert.ok(html.includes("data-copy-artifact-path"));
+  assert.ok(html.includes("data-retry-first-run-upload"));
+  assert.ok(js.includes("lastFirstRunPayload"));
+  assert.ok(js.includes('invoke("desktop_support_summary"'));
+  assert.ok(js.includes('invoke("retry_desktop_native_first_run_upload"'));
+  assert.ok(js.includes("artifactPath"));
+  assert.ok(js.includes("bundleArtifactPath"));
+  assert.equal(js.includes("payload: lastFirstRunPayload"), false);
+  assert.ok(js.includes("Retry upload requires saved local result and bundle artifacts."));
+  assert.ok(js.includes("navigator.clipboard.writeText"));
+  assert.ok(js.includes("Copy support summary"));
+  assert.ok(js.includes("Copy artifact path"));
+  assert.ok(js.includes("Retry upload"));
+  assert.equal(js.includes("firstRunUploadToken"), false);
+  assert.equal(js.includes("runnerToken"), false);
+  assert.ok(rust.includes("fn desktop_support_summary"));
+  assert.ok(rust.includes("build_support_summary"));
+  assert.ok(rust.includes("fn retry_desktop_native_first_run_upload"));
+  assert.ok(rust.includes("artifact_path_under_root"));
+  assert.ok(rust.includes("load_retry_first_run_payload"));
+  assert.ok(rust.includes("load_retry_bundle_payload"));
+  assert.ok(rust.includes("upload_desktop_native_first_run"));
+});

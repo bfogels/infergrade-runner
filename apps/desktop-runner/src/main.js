@@ -29,6 +29,9 @@ const runtimePlanButton = document.querySelector("[data-runtime-plan]");
 const runtimeInstallManagedButton = document.querySelector("[data-runtime-install-managed]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
 const firstRunStartButton = document.querySelector("[data-first-run-start]");
+const retryFirstRunUploadButton = document.querySelector("[data-retry-first-run-upload]");
+const copyArtifactPathButton = document.querySelector("[data-copy-artifact-path]");
+const copySupportSummaryButton = document.querySelector("[data-copy-support-summary]");
 const firstRunStatus = document.querySelector("[data-first-run-status]");
 const firstRunHandoffStatus = document.querySelector("[data-first-run-handoff-status]");
 const runnerSelfTestButton = document.querySelector("[data-runner-self-test]");
@@ -71,6 +74,7 @@ let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxe
 let modelPathReadiness = "Select a local GGUF model for the first benchmark.";
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
+let lastFirstRunPayload = null;
 
 function systemTheme() {
   if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
@@ -842,6 +846,93 @@ function clearFirstRunHandoff() {
   }
 }
 
+function firstRunArtifactText(payload = lastFirstRunPayload) {
+  const paths = [
+    payload?.artifact?.path,
+    payload?.bundle_artifact?.path,
+  ].filter(Boolean);
+  return paths.join("\n");
+}
+
+function updateFirstRunSupportActions() {
+  const hasArtifact = Boolean(firstRunArtifactText());
+  if (copyArtifactPathButton) {
+    copyArtifactPathButton.disabled = !hasArtifact;
+  }
+  if (retryFirstRunUploadButton) {
+    const uploaded = lastFirstRunPayload?.upload?.uploaded === true;
+    retryFirstRunUploadButton.disabled = !lastFirstRunPayload || uploaded;
+  }
+}
+
+async function copyTextToClipboard(text, label) {
+  if (!text) {
+    throw new Error(`${label} is not available yet.`);
+  }
+  if (!navigator.clipboard?.writeText) {
+    throw new Error("Clipboard is unavailable in this view.");
+  }
+  await navigator.clipboard.writeText(text);
+  appendLog(`${label} copied.`);
+}
+
+async function copyArtifactPath() {
+  await copyTextToClipboard(firstRunArtifactText(), "Copy artifact path");
+}
+
+async function copySupportSummary() {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    appendLog("Open the desktop app to copy a support summary.");
+    return;
+  }
+  const payload = await invoke("desktop_support_summary", {
+    firstRunArtifact: lastFirstRunPayload,
+    recentErrors: logLines.slice(-8),
+  });
+  await copyTextToClipboard(JSON.stringify(payload, null, 2), "Copy support summary");
+}
+
+async function retryFirstRunUpload() {
+  if (!lastFirstRunPayload) {
+    throw new Error("Retry upload requires a completed native first benchmark.");
+  }
+  const uploadRunId = readFirstRunUploadRunId() || lastFirstRunPayload?.upload?.run_id;
+  if (!uploadRunId) {
+    throw new Error("Enter a Hub run ID before retrying upload.");
+  }
+  const artifactPath = lastFirstRunPayload?.artifact?.path || "";
+  const bundleArtifactPath = lastFirstRunPayload?.bundle_artifact?.path || "";
+  if (!artifactPath || !bundleArtifactPath) {
+    throw new Error("Retry upload requires saved local result and bundle artifacts.");
+  }
+  const uploadWorkerId = readFirstRunUploadWorkerId();
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    appendLog("Open the desktop app to retry upload.");
+    return;
+  }
+  retryFirstRunUploadButton.disabled = true;
+  firstRunStatus.textContent = "Retrying Hub upload from the local first-run artifact...";
+  const payload = await invoke("retry_desktop_native_first_run_upload", {
+    artifactPath,
+    bundleArtifactPath,
+    uploadRunId,
+    uploadWorkerId,
+  });
+  lastFirstRunPayload = payload;
+  updateFirstRunSupportActions();
+  if (payload?.upload?.uploaded) {
+    firstRunStatus.textContent = `Uploaded bundle ${payload.upload.bundle_id} to Hub run ${payload.upload.run_id}.`;
+    clearFirstRunHandoff();
+    setStatus("First benchmark uploaded", "good");
+  } else {
+    firstRunStatus.textContent = `Upload failed: ${payload?.upload?.error || "unknown Hub upload error"}`;
+    setStatus("Upload failed", "error");
+  }
+  appendLog(`Retried native first-run upload: ${JSON.stringify(payload)}`);
+}
+
 async function startRunner({ confirmStarted = false } = {}) {
   const apiUrl = readApiUrl();
   window.localStorage.setItem(API_URL_STORAGE_KEY, apiUrl);
@@ -994,6 +1085,8 @@ async function runNativeFirstRun() {
       uploadRunId,
       uploadWorkerId,
     });
+    lastFirstRunPayload = payload;
+    updateFirstRunSupportActions();
     const result = payload?.result || {};
     const metrics = result.metrics || {};
     const speed = Number.isFinite(metrics.decode_tokens_per_second)
@@ -1035,6 +1128,7 @@ async function runNativeFirstRun() {
     appendLog(`Native first-run failed: ${message}`);
   } finally {
     firstRunStartButton.disabled = false;
+    updateFirstRunSupportActions();
   }
 }
 
@@ -1191,6 +1285,26 @@ firstRunStartButton?.addEventListener("click", () => {
     setStatus("First benchmark blocked", "error");
     appendLog(`Could not start native first-run: ${message}`);
   });
+});
+
+retryFirstRunUploadButton?.addEventListener("click", () => {
+  retryFirstRunUpload().catch((error) => {
+    const message = error.message || String(error);
+    if (firstRunStatus) {
+      firstRunStatus.textContent = message;
+    }
+    setStatus("Upload retry blocked", "error");
+    appendLog(`Could not retry first-run upload: ${message}`);
+    updateFirstRunSupportActions();
+  });
+});
+
+copyArtifactPathButton?.addEventListener("click", () => {
+  copyArtifactPath().catch((error) => appendLog(`Could not copy artifact path: ${error.message || error}`));
+});
+
+copySupportSummaryButton?.addEventListener("click", () => {
+  copySupportSummary().catch((error) => appendLog(`Could not copy support summary: ${error.message || error}`));
 });
 
 runnerSelfTestButton?.addEventListener("click", () => {

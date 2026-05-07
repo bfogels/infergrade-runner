@@ -88,9 +88,9 @@ v0.2.4 can promote when failed runtime/first-run/upload paths have clearer recov
 
 ## Next Actions
 
-- PR A is open as PR #157 from `codex/runner-v024-supportability` into `develop`.
-- Independent reviewer completed initial review, two targeted re-reviews, and final privacy re-review.
-- Land PR #157 into `develop` if GitHub allows the merge despite the known pre-run CI failure shape.
+- PR A landed in `develop` as merge commit `f158235`.
+- Finish PR B from `codex/runner-v024-desktop-support` into `develop`.
+- After PR B lands, start PR C for managed-runtime remove/reinstall/retry recovery actions.
 
 ## PR A Local Evidence
 
@@ -133,5 +133,56 @@ GitHub Actions:
 Known limits:
 
 - The Rust CLI support summary does not read OS credential storage, so pairing status is marked `not_loaded_by_cli`.
-- Desktop copy/reveal/retry-upload actions remain PR B scope.
 - Runtime remove/reinstall recovery actions remain PR C scope.
+
+## PR B Local Evidence
+
+Branch: `codex/runner-v024-desktop-support`
+PR: #158
+
+Implemented:
+
+- Desktop first-run support actions for copying the support summary, copying the saved local artifact path, and retrying a failed or missing Hub upload.
+- Tauri `desktop_support_summary` command that adapts Runner-owned support summary output for Desktop pairing and recent-error state.
+- Tauri `retry_desktop_native_first_run_upload` command that retries from persisted local result and bundle artifacts rather than accepting browser-supplied benchmark payloads.
+- Retry validation that canonicalizes artifact paths, requires them to live under the native first-run artifact directory, rejects browser-enriched state, and requires native-first-run bundle provenance.
+- Static Desktop coverage to keep the first-run support actions token-free and artifact-backed.
+
+Validation passed locally:
+
+```bash
+npm run check --prefix apps/desktop-runner
+cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked retry_upload -- --nocapture
+cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked desktop_support_summary -- --nocapture
+cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked
+python3 ./scripts/sync_versions.py --check
+python3 ./scripts/check_versions.py
+git diff --check
+gitleaks detect --source=. --redact --no-banner --exit-code 0
+```
+
+Browser smoke:
+
+- Served the Desktop web app with Vite at `http://127.0.0.1:1421/`.
+- Captured Chrome headless screenshots at 1280px width; the first-run panel rendered the new retry/copy support actions without obvious layout overlap.
+
+Reviewer findings:
+
+- P1: initial retry upload accepted browser-supplied first-run payload JSON while using the saved runner token. Fixed by passing only local artifact paths from the browser and loading persisted artifacts in Rust.
+- P1: initial retry path regenerated the bundle payload instead of uploading the saved bundle artifact. Fixed by loading and uploading the exact persisted bundle payload, then updating the local result artifact with upload state.
+- Follow-up hardening: constrained retry artifact paths to the native first-run artifact directory and added a regression test for outside-path rejection.
+
+GitHub Actions:
+
+- PR #158 checks failed before executing workflow steps:
+  - CI `test` run `25524528047`, job `74916811075`, `steps: []`, `log not found`.
+  - Secret Scan `Gitleaks` run `25524528095`, job `74916811544`, `steps: []`, `log not found`.
+- Earlier duplicate check runs from PR creation also failed in the same shape:
+  - CI `test` run `25524511793`, job `74916762588`.
+  - Secret Scan `Gitleaks` run `25524511790`, job `74916762612`.
+- This matches the existing Runner infra/pre-run failure shape from v0.2.3 and PR A; local validation and reviewer re-review are the current merge evidence.
+
+Known limits:
+
+- PR B does not add Finder reveal/open behavior yet; it copies the artifact path for the user and future support tooling.
+- Runtime remove/reinstall/retry recovery actions remain PR C scope.
