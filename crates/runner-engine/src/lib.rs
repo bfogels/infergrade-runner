@@ -44,6 +44,12 @@ use url::Url;
 
 pub const LLAMA_CPP_RUNTIME_ID: &str = "llama-cpp-homebrew-stable-2026-04";
 pub const RUNTIME_MANIFEST_VERSION: &str = "2026-04-22";
+pub const MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID: &str = "llama-cpp-b9050-macos-arm64-metal";
+const MANAGED_LLAMA_CPP_MACOS_METAL_TAG: &str = "b9050";
+const MANAGED_LLAMA_CPP_MACOS_METAL_ARCHIVE_URL: &str =
+    "https://github.com/ggml-org/llama.cpp/releases/download/b9050/llama-b9050-bin-macos-arm64.tar.gz";
+const MANAGED_LLAMA_CPP_MACOS_METAL_SHA256: &str =
+    "d334fa44e42a143ec6e49924f9630136c0b5fedc5a615508636ba9c8d08eb5d3";
 
 fn is_local_http_host(host: &str) -> bool {
     if host == "localhost" {
@@ -145,6 +151,68 @@ pub fn load_selected_llama_cpp_runtime() -> Value {
         Some(selection) => json!({"status": "selected", "selection": selection}),
         None => json!({"status": "not_selected", "selection": Value::Null}),
     }
+}
+
+pub fn managed_llama_cpp_runtime_manifest() -> Value {
+    json!({
+        "manifest_version": RUNTIME_MANIFEST_VERSION,
+        "runtime_family": "llama.cpp",
+        "runtimes": [
+            {
+                "runtime_id": MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID,
+                "channel": "infergrade_stable",
+                "backend": "llama.cpp",
+                "accelerator": "metal",
+                "version_label": "llama.cpp b9050 macOS arm64",
+                "upstream": {
+                    "project": "ggml-org/llama.cpp",
+                    "tag": MANAGED_LLAMA_CPP_MACOS_METAL_TAG,
+                    "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b9050",
+                },
+                "platform": {
+                    "system": "macos",
+                    "arch": "aarch64",
+                    "human": "macOS Apple Silicon",
+                },
+                "archive": {
+                    "url": MANAGED_LLAMA_CPP_MACOS_METAL_ARCHIVE_URL,
+                    "sha256": MANAGED_LLAMA_CPP_MACOS_METAL_SHA256,
+                    "size_bytes": 8641914_u64,
+                    "format": "tar.gz",
+                    "checksum_source": "github_release_asset_digest",
+                    "signature_url": Value::Null,
+                },
+                "verification": {
+                    "sha256": true,
+                    "expected_binaries": true,
+                    "version_smoke": true,
+                    "independent_signature": false,
+                    "notes": [
+                        "The GitHub release asset exposes a SHA-256 digest, but no independent signature asset was found during v0.2.2 planning.",
+                        "Do not describe this runtime as independently signed until a signature lane exists.",
+                    ],
+                },
+                "download": {
+                    "enabled": false,
+                    "requires_explicit_user_action": true,
+                    "blocked_reason": "Managed runtime download remains disabled until checksum verification, extraction, rollback, and independent signature policy are reviewed.",
+                },
+                "expected_binaries": ["llama-cli", "llama-server", "llama-perplexity"],
+                "binary_names": {
+                    "cli": "llama-cli",
+                    "server": "llama-server",
+                    "perplexity": "llama-perplexity",
+                },
+                "rollback_runtime_id": LLAMA_CPP_RUNTIME_ID,
+                "compatibility_notes": [
+                    "Recommended only for macOS Apple Silicon native first-run.",
+                    "Windows and Linux remain preview/partial until separate runtime lanes are validated.",
+                    "Native first-run evidence remains experimental/informational.",
+                ],
+                "provenance": "Upstream ggml-org/llama.cpp GitHub release asset with pinned SHA-256 digest; no independent signature verified.",
+            }
+        ],
+    })
 }
 
 pub fn sanitized_runner_profile(profile: &Value) -> Value {
@@ -386,15 +454,13 @@ pub fn container_runtime_readiness() -> Value {
 }
 
 pub fn verified_runtime_download_policy() -> Value {
-    let verifier_status = if verify_runtime_download_manifest(&json!({
-        "runtime_id": "schema-check",
-        "archive_url": "https://downloads.infergrade.com/runtimes/schema-check.tar.zst",
-        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-        "signature_url": "https://downloads.infergrade.com/runtimes/schema-check.tar.zst.minisig",
-        "expected_binaries": ["llama-cli", "llama-server"],
-        "rollback_runtime_id": "previous-runtime",
-    }))
-    .is_ok()
+    let manifest = managed_llama_cpp_runtime_manifest();
+    let verifier_status = if manifest["runtimes"]
+        .as_array()
+        .and_then(|entries| entries.first())
+        .map(verify_runtime_download_manifest)
+        .transpose()
+        .is_ok()
     {
         "ready"
     } else {
@@ -406,33 +472,21 @@ pub fn verified_runtime_download_policy() -> Value {
         "requires_explicit_user_action": true,
         "required_fields": [
             "runtime_id",
-            "archive_url",
-            "sha256",
-            "signature_url",
+            "channel",
+            "upstream",
+            "platform",
+            "archive.url",
+            "archive.sha256",
             "expected_binaries",
             "rollback_runtime_id"
         ],
-        "message": "Runtime downloads are disabled until a manifest entry passes HTTPS, checksum, signature, expected-binary, and rollback validation.",
+        "message": "Runtime downloads are disabled until checksum verification, extraction, rollback, and signature policy are reviewed.",
     })
 }
 
 pub fn recommended_llama_cpp_runtime() -> Value {
     if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-        json!({
-            "runtime_id": LLAMA_CPP_RUNTIME_ID,
-            "backend": "llama.cpp",
-            "accelerator": "metal",
-            "platform": "macOS Apple Silicon",
-            "source": "homebrew",
-            "provenance": "Homebrew formula `llama.cpp`; inspect with `brew info llama.cpp` before executing.",
-            "install_command": ["brew", "install", "llama.cpp"],
-            "download_required": false,
-            "supported_on_this_platform": true,
-            "notes": [
-                "Recommended managed path for Apple Silicon native benchmarking.",
-                "No install command was run. Installation remains explicit."
-            ],
-        })
+        managed_llama_cpp_runtime_manifest()["runtimes"][0].clone()
     } else {
         json!({
             "runtime_id": "llama-cpp-native-manual",
@@ -741,6 +795,46 @@ pub fn llama_cpp_runtime_plan(selected_runtime: Value) -> Value {
     })
 }
 
+pub fn llama_cpp_runtime_status() -> Value {
+    let selected_runtime = load_selected_llama_cpp_runtime();
+    let mut selected_status = selected_runtime.clone();
+    let selected_cli_path = selected_runtime
+        .pointer("/selection/binaries/cli")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if selected_runtime.get("status").and_then(Value::as_str) == Some("selected") {
+        match selected_cli_path {
+            Some(path) if Path::new(path).is_file() => {}
+            Some(path) => {
+                selected_status["status"] = Value::String("stale".to_string());
+                selected_status["recovery"] = json!({
+                    "message": "Select a valid runtime or reinstall the managed runtime before running native first-run.",
+                    "stale_path": path,
+                });
+            }
+            None => {
+                selected_status["status"] = Value::String("invalid".to_string());
+                selected_status["recovery"] = json!({
+                    "message": "The selected runtime record is missing binaries.cli. Select a valid runtime before running native first-run.",
+                });
+            }
+        }
+    }
+    let mut plan = llama_cpp_runtime_plan(selected_status.clone());
+    plan["managed_runtime_manifest"] = managed_llama_cpp_runtime_manifest();
+    plan["selected_runtime"] = selected_status.clone();
+    if selected_status.get("status").and_then(Value::as_str) == Some("stale") {
+        plan["native_runtime_status"] = Value::String("missing".to_string());
+        plan["recovery"] = selected_status["recovery"].clone();
+        plan["message"] = Value::String(
+            "Selected llama.cpp runtime is missing. Select a valid runtime before the first local benchmark."
+                .to_string(),
+        );
+    }
+    plan
+}
+
 pub fn verify_runtime_download_manifest(entry: &Value) -> Result<(), String> {
     let runtime_id = entry
         .get("runtime_id")
@@ -750,16 +844,50 @@ pub fn verify_runtime_download_manifest(entry: &Value) -> Result<(), String> {
     if runtime_id.is_empty() {
         return Err("runtime_id is required".to_string());
     }
-    for key in ["archive_url", "signature_url"] {
-        let raw = entry.get(key).and_then(Value::as_str).unwrap_or("").trim();
-        let url = Url::parse(raw).map_err(|_| format!("{key} must be a valid HTTPS URL"))?;
+    for key in ["channel", "backend", "rollback_runtime_id"] {
+        if entry
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+        {
+            return Err(format!("{key} is required"));
+        }
+    }
+    if !entry.get("upstream").is_some_and(Value::is_object) {
+        return Err("upstream metadata is required".to_string());
+    }
+    if !entry.get("platform").is_some_and(Value::is_object) {
+        return Err("platform metadata is required".to_string());
+    }
+    let archive_url = entry
+        .pointer("/archive/url")
+        .and_then(Value::as_str)
+        .or_else(|| entry.get("archive_url").and_then(Value::as_str))
+        .unwrap_or("")
+        .trim();
+    let url = Url::parse(archive_url).map_err(|_| "archive.url must be a valid HTTPS URL")?;
+    if url.scheme() != "https" {
+        return Err("archive.url must use HTTPS".to_string());
+    }
+    let signature_url = entry
+        .pointer("/archive/signature_url")
+        .and_then(Value::as_str)
+        .or_else(|| entry.get("signature_url").and_then(Value::as_str))
+        .unwrap_or("")
+        .trim();
+    if !signature_url.is_empty() {
+        let url = Url::parse(signature_url)
+            .map_err(|_| "archive.signature_url must be a valid HTTPS URL")?;
         if url.scheme() != "https" {
-            return Err(format!("{key} must use HTTPS"));
+            return Err("archive.signature_url must use HTTPS".to_string());
         }
     }
     let sha256 = entry
-        .get("sha256")
+        .pointer("/archive/sha256")
         .and_then(Value::as_str)
+        .or_else(|| entry.get("sha256").and_then(Value::as_str))
         .unwrap_or("")
         .trim();
     if sha256.len() != 64 || !sha256.chars().all(|ch| ch.is_ascii_hexdigit()) {
@@ -776,14 +904,6 @@ pub fn verify_runtime_download_manifest(entry: &Value) -> Result<(), String> {
     };
     if !has_binary("llama-cli") || !has_binary("llama-server") {
         return Err("expected_binaries must include llama-cli and llama-server".to_string());
-    }
-    let rollback = entry
-        .get("rollback_runtime_id")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
-    if rollback.is_empty() {
-        return Err("rollback_runtime_id is required".to_string());
     }
     Ok(())
 }
@@ -874,22 +994,28 @@ mod tests {
     fn runtime_download_manifest_requires_supply_chain_and_rollback_fields() {
         let valid = json!({
             "runtime_id": "llama-cpp-metal-2026-05",
-            "archive_url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst",
-            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "signature_url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst.minisig",
+            "channel": "infergrade_stable",
+            "backend": "llama.cpp",
+            "upstream": {"tag": "b0000"},
+            "platform": {"system": "macos", "arch": "aarch64"},
+            "archive": {
+                "url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst",
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "signature_url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst.minisig",
+            },
             "expected_binaries": ["llama-cli", "llama-server", "llama-perplexity"],
             "rollback_runtime_id": "llama-cpp-homebrew-stable-2026-04",
         });
         assert!(verify_runtime_download_manifest(&valid).is_ok());
 
         let mut insecure = valid.clone();
-        insecure["archive_url"] = Value::String("http://example.com/runtime.tar.zst".to_string());
+        insecure["archive"]["url"] = Value::String("http://example.com/runtime.tar.zst".to_string());
         assert!(verify_runtime_download_manifest(&insecure)
             .expect_err("insecure runtime url rejected")
             .contains("HTTPS"));
 
         let mut missing_checksum = valid.clone();
-        missing_checksum["sha256"] = Value::String("abc".to_string());
+        missing_checksum["archive"]["sha256"] = Value::String("abc".to_string());
         assert!(verify_runtime_download_manifest(&missing_checksum)
             .expect_err("short checksum rejected")
             .contains("sha256"));
@@ -899,6 +1025,87 @@ mod tests {
         assert!(verify_runtime_download_manifest(&missing_rollback)
             .expect_err("rollback required")
             .contains("rollback"));
+    }
+
+    #[test]
+    fn managed_runtime_manifest_lists_checksum_verified_macos_metal_lane_without_enabling_download()
+    {
+        let manifest = managed_llama_cpp_runtime_manifest();
+        assert_eq!(manifest["runtime_family"], "llama.cpp");
+        assert_eq!(manifest["manifest_version"], RUNTIME_MANIFEST_VERSION);
+        let runtimes = manifest["runtimes"].as_array().expect("runtime entries");
+        let macos = runtimes
+            .iter()
+            .find(|entry| entry["runtime_id"] == "llama-cpp-b9050-macos-arm64-metal")
+            .expect("macOS Metal entry");
+        assert_eq!(macos["channel"], "infergrade_stable");
+        assert_eq!(macos["backend"], "llama.cpp");
+        assert_eq!(macos["accelerator"], "metal");
+        assert_eq!(macos["platform"]["system"], "macos");
+        assert_eq!(macos["platform"]["arch"], "aarch64");
+        assert_eq!(macos["upstream"]["tag"], "b9050");
+        assert_eq!(
+            macos["archive"]["url"],
+            "https://github.com/ggml-org/llama.cpp/releases/download/b9050/llama-b9050-bin-macos-arm64.tar.gz"
+        );
+        assert_eq!(
+            macos["archive"]["sha256"],
+            "d334fa44e42a143ec6e49924f9630136c0b5fedc5a615508636ba9c8d08eb5d3"
+        );
+        assert_eq!(macos["download"]["enabled"], false);
+        assert_eq!(macos["download"]["requires_explicit_user_action"], true);
+        assert!(macos["download"]["blocked_reason"]
+            .as_str()
+            .unwrap_or("")
+            .contains("independent signature"));
+        assert_eq!(macos["verification"]["independent_signature"], false);
+        assert_eq!(macos["expected_binaries"][0], "llama-cli");
+        assert_eq!(
+            macos["rollback_runtime_id"],
+            "llama-cpp-homebrew-stable-2026-04"
+        );
+        assert!(verify_runtime_download_manifest(macos).is_ok());
+    }
+
+    #[test]
+    fn runtime_status_reports_stale_selected_runtime_without_treating_it_as_available() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-stale-runtime-cache-{}",
+            std::process::id()
+        ));
+        let missing_runtime = runtime_cache_dir.join("missing-llama-cli");
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let selected_path = selected_llama_cpp_runtime_path().expect("selected path");
+        fs::create_dir_all(selected_path.parent().expect("selected parent"))
+            .expect("runtime cache dir");
+        fs::write(
+            &selected_path,
+            serde_json::to_string_pretty(&json!({
+                "runtime_id": "llama-cpp-stale-test",
+                "source": "selected_existing",
+                "binaries": {"cli": missing_runtime.display().to_string()}
+            }))
+            .expect("selection json"),
+        )
+        .expect("selected runtime");
+
+        let status = llama_cpp_runtime_status();
+
+        assert_eq!(status["selected_runtime"]["status"], "stale");
+        assert_eq!(status["native_runtime_status"], "missing");
+        assert!(status["recovery"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Select a valid runtime"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
     }
 
     #[test]
@@ -920,7 +1127,7 @@ mod tests {
         if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
             assert_eq!(
                 plan["recommended_runtime"]["runtime_id"],
-                LLAMA_CPP_RUNTIME_ID
+                MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID
             );
             assert_eq!(plan["recommended_runtime"]["accelerator"], "metal");
         }

@@ -107,6 +107,7 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
   assert.ok(engine.includes("fn verify_runtime_download_manifest"));
   assert.ok(engine.includes("signature_url"));
   assert.ok(engine.includes("rollback_runtime_id"));
+  assert.ok(js.includes("recommended.platform?.human"));
 });
 
 test("desktop runtime panel keeps native first-run readiness truthful and Docker optional", () => {

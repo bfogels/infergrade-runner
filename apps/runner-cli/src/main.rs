@@ -1,10 +1,11 @@
 use infergrade_runner_engine::{
     build_run_bundle_upload_request, build_run_claim_request, build_run_completion_request,
     container_runtime_readiness, execute_hub_json_request, llama_cpp_runtime_plan,
-    load_selected_llama_cpp_runtime, native_first_run_bundle_payload, normalize_api_url,
-    run_native_first_run_with_events, select_existing_llama_cpp_runtime,
-    write_native_first_run_artifact, write_native_first_run_bundle_payload, LlamaCppRuntime,
-    NativeCommandRuntime, NativeFirstRunBundleOptions, NativeFirstRunInput, NativeFirstRunResult,
+    llama_cpp_runtime_status, load_selected_llama_cpp_runtime, managed_llama_cpp_runtime_manifest,
+    native_first_run_bundle_payload, normalize_api_url, run_native_first_run_with_events,
+    select_existing_llama_cpp_runtime, write_native_first_run_artifact,
+    write_native_first_run_bundle_payload, LlamaCppRuntime, NativeCommandRuntime,
+    NativeFirstRunBundleOptions, NativeFirstRunInput, NativeFirstRunResult,
     NativeFirstRunRuntime, NativeRuntimeOutput, RunnerEvent,
 };
 use serde_json::{json, Value};
@@ -14,7 +15,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const HELP_TEXT: &str =
-    "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> --runner-token <token> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence through a paired Hub runner token\n    first-run --model <path> --runtime auto --upload --run-id <id> --run-token <token> ...\n                                               Deprecated debug alias for --runner-token; normal Hub handoff is token-free\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration.";
+    "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime list                               Show the managed llama.cpp runtime manifest as JSON\n    runtime status                             Show selected/detected/managed runtime status as JSON\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> --runner-token <token> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence through a paired Hub runner token\n    first-run --model <path> --runtime auto --upload --run-id <id> --run-token <token> ...\n                                               Deprecated debug alias for --runner-token; normal Hub handoff is token-free\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration.";
 
 fn print_help() {
     println!("{HELP_TEXT}");
@@ -56,6 +57,8 @@ fn command_doctor(args: &[String]) -> Result<Value, String> {
 fn command_runtime(args: &[String]) -> Result<Value, String> {
     match args.first().map(String::as_str) {
         Some("plan") => Ok(llama_cpp_runtime_plan(load_selected_llama_cpp_runtime())),
+        Some("list") => Ok(managed_llama_cpp_runtime_manifest()),
+        Some("status") => Ok(llama_cpp_runtime_status()),
         Some("select-existing") => {
             let mut runtime_path: Option<PathBuf> = None;
             let mut runtime_id: Option<String> = None;
@@ -86,7 +89,7 @@ fn command_runtime(args: &[String]) -> Result<Value, String> {
             select_existing_llama_cpp_runtime(runtime_id.as_deref(), runtime_path, None, None)
         }
         Some(other) => Err(format!("unknown runtime command: {other}")),
-        None => Err("runtime requires a subcommand: plan or select-existing".to_string()),
+        None => Err("runtime requires a subcommand: plan, list, status, or select-existing".to_string()),
     }
 }
 
@@ -567,6 +570,22 @@ mod tests {
             output["download_policy"]["requires_explicit_user_action"],
             true
         );
+    }
+
+    #[test]
+    fn runtime_list_and_status_use_shared_engine_manifest() {
+        let list = command_runtime(&["list".to_string()]).expect("runtime list");
+        assert_eq!(list["runtime_family"], "llama.cpp");
+        assert!(list["runtimes"]
+            .as_array()
+            .expect("runtime entries")
+            .iter()
+            .any(|entry| entry["runtime_id"] == "llama-cpp-b9050-macos-arm64-metal"));
+
+        let status = command_runtime(&["status".to_string()]).expect("runtime status");
+        assert_eq!(status["runtime_family"], "llama.cpp");
+        assert!(status["selected_runtime"].get("status").is_some());
+        assert!(status["recommended_runtime"].get("runtime_id").is_some());
     }
 
     #[test]
