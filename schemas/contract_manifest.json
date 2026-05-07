@@ -3,6 +3,7 @@
   "publisher": "infergrade-runner",
   "ontology_source": "schemas/json/model_ontology.schema.json",
   "schema_files": [
+    "schemas/json/capability_run.schema.json",
     "schemas/json/manifest.schema.json",
     "schemas/json/model_ontology.schema.json",
     "schemas/json/result_record.schema.json",
@@ -22,6 +23,7 @@
   "supporting_docs": [
     "docs/contract_ownership.md",
     "docs/input_output_spec.md",
+    "docs/local_benchmark_methodology.md",
     "docs/schema_draft.md"
   ]
 }

@@ -7,6 +7,7 @@ from infergrade.benchmark_catalog import (
     benchmark_scope_summary_for_selection,
     capability_coverage_guidance_for_selection,
     capability_benchmark_ids_for_request,
+    capability_surface_index,
     evidence_lane_index,
     fidelity_enabled_for_request,
     load_capability_catalog,
@@ -26,9 +27,21 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("metadata_ordering", catalog)
         self.assertTrue(catalog["score_policies"])
         self.assertIn("evidence_lanes", catalog)
-        self.assertEqual([item["lane_id"] for item in catalog["evidence_lanes"]], ["decision", "reference", "gold"])
+        self.assertEqual([item["lane_id"] for item in catalog["evidence_lanes"]], ["smoke", "decision", "reference", "gold"])
+        self.assertIn("capability_surfaces", catalog)
+        self.assertEqual(
+            set(item["surface_id"] for item in catalog["capability_surfaces"]),
+            {
+                "local_assistant_capability",
+                "local_coding_capability",
+                "local_reasoning_capability",
+                "quant_fidelity",
+                "deployment_fitness",
+            },
+        )
         self.assertEqual(catalog["metadata_source_defaults"]["duration"], "estimated")
         self.assertEqual(catalog["benchmark_scopes"][0]["scope_id"], "decision")
+        surface_ids = set(capability_surface_index(catalog))
         check_ids = {item["check_id"] for item in catalog["checks"]}
         planned_ids = {item["check_id"] for item in catalog["planned_benchmark_candidates"]}
         self.assertIn("multiturn_chat_memory_v1", check_ids)
@@ -37,7 +50,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertNotIn("mmlu_pro_reference_v1", planned_ids)
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
-            self.assertIn(check["evidence_lane_id"], {"decision", "reference", "gold"})
+            self.assertIn(check["evidence_lane_id"], {"smoke", "decision", "reference", "gold"})
+            self.assertIn(check["surface_id"], surface_ids)
             self.assertTrue(check["expected_duration_band"])
             self.assertTrue(check["execution_pattern"])
             self.assertTrue(check["score_dimension"])
@@ -50,6 +64,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
 
     def test_evidence_lane_index_exposes_claim_boundaries(self):
         lanes = evidence_lane_index()
+        self.assertEqual(lanes["smoke"]["claim_strength"], "execution_smoke")
         self.assertEqual(lanes["decision"]["claim_strength"], "first_pass_local_decision")
         self.assertIn("leaderboard-style", lanes["decision"]["claim_boundary"])
         self.assertEqual(lanes["reference"]["local_feasibility"], "intentional_local")
@@ -177,7 +192,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
 
     def test_capability_coverage_guidance_marks_unselected_evidence_as_gap(self):
         guidance = capability_coverage_guidance_for_selection(["interactive_chat_v1"])
-        self.assertEqual([item["lane_id"] for item in guidance["evidence_lanes"]], ["decision", "reference", "gold"])
+        self.assertEqual([item["lane_id"] for item in guidance["evidence_lanes"]], ["smoke", "decision", "reference", "gold"])
         self.assertEqual(guidance["selected_evidence_lane_ids"], ["decision"])
         missing = {item["evidence_kind"]: item for item in guidance["missing_core_evidence"]}
         self.assertEqual(missing["capability"]["state"], "not_selected")
@@ -211,6 +226,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(score_dimensions["ifeval"], "instruction_following")
         self.assertEqual(score_dimensions["interactive_chat_v1"], "interactive_latency")
         interactive = next(item for item in metadata["benchmark_checks"] if item["check_id"] == "interactive_chat_v1")
+        self.assertEqual(interactive["surface_id"], "deployment_fitness")
         self.assertEqual(interactive["evidence_lane_id"], "decision")
         self.assertEqual(interactive["claim_strength"], "first_pass_local_decision")
         self.assertFalse(interactive["higher_is_better"])

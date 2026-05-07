@@ -39,7 +39,7 @@ infergrade-run/
       suite_manifest.json
       raw_results.json
     receipts/
-      cost_evidence.json
+      run_facts.json
   provenance/
     model_artifact.json
     backend_config.json
@@ -202,6 +202,23 @@ Suggested fields:
 Draft note:
 
 - capability may be omitted for `canary` runs or when explicitly disabled.
+- runnable local capability evidence should also emit a `capability_run` artifact when the runner owns the benchmark protocol.
+
+## Capability Run Artifact
+
+`result_record.schema.json` is the product-facing normalized result shape. `capability_run.schema.json` is the Runner-owned local benchmark artifact shape.
+
+The capability artifact is distinct from `native_first_run`. It captures:
+
+- evidence lane: `smoke`, `decision`, `reference`, or `gold`
+- capability surface: `local_assistant_capability`, `local_coding_capability`, `local_reasoning_capability`, `quant_fidelity`, or `deployment_fitness`
+- task family, prompt/task metadata, fixture or dataset revision, scorer type, scoring policy, and repetitions
+- model, runtime, hardware, and generation-preset provenance
+- task states: `scored`, `partial`, `failed`, `skipped`, `not_yet_benchmarked`, or `not_comparable`
+- duration, TTFT, tokens/sec, input tokens, and output tokens when available
+- raw output artifact paths, scoring output paths, and explicit supported/unsupported claims
+
+This artifact should be useful before any Hub upload or import. Hub can summarize it, but Runner owns execution truth.
 
 ### `deployment`
 
@@ -284,6 +301,6 @@ Suggested shape:
 
 ## Questions To Refine Together
 
-1. Should benchmark execution cost exist only in `execution`, with `cost` reserved for deployment economics?
+1. Should benchmark execution cost exist only in `execution`, with `cost` reserved for deployment economics? For local v0.2.x work, record objective duration and token facts first rather than inventing local dollar-cost estimates.
 2. Should one result record support exactly one `use_case`?
 3. Should there be a bundle-level summary file in addition to per-profile results?
