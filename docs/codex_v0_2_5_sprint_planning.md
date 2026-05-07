@@ -5,7 +5,7 @@ Date: 2026-05-07
 ## Branch State
 
 - Runner `origin/main`: v0.2.4 at `a8528ca`.
-- Runner `origin/develop`: one reviewed public-release hardening PR ahead of `origin/main` at `b5078d6`.
+- Runner `origin/develop`: two reviewed public-release hardening PRs ahead of `origin/main` at `bbc8360`.
 - Runner open PRs at sprint start: none.
 - Hub open PRs at sprint start: none observed from the Hub checkout.
 
@@ -73,7 +73,7 @@ v0.2.5 can promote when maintainers have clearer artifact verification and relea
 ## PR A Local Evidence
 
 Branch: `codex/runner-v025-release-hardening`
-PR: pending
+PR: #161, merged to `develop` as `b5078d6`.
 
 Implemented:
 
@@ -94,12 +94,10 @@ git diff --check
 gitleaks detect --source=. --redact --no-banner --exit-code 0
 ```
 
-PR: #161, merged to `develop` as `b5078d6`.
-
 ## PR B Local Evidence
 
 Branch: `codex/runner-v025-release-checks`
-PR: pending
+PR: #162, merged to `develop` as `bbc8360`.
 
 Implemented:
 
@@ -116,5 +114,55 @@ python3 ./scripts/check_public_release_readiness.py
 python3 ./scripts/sync_versions.py --check
 python3 ./scripts/check_versions.py
 git diff --check
+gitleaks detect --source=. --redact --no-banner --exit-code 0
+```
+
+## PR C Release Promotion
+
+Branch: `codex/runner-v025-release`
+PR: pending
+
+Scope:
+
+- Promote the reviewed v0.2.5 public-release hardening slice from `develop` to `main`.
+- Bump version declarations from `0.2.4` to `0.2.5` only in the release branch.
+- Preserve the release boundary: artifact-set verification and local release-readiness automation, not a claim that public macOS distribution is fully proven from the local workspace.
+
+Branch-distance proof before release branch:
+
+```bash
+git rev-list --left-right --count origin/main...origin/develop
+# 0 2
+
+git diff --name-status origin/main...origin/develop
+# A docs/codex_v0_2_5_sprint_planning.md
+# M docs/desktop_runner_distribution.md
+# M docs/public_release_checklist.md
+# M docs/release_process.md
+# M python/runner-core/tests/test_release_ci.py
+# A scripts/check_public_release_readiness.py
+# A scripts/verify_desktop_release_artifacts.py
+```
+
+Evidence honesty:
+
+- v0.2.5 does not add Apple Developer ID credentials, notarization credentials, Gatekeeper proof, clean-machine smoke, or public Windows/Linux installer support.
+- The new artifact verifier proves downloaded file/checksum/updater-manifest consistency only.
+- The new readiness checker returns `manual_required` for a healthy local repo because GitHub settings, release-environment secrets, signing/notarization credentials, and published artifacts remain manual gates.
+
+Validation passed locally on the release branch:
+
+```bash
+python3 -m unittest python/runner-core/tests/test_release_ci.py
+python3 ./scripts/check_public_release_readiness.py
+python3 ./scripts/sync_versions.py --check
+python3 ./scripts/check_versions.py
+git diff --check
+cargo test --manifest-path crates/runner-engine/Cargo.toml --locked
+cargo test --manifest-path apps/runner-cli/Cargo.toml --locked
+./scripts/build_desktop_sidecar.sh
+cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked
+npm ci --prefix apps/desktop-runner
+npm run check --prefix apps/desktop-runner
 gitleaks detect --source=. --redact --no-banner --exit-code 0
 ```
