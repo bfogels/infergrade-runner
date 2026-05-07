@@ -7,8 +7,8 @@ This is the live Codex planning file for the Runner v0.2.0 installer-and-go comp
 ## Current Branch State
 
 - Runner `origin/main`: `d2f31b82a334d26f949c0a5e26a656d896f9174a` (`0.1.45`, PR #126).
-- Runner `origin/develop`: `96d4f28b25a2e4721d329dc4676d65523cab3f92`.
-- Runner open PRs: none after #139 landed.
+- Runner `origin/develop`: `b810cf359b5420c064e98e0e249d2c689b792746`.
+- Runner open PRs: #141 (`Select existing llama runtime through runner engine`) into `develop`.
 - Runner recent develop train:
   - #127 Add CLI first-run local artifact output.
   - #128 Harden native command first-run boundary.
@@ -23,8 +23,9 @@ This is the live Codex planning file for the Runner v0.2.0 installer-and-go comp
   - #137 Add Desktop native first-run upload adapter.
   - #138 Prefill Desktop first-run Hub handoff.
   - #139 Harden llama.cpp native first-run proof.
+  - #140 Add Desktop first-run deep link handoff.
 - Runner `main` does not contain the develop train after #126. v0.2.0 has not landed.
-- Hub `origin/main`: `fd9a70ee4ed37196eae3a804446e7f5dca3c52cc`, including PR #203 (`Promote develop pairing UX to main`) and PR #204 (`Keep native first-run evidence informational`).
+- Hub `origin/main`: `c9bb01b1e8566181365be94b2973fb1cb3807ec5`, including PR #203 (`Promote develop pairing UX to main`), PR #204 (`Keep native first-run evidence informational`), and PR #205 (`Open Desktop for native first-run handoff`).
 - Hub open PRs: none at sprint start.
 - Hub code-first pairing is present on `main`: pairing code, regenerate, status polling, and advanced CLI command disclosure exist in `apps/web/app.js`.
 
@@ -38,58 +39,46 @@ This is the live Codex planning file for the Runner v0.2.0 installer-and-go comp
 - Desktop can upload native first-run evidence for a Hub run handoff; Rust loads the saved token and JS never receives an upload token field.
 - Hub keeps native first-run evidence experimental, informational-only, and private to the run owner across the tested read surfaces.
 - Built-in llama.cpp first-run now avoids unbounded preview scans, redacts prompt echoes, prefers the sibling `llama-completion` measurement binary when available, requests Apple Silicon Metal offload, exits after a single turn, and rejects summary-only output when an observed token count is missing.
+- Packaged Desktop now registers `infergrade-runner://` and consumes token-free first-run handoff URLs from Hub.
+- Hub now emits/opens token-free Desktop handoff URLs for local-native queues and requests no browser execution token for that normal path. Explicit advanced run-token minting remains available through the run execution-token endpoint.
 - Docker/Podman remain optional advanced capabilities in readiness surfaces.
 - Token tests cover pairing, worker previews, Hub request previews, Hub executor errors, and CLI upload output redaction.
 
 ## Remaining Blockers
 
-1. Normal Hub-to-Desktop run handoff is incomplete.
-   - Desktop can prefill upload run ids from URL query parameters, but packaged Desktop did not yet register an app URL scheme at this refresh.
-   - In progress on `codex/runner-v020-deep-link-handoff`: register `infergrade-runner://` and consume token-free first-run handoff URLs.
-
-2. Desktop upload needs full end-to-end smoke.
+1. Desktop upload needs full end-to-end smoke.
    - The normal browser-to-packaged-Desktop path still needs validation with a real run, real saved token, real local artifact, and Hub evidence display.
 
-3. Runtime selection/provisioning is not yet installer-and-go.
+2. Runtime selection/provisioning is not yet installer-and-go.
    - A real Apple Silicon Metal CLI smoke succeeded using `/opt/homebrew/bin/llama-cli` and `/Users/brianfogelson/Desktop/Code/ext/models/open_llama_3b_v2/ggml-model-f16-q4_0.gguf`.
-   - v0.2.0 still needs proof that the normal Desktop path can find/use a selected or app-managed runtime without PATH assumptions.
+   - In progress on PR #141: Desktop and Rust CLI can select an explicit existing llama.cpp runtime through `runner-engine` without shelling through Python. Managed downloads remain planned.
 
-4. Hub evidence display for uploaded native-first-run evidence needs browser validation.
+3. Hub evidence display for uploaded native-first-run evidence needs browser validation.
    - Hub API tests prove privacy and informational labeling, but the visual evidence/recommendation surfaces still need an end-to-end smoke with uploaded native-first-run evidence.
 
-5. Package/fresh-machine proof is missing.
+4. Package/fresh-machine proof is missing.
    - No clean macOS Apple Silicon proof yet for: no Docker, no user Python, no Rust, no global CLI, no repo checkout, no terminal, no `INFERGRADE_RUNNER_REPO`.
 
-6. Release docs and UI support labels still need a final honesty pass.
+5. Release docs and UI support labels still need a final honesty pass.
    - Windows/Linux should remain preview unless package proof exists.
    - Runtime downloads/provisioning should not be overclaimed.
 
 ## Planned PR Sequence
 
-1. Land `codex/runner-v020-deep-link-handoff`.
-   - Register the packaged Desktop `infergrade-runner://` URL scheme.
-   - Accept token-free Hub handoff URLs and prefill only run/worker IDs.
-   - Keep upload token loading inside Rust/Tauri.
-
-2. Add Hub first-run open/copy handoff URL.
-   - After a local native run is queued, emit/open `infergrade-runner://first-run?...`.
-   - Keep manual run ID/token machinery out of the normal Hub flow.
-   - Assert the browser never receives upload tokens in the handoff.
-
-3. Runtime selection without Python/PATH assumptions.
+1. Land PR #141: runtime selection without Python/PATH assumptions.
    - Move selected existing llama.cpp runtime selection into `runner-engine`.
    - Let Desktop and Rust CLI select or inspect the runtime without shelling to Python runner-core.
    - Keep downloads/provisioning explicit and provenance-gated.
 
-4. Desktop + Hub end-to-end first-run upload smoke.
+2. Desktop + Hub end-to-end first-run upload smoke.
    - Use a real paired Desktop profile, Hub handoff run ID, selected runtime, and GGUF.
    - Confirm artifact path, upload status, Hub owner-visible evidence, and public/private boundaries.
 
-5. macOS package candidate validation.
+3. macOS package candidate validation.
    - Build sidecar and Desktop package.
    - Run clean-environment package smoke as far as current machine allows.
 
-6. Release promotion decision.
+4. Release promotion decision.
    - If all v0.2.0 gates are met, open `develop -> main`, bump to `0.2.0`, run full validation, and spawn release reviewer.
    - If any core promise remains unproven, keep work on `develop` and document the blocker instead of promoting.
 
@@ -111,6 +100,19 @@ Current live checks before this file:
 - `codex/runner-v020-deep-link-handoff` local checks so far:
   - `node --test apps/desktop-runner/src/static.test.mjs`: pass after adding deep-link handoff guards.
   - `npm run check --prefix apps/desktop-runner`: pass.
+- #140 reviewer added stricter handoff identifier validation, reran local checks, and landed #140 into `develop` as `b810cf359b5420c064e98e0e249d2c689b792746`.
+- #205 Hub reviewer landed the Hub handoff/no-browser-token path into Hub `main` as `c9bb01b1e8566181365be94b2973fb1cb3807ec5`.
+- PR #141 local checks so far:
+  - `cargo test --manifest-path crates/runner-engine/Cargo.toml --locked`: pass.
+  - `cargo test --manifest-path apps/runner-cli/Cargo.toml --locked`: pass.
+  - `npm ci --prefix apps/desktop-runner`: pass.
+  - `npm run check --prefix apps/desktop-runner`: pass.
+  - `./scripts/build_desktop_sidecar.sh`: pass.
+  - `cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked`: pass after building the sidecar.
+  - `cargo run --manifest-path apps/runner-cli/Cargo.toml -- runtime select-existing --runtime-path /opt/homebrew/bin/llama-cli`: pass; wrote canonical selected Homebrew llama.cpp binary paths to `~/.cache/infergrade/runtimes/llama.cpp/selected_runtime.json`.
+  - `cargo fmt --all --check`: pass.
+  - `git diff --check`: pass.
+  - `gitleaks detect --source=. --redact --no-banner --exit-code 0`: pass.
 
 ## Reviewer Findings
 
@@ -121,6 +123,8 @@ Current live checks before this file:
 - #137 reviewer caught upload failure being allowed to mask successful local artifact creation; fixed by preserving result success and reporting upload failure separately.
 - #138 reviewer caught stale worker handoff reuse; fixed by clearing old worker IDs when a new run-only handoff arrives.
 - #139 reviewer caught prompt echo leakage and generated-token overclaim; fixed by exact prompt redaction, sibling `llama-completion` preference, and rejecting summary-only output without observed token counts.
+- #140 reviewer caught unsafe handoff identifier acceptance; fixed by requiring safe Hub identifier-shaped run/worker values and rejecting token/secret/authorization/bearer-like values.
+- #205 reviewer found no blockers and validated that normal local-native browser queueing returns no `execution_token` while explicit advanced minting still works.
 
 ## Release-Gate Status
 
