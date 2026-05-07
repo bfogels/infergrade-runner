@@ -34,7 +34,7 @@ This is the live Codex planning file for the Runner v0.2.0 installer-and-go comp
 - Hub pairing UX is code-first on the release lane.
 - Shared `runner-engine` owns native first-run inputs/results, typed events, local artifact writer, bundle-preview writer, run-scoped upload request builders, and native Hub JSON executor.
 - CLI can run local native first-run with `--no-upload`.
-- CLI can explicitly upload native first-run evidence with a run-scoped token and complete the run.
+- CLI can explicitly upload native first-run evidence with a paired runner token and complete the run.
 - Desktop can run the native first-run engine and write local result and bundle-preview artifacts.
 - Desktop can upload native first-run evidence for a Hub run handoff; Rust loads the saved token and JS never receives an upload token field.
 - Hub keeps native first-run evidence experimental, informational-only, and private to the run owner across the tested read surfaces.

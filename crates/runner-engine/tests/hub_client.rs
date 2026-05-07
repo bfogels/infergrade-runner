@@ -121,7 +121,44 @@ fn run_claim_request_uses_runner_session_without_leaking_token() {
         request.sanitized_preview()["payload"]["execution_mode"],
         "local_native"
     );
+    assert!(!request
+        .sanitized_preview()
+        .to_string()
+        .contains("qbhr_runner_secret"));
     assert!(!format!("{request:?}").contains("qbhr_runner_secret"));
+}
+
+#[test]
+fn run_claim_request_rejects_unsafe_ids_and_missing_mode() {
+    let bad_run_id = build_run_claim_request(
+        "api.infergrade.com",
+        "../run-secret",
+        "runner_local_native_1",
+        "local_native",
+        Some("qbhr_runner_secret"),
+    )
+    .expect_err("path injection rejected");
+    assert_eq!(bad_run_id.code(), "hub_path_id_invalid");
+
+    let bad_worker_id = build_run_claim_request(
+        "api.infergrade.com",
+        "run_cfg_abc_123",
+        " runner-local ",
+        "local_native",
+        Some("qbhr_runner_secret"),
+    )
+    .expect_err("whitespace worker id rejected");
+    assert_eq!(bad_worker_id.code(), "hub_path_id_invalid");
+
+    let missing_mode = build_run_claim_request(
+        "api.infergrade.com",
+        "run_cfg_abc_123",
+        "runner_local_native_1",
+        " ",
+        Some("qbhr_runner_secret"),
+    )
+    .expect_err("execution mode required");
+    assert_eq!(missing_mode.code(), "hub_execution_mode_invalid");
 }
 
 #[test]
