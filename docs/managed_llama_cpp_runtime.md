@@ -14,6 +14,7 @@ The Rust CLI also exposes the shared engine manifest and status:
 
 ```bash
 infergrade-runner runtime list
+infergrade-runner runtime channels
 infergrade-runner runtime status
 infergrade-runner runtime install
 ```
@@ -48,6 +49,7 @@ infergrade-runner runtime install
 
 - No legacy install or upgrade happens unless `--execute` is passed.
 - No Rust managed install happens unless `infergrade-runner runtime install` is run explicitly.
+- Runtime channel changes and updates are manual. The shared engine exposes `infergrade_stable`, `previous_release`, `upstream_release`, `local_binary`, and `experimental` channel policy so Desktop and CLI can render the same safety model.
 - Managed selections are stored under `~/.cache/infergrade/runtimes/llama.cpp/selected_runtime.json`.
 - Explicit CLI paths and `INFERGRADE_LLAMA_CPP_*` environment variables override managed selection.
 - Doctor reports whether native binaries came from `custom_path`, `environment_path`, `managed_runtime`, or `system_path`.

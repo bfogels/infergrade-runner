@@ -160,6 +160,7 @@ pub fn managed_llama_cpp_runtime_manifest() -> Value {
     json!({
         "manifest_version": RUNTIME_MANIFEST_VERSION,
         "runtime_family": "llama.cpp",
+        "channels": managed_llama_cpp_runtime_channels(),
         "runtimes": [
             {
                 "runtime_id": MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID,
@@ -216,6 +217,94 @@ pub fn managed_llama_cpp_runtime_manifest() -> Value {
             }
         ],
     })
+}
+
+pub fn managed_llama_cpp_runtime_channels() -> Value {
+    json!({
+        "manifest_version": RUNTIME_MANIFEST_VERSION,
+        "runtime_family": "llama.cpp",
+        "channels": [
+            {
+                "channel": "infergrade_stable",
+                "label": "InferGrade Stable",
+                "audience": "default",
+                "default": true,
+                "managed_by_infergrade": true,
+                "install_policy": "explicit_only",
+                "update_policy": "manual_only",
+                "provenance_expectation": "Pinned manifest entry with SHA-256 verification. Independent signature verification is not yet available.",
+                "evidence_note": "Recommended for native first-run evidence, which remains experimental/informational until stronger trust gates exist.",
+            },
+            {
+                "channel": "previous_release",
+                "label": "Previous Stable",
+                "audience": "recovery",
+                "default": false,
+                "managed_by_infergrade": true,
+                "install_policy": "explicit_only",
+                "update_policy": "manual_rollback_only",
+                "provenance_expectation": "Pinned historical manifest entry when available.",
+                "evidence_note": "Useful for recovery when a stable runtime update regresses.",
+            },
+            {
+                "channel": "upstream_release",
+                "label": "Upstream Release",
+                "audience": "advanced",
+                "default": false,
+                "managed_by_infergrade": false,
+                "install_policy": "explicit_only",
+                "update_policy": "manual_only",
+                "provenance_expectation": "Upstream release metadata must be reviewed before selection.",
+                "evidence_note": "Directional evidence only unless promoted into InferGrade Stable.",
+            },
+            {
+                "channel": "local_binary",
+                "label": "Local Binary",
+                "audience": "advanced",
+                "default": false,
+                "managed_by_infergrade": false,
+                "install_policy": "user_selected_path_only",
+                "update_policy": "not_managed",
+                "provenance_expectation": "User-selected local path. InferGrade validates executability but does not verify archive provenance.",
+                "evidence_note": "Useful local evidence, not an InferGrade-managed runtime claim.",
+            },
+            {
+                "channel": "experimental",
+                "label": "Experimental",
+                "audience": "advanced",
+                "default": false,
+                "managed_by_infergrade": false,
+                "install_policy": "explicit_only",
+                "update_policy": "manual_only",
+                "provenance_expectation": "Requires clear user opt-in and visible warnings.",
+                "evidence_note": "Experimental evidence only; never decision-grade by channel alone.",
+            },
+        ],
+    })
+}
+
+fn runtime_channel_details(channel: &str) -> Value {
+    managed_llama_cpp_runtime_channels()["channels"]
+        .as_array()
+        .and_then(|channels| {
+            channels
+                .iter()
+                .find(|entry| entry["channel"].as_str() == Some(channel))
+                .cloned()
+        })
+        .unwrap_or_else(|| {
+            json!({
+                "channel": channel,
+                "label": "Unknown Runtime Channel",
+                "audience": "unknown",
+                "default": false,
+                "managed_by_infergrade": false,
+                "install_policy": "unknown",
+                "update_policy": "manual_review_required",
+                "provenance_expectation": "Unknown channel; review runtime provenance before running benchmarks.",
+                "evidence_note": "Treat evidence as informational until the runtime channel is understood.",
+            })
+        })
 }
 
 pub fn sanitized_runner_profile(profile: &Value) -> Value {
@@ -726,6 +815,7 @@ pub fn select_existing_llama_cpp_runtime(
         "backend": "llama.cpp",
         "version_label": "existing local binary",
         "source": "selected_existing",
+        "channel": "local_binary",
         "provenance": "User-selected existing llama.cpp binary. No runtime download or install command was run by InferGrade.",
         "manifest_version": RUNTIME_MANIFEST_VERSION,
         "binaries": {
@@ -827,6 +917,34 @@ pub fn llama_cpp_runtime_status() -> Value {
     let mut plan = llama_cpp_runtime_plan(selected_status.clone());
     plan["managed_runtime_manifest"] = managed_llama_cpp_runtime_manifest();
     plan["selected_runtime"] = selected_status.clone();
+    if selected_status
+        .get("selection")
+        .map(|selection| !selection.is_null())
+        .unwrap_or(false)
+    {
+        let selected_channel = selected_status
+            .pointer("/selection/channel")
+            .and_then(Value::as_str)
+            .unwrap_or("local_binary");
+        plan["selected_channel"] = runtime_channel_details(selected_channel);
+    } else {
+        plan["selected_channel"] = json!({
+            "channel": "not_selected",
+            "label": "No Runtime Selected",
+            "audience": "default",
+            "default": false,
+            "managed_by_infergrade": false,
+            "install_policy": "select_or_install_required",
+            "update_policy": "not_applicable",
+            "provenance_expectation": "No runtime has been selected yet.",
+            "evidence_note": "No native-first-run evidence can be produced until a runtime is selected or installed.",
+        });
+    }
+    plan["runtime_channels"] = managed_llama_cpp_runtime_channels();
+    plan["update_policy"] = json!({
+        "automatic_updates": false,
+        "message": "Runtime updates are manual. InferGrade will not silently download, upgrade, or switch llama.cpp runtimes.",
+    });
     if selected_status.get("status").and_then(Value::as_str) == Some("stale") {
         plan["native_runtime_status"] = Value::String("missing".to_string());
         plan["recovery"] = selected_status["recovery"].clone();
@@ -1582,6 +1700,7 @@ mod tests {
         let manifest = managed_llama_cpp_runtime_manifest();
         assert_eq!(manifest["runtime_family"], "llama.cpp");
         assert_eq!(manifest["manifest_version"], RUNTIME_MANIFEST_VERSION);
+        assert_eq!(manifest["channels"]["runtime_family"], "llama.cpp");
         let runtimes = manifest["runtimes"].as_array().expect("runtime entries");
         let macos = runtimes
             .iter()
@@ -1614,6 +1733,32 @@ mod tests {
             "llama-cpp-homebrew-stable-2026-04"
         );
         assert!(verify_runtime_download_manifest(macos).is_ok());
+    }
+
+    #[test]
+    fn managed_runtime_channels_describe_manual_update_policy() {
+        let channels = managed_llama_cpp_runtime_channels();
+        assert_eq!(channels["runtime_family"], "llama.cpp");
+        let entries = channels["channels"].as_array().expect("channel entries");
+        let stable = entries
+            .iter()
+            .find(|entry| entry["channel"] == "infergrade_stable")
+            .expect("stable channel");
+        assert_eq!(stable["default"], true);
+        assert_eq!(stable["managed_by_infergrade"], true);
+        assert_eq!(stable["install_policy"], "explicit_only");
+        assert_eq!(stable["update_policy"], "manual_only");
+
+        let local = entries
+            .iter()
+            .find(|entry| entry["channel"] == "local_binary")
+            .expect("local binary channel");
+        assert_eq!(local["managed_by_infergrade"], false);
+        assert_eq!(local["update_policy"], "not_managed");
+        assert!(local["provenance_expectation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("User-selected"));
     }
 
     #[test]
@@ -1855,10 +2000,39 @@ mod tests {
 
         assert_eq!(status["selected_runtime"]["status"], "stale");
         assert_eq!(status["native_runtime_status"], "missing");
+        assert_eq!(status["selected_channel"]["channel"], "local_binary");
         assert!(status["recovery"]["message"]
             .as_str()
             .unwrap_or("")
             .contains("Select a valid runtime"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn runtime_status_does_not_call_unselected_runtime_local_binary() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-unselected-runtime-cache-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let status = llama_cpp_runtime_status();
+
+        assert_eq!(status["selected_runtime"]["status"], "not_selected");
+        assert_eq!(status["selected_channel"]["channel"], "not_selected");
+        assert_eq!(
+            status["selected_channel"]["update_policy"],
+            "not_applicable"
+        );
+        assert_ne!(status["selected_channel"]["channel"], "local_binary");
 
         if let Some(previous_cache_dir) = previous_cache_dir {
             env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
@@ -1923,6 +2097,7 @@ mod tests {
             "llama-cpp-selected-test"
         );
         assert_eq!(selection["selection"]["source"], "selected_existing");
+        assert_eq!(selection["selection"]["channel"], "local_binary");
         assert!(selection["message"]
             .as_str()
             .unwrap_or("")
@@ -1938,6 +2113,10 @@ mod tests {
         );
         let plan = llama_cpp_runtime_plan(selected);
         assert_eq!(plan["native_runtime_status"], "available");
+        let status = llama_cpp_runtime_status();
+        assert_eq!(status["selected_channel"]["channel"], "local_binary");
+        assert_eq!(status["selected_channel"]["update_policy"], "not_managed");
+        assert_eq!(status["update_policy"]["automatic_updates"], false);
 
         if let Some(previous_cache_dir) = previous_cache_dir {
             env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
