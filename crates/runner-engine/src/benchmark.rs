@@ -163,13 +163,16 @@ impl LlamaCppRuntime {
     }
 
     pub fn resolve(command_path: Option<PathBuf>) -> Result<Self, String> {
-        let command_path = match command_path {
-            Some(path) => validate_llama_cpp_command_path(path)?,
-            None => selected_llama_cpp_cli_path()?.ok_or_else(|| {
+        let (command_path, runtime_id) = match command_path {
+            Some(path) => (
+                validate_llama_cpp_command_path(path)?,
+                LLAMA_CPP_AUTO_RUNTIME_ID.to_string(),
+            ),
+            None => selected_llama_cpp_runtime_binding()?.ok_or_else(|| {
                 "No selected llama.cpp runtime was found. Pass --runtime-path or select an app-managed llama.cpp runtime before using --runtime auto.".to_string()
             })?,
         };
-        Ok(Self::new(command_path, LLAMA_CPP_AUTO_RUNTIME_ID))
+        Ok(Self::new(command_path, runtime_id))
     }
 }
 
@@ -471,7 +474,7 @@ fn validate_llama_cpp_command_path(path: PathBuf) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn selected_llama_cpp_cli_path() -> Result<Option<PathBuf>, String> {
+fn selected_llama_cpp_runtime_binding() -> Result<Option<(PathBuf, String)>, String> {
     let path = crate::selected_llama_cpp_runtime_path()?;
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
@@ -500,7 +503,14 @@ fn selected_llama_cpp_cli_path() -> Result<Option<PathBuf>, String> {
                 path.display()
             )
         })?;
-    validate_llama_cpp_command_path(PathBuf::from(raw)).map(Some)
+    let runtime_id = value
+        .get("runtime_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(LLAMA_CPP_AUTO_RUNTIME_ID)
+        .to_string();
+    validate_llama_cpp_command_path(PathBuf::from(raw)).map(|path| Some((path, runtime_id)))
 }
 
 fn parse_llama_timings(raw_log: &str) -> LlamaTimings {

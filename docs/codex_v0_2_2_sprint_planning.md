@@ -37,7 +37,7 @@ The GitHub release metadata does not expose an independent signature asset for t
    - Keep actual download/install disabled in this PR.
    - Add CLI `runtime list` and `runtime status` on top of the shared engine manifest/status.
 
-2. PR B: checksum-verified managed runtime install prototype, if supply-chain review accepts checksum-only for local explicit installs.
+2. PR B: checksum-verified managed runtime install prototype.
    - Download the archive only after explicit user action.
    - Verify SHA256 before extraction.
    - Extract into the runtime cache.
@@ -46,6 +46,7 @@ The GitHub release metadata does not expose an independent signature asset for t
    - Write selected runtime record.
    - Roll back on failure.
    - Label provenance as checksum-verified GitHub release asset, not independently signed.
+   - Status: implementation PR in progress after PR A landed. Local smoke installed the upstream `b9050` macOS arm64 runtime into a temporary cache, verified SHA-256, selected it, and ran native first-run against TinyLlama with `runtime_id=llama-cpp-b9050-macos-arm64-metal`.
 
 3. PR C: Desktop runtime install/status UI, only after the engine install path is reviewed.
    - Show missing/stale/selected runtime state.

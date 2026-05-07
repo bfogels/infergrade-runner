@@ -1,12 +1,13 @@
 use infergrade_runner_engine::{
     build_run_bundle_upload_request, build_run_claim_request, build_run_completion_request,
-    container_runtime_readiness, execute_hub_json_request, llama_cpp_runtime_plan,
-    llama_cpp_runtime_status, load_selected_llama_cpp_runtime, managed_llama_cpp_runtime_manifest,
-    native_first_run_bundle_payload, normalize_api_url, run_native_first_run_with_events,
-    select_existing_llama_cpp_runtime, write_native_first_run_artifact,
-    write_native_first_run_bundle_payload, LlamaCppRuntime, NativeCommandRuntime,
-    NativeFirstRunBundleOptions, NativeFirstRunInput, NativeFirstRunResult,
-    NativeFirstRunRuntime, NativeRuntimeOutput, RunnerEvent,
+    container_runtime_readiness, execute_hub_json_request, install_managed_llama_cpp_runtime,
+    llama_cpp_runtime_plan, llama_cpp_runtime_status, load_selected_llama_cpp_runtime,
+    managed_llama_cpp_runtime_manifest, native_first_run_bundle_payload, normalize_api_url,
+    run_native_first_run_with_events, select_existing_llama_cpp_runtime,
+    write_native_first_run_artifact, write_native_first_run_bundle_payload, LlamaCppRuntime,
+    ManagedRuntimeInstallOptions, NativeCommandRuntime, NativeFirstRunBundleOptions,
+    NativeFirstRunInput, NativeFirstRunResult, NativeFirstRunRuntime, NativeRuntimeOutput,
+    RunnerEvent,
 };
 use serde_json::{json, Value};
 use std::env;
@@ -15,7 +16,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const HELP_TEXT: &str =
-    "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime list                               Show the managed llama.cpp runtime manifest as JSON\n    runtime status                             Show selected/detected/managed runtime status as JSON\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> --runner-token <token> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence through a paired Hub runner token\n    first-run --model <path> --runtime auto --upload --run-id <id> --run-token <token> ...\n                                               Deprecated debug alias for --runner-token; normal Hub handoff is token-free\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration.";
+    "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime list                               Show the managed llama.cpp runtime manifest as JSON\n    runtime status                             Show selected/detected/managed runtime status as JSON\n    runtime install [--runtime-id <id>]        Explicitly download, verify, extract, smoke, and select a managed llama.cpp runtime\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> --runner-token <token> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence through a paired Hub runner token\n    first-run --model <path> --runtime auto --upload --run-id <id> --run-token <token> ...\n                                               Deprecated debug alias for --runner-token; normal Hub handoff is token-free\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration.";
 
 fn print_help() {
     println!("{HELP_TEXT}");
@@ -59,6 +60,28 @@ fn command_runtime(args: &[String]) -> Result<Value, String> {
         Some("plan") => Ok(llama_cpp_runtime_plan(load_selected_llama_cpp_runtime())),
         Some("list") => Ok(managed_llama_cpp_runtime_manifest()),
         Some("status") => Ok(llama_cpp_runtime_status()),
+        Some("install") => {
+            let mut runtime_id: Option<String> = None;
+            let mut index = 1;
+            while index < args.len() {
+                match args[index].as_str() {
+                    "--runtime-id" => {
+                        index += 1;
+                        runtime_id = Some(
+                            args.get(index)
+                                .ok_or_else(|| "--runtime-id requires a value".to_string())?
+                                .to_string(),
+                        );
+                    }
+                    other => return Err(format!("unknown runtime install option: {other}")),
+                }
+                index += 1;
+            }
+            install_managed_llama_cpp_runtime(ManagedRuntimeInstallOptions {
+                runtime_id,
+                archive_bytes: None,
+            })
+        }
         Some("select-existing") => {
             let mut runtime_path: Option<PathBuf> = None;
             let mut runtime_id: Option<String> = None;
@@ -89,7 +112,10 @@ fn command_runtime(args: &[String]) -> Result<Value, String> {
             select_existing_llama_cpp_runtime(runtime_id.as_deref(), runtime_path, None, None)
         }
         Some(other) => Err(format!("unknown runtime command: {other}")),
-        None => Err("runtime requires a subcommand: plan, list, status, or select-existing".to_string()),
+        None => Err(
+            "runtime requires a subcommand: plan, list, status, install, or select-existing"
+                .to_string(),
+        ),
     }
 }
 
@@ -540,13 +566,19 @@ mod tests {
 
     fn write_test_llama_binary(path: &std::path::Path) {
         #[cfg(windows)]
-        std::fs::write(path, "@echo off\r\necho llama-cli version 0.0-test\r\n")
-            .expect("test llama binary");
+        std::fs::write(
+            path,
+            "@echo off\r\necho llama-cli version 0.0-test\r\necho llama_print_timings:        load time =     617.57 ms 1>&2\r\necho llama_print_timings:        eval time =    1285.25 ms /    6 runs   (40.16 ms per token, 24.90 tokens per second) 1>&2\r\n",
+        )
+        .expect("test llama binary");
         #[cfg(not(windows))]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::write(path, "#!/bin/sh\necho 'llama-cli version 0.0-test'\n")
-                .expect("test llama binary");
+            std::fs::write(
+                path,
+                "#!/bin/sh\necho 'llama-cli version 0.0-test'\necho 'llama_print_timings:        load time =     617.57 ms' >&2\necho 'llama_print_timings:        eval time =    1285.25 ms /    6 runs   (40.16 ms per token, 24.90 tokens per second)' >&2\n",
+            )
+            .expect("test llama binary");
             let mut permissions = std::fs::metadata(path)
                 .expect("test binary metadata")
                 .permissions();
@@ -586,6 +618,18 @@ mod tests {
         assert_eq!(status["runtime_family"], "llama.cpp");
         assert!(status["selected_runtime"].get("status").is_some());
         assert!(status["recommended_runtime"].get("runtime_id").is_some());
+    }
+
+    #[test]
+    fn runtime_install_is_explicit_shared_engine_command() {
+        assert!(HELP_TEXT.contains("runtime install [--runtime-id <id>]"));
+        let error = command_runtime(&[
+            "install".to_string(),
+            "--runtime-id".to_string(),
+            "unknown-runtime".to_string(),
+        ])
+        .expect_err("unknown managed runtime rejected before download");
+        assert!(error.contains("unknown managed llama.cpp runtime"));
     }
 
     #[test]
@@ -835,6 +879,57 @@ mod tests {
 
         let _ = std::fs::remove_file(model_path);
         let _ = std::fs::remove_file(runtime_path);
+    }
+
+    #[test]
+    fn first_run_auto_uses_selected_runtime_id_for_artifact_provenance() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let model_path = env::temp_dir().join(format!(
+            "infergrade-runner-cli-selected-runtime-model-{}.gguf",
+            std::process::id()
+        ));
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-cli-selected-runtime-cache-{}",
+            std::process::id()
+        ));
+        let extension = if cfg!(windows) { "cmd" } else { "sh" };
+        let runtime_path = env::temp_dir().join(format!(
+            "infergrade-runner-cli-selected-runtime-{}.{}",
+            std::process::id(),
+            extension
+        ));
+        std::fs::write(&model_path, b"fake gguf path validation only").expect("model file");
+        write_test_llama_binary(&runtime_path);
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        select_existing_llama_cpp_runtime(
+            Some("llama-cpp-managed-test"),
+            Some(runtime_path.clone()),
+            None,
+            None,
+        )
+        .expect("selected runtime");
+
+        let output = command_first_run(&[
+            "--model".to_string(),
+            model_path.display().to_string(),
+            "--runtime".to_string(),
+            "auto".to_string(),
+            "--no-upload".to_string(),
+        ])
+        .expect("first-run selected runtime output");
+
+        assert_eq!(output["mode"], "llama_cpp");
+        assert_eq!(output["result"]["runtime_id"], "llama-cpp-managed-test");
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = std::fs::remove_file(model_path);
+        let _ = std::fs::remove_file(runtime_path);
+        let _ = std::fs::remove_dir_all(runtime_cache_dir);
     }
 
     #[test]
