@@ -35,8 +35,9 @@ pub use worker_protocol::{
 
 use serde_json::{json, Value};
 use std::env;
+use std::fs;
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use url::Url;
 
@@ -132,6 +133,17 @@ pub fn selected_llama_cpp_runtime_path() -> Result<PathBuf, String> {
     Ok(runtime_cache_root()?
         .join("llama.cpp")
         .join("selected_runtime.json"))
+}
+
+pub fn load_selected_llama_cpp_runtime() -> Value {
+    match selected_llama_cpp_runtime_path()
+        .ok()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+    {
+        Some(selection) => json!({"status": "selected", "selection": selection}),
+        None => json!({"status": "not_selected", "selection": Value::Null}),
+    }
 }
 
 pub fn sanitized_runner_profile(profile: &Value) -> Value {
@@ -440,11 +452,274 @@ pub fn recommended_llama_cpp_runtime() -> Value {
     }
 }
 
+fn safe_runtime_id(value: Option<&str>) -> Result<String, String> {
+    let runtime_id = value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(LLAMA_CPP_RUNTIME_ID);
+    if runtime_id.len() > 120
+        || runtime_id == "."
+        || runtime_id == ".."
+        || !runtime_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+    {
+        return Err(
+            "runtime_id must contain only letters, numbers, dots, underscores, or dashes."
+                .to_string(),
+        );
+    }
+    Ok(runtime_id.to_string())
+}
+
+fn find_program_path(program: &str) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    for dir in env::split_paths(&path) {
+        let candidate = dir.join(program);
+        if candidate.is_file() && is_executable_file(&candidate) {
+            return Some(candidate);
+        }
+        if cfg!(windows) {
+            let candidate = dir.join(format!("{program}.exe"));
+            if candidate.is_file() && is_executable_file(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        return fs::metadata(path)
+            .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false);
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+fn validate_existing_runtime_path(
+    path: &Path,
+    kind: &str,
+    required_name: &str,
+) -> Result<String, String> {
+    if !path.is_file() {
+        return Err(format!(
+            "{kind} path `{}` does not exist or is not a file.",
+            path.display()
+        ));
+    }
+    if !is_executable_file(path) {
+        return Err(format!(
+            "{kind} path `{}` is not executable. Select a runnable llama.cpp binary.",
+            path.display()
+        ));
+    }
+    let canonical = fs::canonicalize(path).map_err(|error| {
+        format!(
+            "could not resolve {kind} path `{}`: {error}",
+            path.display()
+        )
+    })?;
+    validate_llama_cpp_binary(&canonical, kind, required_name)?;
+    Ok(canonical.display().to_string())
+}
+
+fn validate_llama_cpp_binary(path: &Path, kind: &str, required_name: &str) -> Result<(), String> {
+    let output = StdCommand::new(path)
+        .arg("--version")
+        .output()
+        .map_err(|error| {
+            format!(
+                "could not execute {kind} path `{}` with --version: {error}",
+                path.display()
+            )
+        })?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let preview = stdout
+        .lines()
+        .chain(stderr.lines())
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+        .chars()
+        .take(300)
+        .collect::<String>();
+    if !output.status.success() {
+        return Err(format!(
+            "{kind} path `{}` did not run successfully with --version. First output: {}",
+            path.display(),
+            if preview.is_empty() {
+                "(none)"
+            } else {
+                &preview
+            }
+        ));
+    }
+    let binary_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    let lower_name = binary_name.to_ascii_lowercase();
+    let lower_output = preview.to_ascii_lowercase();
+    let expected_name = required_name.to_ascii_lowercase();
+    if !lower_name.contains(&expected_name) && !lower_output.contains("llama") {
+        return Err(format!(
+            "{kind} path `{}` does not look like a llama.cpp `{required_name}` binary.",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_existing_runtime_binary(
+    explicit_path: Option<PathBuf>,
+    program: &str,
+    kind: &str,
+    required: bool,
+) -> Result<Option<String>, String> {
+    if let Some(path) = explicit_path {
+        return validate_existing_runtime_path(&path, kind, program).map(Some);
+    }
+    if let Some(path) = find_program_path(program) {
+        return validate_existing_runtime_path(&path, kind, program).map(Some);
+    }
+    if required {
+        Err(format!(
+            "Cannot select existing llama.cpp runtime; missing required {kind} binary. Provide an explicit path instead of relying on PATH."
+        ))
+    } else {
+        Ok(None)
+    }
+}
+
+fn resolve_optional_sibling_runtime_binary(
+    cli: &Path,
+    explicit_path: Option<PathBuf>,
+    program: &str,
+    kind: &str,
+) -> Result<Option<String>, String> {
+    if let Some(path) = explicit_path {
+        return validate_existing_runtime_path(&path, kind, program).map(Some);
+    }
+    let Some(parent) = cli.parent() else {
+        return Ok(None);
+    };
+    let candidate = parent.join(program);
+    if candidate.is_file() {
+        return validate_existing_runtime_path(&candidate, kind, program).map(Some);
+    }
+    if cfg!(windows) {
+        let candidate = parent.join(format!("{program}.exe"));
+        if candidate.is_file() {
+            return validate_existing_runtime_path(&candidate, kind, program).map(Some);
+        }
+    }
+    Ok(None)
+}
+
+pub fn select_existing_llama_cpp_runtime(
+    runtime_id: Option<&str>,
+    cli_path: Option<PathBuf>,
+    server_path: Option<PathBuf>,
+    perplexity_path: Option<PathBuf>,
+) -> Result<Value, String> {
+    let runtime_id = safe_runtime_id(runtime_id)?;
+    let cli_was_explicit = cli_path.is_some();
+    let cli = resolve_existing_runtime_binary(cli_path, "llama-cli", "llama-cli", true)?
+        .ok_or_else(|| "llama-cli selection failed.".to_string())?;
+    let cli_path = PathBuf::from(&cli);
+    let server = if cli_was_explicit {
+        resolve_optional_sibling_runtime_binary(
+            &cli_path,
+            server_path,
+            "llama-server",
+            "llama-server",
+        )?
+    } else {
+        resolve_existing_runtime_binary(server_path, "llama-server", "llama-server", false)?
+    };
+    let perplexity = if cli_was_explicit {
+        resolve_optional_sibling_runtime_binary(
+            &cli_path,
+            perplexity_path,
+            "llama-perplexity",
+            "llama-perplexity",
+        )?
+    } else {
+        resolve_existing_runtime_binary(
+            perplexity_path,
+            "llama-perplexity",
+            "llama-perplexity",
+            false,
+        )?
+    };
+    let selection = json!({
+        "runtime_id": runtime_id,
+        "backend": "llama.cpp",
+        "version_label": "existing local binary",
+        "source": "selected_existing",
+        "provenance": "User-selected existing llama.cpp binary. No runtime download or install command was run by InferGrade.",
+        "manifest_version": RUNTIME_MANIFEST_VERSION,
+        "binaries": {
+            "cli": cli,
+            "server": server,
+            "perplexity": perplexity,
+        },
+        "selected_at_platform": {
+            "system": env::consts::OS,
+            "machine": env::consts::ARCH,
+        },
+    });
+    let path = selected_llama_cpp_runtime_path()?;
+    let parent = path.parent().ok_or_else(|| {
+        format!(
+            "could not resolve selected runtime directory for `{}`",
+            path.display()
+        )
+    })?;
+    fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "could not create selected runtime directory `{}`: {error}",
+            parent.display()
+        )
+    })?;
+    let body = serde_json::to_string_pretty(&selection)
+        .map_err(|error| format!("could not serialize selected runtime: {error}"))?;
+    fs::write(&path, format!("{body}\n")).map_err(|error| {
+        format!(
+            "could not write selected runtime `{}`: {error}",
+            path.display()
+        )
+    })?;
+    Ok(json!({
+        "status": "selected",
+        "selection": selection,
+        "path": path.display().to_string(),
+        "message": "Existing llama.cpp runtime selected. No download or install command was run.",
+    }))
+}
+
 pub fn llama_cpp_runtime_plan(selected_runtime: Value) -> Value {
     let cli = command_version("llama-cli");
     let server = command_version("llama-server");
-    let runtime_available = cli.get("status").and_then(Value::as_str) == Some("found")
-        && server.get("status").and_then(Value::as_str) == Some("found");
+    let selected_cli_available = selected_runtime
+        .pointer("/selection/binaries/cli")
+        .and_then(Value::as_str)
+        .map(Path::new)
+        .map(Path::is_file)
+        .unwrap_or(false);
+    let runtime_available =
+        cli.get("status").and_then(Value::as_str) == Some("found") || selected_cli_available;
     json!({
         "manifest_version": RUNTIME_MANIFEST_VERSION,
         "runtime_family": "llama.cpp",
@@ -515,6 +790,35 @@ pub fn verify_runtime_download_manifest(entry: &Value) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn write_test_llama_binary(path: &Path, binary_label: &str) {
+        #[cfg(windows)]
+        fs::write(
+            path,
+            format!("@echo off\r\necho {binary_label} version 0.0-test\r\n"),
+        )
+        .expect("test llama binary");
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::write(
+                path,
+                format!("#!/bin/sh\necho '{binary_label} version 0.0-test'\n"),
+            )
+            .expect("test llama binary");
+            let mut permissions = fs::metadata(path)
+                .expect("test binary metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(path, permissions).expect("test binary executable");
+        }
+    }
 
     #[test]
     fn normalizes_hosted_and_local_api_urls() {
@@ -619,6 +923,109 @@ mod tests {
             );
             assert_eq!(plan["recommended_runtime"]["accelerator"], "metal");
         }
+    }
+
+    #[test]
+    fn selects_existing_llama_cpp_runtime_from_explicit_path_without_installing() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-runtime-cache-{}",
+            std::process::id()
+        ));
+        let runtime_path = env::temp_dir().join(format!(
+            "infergrade-runner-engine-llama-cli-{}{}",
+            std::process::id(),
+            if cfg!(windows) { ".cmd" } else { "" }
+        ));
+        write_test_llama_binary(&runtime_path, "llama-cli");
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let selection = select_existing_llama_cpp_runtime(
+            Some("llama-cpp-selected-test"),
+            Some(runtime_path.clone()),
+            None,
+            None,
+        )
+        .expect("runtime selection");
+
+        assert_eq!(selection["status"], "selected");
+        assert_eq!(
+            selection["selection"]["runtime_id"],
+            "llama-cpp-selected-test"
+        );
+        assert_eq!(selection["selection"]["source"], "selected_existing");
+        assert!(selection["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("No download or install command was run"));
+        let selected = load_selected_llama_cpp_runtime();
+        assert_eq!(selected["status"], "selected");
+        assert_eq!(
+            selected["selection"]["binaries"]["cli"],
+            fs::canonicalize(&runtime_path)
+                .expect("canonical runtime path")
+                .display()
+                .to_string()
+        );
+        let plan = llama_cpp_runtime_plan(selected);
+        assert_eq!(plan["native_runtime_status"], "available");
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_file(runtime_path);
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn selected_runtime_rejects_non_executable_or_non_llama_files() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-invalid-runtime-cache-{}",
+            std::process::id()
+        ));
+        let invalid_path = runtime_cache_dir.join("llama-cli");
+        fs::create_dir_all(&runtime_cache_dir).expect("runtime cache dir");
+        fs::write(&invalid_path, b"not a runnable llama.cpp binary").expect("invalid file");
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let error = select_existing_llama_cpp_runtime(
+            Some("llama-cpp-invalid-test"),
+            Some(invalid_path),
+            None,
+            None,
+        )
+        .expect_err("invalid runtime rejected");
+
+        assert!(
+            error.contains("executable")
+                || error.contains("execute")
+                || error.contains("llama.cpp")
+        );
+        assert_eq!(load_selected_llama_cpp_runtime()["status"], "not_selected");
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn selected_runtime_rejects_unsafe_runtime_ids() {
+        let error = select_existing_llama_cpp_runtime(
+            Some("../bad"),
+            Some(PathBuf::from("/definitely/missing/llama-cli")),
+            None,
+            None,
+        )
+        .expect_err("unsafe runtime id rejected");
+        assert!(error.contains("runtime_id"));
     }
 
     #[test]

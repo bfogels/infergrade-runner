@@ -1,7 +1,8 @@
 use infergrade_runner_engine::{
     build_run_bundle_upload_request, build_run_completion_request, container_runtime_readiness,
-    execute_hub_json_request, llama_cpp_runtime_plan, native_first_run_bundle_payload,
-    normalize_api_url, run_native_first_run_with_events, write_native_first_run_artifact,
+    execute_hub_json_request, llama_cpp_runtime_plan, load_selected_llama_cpp_runtime,
+    native_first_run_bundle_payload, normalize_api_url, run_native_first_run_with_events,
+    select_existing_llama_cpp_runtime, write_native_first_run_artifact,
     write_native_first_run_bundle_payload, LlamaCppRuntime, NativeCommandRuntime,
     NativeFirstRunBundleOptions, NativeFirstRunInput, NativeFirstRunResult, NativeFirstRunRuntime,
     NativeRuntimeOutput, RunnerEvent,
@@ -14,7 +15,7 @@ use std::process::ExitCode;
 
 fn print_help() {
     println!(
-        "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> --run-token <token> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence through a Hub run-scoped token\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration."
+        "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> --run-token <token> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence through a Hub run-scoped token\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration."
     );
 }
 
@@ -53,12 +54,38 @@ fn command_doctor(args: &[String]) -> Result<Value, String> {
 
 fn command_runtime(args: &[String]) -> Result<Value, String> {
     match args.first().map(String::as_str) {
-        Some("plan") => Ok(llama_cpp_runtime_plan(json!({
-            "status": "not_selected",
-            "selection": Value::Null,
-        }))),
+        Some("plan") => Ok(llama_cpp_runtime_plan(load_selected_llama_cpp_runtime())),
+        Some("select-existing") => {
+            let mut runtime_path: Option<PathBuf> = None;
+            let mut runtime_id: Option<String> = None;
+            let mut index = 1;
+            while index < args.len() {
+                match args[index].as_str() {
+                    "--runtime-path" | "--llama-cpp-cli-path" => {
+                        index += 1;
+                        runtime_path =
+                            Some(PathBuf::from(args.get(index).ok_or_else(|| {
+                                "--runtime-path requires a path".to_string()
+                            })?));
+                    }
+                    "--runtime-id" => {
+                        index += 1;
+                        runtime_id = Some(
+                            args.get(index)
+                                .ok_or_else(|| "--runtime-id requires a value".to_string())?
+                                .to_string(),
+                        );
+                    }
+                    other => {
+                        return Err(format!("unknown runtime select-existing option: {other}"))
+                    }
+                }
+                index += 1;
+            }
+            select_existing_llama_cpp_runtime(runtime_id.as_deref(), runtime_path, None, None)
+        }
         Some(other) => Err(format!("unknown runtime command: {other}")),
-        None => Err("runtime requires a subcommand: plan".to_string()),
+        None => Err("runtime requires a subcommand: plan or select-existing".to_string()),
     }
 }
 
@@ -478,8 +505,30 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
-    use std::sync::mpsc;
+    use std::sync::{mpsc, Mutex, OnceLock};
     use std::thread;
+
+    fn env_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn write_test_llama_binary(path: &std::path::Path) {
+        #[cfg(windows)]
+        std::fs::write(path, "@echo off\r\necho llama-cli version 0.0-test\r\n")
+            .expect("test llama binary");
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(path, "#!/bin/sh\necho 'llama-cli version 0.0-test'\n")
+                .expect("test llama binary");
+            let mut permissions = std::fs::metadata(path)
+                .expect("test binary metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(path, permissions).expect("test binary executable");
+        }
+    }
 
     #[test]
     fn doctor_normalizes_default_api_url_and_keeps_docker_optional() {
@@ -496,6 +545,45 @@ mod tests {
             output["download_policy"]["requires_explicit_user_action"],
             true
         );
+    }
+
+    #[test]
+    fn runtime_select_existing_uses_shared_engine_and_records_explicit_path() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-cli-runtime-cache-{}",
+            std::process::id()
+        ));
+        let runtime_path = env::temp_dir().join(format!(
+            "infergrade-runner-cli-select-runtime-{}{}",
+            std::process::id(),
+            if cfg!(windows) { ".cmd" } else { "" }
+        ));
+        write_test_llama_binary(&runtime_path);
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let output = command_runtime(&[
+            "select-existing".to_string(),
+            "--runtime-path".to_string(),
+            runtime_path.display().to_string(),
+        ])
+        .expect("runtime selected");
+
+        assert_eq!(output["status"], "selected");
+        assert_eq!(output["selection"]["source"], "selected_existing");
+        assert!(output["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("No download or install command was run"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = std::fs::remove_file(runtime_path);
+        let _ = std::fs::remove_dir_all(runtime_cache_dir);
     }
 
     #[test]

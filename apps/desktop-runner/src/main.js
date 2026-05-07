@@ -1156,10 +1156,24 @@ runtimePlanButton?.addEventListener("click", () => {
 runtimeSelectExistingButton?.addEventListener("click", () => {
   llamaRuntimeReadiness = "Looking for an installed llama.cpp runtime...";
   renderLocalReadinessChecklist();
-  executeSidecar(runtimeCommandArgs(["--select-existing"]))
-    .then(() => {
-      llamaRuntimeReadiness = "Installed llama.cpp runtime selected. Start listening when paired.";
+  loadTauriInvoke()
+    .then((invoke) => {
+      if (!invoke) {
+        appendLog("Open the desktop app to select an installed llama.cpp runtime.");
+        llamaRuntimeReadiness = "Runtime selection is available inside the desktop app.";
+        return null;
+      }
+      return invoke("select_existing_llama_cpp_runtime", {
+        runtimePath: readFirstRunRuntimePath(),
+      });
+    })
+    .then((selection) => {
+      if (!selection) {
+        return;
+      }
+      llamaRuntimeReadiness = "Installed llama.cpp runtime selected. No install command was run.";
       renderLocalReadinessChecklist();
+      appendLog(`Selected llama.cpp runtime: ${JSON.stringify(selection)}`);
     })
     .catch((error) => {
       llamaRuntimeReadiness = "No installed llama.cpp runtime selected. See logs for the technical detail.";
