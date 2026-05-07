@@ -1,12 +1,14 @@
 import contextlib
 import io
 import json
+import subprocess
 import sys
 import unittest
 from tempfile import TemporaryDirectory
 from pathlib import Path
 
 from scripts.sync_versions import sync_versions
+from scripts.check_public_release_readiness import main as check_public_release_readiness
 from scripts.verify_desktop_release_artifacts import main as verify_desktop_release_artifacts
 from scripts.write_desktop_release_checksums import main as write_desktop_release_checksums
 from scripts.write_desktop_update_manifest import main as write_desktop_update_manifest
@@ -901,6 +903,96 @@ class ReleaseCiTests(unittest.TestCase):
 
             self.assertIn("No signature file found", str(raised.exception))
             self.assertFalse(output.exists())
+
+    def test_public_release_readiness_reports_local_checks_and_manual_gates(self):
+        old_argv = sys.argv
+        try:
+            sys.argv = ["check_public_release_readiness", "--root", str(ROOT)]
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                self.assertEqual(check_public_release_readiness(), 0)
+        finally:
+            sys.argv = old_argv
+
+        output = stdout.getvalue()
+        self.assertIn("public_release_readiness=manual_required", output)
+        self.assertIn("release_evidence_scope=local_repository_checks_only", output)
+        self.assertIn("release_signing_notarization=manual_github_release_environment_gate", output)
+        self.assertIn("pass\tgit_repository_state\t", output)
+        self.assertIn("pass\trequired_files\t", output)
+        self.assertIn("pass\tdesktop_release_workflow\t", output)
+        self.assertIn("pass\tsecret_filename_scan\t", output)
+        self.assertIn("manual\tgithub_settings\t", output)
+        self.assertIn("manual\tsigning_credentials\t", output)
+        self.assertNotIn("release_signing_notarization=pass", output)
+
+    def test_public_release_readiness_json_preserves_manual_state(self):
+        old_argv = sys.argv
+        try:
+            sys.argv = ["check_public_release_readiness", "--root", str(ROOT), "--json"]
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                self.assertEqual(check_public_release_readiness(), 0)
+        finally:
+            sys.argv = old_argv
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual("manual_required", payload["status"])
+        self.assertEqual("local_repository_checks_only", payload["scope"])
+        checks = {item["name"]: item for item in payload["checks"]}
+        self.assertEqual("pass", checks["git_repository_state"]["status"])
+        self.assertEqual("manual", checks["github_settings"]["status"])
+        self.assertEqual("manual", checks["signing_credentials"]["status"])
+        self.assertEqual("pass", checks["desktop_release_workflow"]["status"])
+
+    def test_public_release_readiness_fails_for_suspicious_local_secret_filenames(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "VERSION").write_text("0.2.5\n", encoding="utf-8")
+            (root / "deploy.key").write_text("not a real secret\n", encoding="utf-8")
+
+            old_argv = sys.argv
+            try:
+                sys.argv = ["check_public_release_readiness", "--root", str(root)]
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    self.assertEqual(check_public_release_readiness(), 1)
+            finally:
+                sys.argv = old_argv
+
+            output = stdout.getvalue()
+            self.assertIn("public_release_readiness=fail", output)
+            self.assertIn("fail\tgit_repository_state\t", output)
+            self.assertIn("fail\tsecret_filename_scan\t", output)
+            self.assertIn("deploy.key", output)
+
+    def test_public_release_readiness_fails_for_dirty_git_worktree(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.check_call(["git", "init"], cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            (root / "VERSION").write_text("0.2.5\n", encoding="utf-8")
+            subprocess.check_call(["git", "add", "VERSION"], cwd=root)
+            subprocess.check_call(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "init"],
+                cwd=root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            (root / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+
+            old_argv = sys.argv
+            try:
+                sys.argv = ["check_public_release_readiness", "--root", str(root)]
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    self.assertEqual(check_public_release_readiness(), 1)
+            finally:
+                sys.argv = old_argv
+
+            output = stdout.getvalue()
+            self.assertIn("public_release_readiness=fail", output)
+            self.assertIn("fail\tgit_repository_state\tworktree is not clean", output)
+            self.assertIn("dirty.txt", output)
 
 
 if __name__ == "__main__":
