@@ -4,7 +4,7 @@ InferGrade Desktop Runner is the local companion app for people who want to pair
 
 The Hub remains the model selection, benchmark planning, recommendation, and results surface. This app should stay focused on pairing, readiness, Runner lifecycle, local runtime controls, logs, updates, and support export.
 
-The desktop happy path is now native-first for macOS Apple Silicon: Docker will not be required for the first local benchmark, and the app can run a local GGUF through a selected `llama.cpp` runtime, write local artifacts, and upload `native_first_run` evidence back to Hub. Managed runtime downloads are not enabled yet, so users must explicitly select an existing trusted `llama-cli` binary before the native first-run button is ready. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
+The desktop happy path is now native-first for macOS Apple Silicon: Docker will not be required for the first local benchmark, and the app can run a local GGUF through either the recommended managed Metal `llama.cpp` runtime or a selected existing `llama-cli` binary, write local artifacts, and upload `native_first_run` evidence back to Hub. Managed runtime install is explicit, checksum-verified, and not independently signed yet. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
 
 ## What It Includes
 
@@ -134,4 +134,4 @@ The native first-run lane is intentionally narrow:
 - Docker/Podman: optional; missing containers only disable advanced sandboxed benchmarks.
 - Python runner-core: still present for legacy/advanced execution bridge paths, but not required for the Rust native first-run benchmark itself.
 - Windows/Linux Desktop: preview until packaging and launch smoke are proven on those platforms.
-- Managed runtime downloads: planned, not silently enabled.
+- Managed runtime install: explicit macOS Apple Silicon Metal lane available; broader channels and independent signature verification are planned.
