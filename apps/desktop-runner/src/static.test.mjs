@@ -214,3 +214,66 @@ test("desktop runner engine logic is separated from the Tauri adapter", () => {
   assert.ok(cliRust.includes("select_existing_llama_cpp_runtime"));
   assert.ok(cliRust.includes("llama_cpp_runtime_plan"));
 });
+
+test("desktop first-run handoff stays token-free and uploads through secure Rust adapter", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const helpers = readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+
+  assert.ok(html.includes("data-first-run-handoff-status"));
+  assert.ok(html.includes('name="firstRunUploadRunId"'));
+  assert.ok(html.includes("The app reads the saved runner token from secure storage."));
+  assert.ok(html.includes("Tokens are not shown in this browser UI."));
+  assert.ok(js.includes("FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY"));
+  assert.ok(js.includes("firstRunHandoffFromParams"));
+  assert.ok(js.includes("firstRunHandoffFromDeepLink"));
+  assert.ok(js.includes("Ignored first-run handoff with"));
+  assert.ok(js.includes('invoke("run_desktop_native_first_run"'));
+  assert.ok(js.includes("uploadRunId"));
+  assert.ok(js.includes("uploadWorkerId"));
+  assert.ok(js.includes("clearFirstRunHandoff();"));
+  assert.ok(js.includes("Ready to upload this first-run result to Hub run"));
+  assert.equal(js.includes("uploadToken"), false);
+  assert.equal(js.includes("execution_token"), false);
+  assert.equal(js.includes("runnerToken"), false);
+  assert.ok(helpers.includes("sensitiveKeys"));
+  assert.ok(helpers.includes("token|secret|authorization|bearer"));
+  assert.ok(helpers.includes("authorization"));
+  assert.ok(helpers.includes("bearer"));
+  assert.ok(rust.includes("fn upload_desktop_native_first_run"));
+  assert.ok(rust.includes(".load_runner_token()"));
+  assert.ok(rust.includes("build_run_claim_request"));
+  assert.ok(rust.includes("build_run_bundle_upload_request"));
+  assert.ok(rust.includes("build_run_completion_request"));
+  assert.ok(rust.includes("Pair with Hub before uploading a native first-run result."));
+  assert.equal(rust.includes("runner_token: String"), false);
+});
+
+test("desktop first-run UI renders progress, artifacts, upload state, and selected-runtime guidance", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+
+  assert.ok(html.includes("Run native first benchmark"));
+  assert.ok(html.includes("Choose a model and selected llama.cpp runtime before running."));
+  assert.ok(html.includes("Leave blank to use the selected llama.cpp runtime"));
+  assert.ok(js.includes("ensureFirstRunEvents"));
+  assert.ok(js.includes('listen("runner-first-run-event"'));
+  assert.ok(js.includes("firstRunMessageFromEvent"));
+  assert.ok(js.includes("Native first-run started."));
+  assert.ok(js.includes("Native first-run completed."));
+  assert.ok(js.includes("Artifact: ${payload.artifact.path}."));
+  assert.ok(js.includes("Bundle payload: ${payload.bundle_artifact.path}."));
+  assert.ok(js.includes("Uploaded bundle ${payload.upload.bundle_id} to Hub run ${payload.upload.run_id}."));
+  assert.ok(js.includes("Native first-run completed and uploaded to Hub with native_first_run evidence."));
+  assert.ok(js.includes("Native first-run completed locally, but Hub upload failed."));
+  assert.ok(js.includes("Select a local GGUF model file before running the first benchmark."));
+  assert.ok(js.includes("Use a local GGUF model file for the native first-run benchmark."));
+  assert.ok(js.includes("Installed llama.cpp runtime selected. No install command was run."));
+  assert.ok(rust.includes("runner-first-run-event"));
+  assert.ok(rust.includes("write_native_first_run_artifact"));
+  assert.ok(rust.includes("write_native_first_run_bundle_payload"));
+  assert.ok(rust.includes("mark_desktop_native_first_run_upload_failed"));
+  assert.ok(js.includes("Native first-run completed locally, but Hub upload failed."));
+});
