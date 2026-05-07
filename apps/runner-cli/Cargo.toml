@@ -1,6 +1,6 @@
 [package]
 name = "infergrade-runner-cli"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 description = "Rust CLI frontend for the shared InferGrade runner engine"
 

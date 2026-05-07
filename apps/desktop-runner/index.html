@@ -143,11 +143,42 @@
             </details>
             <div class="button-row">
               <button type="button" data-first-run-start>Run native first benchmark</button>
+              <button type="button" class="button-secondary" data-first-run-again disabled>Run again</button>
+              <button type="button" class="button-secondary" data-first-run-another-model disabled>Run another model</button>
               <button type="button" class="button-secondary" data-retry-first-run-upload disabled>Retry upload</button>
               <button type="button" class="button-secondary" data-copy-artifact-path disabled>Copy artifact path</button>
               <button type="button" class="button-secondary" data-copy-support-summary>Copy support summary</button>
             </div>
             <p class="hint" data-first-run-status>Choose a model and selected llama.cpp runtime before running.</p>
+          </div>
+          <div class="first-run-checklist" aria-label="First-run progress">
+            <h3>First-run path</h3>
+            <div class="flow-list">
+              <div data-first-run-step="paired">
+                <strong>Paired with Hub</strong>
+                <span>Paste a Hub pairing code to save this machine.</span>
+              </div>
+              <div data-first-run-step="runtime">
+                <strong>Runtime selected</strong>
+                <span>Select or install a local llama.cpp runtime.</span>
+              </div>
+              <div data-first-run-step="model">
+                <strong>Model selected</strong>
+                <span>Select a local GGUF model.</span>
+              </div>
+              <div data-first-run-step="ready">
+                <strong>First-run ready</strong>
+                <span>Pairing, runtime, and model are required before running.</span>
+              </div>
+              <div data-first-run-step="upload">
+                <strong>Upload ready</strong>
+                <span>Run locally, then use a Hub run handoff or run ID to upload.</span>
+              </div>
+              <div data-first-run-step="result">
+                <strong>Result available</strong>
+                <span>Uploaded native first-run evidence will appear in Hub.</span>
+              </div>
+            </div>
           </div>
           <details class="advanced-token-panel runtime-advanced-panel">
             <summary>Advanced runtime version</summary>

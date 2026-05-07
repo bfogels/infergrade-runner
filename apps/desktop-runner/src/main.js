@@ -30,7 +30,14 @@ const runtimeInstallManagedButton = document.querySelector("[data-runtime-instal
 const runtimeReinstallManagedButton = document.querySelector("[data-runtime-reinstall-managed]");
 const runtimeRemoveSelectedButton = document.querySelector("[data-runtime-remove-selected]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
+const runtimeIdInput = document.querySelector('[name="runtimeId"]');
+const firstRunModelPathInput = document.querySelector('[name="firstRunModelPath"]');
+const firstRunRuntimePathInput = document.querySelector('[name="firstRunRuntimePath"]');
+const firstRunUploadRunIdInput = document.querySelector('[name="firstRunUploadRunId"]');
+const firstRunUploadWorkerIdInput = document.querySelector('[name="firstRunUploadWorkerId"]');
 const firstRunStartButton = document.querySelector("[data-first-run-start]");
+const firstRunAgainButton = document.querySelector("[data-first-run-again]");
+const firstRunAnotherModelButton = document.querySelector("[data-first-run-another-model]");
 const retryFirstRunUploadButton = document.querySelector("[data-retry-first-run-upload]");
 const copyArtifactPathButton = document.querySelector("[data-copy-artifact-path]");
 const copySupportSummaryButton = document.querySelector("[data-copy-support-summary]");
@@ -54,6 +61,9 @@ const pairingReadinessStatus = document.querySelector("[data-pairing-readiness-s
 const runtimeLlamaStatus = document.querySelector("[data-runtime-llama-status]");
 const containerRuntimeStatus = document.querySelector("[data-container-runtime-status]");
 const modelPathStatus = document.querySelector("[data-model-path-status]");
+const firstRunStepNodes = new Map(
+  [...document.querySelectorAll("[data-first-run-step]")].map((node) => [node.dataset.firstRunStep, node])
+);
 const statusText = document.querySelector("[data-runner-status]");
 const statusDot = document.querySelector("[data-status-dot]");
 const pairState = document.querySelector("[data-pair-state]");
@@ -74,6 +84,7 @@ let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp job
 let nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
 let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxed benchmarks.";
 let modelPathReadiness = "Select a local GGUF model for the first benchmark.";
+let llamaRuntimeAvailable = false;
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
 let lastFirstRunPayload = null;
@@ -289,10 +300,85 @@ function renderLocalReadinessChecklist() {
   if (modelPathStatus) {
     modelPathStatus.textContent = modelPathReadiness;
   }
+  renderFirstRunChecklist();
+}
+
+function setFirstRunStep(name, state, message) {
+  const node = firstRunStepNodes.get(name);
+  if (!node) {
+    return;
+  }
+  node.dataset.state = state;
+  const detail = node.querySelector("span");
+  if (detail) {
+    detail.textContent = message;
+  }
+}
+
+function currentFirstRunModelPath() {
+  return firstRunModelPathInput?.value.trim() || "";
+}
+
+function currentFirstRunUploadRunId() {
+  return firstRunUploadRunIdInput?.value.trim() || "";
+}
+
+function hasSelectedModelPath() {
+  return currentFirstRunModelPath().toLowerCase().endsWith(".gguf");
+}
+
+function renderFirstRunChecklist() {
+  const paired = savedTokenAvailable && runnerProfileAvailable;
+  const modelSelected = hasSelectedModelPath();
+  const localRunComplete = Boolean(lastFirstRunPayload?.artifact?.path && lastFirstRunPayload?.bundle_artifact?.path);
+  const uploadSucceeded = lastFirstRunPayload?.upload?.uploaded === true;
+  const uploadFailed = Boolean(lastFirstRunPayload?.upload?.error);
+  const uploadReady = localRunComplete && Boolean(currentFirstRunUploadRunId()) && !uploadSucceeded;
+  const firstRunReady = paired && llamaRuntimeAvailable && modelSelected;
+
+  setFirstRunStep(
+    "paired",
+    paired ? "done" : "current",
+    paired ? "Paired through the OS credential store. Tokens stay out of this browser UI." : "Paste a Hub pairing code to save this machine."
+  );
+  setFirstRunStep(
+    "runtime",
+    llamaRuntimeAvailable ? "done" : paired ? "current" : "blocked",
+    llamaRuntimeAvailable ? "A local llama.cpp runtime is selected." : "Install the recommended runtime or select an existing llama.cpp binary."
+  );
+  setFirstRunStep(
+    "model",
+    modelSelected ? "done" : llamaRuntimeAvailable ? "current" : "blocked",
+    modelSelected ? `Selected model: ${currentFirstRunModelPath()}` : "Select a local GGUF model before running."
+  );
+  setFirstRunStep(
+    "ready",
+    firstRunReady ? "done" : "blocked",
+    firstRunReady ? "Ready to run a native first-run smoke benchmark." : "Pairing, runtime, and a GGUF model are required before running."
+  );
+  setFirstRunStep(
+    "upload",
+    uploadSucceeded ? "done" : uploadReady ? "current" : uploadFailed ? "blocked" : "blocked",
+    uploadSucceeded
+      ? `Uploaded bundle ${lastFirstRunPayload.upload.bundle_id} to Hub run ${lastFirstRunPayload.upload.run_id}.`
+      : uploadReady
+        ? `Ready to retry upload to Hub run ${currentFirstRunUploadRunId()}.`
+        : uploadFailed
+          ? "Local artifacts are saved; fix pairing or run access, then retry upload."
+          : localRunComplete
+            ? "Local artifacts are saved; enter a Hub run ID to upload."
+            : "Run locally first, then upload with a Hub run handoff or run ID."
+  );
+  setFirstRunStep(
+    "result",
+    uploadSucceeded ? "done" : "blocked",
+    uploadSucceeded ? "Hub has the uploaded native_first_run bundle." : "Result availability starts after a successful upload."
+  );
 }
 
 function renderDesktopReadiness(payload = {}) {
   if (!payload.status) {
+    llamaRuntimeAvailable = false;
     nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
     containerRuntimeReadiness = "Open the desktop app to check Docker/Podman. Docker is optional advanced support.";
     renderLocalReadinessChecklist();
@@ -304,8 +390,10 @@ function renderDesktopReadiness(payload = {}) {
   const runtime = payload.llama_cpp_runtime || "";
   const runtimeMessage = payload.llama_cpp_message || "";
   if (runtime === "available") {
+    llamaRuntimeAvailable = true;
     llamaRuntimeReadiness = runtimeMessage || "Native llama.cpp runtime is available.";
   } else if (runtime === "missing") {
+    llamaRuntimeAvailable = false;
     llamaRuntimeReadiness = runtimeMessage || "Select or install a native llama.cpp runtime before the first local benchmark.";
   }
   const docker = payload.docker || {};
@@ -689,7 +777,7 @@ function readApiUrl() {
 }
 
 function runtimeCommandArgs(extraArgs = []) {
-  const runtimeId = form.elements.runtimeId?.value.trim();
+  const runtimeId = runtimeIdInput?.value.trim();
   const args = ["install-runtime", "--runtime", "llama.cpp"];
   if (runtimeId) {
     args.push("--runtime-id", runtimeId);
@@ -766,7 +854,7 @@ async function inspectRuntimePlan() {
 }
 
 async function installManagedRuntime({ reinstall = false } = {}) {
-  const runtimeId = form.elements.runtimeId?.value.trim() || null;
+  const runtimeId = runtimeIdInput?.value.trim() || null;
   llamaRuntimeReadiness = reinstall
     ? "Replacing the selected llama.cpp runtime with the managed runtime. Local binaries are not deleted."
     : "Installing the recommended llama.cpp runtime. This can take a minute...";
@@ -789,6 +877,7 @@ async function installManagedRuntime({ reinstall = false } = {}) {
     runtimeId,
   });
   llamaRuntimeReadiness = managedRuntimeInstallSummary(result);
+  llamaRuntimeAvailable = true;
   renderLocalReadinessChecklist();
   appendLog(`Installed managed llama.cpp runtime: ${JSON.stringify(result)}`);
   return result;
@@ -809,13 +898,14 @@ async function removeSelectedRuntime() {
     removeManagedFiles: true,
   });
   llamaRuntimeReadiness = runtimeRemovalSummary(result);
+  llamaRuntimeAvailable = false;
   renderLocalReadinessChecklist();
   appendLog(`Removed selected llama.cpp runtime: ${JSON.stringify(result)}`);
   return result;
 }
 
 function readFirstRunModelPath() {
-  const modelPath = form.elements.firstRunModelPath?.value.trim() || "";
+  const modelPath = currentFirstRunModelPath();
   if (!modelPath) {
     throw new Error("Select a local GGUF model file before running the first benchmark.");
   }
@@ -828,7 +918,7 @@ function readFirstRunModelPath() {
 }
 
 function readFirstRunRuntimePath() {
-  return form.elements.firstRunRuntimePath?.value.trim() || null;
+  return firstRunRuntimePathInput?.value.trim() || null;
 }
 
 function firstRunHandoffFromUrl() {
@@ -856,11 +946,11 @@ function applyFirstRunHandoff(incomingHandoff = null) {
   const storedWorkerId = window.localStorage.getItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY) || "";
   const runId = urlHandoff.runId || storedRunId;
   const workerId = urlHandoff.runId ? urlHandoff.workerId : storedWorkerId;
-  if (runId && form.elements.firstRunUploadRunId && !form.elements.firstRunUploadRunId.value.trim()) {
-    form.elements.firstRunUploadRunId.value = runId;
+  if (runId && firstRunUploadRunIdInput && !firstRunUploadRunIdInput.value.trim()) {
+    firstRunUploadRunIdInput.value = runId;
   }
-  if (workerId && form.elements.firstRunUploadWorkerId && !form.elements.firstRunUploadWorkerId.value.trim()) {
-    form.elements.firstRunUploadWorkerId.value = workerId;
+  if (workerId && firstRunUploadWorkerIdInput && !firstRunUploadWorkerIdInput.value.trim()) {
+    firstRunUploadWorkerIdInput.value = workerId;
   }
   if (urlHandoff.runId) {
     window.localStorage.setItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY, urlHandoff.runId);
@@ -868,8 +958,8 @@ function applyFirstRunHandoff(incomingHandoff = null) {
       window.localStorage.setItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY, urlHandoff.workerId);
     } else {
       window.localStorage.removeItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY);
-      if (form.elements.firstRunUploadWorkerId) {
-        form.elements.firstRunUploadWorkerId.value = "";
+      if (firstRunUploadWorkerIdInput) {
+        firstRunUploadWorkerIdInput.value = "";
       }
     }
   }
@@ -878,6 +968,7 @@ function applyFirstRunHandoff(incomingHandoff = null) {
       ? `Ready to upload this first-run result to Hub run ${runId}.`
       : "If Hub opened Desktop with a run handoff, this fills automatically.";
   }
+  renderLocalReadinessChecklist();
 }
 
 async function initFirstRunDeepLinkHandoff() {
@@ -907,7 +998,7 @@ async function initFirstRunDeepLinkHandoff() {
 }
 
 function readFirstRunUploadRunId() {
-  const runId = form.elements.firstRunUploadRunId?.value.trim() || "";
+  const runId = currentFirstRunUploadRunId();
   if (runId) {
     window.localStorage.setItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY, runId);
   }
@@ -915,7 +1006,7 @@ function readFirstRunUploadRunId() {
 }
 
 function readFirstRunUploadWorkerId() {
-  const workerId = form.elements.firstRunUploadWorkerId?.value.trim() || "";
+  const workerId = firstRunUploadWorkerIdInput?.value.trim() || "";
   if (workerId) {
     window.localStorage.setItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY, workerId);
   }
@@ -925,11 +1016,11 @@ function readFirstRunUploadWorkerId() {
 function clearFirstRunHandoff() {
   window.localStorage.removeItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY);
   window.localStorage.removeItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY);
-  if (form.elements.firstRunUploadRunId) {
-    form.elements.firstRunUploadRunId.value = "";
+  if (firstRunUploadRunIdInput) {
+    firstRunUploadRunIdInput.value = "";
   }
-  if (form.elements.firstRunUploadWorkerId) {
-    form.elements.firstRunUploadWorkerId.value = "";
+  if (firstRunUploadWorkerIdInput) {
+    firstRunUploadWorkerIdInput.value = "";
   }
   if (firstRunHandoffStatus) {
     firstRunHandoffStatus.textContent = "Hub upload complete. Start another run from Hub when you want to add more evidence.";
@@ -946,6 +1037,12 @@ function firstRunArtifactText(payload = lastFirstRunPayload) {
 
 function updateFirstRunSupportActions() {
   const hasArtifact = Boolean(firstRunArtifactText());
+  if (firstRunAgainButton) {
+    firstRunAgainButton.disabled = !lastFirstRunPayload;
+  }
+  if (firstRunAnotherModelButton) {
+    firstRunAnotherModelButton.disabled = !lastFirstRunPayload && !currentFirstRunModelPath();
+  }
   if (copyArtifactPathButton) {
     copyArtifactPathButton.disabled = !hasArtifact;
   }
@@ -953,6 +1050,24 @@ function updateFirstRunSupportActions() {
     const uploaded = lastFirstRunPayload?.upload?.uploaded === true;
     retryFirstRunUploadButton.disabled = !lastFirstRunPayload || uploaded;
   }
+}
+
+function clearFirstRunLocalState({ clearModel = false } = {}) {
+  lastFirstRunPayload = null;
+  if (clearModel && firstRunModelPathInput) {
+    firstRunModelPathInput.value = "";
+  }
+  modelPathReadiness = currentFirstRunModelPath()
+    ? `First-run model selected: ${currentFirstRunModelPath()}`
+    : "Select a local GGUF model for the first benchmark.";
+  nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
+  if (firstRunStatus) {
+    firstRunStatus.textContent = clearModel
+      ? "Choose another local GGUF model before running."
+      : "Ready to run this local GGUF model again.";
+  }
+  updateFirstRunSupportActions();
+  renderLocalReadinessChecklist();
 }
 
 async function copyTextToClipboard(text, label) {
@@ -1339,7 +1454,8 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
       if (!selection) {
         return;
       }
-      llamaRuntimeReadiness = "Installed llama.cpp runtime selected. No install command was run.";
+    llamaRuntimeReadiness = "Installed llama.cpp runtime selected. No install command was run.";
+      llamaRuntimeAvailable = true;
       renderLocalReadinessChecklist();
       appendLog(`Selected llama.cpp runtime: ${JSON.stringify(selection)}`);
     })
@@ -1351,6 +1467,21 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
     });
 });
 
+firstRunModelPathInput?.addEventListener("input", () => {
+  const modelPath = currentFirstRunModelPath();
+  modelPathReadiness = modelPath
+    ? modelPath.toLowerCase().endsWith(".gguf")
+      ? `First-run model selected: ${modelPath}`
+      : "Use a local GGUF model file for native first-run."
+    : "Select a local GGUF model for the first benchmark.";
+  updateFirstRunSupportActions();
+  renderLocalReadinessChecklist();
+});
+
+firstRunUploadRunIdInput?.addEventListener("input", () => {
+  renderLocalReadinessChecklist();
+});
+
 firstRunStartButton?.addEventListener("click", () => {
   runNativeFirstRun().catch((error) => {
     const message = error.message || String(error);
@@ -1360,6 +1491,24 @@ firstRunStartButton?.addEventListener("click", () => {
     setStatus("First benchmark blocked", "error");
     appendLog(`Could not start native first-run: ${message}`);
   });
+});
+
+firstRunAgainButton?.addEventListener("click", () => {
+  clearFirstRunLocalState();
+  runNativeFirstRun().catch((error) => {
+    const message = error.message || String(error);
+    if (firstRunStatus) {
+      firstRunStatus.textContent = message;
+    }
+    setStatus("First benchmark blocked", "error");
+    appendLog(`Could not rerun native first-run: ${message}`);
+  });
+});
+
+firstRunAnotherModelButton?.addEventListener("click", () => {
+  clearFirstRunLocalState({ clearModel: true });
+  setStatus("Choose another model", "idle");
+  appendLog("Cleared local first-run result state; choose another GGUF model to run.");
 });
 
 retryFirstRunUploadButton?.addEventListener("click", () => {
