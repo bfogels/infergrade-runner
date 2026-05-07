@@ -108,10 +108,23 @@ def sync_versions(root: pathlib.Path = ROOT, dry_run: bool = False) -> list[str]
             r'^version = "[^"]+"$',
             f'version = "{version}"',
         ),
+        "apps/runner-cli/Cargo.toml": (
+            r'^version = "[^"]+"$',
+            f'version = "{version}"',
+        ),
+        "crates/runner-engine/Cargo.toml": (
+            r'^version = "[^"]+"$',
+            f'version = "{version}"',
+        ),
         "apps/desktop-runner/src-tauri/Cargo.lock": (
             r'(name = "(?:infergrade_desktop_runner|infergrade_runner_engine)"\nversion = )"[^"]+"',
             rf'\1"{version}"',
             2,
+        ),
+        "Cargo.lock": (
+            r'(name = "(?:infergrade-runner-cli|infergrade_desktop_runner|infergrade_runner_engine)"\nversion = )"[^"]+"',
+            rf'\1"{version}"',
+            3,
         ),
     }
     for path, replacement_args in text_replacements.items():

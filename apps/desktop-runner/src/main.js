@@ -1,6 +1,8 @@
 import "./styles.css";
 import packageInfo from "../package.json";
 import {
+  firstRunHandoffFromDeepLink,
+  firstRunHandoffFromParams,
   normalizeDesktopApiUrl,
   userSafeStartFailure,
   userSafeTokenFailure,
@@ -9,6 +11,8 @@ import {
 
 const SIDECAR_NAME = "binaries/infergrade-sidecar";
 const API_URL_STORAGE_KEY = "infergrade.runner.apiUrl";
+const FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY = "infergrade.runner.firstRun.runId";
+const FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY = "infergrade.runner.firstRun.workerId";
 const THEME_STORAGE_KEY = "infergrade.runner.theme";
 const APP_VERSION_FALLBACK = packageInfo.version;
 const UPDATE_CHANNEL = "release";
@@ -25,6 +29,9 @@ const clearLogsButton = document.querySelector("[data-clear-logs]");
 const themeChoiceButtons = [...document.querySelectorAll("[data-theme-choice]")];
 const runtimePlanButton = document.querySelector("[data-runtime-plan]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
+const firstRunStartButton = document.querySelector("[data-first-run-start]");
+const firstRunStatus = document.querySelector("[data-first-run-status]");
+const firstRunHandoffStatus = document.querySelector("[data-first-run-handoff-status]");
 const runnerSelfTestButton = document.querySelector("[data-runner-self-test]");
 const checkUpdateButton = document.querySelector("[data-check-update]");
 const installUpdateButton = document.querySelector("[data-install-update]");
@@ -54,14 +61,16 @@ let logLines = [];
 let tauriInvoke = null;
 let tauriListen = null;
 let runnerListenerEventsReady = false;
+let firstRunEventsReady = false;
 let runnerStartupLines = [];
 let runnerStartupWaiters = [];
 let previewToken = "";
 let pendingUpdate = null;
 let lastNormalizedApiUrl = "https://api.infergrade.com/";
 let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp jobs.";
-let nativeSuiteReadiness = "Native first-run executor is still in progress; Docker is optional for advanced sandboxed benchmarks.";
+let nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
 let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxed benchmarks.";
+let modelPathReadiness = "Select a local GGUF model for the first benchmark.";
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
 
@@ -274,20 +283,20 @@ function renderLocalReadinessChecklist() {
     containerRuntimeStatus.textContent = containerRuntimeReadiness;
   }
   if (modelPathStatus) {
-    modelPathStatus.textContent = "Chosen in Hub run plans; Desktop validates runtime and listener readiness.";
+    modelPathStatus.textContent = modelPathReadiness;
   }
 }
 
 function renderDesktopReadiness(payload = {}) {
   if (!payload.status) {
-    nativeSuiteReadiness = "Native first-run executor is still in progress; Docker is optional for advanced sandboxed benchmarks.";
+    nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
     containerRuntimeReadiness = "Open the desktop app to check Docker/Podman. Docker is optional advanced support.";
     renderLocalReadinessChecklist();
     return;
   }
   nativeSuiteReadiness =
     payload.native_benchmark_message ||
-    "Native first-run executor is still in progress; Docker is optional for advanced sandboxed benchmarks.";
+    "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
   const runtime = payload.llama_cpp_runtime || "";
   const runtimeMessage = payload.llama_cpp_message || "";
   if (runtime === "available") {
@@ -486,6 +495,28 @@ async function ensureRunnerListenerEvents() {
   });
 }
 
+async function ensureFirstRunEvents() {
+  if (firstRunEventsReady) {
+    return;
+  }
+  const listen = await loadTauriListen();
+  if (!listen) {
+    return;
+  }
+  firstRunEventsReady = true;
+  await listen("runner-first-run-event", (event) => {
+    const payload = event?.payload || {};
+    const message = firstRunMessageFromEvent(payload);
+    if (!message) {
+      return;
+    }
+    if (firstRunStatus) {
+      firstRunStatus.textContent = message;
+    }
+    appendLog(`First-run ${payload.type || "event"}: ${message}`);
+  });
+}
+
 async function loadStoredToken() {
   const invoke = await loadTauriInvoke();
   if (invoke) {
@@ -585,6 +616,23 @@ function appendLog(message) {
   logOutput.scrollTop = logOutput.scrollHeight;
 }
 
+function firstRunMessageFromEvent(payload = {}) {
+  if (payload.type === "benchmark_started") {
+    return "Native first-run started.";
+  }
+  if (payload.type === "benchmark_progress") {
+    const percent = Number.isFinite(payload.progress_percent) ? ` (${Math.round(payload.progress_percent)}%)` : "";
+    return `${payload.message || "Native first-run progress."}${percent}`;
+  }
+  if (payload.type === "benchmark_completed") {
+    return "Native first-run completed.";
+  }
+  if (payload.type === "error") {
+    return payload.message || "Native first-run failed.";
+  }
+  return "";
+}
+
 function pairingSummary(stdout) {
   try {
     const payload = JSON.parse(stdout || "{}");
@@ -679,6 +727,128 @@ function runtimePlanSummary(plan = {}) {
   const runtimeText = plan.message || "No install command was run. Review the runtime plan before selecting a runtime.";
   const lane = recommended.platform || recommended.accelerator || "this machine";
   return `${runtimeText} Recommended lane: ${lane}. ${selectedText}`;
+}
+
+function readFirstRunModelPath() {
+  const modelPath = form.elements.firstRunModelPath?.value.trim() || "";
+  if (!modelPath) {
+    throw new Error("Select a local GGUF model file before running the first benchmark.");
+  }
+  if (!modelPath.toLowerCase().endsWith(".gguf")) {
+    throw new Error("Use a local GGUF model file for the native first-run benchmark.");
+  }
+  modelPathReadiness = `First-run model selected: ${modelPath}`;
+  renderLocalReadinessChecklist();
+  return modelPath;
+}
+
+function readFirstRunRuntimePath() {
+  return form.elements.firstRunRuntimePath?.value.trim() || null;
+}
+
+function firstRunHandoffFromUrl() {
+  return firstRunHandoffFromParams(new URLSearchParams(window.location.search || ""), (reason) => {
+    appendLog(`Ignored first-run handoff with ${reason}.`);
+  });
+}
+
+function firstRunHandoffFromDeepLinks(urls) {
+  const values = Array.isArray(urls) ? urls : [];
+  for (const value of values) {
+    const handoff = firstRunHandoffFromDeepLink(value, (reason) => {
+      appendLog(`Ignored first-run handoff with ${reason}.`);
+    });
+    if (handoff.runId) {
+      return handoff;
+    }
+  }
+  return { runId: "", workerId: "" };
+}
+
+function applyFirstRunHandoff(incomingHandoff = null) {
+  const urlHandoff = incomingHandoff || firstRunHandoffFromUrl();
+  const storedRunId = window.localStorage.getItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY) || "";
+  const storedWorkerId = window.localStorage.getItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY) || "";
+  const runId = urlHandoff.runId || storedRunId;
+  const workerId = urlHandoff.runId ? urlHandoff.workerId : storedWorkerId;
+  if (runId && form.elements.firstRunUploadRunId && !form.elements.firstRunUploadRunId.value.trim()) {
+    form.elements.firstRunUploadRunId.value = runId;
+  }
+  if (workerId && form.elements.firstRunUploadWorkerId && !form.elements.firstRunUploadWorkerId.value.trim()) {
+    form.elements.firstRunUploadWorkerId.value = workerId;
+  }
+  if (urlHandoff.runId) {
+    window.localStorage.setItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY, urlHandoff.runId);
+    if (urlHandoff.workerId) {
+      window.localStorage.setItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY, urlHandoff.workerId);
+    } else {
+      window.localStorage.removeItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY);
+      if (form.elements.firstRunUploadWorkerId) {
+        form.elements.firstRunUploadWorkerId.value = "";
+      }
+    }
+  }
+  if (firstRunHandoffStatus) {
+    firstRunHandoffStatus.textContent = runId
+      ? `Ready to upload this first-run result to Hub run ${runId}.`
+      : "If Hub opened Desktop with a run handoff, this fills automatically.";
+  }
+}
+
+async function initFirstRunDeepLinkHandoff() {
+  applyFirstRunHandoff();
+  if (!isTauriRuntime()) {
+    return;
+  }
+  try {
+    const { getCurrent, onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
+    const startHandoff = firstRunHandoffFromDeepLinks(await getCurrent());
+    if (startHandoff.runId) {
+      applyFirstRunHandoff(startHandoff);
+      appendLog(`Received Hub first-run handoff for run ${startHandoff.runId}.`);
+    }
+    await onOpenUrl((urls) => {
+      const handoff = firstRunHandoffFromDeepLinks(urls);
+      if (!handoff.runId) {
+        return;
+      }
+      applyFirstRunHandoff(handoff);
+      setStatus("Hub run handoff received", "good");
+      appendLog(`Received Hub first-run handoff for run ${handoff.runId}.`);
+    });
+  } catch (error) {
+    appendLog(`Could not initialize Hub first-run handoff links: ${error.message || error}`);
+  }
+}
+
+function readFirstRunUploadRunId() {
+  const runId = form.elements.firstRunUploadRunId?.value.trim() || "";
+  if (runId) {
+    window.localStorage.setItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY, runId);
+  }
+  return runId || null;
+}
+
+function readFirstRunUploadWorkerId() {
+  const workerId = form.elements.firstRunUploadWorkerId?.value.trim() || "";
+  if (workerId) {
+    window.localStorage.setItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY, workerId);
+  }
+  return workerId || null;
+}
+
+function clearFirstRunHandoff() {
+  window.localStorage.removeItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY);
+  window.localStorage.removeItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY);
+  if (form.elements.firstRunUploadRunId) {
+    form.elements.firstRunUploadRunId.value = "";
+  }
+  if (form.elements.firstRunUploadWorkerId) {
+    form.elements.firstRunUploadWorkerId.value = "";
+  }
+  if (firstRunHandoffStatus) {
+    firstRunHandoffStatus.textContent = "Hub upload complete. Start another run from Hub when you want to add more evidence.";
+  }
 }
 
 async function startRunner({ confirmStarted = false } = {}) {
@@ -811,6 +981,73 @@ async function runDesktopSelfTest() {
   setStatus("Runner self-test passed", "good");
 }
 
+async function runNativeFirstRun() {
+  const modelPath = readFirstRunModelPath();
+  const runtimePath = readFirstRunRuntimePath();
+  const uploadRunId = readFirstRunUploadRunId();
+  const uploadWorkerId = readFirstRunUploadWorkerId();
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    firstRunStatus.textContent = "Open the desktop app to run the native first benchmark.";
+    appendLog("Development view cannot run the native first benchmark.");
+    return;
+  }
+
+  await ensureFirstRunEvents();
+  firstRunStartButton.disabled = true;
+  setStatus("First benchmark running", "warning");
+  firstRunStatus.textContent = "Starting native first-run benchmark...";
+  try {
+    const payload = await invoke("run_desktop_native_first_run", {
+      modelPath,
+      runtimePath,
+      uploadRunId,
+      uploadWorkerId,
+    });
+    const result = payload?.result || {};
+    const metrics = result.metrics || {};
+    const speed = Number.isFinite(metrics.decode_tokens_per_second)
+      ? `${metrics.decode_tokens_per_second.toFixed(2)} tokens/sec`
+      : "speed unavailable";
+    const ttft = Number.isFinite(metrics.time_to_first_token_ms)
+      ? `${metrics.time_to_first_token_ms} ms TTFT`
+      : "TTFT unavailable";
+    const artifactPath = payload?.artifact?.path ? ` Artifact: ${payload.artifact.path}.` : "";
+    const bundlePath = payload?.bundle_artifact?.path ? ` Bundle payload: ${payload.bundle_artifact.path}.` : "";
+    const uploadStatus = payload?.upload?.uploaded
+      ? ` Uploaded bundle ${payload.upload.bundle_id} to Hub run ${payload.upload.run_id}.`
+      : payload?.upload?.error
+        ? ` Upload failed: ${payload.upload.error}`
+        : " Not uploaded; enter a Hub run ID to attach this evidence to a run.";
+    firstRunStatus.textContent = `Completed native first-run (${speed}, ${ttft}).${artifactPath}${bundlePath}${uploadStatus}`;
+    modelPathReadiness = payload?.upload?.uploaded
+      ? "Native first-run completed and uploaded to Hub with native_first_run evidence."
+      : payload?.upload?.error
+        ? "Native first-run completed locally, but Hub upload failed. Keep the local artifacts and retry upload after fixing pairing or run access."
+        : "Native first-run completed locally with result and bundle artifacts.";
+    nativeSuiteReadiness = payload?.upload?.uploaded
+      ? "Native first-run completed and uploaded through the paired desktop runner."
+      : payload?.upload?.error
+        ? "Native first-run evidence exists locally; Hub upload still needs a valid paired runner and run ID."
+        : "Native first-run completed locally with native_first_run evidence and a Hub-compatible bundle preview.";
+    if (payload?.upload?.uploaded) {
+      clearFirstRunHandoff();
+    } else {
+      applyFirstRunHandoff();
+    }
+    setStatus("First benchmark complete", "good");
+    renderLocalReadinessChecklist();
+    appendLog(`Native first-run result: ${JSON.stringify(payload)}`);
+  } catch (error) {
+    const message = error.message || error;
+    firstRunStatus.textContent = `Native first-run failed: ${message}`;
+    setStatus("First benchmark failed", "error");
+    appendLog(`Native first-run failed: ${message}`);
+  } finally {
+    firstRunStartButton.disabled = false;
+  }
+}
+
 async function stopRunner() {
   if (!childProcess) {
     return;
@@ -919,10 +1156,24 @@ runtimePlanButton?.addEventListener("click", () => {
 runtimeSelectExistingButton?.addEventListener("click", () => {
   llamaRuntimeReadiness = "Looking for an installed llama.cpp runtime...";
   renderLocalReadinessChecklist();
-  executeSidecar(runtimeCommandArgs(["--select-existing"]))
-    .then(() => {
-      llamaRuntimeReadiness = "Installed llama.cpp runtime selected. Start listening when paired.";
+  loadTauriInvoke()
+    .then((invoke) => {
+      if (!invoke) {
+        appendLog("Open the desktop app to select an installed llama.cpp runtime.");
+        llamaRuntimeReadiness = "Runtime selection is available inside the desktop app.";
+        return null;
+      }
+      return invoke("select_existing_llama_cpp_runtime", {
+        runtimePath: readFirstRunRuntimePath(),
+      });
+    })
+    .then((selection) => {
+      if (!selection) {
+        return;
+      }
+      llamaRuntimeReadiness = "Installed llama.cpp runtime selected. No install command was run.";
       renderLocalReadinessChecklist();
+      appendLog(`Selected llama.cpp runtime: ${JSON.stringify(selection)}`);
     })
     .catch((error) => {
       llamaRuntimeReadiness = "No installed llama.cpp runtime selected. See logs for the technical detail.";
@@ -930,6 +1181,17 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
       setStatus("Runtime selection failed", "error");
       appendLog(`Could not select installed llama.cpp runtime: ${error.message || error}`);
     });
+});
+
+firstRunStartButton?.addEventListener("click", () => {
+  runNativeFirstRun().catch((error) => {
+    const message = error.message || String(error);
+    if (firstRunStatus) {
+      firstRunStatus.textContent = message;
+    }
+    setStatus("First benchmark blocked", "error");
+    appendLog(`Could not start native first-run: ${message}`);
+  });
 });
 
 runnerSelfTestButton?.addEventListener("click", () => {
@@ -952,6 +1214,7 @@ relaunchUpdateButton?.addEventListener("click", () => {
 });
 
 initTheme();
+initFirstRunDeepLinkHandoff().catch((error) => appendLog(`Could not initialize first-run handoff: ${error.message || error}`));
 renderReleaseStatus().catch((error) => appendLog(`Could not render release status: ${error.message || error}`));
 refreshRunnerCliVersion().catch((error) => appendLog(`Could not check Runner CLI version: ${error.message || error}`));
 checkRunnerStartupSelfTest().catch((error) => appendLog(`Could not run startup self-test: ${error.message || error}`));

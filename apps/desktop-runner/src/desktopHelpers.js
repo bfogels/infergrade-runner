@@ -1,4 +1,6 @@
 const HOSTED_API_URL = "https://api.infergrade.com";
+const SENSITIVE_HANDOFF_TEXT = /token|secret|authorization|bearer/i;
+const HUB_HANDOFF_ID = /^[A-Za-z0-9_.-]{1,160}$/;
 
 function isLocalHost(hostname) {
   const host = String(hostname || "").toLowerCase();
@@ -37,6 +39,69 @@ export function normalizeDesktopApiUrl(value = "") {
     throw new Error("Enter a valid Hub API URL, such as https://api.infergrade.com.");
   }
   return parsed.href;
+}
+
+export function firstRunHandoffFromParams(params, onRejected = () => {}) {
+  const searchParams = params instanceof URLSearchParams ? params : new URLSearchParams(params || "");
+  const sensitiveKeys = [...searchParams.keys()].filter((key) => SENSITIVE_HANDOFF_TEXT.test(key));
+  if (sensitiveKeys.length) {
+    onRejected("sensitive handoff parameter");
+    return { runId: "", workerId: "" };
+  }
+  const rawRunId =
+    searchParams.get("first_run_run_id") ||
+    searchParams.get("firstRunRunId") ||
+    searchParams.get("run_id") ||
+    searchParams.get("runId") ||
+    "";
+  const rawWorkerId =
+    searchParams.get("first_run_worker_id") || searchParams.get("worker_id") || searchParams.get("workerId") || "";
+  const runId = safeHandoffId(rawRunId, onRejected);
+  const workerId = safeHandoffId(rawWorkerId, onRejected);
+  if (runId === null || workerId === null) {
+    return { runId: "", workerId: "" };
+  }
+  return {
+    runId,
+    workerId,
+  };
+}
+
+function safeHandoffId(value, onRejected) {
+  const raw = String(value || "");
+  if (!raw) {
+    return "";
+  }
+  const trimmed = raw.trim();
+  if (
+    raw !== trimmed ||
+    trimmed === "." ||
+    trimmed === ".." ||
+    !HUB_HANDOFF_ID.test(trimmed) ||
+    SENSITIVE_HANDOFF_TEXT.test(trimmed)
+  ) {
+    onRejected("unsafe handoff identifier");
+    return null;
+  }
+  return trimmed;
+}
+
+export function firstRunHandoffFromDeepLink(value, onRejected = () => {}) {
+  if (!value || typeof value !== "string") {
+    return { runId: "", workerId: "" };
+  }
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch (_error) {
+    onRejected("invalid first-run handoff URL");
+    return { runId: "", workerId: "" };
+  }
+  if (parsed.protocol !== "infergrade-runner:") {
+    onRejected("unexpected first-run handoff URL scheme");
+    return { runId: "", workerId: "" };
+  }
+  return firstRunHandoffFromParams(parsed.searchParams, onRejected);
 }
 
 export function userSafeUpdateFailure(_message = "") {

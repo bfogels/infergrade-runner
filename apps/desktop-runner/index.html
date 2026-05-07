@@ -89,13 +89,72 @@
           <div class="panel-heading compact-heading">
             <div>
               <h2>Runtime</h2>
-              <p class="hint">Advanced llama.cpp selection stays explicit.</p>
+              <p class="hint">Native llama.cpp first-run stays explicit and local.</p>
             </div>
           </div>
           <p>
             Inspect the managed runtime plan, then choose whether to use the pinned lane or your installed
             llama.cpp binaries.
           </p>
+          <div class="first-run-panel" aria-label="Native first-run benchmark">
+            <h3>First local benchmark</h3>
+            <p class="hint compact-hint">
+              Run a short native llama.cpp smoke benchmark on a local GGUF model and write local result
+              artifacts. Upload is optional and uses the saved pairing token inside the desktop app.
+            </p>
+            <label>
+              <span>Model path</span>
+              <input
+                name="firstRunModelPath"
+                type="text"
+                autocomplete="off"
+                placeholder="/path/to/model.gguf"
+              />
+            </label>
+            <details class="advanced-token-panel runtime-advanced-panel">
+              <summary>Advanced runtime path</summary>
+              <label>
+                <span>llama-cli path</span>
+                <input
+                  name="firstRunRuntimePath"
+                  type="text"
+                  autocomplete="off"
+                  placeholder="Leave blank to use the selected llama.cpp runtime"
+                />
+              </label>
+            </details>
+            <details class="advanced-token-panel runtime-advanced-panel">
+              <summary>Hub run handoff</summary>
+              <p class="hint" data-first-run-handoff-status>
+                If Hub opened Desktop with a run handoff, this fills automatically.
+              </p>
+              <label>
+                <span>Run ID</span>
+                <input
+                  name="firstRunUploadRunId"
+                  type="text"
+                  autocomplete="off"
+                  placeholder="Run ID from Hub"
+                />
+              </label>
+              <label>
+                <span>Worker ID</span>
+                <input
+                  name="firstRunUploadWorkerId"
+                  type="text"
+                  autocomplete="off"
+                  placeholder="Leave blank to use this paired runner"
+                />
+              </label>
+              <p class="hint">
+                The app reads the saved runner token from secure storage. Tokens are not shown in this browser UI.
+              </p>
+            </details>
+            <div class="button-row">
+              <button type="button" data-first-run-start>Run native first benchmark</button>
+            </div>
+            <p class="hint" data-first-run-status>Choose a model and selected llama.cpp runtime before running.</p>
+          </div>
           <details class="advanced-token-panel runtime-advanced-panel">
             <summary>Advanced runtime version</summary>
             <label>
@@ -121,7 +180,7 @@
             <div class="status-list">
               <div>
                 <strong>Native benchmark suite</strong>
-                <span data-native-suite-status>Native first-run executor is still in progress; Docker is optional for advanced sandboxed benchmarks.</span>
+                <span data-native-suite-status>Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.</span>
               </div>
               <div>
                 <strong>Hub connection</strong>
@@ -148,7 +207,7 @@
               </div>
               <div>
                 <strong>Model path</strong>
-                <span data-model-path-status>Chosen in Hub run plans; Desktop validates runtime and listener readiness.</span>
+                <span data-model-path-status>Select a local GGUF model for the first benchmark.</span>
               </div>
             </div>
           </div>

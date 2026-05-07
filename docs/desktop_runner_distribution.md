@@ -42,9 +42,11 @@ The desktop app exposes the pieces that a non-terminal user needs first:
 - pair with a Hub code and start listening
 - inspect process logs without a shell
 - switch between light and dark modes
-- inspect or select the explicit managed `llama.cpp` runtime through the existing Runner CLI
+- inspect or select an explicit `llama.cpp` runtime through `runner-engine`
+- select a local GGUF model and run the native first-run lane without Docker
+- upload native-first-run evidence to Hub through the saved paired runner token
 
-The runtime controls are deliberately conservative. They run the same inspect/select commands a terminal user would run and do not install or upgrade anything without the existing CLI confirmation path. A true version dropdown should wait for a broader managed-runtime manifest with per-platform support, compatibility labels, signed artifacts, checksums, and rollback policy.
+The runtime controls are deliberately conservative. They validate and record an existing runnable `llama-cli` path; they do not silently install or upgrade anything. A true version dropdown should wait for a broader managed-runtime manifest with per-platform support, compatibility labels, signed artifacts, checksums, and rollback policy.
 
 ## Windows And Linux Build Prerequisites
 
@@ -128,9 +130,29 @@ For each candidate build, record:
 - whether token save/load/clear was exercised
 - whether Runner start/stop left orphaned processes
 
+## Latest Local Candidate Evidence
+
+The current local macOS Apple Silicon candidate was built from the v0.2.0 `develop` train with ad-hoc signing:
+
+```text
+artifact: target/release/bundle/dmg/InferGrade Runner_0.2.0_aarch64.dmg
+size: 6897857 bytes
+sha256: 2cba43695b65500e8ac114f64d38a9be1fa760d18a8736fdbe55b29b84fab762
+signing: ad-hoc local signing
+notarization: skipped locally because Apple notarization credentials were not present
+```
+
+Local package smoke mounted the DMG, verified the app with `codesign --verify --deep --strict`, launched `InferGrade Runner.app`, observed the packaged `infergrade_desktop_runner` process, and confirmed the bundled sidecar responds under a clean shell environment with only `/usr/bin:/bin` on `PATH`:
+
+```text
+infergrade 0.2.0
+```
+
+This proves the local package opens and carries the sidecar without a global `infergrade` command, repo checkout, or Docker. It does not replace public-release gates: Developer ID signing, notarization, Gatekeeper assessment, clean-machine token storage, and full Desktop UI first-run upload smoke still need protected-release validation.
+
 ## Non-Goals
 
 - no signing secrets in the repo
 - no auto-update keys in the repo
 - no claim that Windows/Linux installers are supported until a build has been attempted
-- no rewrite of Runner execution inside the app
+- no claim that managed runtime downloads are complete until signed/checksummed runtime manifests and rollback are implemented

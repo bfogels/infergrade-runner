@@ -20,6 +20,7 @@ test("desktop shell permission shapes keep version separate from URL-scoped comm
 test("desktop onboarding exposes paste-code pairing, reset, and bundled runner self-test", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const helpers = readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8");
   const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 
   assert.ok(html.includes('value="https://api.infergrade.com"'));
@@ -71,7 +72,7 @@ test("desktop pairing keeps successful pairing when automatic start fails", () =
   assert.ok(js.includes("Checking Runner startup self-test"));
 });
 
-test("desktop runtime panel shows local readiness without owning model selection", () => {
+test("desktop runtime panel shows local readiness and explicit first-run model selection", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
   const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
@@ -82,12 +83,18 @@ test("desktop runtime panel shows local readiness without owning model selection
   assert.ok(html.includes("data-pairing-readiness-status"));
   assert.ok(html.includes("data-runtime-llama-status"));
   assert.ok(html.includes("data-model-path-status"));
-  assert.ok(html.includes("Chosen in Hub run plans"));
+  assert.ok(html.includes("Select a local GGUF model for the first benchmark."));
   assert.ok(js.includes("renderLocalReadinessChecklist"));
   assert.ok(js.includes("await stopRunner()"));
   assert.ok(js.includes('invoke("llama_cpp_runtime_plan"'));
+  assert.ok(js.includes('invoke("select_existing_llama_cpp_runtime"'));
+  assert.equal(js.includes("executeSidecar(runtimeCommandArgs([\"--select-existing\"])"), false);
   assert.ok(rust.includes("fn llama_cpp_runtime_plan"));
+  assert.ok(rust.includes("fn select_existing_llama_cpp_runtime"));
+  assert.ok(rust.includes("engine_select_existing_llama_cpp_runtime"));
   assert.ok(engine.includes("No install command was run"));
+  assert.ok(engine.includes("fn select_existing_llama_cpp_runtime"));
+  assert.ok(engine.includes("selected_existing"));
   assert.ok(engine.includes("fn verify_runtime_download_manifest"));
   assert.ok(engine.includes("signature_url"));
   assert.ok(engine.includes("rollback_runtime_id"));
@@ -103,10 +110,12 @@ test("desktop runtime panel keeps native first-run readiness truthful and Docker
   const shapes = permissions.map((entry) => JSON.stringify(entry.args || []));
 
   assert.ok(html.includes("Native benchmark suite"));
-  assert.ok(html.includes("Native first-run executor is still in progress"));
+  assert.ok(html.includes("Native first-run can run with a local GGUF model and selected llama.cpp runtime."));
   assert.ok(html.includes("Docker is optional for advanced sandboxed benchmarks"));
   assert.ok(html.includes("data-native-suite-status"));
   assert.ok(html.includes("data-container-runtime-status"));
+  assert.ok(html.includes("data-first-run-start"));
+  assert.ok(html.includes("data-first-run-status"));
   assert.ok(js.includes("desktop-readiness"));
   assert.ok(js.includes("renderDesktopReadiness"));
   assert.ok(shapes.includes(JSON.stringify(["desktop-readiness"])));
@@ -117,8 +126,72 @@ test("desktop readiness copy does not overclaim when native runtime is missing",
 
   assert.ok(js.includes("runtime === \"available\""));
   assert.ok(js.includes("Select a native runtime before first-run benchmark support"));
-  assert.ok(js.includes("Native first-run executor is still in progress"));
+  assert.ok(js.includes("Not uploaded; enter a Hub run ID"));
   assert.equal(js.includes("Docker not found. Native benchmarks are available; advanced sandboxed benchmarks are disabled.\";"), false);
+});
+
+test("desktop first-run UI calls runner-engine through Tauri and keeps upload token out of browser state", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const helpers = readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const tauriConfig = readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8");
+  const tauriCargo = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
+  const packageJson = readFileSync(new URL("../package.json", import.meta.url), "utf8");
+
+  assert.ok(html.includes("First local benchmark"));
+  assert.ok(html.includes("name=\"firstRunModelPath\""));
+  assert.ok(html.includes("name=\"firstRunRuntimePath\""));
+  assert.ok(html.includes("name=\"firstRunUploadRunId\""));
+  assert.ok(html.includes("name=\"firstRunUploadWorkerId\""));
+  assert.ok(html.includes("data-first-run-handoff-status"));
+  assert.ok(html.includes("Run native first benchmark"));
+  assert.ok(html.includes("write local result"));
+  assert.ok(html.includes("Tokens are not shown in this browser UI."));
+  assert.ok(js.includes('listen("runner-first-run-event"'));
+  assert.ok(js.includes('invoke("run_desktop_native_first_run"'));
+  assert.ok(js.includes("readFirstRunModelPath"));
+  assert.ok(js.includes("readFirstRunUploadRunId"));
+  assert.ok(js.includes("firstRunHandoffFromUrl"));
+  assert.ok(js.includes("firstRunHandoffFromDeepLink"));
+  assert.ok(js.includes("initFirstRunDeepLinkHandoff"));
+  assert.ok(helpers.includes("infergrade-runner:"));
+  assert.ok(js.includes("@tauri-apps/plugin-deep-link"));
+  assert.ok(helpers.includes("first_run_run_id"));
+  assert.ok(helpers.includes("first_run_worker_id"));
+  assert.ok(helpers.includes("sensitive handoff parameter"));
+  assert.ok(js.includes("URLSearchParams(window.location.search"));
+  assert.ok(js.includes("FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY"));
+  assert.ok(js.includes("urlHandoff.runId ? urlHandoff.workerId : storedWorkerId"));
+  assert.ok(js.includes("removeItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY)"));
+  assert.ok(js.includes("applyFirstRunHandoff();"));
+  assert.ok(js.includes(".endsWith(\".gguf\")"));
+  assert.ok(js.includes("native_first_run evidence"));
+  assert.ok(js.includes("payload?.artifact?.path"));
+  assert.ok(js.includes("payload?.bundle_artifact?.path"));
+  assert.equal(html.includes("firstRunUploadToken"), false);
+  assert.equal(js.includes("firstRunUploadToken"), false);
+  assert.equal(js.includes('params.get("access_token")'), false);
+  assert.equal(js.includes("FIRST_RUN_HANDOFF_TOKEN"), false);
+  assert.ok(tauriConfig.includes('"deep-link"'));
+  assert.ok(tauriConfig.includes('"schemes": ["infergrade-runner"]'));
+  assert.ok(tauriCargo.includes("tauri-plugin-deep-link"));
+  assert.ok(packageJson.includes("@tauri-apps/plugin-deep-link"));
+  assert.ok(rust.includes("fn native_first_run_input"));
+  assert.ok(rust.includes("async fn run_desktop_native_first_run"));
+  assert.ok(rust.includes("fn desktop_first_run_artifact_dir"));
+  assert.ok(rust.includes("write_native_first_run_artifact"));
+  assert.ok(rust.includes("write_native_first_run_bundle_payload"));
+  assert.ok(rust.includes("native_first_run_bundle_payload"));
+  assert.ok(rust.includes("LlamaCppRuntime::resolve"));
+  assert.ok(rust.includes("engine_run_native_first_run_with_events"));
+  assert.ok(rust.includes("build_run_claim_request"));
+  assert.ok(rust.includes("build_run_bundle_upload_request"));
+  assert.ok(rust.includes("execute_hub_json_request"));
+  assert.ok(rust.includes("DesktopTokenStore"));
+  assert.ok(rust.includes("RunnerEvent::Error"));
+  assert.ok(rust.includes("upload: false"));
+  assert.ok(rust.includes("tauri_plugin_deep_link::init()"));
 });
 
 test("desktop runner engine logic is separated from the Tauri adapter", () => {
@@ -137,5 +210,7 @@ test("desktop runner engine logic is separated from the Tauri adapter", () => {
   assert.ok(rootCargo.includes("apps/runner-cli"));
   assert.ok(cliCargo.includes("infergrade_runner_engine"));
   assert.ok(cliRust.includes("runtime plan"));
+  assert.ok(cliRust.includes("runtime select-existing --runtime-path <path>"));
+  assert.ok(cliRust.includes("select_existing_llama_cpp_runtime"));
   assert.ok(cliRust.includes("llama_cpp_runtime_plan"));
 });

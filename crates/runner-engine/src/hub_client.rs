@@ -1,4 +1,4 @@
-use crate::{normalize_api_url, RunnerError};
+use crate::{normalize_api_url, worker_protocol::claim_run_job_payload, RunnerError};
 use serde_json::{json, Value};
 use std::fmt;
 
@@ -23,6 +23,22 @@ pub struct HubJsonRequest {
     pub url: String,
     pub body: Option<Value>,
     bearer_token: Option<String>,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct HubJsonResponse {
+    pub status: u16,
+    pub body: Value,
+}
+
+impl fmt::Debug for HubJsonResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HubJsonResponse")
+            .field("status", &self.status)
+            .field("body", &"[redacted]")
+            .finish()
+    }
 }
 
 impl HubJsonRequest {
@@ -85,4 +101,184 @@ pub fn build_hub_json_request(
             .filter(|token| !token.is_empty())
             .map(str::to_string),
     })
+}
+
+pub async fn execute_hub_json_request(
+    request: &HubJsonRequest,
+) -> Result<HubJsonResponse, RunnerError> {
+    let client = reqwest::Client::new();
+    let mut builder = match request.method {
+        HubMethod::Get => client.get(&request.url),
+        HubMethod::Post => client.post(&request.url),
+    };
+    if let Some(authorization) = request.authorization_header() {
+        builder = builder.header("Authorization", authorization);
+    }
+    if let Some(body) = &request.body {
+        builder = builder.json(body);
+    }
+    let response = builder.send().await.map_err(|error| {
+        RunnerError::new(
+            "hub_request_failed",
+            format!("Could not reach Hub endpoint: {error}"),
+        )
+    })?;
+    let status = response.status().as_u16();
+    let text = response.text().await.map_err(|error| {
+        RunnerError::new(
+            "hub_request_failed",
+            format!("Could not read Hub response: {error}"),
+        )
+    })?;
+    let body = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"error": text}));
+    if !(200..300).contains(&status) {
+        let detail = response_detail(&body, request.bearer_token.as_deref());
+        return Err(RunnerError::new(
+            "hub_request_failed",
+            format!("Hub request failed with HTTP {status}: {detail}"),
+        ));
+    }
+    Ok(HubJsonResponse { status, body })
+}
+
+pub fn build_run_bundle_upload_request(
+    api_url: &str,
+    run_id: &str,
+    bundle_payload: Value,
+    bearer_token: Option<&str>,
+) -> Result<HubJsonRequest, RunnerError> {
+    let run_id = validate_hub_path_id(run_id, "run_id")?;
+    validate_bundle_upload_payload(&bundle_payload)?;
+    build_hub_json_request(
+        HubMethod::Post,
+        api_url,
+        &format!("/v1/runs/{run_id}/bundle"),
+        Some(bundle_payload),
+        bearer_token,
+    )
+}
+
+pub fn build_run_claim_request(
+    api_url: &str,
+    run_id: &str,
+    worker_id: &str,
+    execution_mode: &str,
+    bearer_token: Option<&str>,
+) -> Result<HubJsonRequest, RunnerError> {
+    let run_id = validate_hub_path_id(run_id, "run_id")?;
+    let worker_id = validate_hub_path_id(worker_id, "worker_id")?;
+    let execution_mode = execution_mode.trim();
+    if execution_mode.is_empty() {
+        return Err(RunnerError::new(
+            "hub_execution_mode_invalid",
+            "execution_mode is required to claim a Hub run.",
+        ));
+    }
+    build_hub_json_request(
+        HubMethod::Post,
+        api_url,
+        "/v1/runs/claim",
+        Some(claim_run_job_payload(
+            &worker_id,
+            execution_mode,
+            Some(&run_id),
+            None,
+            None,
+        )),
+        bearer_token,
+    )
+}
+
+pub fn build_run_completion_request(
+    api_url: &str,
+    run_id: &str,
+    worker_id: &str,
+    bundle_id: &str,
+    upload_response: Option<Value>,
+    bearer_token: Option<&str>,
+) -> Result<HubJsonRequest, RunnerError> {
+    let run_id = validate_hub_path_id(run_id, "run_id")?;
+    let worker_id = validate_hub_path_id(worker_id, "worker_id")?;
+    let bundle_id = validate_hub_path_id(bundle_id, "bundle_id")?;
+    build_hub_json_request(
+        HubMethod::Post,
+        api_url,
+        &format!("/v1/runs/{run_id}/complete"),
+        Some(json!({
+            "worker_id": worker_id,
+            "bundle_id": bundle_id,
+            "upload": upload_response,
+        })),
+        bearer_token,
+    )
+}
+
+fn validate_bundle_upload_payload(payload: &Value) -> Result<(), RunnerError> {
+    let Some(object) = payload.as_object() else {
+        return Err(RunnerError::new(
+            "hub_bundle_payload_invalid",
+            "Bundle upload payload must be a JSON object.",
+        ));
+    };
+    if !object.get("manifest").is_some_and(Value::is_object) {
+        return Err(RunnerError::new(
+            "hub_bundle_payload_invalid",
+            "Bundle upload payload is missing a manifest object.",
+        ));
+    }
+    if !object.get("results").is_some_and(Value::is_array) {
+        return Err(RunnerError::new(
+            "hub_bundle_payload_invalid",
+            "Bundle upload payload is missing a results array.",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_hub_path_id<'a>(value: &'a str, field_name: &str) -> Result<&'a str, RunnerError> {
+    let trimmed = value.trim();
+    if value != trimmed
+        || trimmed.is_empty()
+        || trimmed.len() > 160
+        || !trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.')
+        || trimmed == "."
+        || trimmed == ".."
+    {
+        return Err(RunnerError::new(
+            "hub_path_id_invalid",
+            format!("{field_name} must be a safe Hub identifier."),
+        ));
+    }
+    Ok(trimmed)
+}
+
+fn response_detail(body: &Value, token: Option<&str>) -> String {
+    let raw = body
+        .get("detail")
+        .or_else(|| body.get("error"))
+        .map(|value| {
+            if let Some(message) = value.get("message").and_then(Value::as_str) {
+                message.to_string()
+            } else if let Some(text) = value.as_str() {
+                text.to_string()
+            } else {
+                value.to_string()
+            }
+        })
+        .unwrap_or_else(|| "no detail".to_string());
+    redact_response_detail(raw, token)
+        .chars()
+        .take(300)
+        .collect()
+}
+
+fn redact_response_detail(detail: String, token: Option<&str>) -> String {
+    let Some(token) = token.map(str::trim).filter(|value| !value.is_empty()) else {
+        return detail;
+    };
+    detail
+        .replace(token, "[redacted]")
+        .replace(&format!("Bearer {token}"), "Bearer [redacted]")
 }
