@@ -956,6 +956,255 @@ pub fn llama_cpp_runtime_status() -> Value {
     plan
 }
 
+pub fn build_support_summary(
+    app_version: Option<&str>,
+    pairing_status: Value,
+    first_run_artifact: Option<Value>,
+    recent_errors: &[String],
+) -> Value {
+    let runtime_status = llama_cpp_runtime_status();
+    let selected_runtime = runtime_status
+        .get("selected_runtime")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let selected_channel = runtime_status
+        .get("selected_channel")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let selected_selection = selected_runtime.get("selection").unwrap_or(&Value::Null);
+    let first_run_status = support_first_run_status(first_run_artifact.as_ref());
+    let pairing = redact_support_value(pairing_status);
+    let errors = recent_errors
+        .iter()
+        .filter_map(|error| {
+            let sanitized = redact_support_text(error).trim().to_string();
+            if sanitized.is_empty() {
+                None
+            } else {
+                Some(Value::String(sanitized))
+            }
+        })
+        .take(8)
+        .collect::<Vec<_>>();
+    json!({
+        "export_kind": "infergrade_runner_support_summary_v1",
+        "secrets_excluded": true,
+        "app_version": app_version.unwrap_or(env!("CARGO_PKG_VERSION")),
+        "runner_engine_version": env!("CARGO_PKG_VERSION"),
+        "runtime": {
+            "family": "llama.cpp",
+            "native_runtime_status": runtime_status.get("native_runtime_status").cloned().unwrap_or(Value::Null),
+            "message": runtime_status.get("message").cloned().unwrap_or(Value::Null),
+            "selected_runtime_status": selected_runtime.get("status").cloned().unwrap_or(Value::Null),
+            "selected_runtime_id": selected_selection.get("runtime_id").cloned().unwrap_or(Value::Null),
+            "selected_channel": selected_channel,
+            "runtime_path": selected_selection.pointer("/binaries/cli").cloned().unwrap_or(Value::Null),
+            "provenance": selected_selection.get("provenance").cloned().unwrap_or_else(|| selected_selection.get("source").cloned().unwrap_or(Value::Null)),
+            "recovery": runtime_status.get("recovery").cloned().unwrap_or(Value::Null),
+            "update_policy": runtime_status.get("update_policy").cloned().unwrap_or(Value::Null),
+        },
+        "pairing": pairing,
+        "first_run": first_run_status,
+        "recent_errors": errors,
+        "next_actions": support_next_actions(&runtime_status, first_run_artifact.as_ref()),
+        "privacy": {
+            "browser_visible_tokens": false,
+            "excluded": [
+                "runner tokens",
+                "upload tokens",
+                "bearer tokens",
+                "authorization headers",
+                "pairing codes"
+            ],
+        },
+    })
+}
+
+fn support_first_run_status(first_run_artifact: Option<&Value>) -> Value {
+    let Some(payload) = first_run_artifact else {
+        return json!({
+            "status": "not_provided",
+            "upload_status": "unknown",
+            "message": "No first-run artifact was provided for this support summary.",
+        });
+    };
+    let artifact_path = payload
+        .pointer("/artifact/path")
+        .or_else(|| payload.pointer("/bundle_artifact/path"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let bundle_artifact_path = payload
+        .pointer("/bundle_artifact/path")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let uploaded = payload
+        .pointer("/upload/uploaded")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let upload_status = if uploaded {
+        "succeeded"
+    } else if payload.get("upload").is_some() {
+        "not_uploaded_or_failed"
+    } else {
+        "not_attempted"
+    };
+    json!({
+        "status": redact_support_value(payload.pointer("/result/status").cloned().unwrap_or_else(|| Value::String("completed_or_unknown".to_string()))),
+        "evidence_kind": redact_support_value(payload.pointer("/result/evidence_kind").cloned().unwrap_or(Value::Null)),
+        "artifact_path": redact_support_value(artifact_path),
+        "bundle_artifact_path": redact_support_value(bundle_artifact_path),
+        "upload_status": upload_status,
+        "upload_reason": redact_support_value(payload.pointer("/upload/reason").cloned().unwrap_or(Value::Null)),
+        "run_id": redact_support_value(payload.pointer("/upload/run_id").cloned().unwrap_or(Value::Null)),
+        "bundle_id": redact_support_value(payload.pointer("/upload/bundle_id").cloned().unwrap_or(Value::Null)),
+        "message": if uploaded {
+            "Local first-run completed and upload succeeded."
+        } else {
+            "Local first-run artifact is available; upload can be retried after pairing and Hub handoff are healthy."
+        },
+    })
+}
+
+fn support_next_actions(runtime_status: &Value, first_run_artifact: Option<&Value>) -> Value {
+    let mut actions = Vec::new();
+    match runtime_status
+        .get("native_runtime_status")
+        .and_then(Value::as_str)
+    {
+        Some("available") => {}
+        _ => actions.push(json!({
+            "area": "runtime",
+            "action": "install_or_select_runtime",
+            "message": "Install the recommended managed runtime or select a runnable llama.cpp binary before running native first-run.",
+        })),
+    }
+    if runtime_status
+        .pointer("/selected_runtime/status")
+        .and_then(Value::as_str)
+        == Some("stale")
+    {
+        actions.push(json!({
+            "area": "runtime",
+            "action": "repair_stale_selection",
+            "message": "The selected runtime path is stale. Reinstall the managed runtime or select an existing llama.cpp binary.",
+        }));
+    }
+    match first_run_artifact {
+        None => actions.push(json!({
+            "area": "first_run",
+            "action": "run_native_first_benchmark",
+            "message": "Run the native first benchmark after pairing, runtime selection, and model selection are ready.",
+        })),
+        Some(payload)
+            if payload
+                .pointer("/upload/uploaded")
+                .and_then(Value::as_bool)
+                .unwrap_or(false) => {}
+        Some(_) => actions.push(json!({
+            "area": "upload",
+            "action": "retry_upload",
+            "message": "A local first-run artifact exists. Retry upload after confirming the machine is paired with Hub.",
+        })),
+    }
+    Value::Array(actions)
+}
+
+pub fn redact_support_value(value: Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(redact_support_text(&text)),
+        Value::Array(items) => Value::Array(items.into_iter().map(redact_support_value).collect()),
+        Value::Object(entries) => Value::Object(
+            entries
+                .into_iter()
+                .map(|(key, item)| {
+                    let normalized_key = key.to_lowercase();
+                    let redacted_value = if normalized_key.contains("authorization")
+                        || normalized_key == "access_token"
+                        || normalized_key == "runner_token"
+                        || normalized_key == "upload_token"
+                        || normalized_key == "bearer_token"
+                        || normalized_key == "pairing_code"
+                    {
+                        Value::String("[redacted]".to_string())
+                    } else {
+                        redact_support_value(item)
+                    };
+                    (key, redacted_value)
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+pub fn redact_support_text(text: &str) -> String {
+    let mut redact_next = false;
+    text.split_whitespace()
+        .map(|part| {
+            if redact_next {
+                redact_next = false;
+                return "[redacted]".to_string();
+            }
+            let lower = part.to_lowercase();
+            let upper = part.to_uppercase();
+            let embedded_redacted = redact_embedded_support_patterns(part);
+            if embedded_redacted != part {
+                return embedded_redacted;
+            }
+            if lower.starts_with("bearer")
+                || lower.starts_with("qbhr_")
+                || lower.starts_with("igrt_")
+                || lower.starts_with("igrp_")
+                || lower.starts_with("igrp-")
+                || upper.starts_with("IGRP-")
+                || lower.contains("authorization:")
+            {
+                if lower == "bearer"
+                    || lower.ends_with("bearer")
+                    || lower.contains("authorization:")
+                {
+                    redact_next = true;
+                }
+                "[redacted]".to_string()
+            } else {
+                part.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn redact_embedded_support_patterns(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut redacted = String::with_capacity(text.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let suffix = text[index..].to_lowercase();
+        if ["qbhr_", "igrt_", "igrp_", "igrp-"]
+            .iter()
+            .any(|prefix| suffix.starts_with(prefix))
+        {
+            redacted.push_str("[redacted]");
+            index += sensitive_pattern_len(&bytes[index..]);
+            continue;
+        }
+        let ch = text[index..]
+            .chars()
+            .next()
+            .expect("index is always within string");
+        redacted.push(ch);
+        index += ch.len_utf8();
+    }
+    redacted
+}
+
+fn sensitive_pattern_len(bytes: &[u8]) -> usize {
+    bytes
+        .iter()
+        .take_while(|byte| byte.is_ascii_alphanumeric() || **byte == b'_' || **byte == b'-')
+        .count()
+}
+
 pub fn verify_runtime_download_manifest(entry: &Value) -> Result<(), String> {
     let runtime_id = entry
         .get("runtime_id")
@@ -2033,6 +2282,103 @@ mod tests {
             "not_applicable"
         );
         assert_ne!(status["selected_channel"]["channel"], "local_binary");
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn support_summary_preserves_recovery_hints_without_secrets() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-support-cache-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let first_run = json!({
+            "result": {
+                "status": "completed",
+                "evidence_kind": "native_first_run"
+            },
+            "artifact": {
+                "path": "/tmp/qbhr_path_secret/native-first-run-result.json"
+            },
+            "bundle_artifact": {
+                "path": "/tmp/infergrade/IGRP-8421-bundle.json"
+            },
+            "upload": {
+                "uploaded": false,
+                "reason": "Bearer qbhr_reason_secret",
+                "run_id": "qbhr_run_secret",
+                "bundle_id": "igrp_bundle_secret",
+                "server": {
+                    "authorization": "Bearer qbhr_secret_token",
+                    "echo": "qbhr_secret_token"
+                }
+            }
+        });
+
+        let summary = build_support_summary(
+            Some("0.2.4-test"),
+            json!({
+                "profile": {"status": "present"},
+                "token": {"status": "present"},
+                "access_token": "qbhr_secret_token"
+            }),
+            Some(first_run),
+            &[
+                "Authorization: Bearer qbhr_secret_token".to_string(),
+                "pairing failed for code IGRP-8421".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            summary["export_kind"],
+            "infergrade_runner_support_summary_v1"
+        );
+        assert_eq!(summary["secrets_excluded"], true);
+        assert_eq!(summary["app_version"], "0.2.4-test");
+        assert_eq!(
+            summary["runtime"]["selected_channel"]["channel"],
+            "not_selected"
+        );
+        assert_eq!(summary["pairing"]["access_token"], "[redacted]");
+        assert_eq!(
+            summary["first_run"]["upload_status"],
+            "not_uploaded_or_failed"
+        );
+        assert_eq!(
+            summary["first_run"]["upload_reason"],
+            "[redacted] [redacted]"
+        );
+        assert_eq!(summary["first_run"]["run_id"], "[redacted]");
+        assert_eq!(summary["first_run"]["bundle_id"], "[redacted]");
+        assert!(!summary["first_run"]["artifact_path"]
+            .as_str()
+            .expect("artifact path")
+            .contains("qbhr_path_secret"));
+        assert!(!summary["first_run"]["bundle_artifact_path"]
+            .as_str()
+            .expect("bundle artifact path")
+            .contains("IGRP-8421"));
+        assert!(summary["next_actions"]
+            .as_array()
+            .expect("next actions")
+            .iter()
+            .any(|action| action["action"] == "retry_upload"));
+        let rendered = serde_json::to_string(&summary).expect("summary JSON");
+        assert!(!rendered.contains("qbhr_secret_token"));
+        assert!(!rendered.contains("qbhr_reason_secret"));
+        assert!(!rendered.contains("qbhr_run_secret"));
+        assert!(!rendered.contains("igrp_bundle_secret"));
+        assert!(!rendered.contains("qbhr_path_secret"));
+        assert!(!rendered.contains("IGRP-8421"));
+        assert!(!rendered.contains("Bearer qbhr"));
 
         if let Some(previous_cache_dir) = previous_cache_dir {
             env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
