@@ -5,7 +5,7 @@ Date: 2026-05-07
 ## Branch State
 
 - Runner `origin/main`: v0.2.5 at `1010e26`.
-- Runner `origin/develop`: synced to `origin/main` at `1010e26`.
+- Runner `origin/develop`: two reviewed v0.2.6 Desktop UX PRs ahead of `origin/main` at `251191c`.
 - Runner open PRs at sprint start: none.
 - Hub open PRs at sprint start: none checked for this Desktop-only slice.
 
@@ -97,7 +97,7 @@ Browser smoke:
 ## PR B Local Evidence
 
 Branch: `codex/runner-v026-repeat-actions`
-PR: pending
+PR: #165, merged to `develop` as `251191c`.
 
 Implemented:
 
@@ -123,3 +123,47 @@ Browser smoke:
 - Typing `/tmp/model.gguf` marks the model step `done`.
 - `Run another model` becomes enabled after model input is present; `Run again` remains disabled until a completed first-run payload exists.
 - Mobile viewport at `390px` had no horizontal overflow.
+
+## PR C Release Promotion
+
+Branch: `codex/runner-v026-release`
+PR: pending
+
+Scope:
+
+- Promote the reviewed v0.2.6 first-run UX polish slice from `develop` to `main`.
+- Bump version declarations from `0.2.5` to `0.2.6` only in the release branch.
+- Preserve the release boundary: Desktop first-run guidance and repeat actions, not benchmark methodology, capability scoring, Hub recommendation changes, or stronger evidence claims.
+
+Branch-distance proof before release branch:
+
+```bash
+git rev-list --left-right --count origin/main...origin/develop
+# 0 2
+
+git diff --name-status origin/main...origin/develop
+# M apps/desktop-runner/index.html
+# M apps/desktop-runner/src/main.js
+# M apps/desktop-runner/src/static.test.mjs
+# M apps/desktop-runner/src/styles.css
+# A docs/codex_v0_2_6_sprint_planning.md
+```
+
+Evidence honesty:
+
+- v0.2.6 does not add benchmark methodology, capability lanes, public result claims, decision-grade evidence, Hub recommendation integration, or new upload/result tokens.
+- `Open result in Hub` and `Reveal artifact` remain follow-ups until safe token-free result URLs and root-validated file reveal APIs exist.
+- The first-run checklist reflects existing local state and does not change Runner-owned execution truth.
+
+Validation passed locally on the release branch:
+
+```bash
+npm ci --prefix apps/desktop-runner
+npm run check --prefix apps/desktop-runner
+python3 ./scripts/sync_versions.py --check
+python3 ./scripts/check_versions.py
+git diff --check
+gitleaks detect --source=. --redact --no-banner --exit-code 0
+./scripts/build_desktop_sidecar.sh
+cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked
+```
