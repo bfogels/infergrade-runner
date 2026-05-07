@@ -60,6 +60,12 @@ def evidence_lane_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, D
     return {str(item["lane_id"]): dict(item) for item in list(payload.get("evidence_lanes") or [])}
 
 
+def capability_surface_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+    """Return capability surfaces keyed by surface id."""
+    payload = catalog or load_capability_catalog()
+    return {str(item["surface_id"]): dict(item) for item in list(payload.get("capability_surfaces") or [])}
+
+
 def shortcut_selection(shortcut_id: Optional[str], catalog: Optional[Dict[str, Any]] = None) -> Dict[str, List[str]]:
     """Return the suite/group/check selection declared by a benchmark shortcut."""
     payload = catalog or load_capability_catalog()
@@ -400,6 +406,7 @@ def selection_metadata_for_request(
                 "suite_id": suite_id,
                 "display_name": suites[suite_id].get("display_name"),
                 "description": suites[suite_id].get("description"),
+                "surface_id": suites[suite_id].get("surface_id"),
                 "default_scope": suites[suite_id].get("default_scope"),
                 "effort_level": suites[suite_id].get("effort_level"),
             }
@@ -412,6 +419,7 @@ def selection_metadata_for_request(
                 "display_name": groups[group_id].get("display_name"),
                 "description": groups[group_id].get("description"),
                 "evidence_kind": groups[group_id].get("evidence_kind"),
+                "surface_id": groups[group_id].get("surface_id"),
                 "suite_scope": groups[group_id].get("suite_scope"),
                 "effort_hint": groups[group_id].get("effort_hint"),
                 "expected_duration_band": groups[group_id].get("expected_duration_band"),
@@ -452,6 +460,7 @@ def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dic
         "display_name": check.get("display_name"),
         "description": check.get("description"),
         "evidence_kind": check.get("evidence_kind"),
+        "surface_id": check.get("surface_id"),
         "evidence_lane_id": lane_id,
         "evidence_lane_label": lane.get("display_name"),
         "claim_strength": lane.get("claim_strength"),
