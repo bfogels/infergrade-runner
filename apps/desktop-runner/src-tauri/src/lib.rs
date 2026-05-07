@@ -829,7 +829,8 @@ mod tests {
     use infergrade_runner_engine::{
         claim_run_job_payload, runner_heartbeat_payload, runner_register_payload,
         sanitized_runner_profile, ui_pairing_response, verify_runtime_download_manifest,
-        worker_request_preview, NativeFirstRunRuntime, NativeRuntimeOutput, LLAMA_CPP_RUNTIME_ID,
+        worker_request_preview, NativeFirstRunRuntime, NativeRuntimeOutput,
+        MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID,
     };
     use std::sync::{Mutex as TestMutex, OnceLock};
 
@@ -1067,7 +1068,7 @@ mod tests {
         if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
             assert_eq!(
                 plan["recommended_runtime"]["runtime_id"],
-                LLAMA_CPP_RUNTIME_ID
+                MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID
             );
             assert_eq!(plan["recommended_runtime"]["accelerator"], "metal");
         }
@@ -1112,22 +1113,34 @@ mod tests {
     fn runtime_download_manifest_requires_supply_chain_and_rollback_fields() {
         let valid = json!({
             "runtime_id": "llama-cpp-metal-2026-05",
-            "archive_url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst",
-            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "signature_url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst.minisig",
+            "channel": "infergrade_stable",
+            "backend": "llama.cpp",
+            "upstream": {
+                "project": "ggml-org/llama.cpp",
+                "tag": "b9050"
+            },
+            "platform": {
+                "system": "macos",
+                "arch": "aarch64"
+            },
+            "archive": {
+                "url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst",
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "signature_url": "https://downloads.infergrade.com/runtimes/llama-cpp-metal-2026-05.tar.zst.minisig"
+            },
             "expected_binaries": ["llama-cli", "llama-server", "llama-perplexity"],
             "rollback_runtime_id": "llama-cpp-homebrew-stable-2026-04",
         });
         assert!(verify_runtime_download_manifest(&valid).is_ok());
 
         let mut insecure = valid.clone();
-        insecure["archive_url"] = Value::String("http://example.com/runtime.tar.zst".to_string());
+        insecure["archive"]["url"] = Value::String("http://example.com/runtime.tar.zst".to_string());
         assert!(verify_runtime_download_manifest(&insecure)
             .expect_err("insecure runtime url rejected")
             .contains("HTTPS"));
 
         let mut missing_checksum = valid.clone();
-        missing_checksum["sha256"] = Value::String("abc".to_string());
+        missing_checksum["archive"]["sha256"] = Value::String("abc".to_string());
         assert!(verify_runtime_download_manifest(&missing_checksum)
             .expect_err("short checksum rejected")
             .contains("sha256"));

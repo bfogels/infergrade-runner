@@ -695,7 +695,7 @@ function runtimePlanSummary(plan = {}) {
   const selected = plan.selected_runtime || {};
   const selectedText = selected.status === "selected" ? "Selected runtime is recorded." : "No managed runtime is selected yet.";
   const runtimeText = plan.message || "No install command was run. Review the runtime plan before selecting a runtime.";
-  const lane = recommended.platform || recommended.accelerator || "this machine";
+  const lane = recommended.platform?.human || recommended.platform_label || recommended.platform || recommended.accelerator || "this machine";
   return `${runtimeText} Recommended lane: ${lane}. ${selectedText}`;
 }
 
