@@ -6,7 +6,9 @@ use infergrade_runner_engine::{
     install_managed_llama_cpp_runtime as engine_install_managed_llama_cpp_runtime,
     llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, native_first_run_bundle_payload,
     normalize_api_url, pairing_error_detail, pairing_status_payload, preferred_execution_mode,
-    profile_string, redact_listener_text, redact_worker_response, reset_pairing_state,
+    profile_string, redact_listener_text, redact_worker_response,
+    remove_selected_llama_cpp_runtime as engine_remove_selected_llama_cpp_runtime,
+    reset_pairing_state,
     run_native_first_run_with_events as engine_run_native_first_run_with_events,
     runner_id_from_profile,
     select_existing_llama_cpp_runtime as engine_select_existing_llama_cpp_runtime,
@@ -549,6 +551,11 @@ async fn install_managed_llama_cpp_runtime(runtime_id: Option<String>) -> Result
     .map_err(|error| format!("managed runtime install task failed: {error}"))?
 }
 
+#[tauri::command]
+fn remove_selected_llama_cpp_runtime(remove_managed_files: Option<bool>) -> Result<Value, String> {
+    engine_remove_selected_llama_cpp_runtime(remove_managed_files.unwrap_or(true))
+}
+
 fn native_first_run_input(model_path: &str) -> NativeFirstRunInput {
     NativeFirstRunInput {
         model_path: PathBuf::from(model_path.trim()),
@@ -1040,6 +1047,7 @@ pub fn run() {
             reset_runner_pairing,
             llama_cpp_runtime_plan,
             install_managed_llama_cpp_runtime,
+            remove_selected_llama_cpp_runtime,
             select_existing_llama_cpp_runtime,
             run_desktop_native_first_run,
             retry_desktop_native_first_run_upload,
@@ -1478,6 +1486,43 @@ mod tests {
             .as_str()
             .unwrap_or("")
             .contains("No download or install command was run"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_file(runtime_path);
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn desktop_removes_selected_runtime_through_runner_engine() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-desktop-remove-runtime-cache-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let first = remove_selected_llama_cpp_runtime(Some(true)).expect("no selected runtime");
+        assert_eq!(first["status"], "not_selected");
+        assert_eq!(first["removed_selection"], false);
+
+        let runtime_path = env::temp_dir().join(format!(
+            "infergrade-desktop-remove-llama-cli-{}{}",
+            std::process::id(),
+            if cfg!(windows) { ".cmd" } else { "" }
+        ));
+        write_test_llama_binary(&runtime_path);
+        select_existing_llama_cpp_runtime(Some(runtime_path.display().to_string()))
+            .expect("runtime selected");
+        let removed = remove_selected_llama_cpp_runtime(Some(true)).expect("runtime removed");
+        assert_eq!(removed["status"], "removed");
+        assert_eq!(removed["removed_selection"], true);
+        assert_eq!(removed["removed_managed_files"], false);
+        assert!(runtime_path.exists());
 
         if let Some(previous_cache_dir) = previous_cache_dir {
             env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);

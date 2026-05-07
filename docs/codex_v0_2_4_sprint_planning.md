@@ -89,8 +89,9 @@ v0.2.4 can promote when failed runtime/first-run/upload paths have clearer recov
 ## Next Actions
 
 - PR A landed in `develop` as merge commit `f158235`.
-- Finish PR B from `codex/runner-v024-desktop-support` into `develop`.
-- After PR B lands, start PR C for managed-runtime remove/reinstall/retry recovery actions.
+- PR B landed in `develop` as squash commit `f704f4f`.
+- Finish PR C from `codex/runner-v024-runtime-recovery` into `develop`.
+- After PR C lands, open the v0.2.4 release promotion PR from `develop` to `main`.
 
 ## PR A Local Evidence
 
@@ -186,3 +187,47 @@ Known limits:
 
 - PR B does not add Finder reveal/open behavior yet; it copies the artifact path for the user and future support tooling.
 - Runtime remove/reinstall/retry recovery actions remain PR C scope.
+
+## PR C Local Evidence
+
+Branch: `codex/runner-v024-runtime-recovery`
+PR: pending
+
+Implemented:
+
+- Runner-engine `remove_selected_llama_cpp_runtime` recovery operation.
+- Recovery removes the selected runtime record and, only for `managed_download` selections, optionally removes the InferGrade-managed runtime install root.
+- Local user-selected binaries are not deleted when clearing a `local_binary` selection.
+- Desktop Tauri command for clearing the selected runtime through runner-engine.
+- Desktop runtime actions for install/retry, explicit managed reinstall, and removing the selected runtime.
+- Reinstall is an explicit remove-then-install path; no automatic runtime switching or background update path was added.
+- Reviewer residual risk: replacing a local-binary selection with the managed runtime is deliberate but could surprise users if copy is vague. Fixed by labeling the action `Replace selection with managed runtime` and stating local binaries are not deleted.
+
+Validation passed locally so far:
+
+```bash
+cargo test --manifest-path crates/runner-engine/Cargo.toml --locked removes_selected_managed_runtime_without_touching_local_binary_selections -- --nocapture
+cargo test --manifest-path crates/runner-engine/Cargo.toml --locked
+./scripts/build_desktop_sidecar.sh
+cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked desktop_removes_selected_runtime -- --nocapture
+cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked
+npm ci --prefix apps/desktop-runner
+npm run check --prefix apps/desktop-runner
+python3 ./scripts/sync_versions.py --check
+python3 ./scripts/check_versions.py
+git diff --check
+gitleaks detect --source=. --redact --no-banner --exit-code 0
+```
+
+Browser smoke:
+
+- Served the Desktop web app with Vite at `http://127.0.0.1:1422/`.
+- In-app browser DOM verified the runtime panel includes `Install or retry recommended runtime`, `Reinstall managed runtime`, and `Remove selected runtime`.
+- Browser console error log count: 0.
+- Screenshot capture timed out in the browser tool, so visual screenshot evidence is not claimed for PR C.
+
+Evidence honesty notes:
+
+- Runtime recovery remains manual and explicit.
+- Managed runtime downloads are still SHA-256 verified but not independently signed.
+- Removing a selected runtime is supportability state cleanup; it does not change benchmark evidence strength.
