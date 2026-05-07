@@ -185,6 +185,7 @@ test("desktop first-run UI calls runner-engine through Tauri and keeps upload to
   assert.ok(rust.includes("native_first_run_bundle_payload"));
   assert.ok(rust.includes("LlamaCppRuntime::resolve"));
   assert.ok(rust.includes("engine_run_native_first_run_with_events"));
+  assert.ok(rust.includes("build_run_claim_request"));
   assert.ok(rust.includes("build_run_bundle_upload_request"));
   assert.ok(rust.includes("execute_hub_json_request"));
   assert.ok(rust.includes("DesktopTokenStore"));

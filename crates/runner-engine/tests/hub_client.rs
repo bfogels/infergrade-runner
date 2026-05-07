@@ -1,6 +1,6 @@
 use infergrade_runner_engine::{
-    build_hub_json_request, build_run_bundle_upload_request, build_run_completion_request,
-    execute_hub_json_request, hub_api_url, HubMethod,
+    build_hub_json_request, build_run_bundle_upload_request, build_run_claim_request,
+    build_run_completion_request, execute_hub_json_request, hub_api_url, HubMethod,
 };
 use serde_json::json;
 use std::io::{Read, Write};
@@ -90,6 +90,38 @@ fn run_bundle_upload_request_uses_run_scoped_route_and_redacts_token() {
     let preview = request.sanitized_preview().to_string();
     assert!(!debug.contains("rtok_secret_for_run"));
     assert!(!preview.contains("rtok_secret_for_run"));
+}
+
+#[test]
+fn run_claim_request_uses_runner_session_without_leaking_token() {
+    let request = build_run_claim_request(
+        "api.infergrade.com",
+        "run_cfg_abc_123",
+        "runner_local_native_1",
+        "local_native",
+        Some("qbhr_runner_secret"),
+    )
+    .expect("claim request");
+
+    assert_eq!(request.method, HubMethod::Post);
+    assert_eq!(request.url, "https://api.infergrade.com/v1/runs/claim");
+    assert_eq!(
+        request.authorization_header().as_deref(),
+        Some("Bearer qbhr_runner_secret")
+    );
+    assert_eq!(
+        request.sanitized_preview()["payload"]["run_id"],
+        "run_cfg_abc_123"
+    );
+    assert_eq!(
+        request.sanitized_preview()["payload"]["worker_id"],
+        "runner_local_native_1"
+    );
+    assert_eq!(
+        request.sanitized_preview()["payload"]["execution_mode"],
+        "local_native"
+    );
+    assert!(!format!("{request:?}").contains("qbhr_runner_secret"));
 }
 
 #[test]

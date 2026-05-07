@@ -1,4 +1,4 @@
-use crate::{normalize_api_url, RunnerError};
+use crate::{normalize_api_url, worker_protocol::claim_run_job_payload, RunnerError};
 use serde_json::{json, Value};
 use std::fmt;
 
@@ -154,6 +154,37 @@ pub fn build_run_bundle_upload_request(
         api_url,
         &format!("/v1/runs/{run_id}/bundle"),
         Some(bundle_payload),
+        bearer_token,
+    )
+}
+
+pub fn build_run_claim_request(
+    api_url: &str,
+    run_id: &str,
+    worker_id: &str,
+    execution_mode: &str,
+    bearer_token: Option<&str>,
+) -> Result<HubJsonRequest, RunnerError> {
+    let run_id = validate_hub_path_id(run_id, "run_id")?;
+    let worker_id = validate_hub_path_id(worker_id, "worker_id")?;
+    let execution_mode = execution_mode.trim();
+    if execution_mode.is_empty() {
+        return Err(RunnerError::new(
+            "hub_execution_mode_invalid",
+            "execution_mode is required to claim a Hub run.",
+        ));
+    }
+    build_hub_json_request(
+        HubMethod::Post,
+        api_url,
+        "/v1/runs/claim",
+        Some(claim_run_job_payload(
+            &worker_id,
+            execution_mode,
+            Some(&run_id),
+            None,
+            None,
+        )),
         bearer_token,
     )
 }

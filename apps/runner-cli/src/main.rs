@@ -1,11 +1,11 @@
 use infergrade_runner_engine::{
-    build_run_bundle_upload_request, build_run_completion_request, container_runtime_readiness,
-    execute_hub_json_request, llama_cpp_runtime_plan, load_selected_llama_cpp_runtime,
-    native_first_run_bundle_payload, normalize_api_url, run_native_first_run_with_events,
-    select_existing_llama_cpp_runtime, write_native_first_run_artifact,
-    write_native_first_run_bundle_payload, LlamaCppRuntime, NativeCommandRuntime,
-    NativeFirstRunBundleOptions, NativeFirstRunInput, NativeFirstRunResult, NativeFirstRunRuntime,
-    NativeRuntimeOutput, RunnerEvent,
+    build_run_bundle_upload_request, build_run_claim_request, build_run_completion_request,
+    container_runtime_readiness, execute_hub_json_request, llama_cpp_runtime_plan,
+    load_selected_llama_cpp_runtime, native_first_run_bundle_payload, normalize_api_url,
+    run_native_first_run_with_events, select_existing_llama_cpp_runtime,
+    write_native_first_run_artifact, write_native_first_run_bundle_payload, LlamaCppRuntime,
+    NativeCommandRuntime, NativeFirstRunBundleOptions, NativeFirstRunInput, NativeFirstRunResult,
+    NativeFirstRunRuntime, NativeRuntimeOutput, RunnerEvent,
 };
 use serde_json::{json, Value};
 use std::env;
@@ -358,6 +358,16 @@ where
             payload["bundle_artifact"] =
                 serde_json::to_value(bundle_artifact).map_err(|error| error.to_string())?;
         }
+        let claim_request = build_run_claim_request(
+            &api_url,
+            &run_id,
+            &worker_id,
+            "local_native",
+            Some(&run_token),
+        )
+        .map_err(|error| error.to_string())?;
+        let claim_response = block_on_hub_request(&claim_request)?;
+        let redacted_claim_body = redact_value_token(claim_response.body.clone(), &run_token);
         let upload_request =
             build_run_bundle_upload_request(&api_url, &run_id, bundle_payload, Some(&run_token))
                 .map_err(|error| error.to_string())?;
@@ -385,6 +395,7 @@ where
             "uploaded": true,
             "run_id": run_id,
             "bundle_id": bundle_id,
+            "claim": redacted_claim_body,
             "server": redacted_upload_body,
             "completion": redacted_completion_body,
         });
@@ -948,6 +959,7 @@ mod tests {
         assert_eq!(output["upload"]["uploaded"], true);
         assert_eq!(output["upload"]["run_id"], "run_cli_upload_123");
         assert_eq!(output["upload"]["bundle_id"], "nfr_cli_bundle");
+        assert_eq!(output["upload"]["claim"]["run"]["status"], "running");
         assert_eq!(output["upload"]["server"]["stored"], true);
         assert_eq!(output["upload"]["server"]["echo"], "[redacted]");
         assert_eq!(output["upload"]["completion"]["run"]["status"], "completed");
@@ -958,15 +970,20 @@ mod tests {
         let rendered = serde_json::to_string(&output).expect("output JSON");
         assert!(!rendered.contains("rtok_cli_secret"));
 
-        let first_request = received.recv().expect("bundle request");
-        let second_request = received.recv().expect("complete request");
-        assert!(first_request.starts_with("POST /v1/runs/run_cli_upload_123/bundle HTTP/1.1"));
-        assert!(first_request.contains("authorization: Bearer rtok_cli_secret"));
-        assert!(first_request.contains("\"source_bundle_origin\":\"infergrade_native_first_run\""));
-        assert!(!first_request.contains(model_path.display().to_string().as_str()));
-        assert!(second_request.starts_with("POST /v1/runs/run_cli_upload_123/complete HTTP/1.1"));
-        assert!(second_request.contains("\"worker_id\":\"worker-cli-upload\""));
-        assert!(second_request.contains("\"bundle_id\":\"nfr_cli_bundle\""));
+        let claim_request = received.recv().expect("claim request");
+        let bundle_request = received.recv().expect("bundle request");
+        let complete_request = received.recv().expect("complete request");
+        assert!(claim_request.starts_with("POST /v1/runs/claim HTTP/1.1"));
+        assert!(claim_request.contains("authorization: Bearer rtok_cli_secret"));
+        assert!(claim_request.contains("\"run_id\":\"run_cli_upload_123\""));
+        assert!(claim_request.contains("\"worker_id\":\"worker-cli-upload\""));
+        assert!(bundle_request.starts_with("POST /v1/runs/run_cli_upload_123/bundle HTTP/1.1"));
+        assert!(bundle_request.contains("authorization: Bearer rtok_cli_secret"));
+        assert!(bundle_request.contains("\"source_bundle_origin\":\"infergrade_native_first_run\""));
+        assert!(!bundle_request.contains(model_path.display().to_string().as_str()));
+        assert!(complete_request.starts_with("POST /v1/runs/run_cli_upload_123/complete HTTP/1.1"));
+        assert!(complete_request.contains("\"worker_id\":\"worker-cli-upload\""));
+        assert!(complete_request.contains("\"bundle_id\":\"nfr_cli_bundle\""));
 
         let _ = std::fs::remove_file(model_path);
         let _ = std::fs::remove_file(runtime_path);
@@ -1012,11 +1029,13 @@ mod tests {
         let address = listener.local_addr().expect("server address");
         let (sender, receiver) = mpsc::channel();
         thread::spawn(move || {
-            for index in 0..2 {
+            for index in 0..3 {
                 let (mut stream, _) = listener.accept().expect("accept request");
                 let request = read_http_request(&mut stream);
                 sender.send(request).expect("send request");
                 let body = if index == 0 {
+                    r#"{"run":{"run_id":"run_cli_upload_123","status":"running"}}"#
+                } else if index == 1 {
                     r#"{"stored":true,"bundle_id":"nfr_cli_bundle","echo":"rtok_cli_secret","server_validation":{"verification_levels":["experimental"],"comparison_grades":["informational_only"]}}"#
                 } else {
                     r#"{"run":{"run_id":"run_cli_upload_123","status":"completed"}}"#
