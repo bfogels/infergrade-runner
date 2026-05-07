@@ -313,14 +313,20 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertEqual(workflow.count("./scripts/write_desktop_release_checksums.py"), 3)
         self.assertIn("target/release/bundle/windows/SHA256SUMS", workflow)
         self.assertIn("target/release/bundle/linux/SHA256SUMS", workflow)
-        self.assertIn("actions/setup-python@v5", workflow)
-        self.assertIn('python-version: "3.12"', workflow)
-        self.assertIn("target/release/bundle/nsis/*.exe", workflow)
-        self.assertIn("target/release/bundle/msi/*.msi", workflow)
-        self.assertIn("target/release/bundle/deb/*.deb", workflow)
-        self.assertIn("target/release/bundle/appimage/*.AppImage", workflow)
-        self.assertIn("target/release/bundle/windows/SHA256SUMS", workflow)
-        self.assertIn("target/release/bundle/linux/SHA256SUMS", workflow)
+
+    def test_local_desktop_dmg_smoke_script_records_release_evidence(self):
+        script = (ROOT / "scripts" / "smoke_desktop_dmg.sh").read_text(encoding="utf-8")
+
+        self.assertIn("hdiutil attach", script)
+        self.assertIn("codesign --verify --deep --strict --verbose=2", script)
+        self.assertIn("env -i HOME=\"$HOME\" PATH='/usr/bin:/bin'", script)
+        self.assertIn("infergrade-sidecar", script)
+        self.assertIn("infergrade_desktop_runner", script)
+        self.assertIn("desktop_dmg_smoke=pass", script)
+        self.assertIn("desktop_dmg_sha256=", script)
+        self.assertIn("desktop_dmg_sidecar_version=", script)
+        self.assertIn("desktop_dmg_notarization=not_checked_by_local_smoke", script)
+        self.assertIn("does not\nreplace Developer ID signing", script)
 
     def test_desktop_release_docs_match_protected_signing_and_notarization_gate(self):
         docs = (ROOT / "docs" / "release_process.md").read_text(encoding="utf-8")

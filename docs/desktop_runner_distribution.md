@@ -150,6 +150,14 @@ infergrade 0.2.0
 
 This proves the local package opens and carries the sidecar without a global `infergrade` command, repo checkout, or Docker. It does not replace public-release gates: Developer ID signing, notarization, Gatekeeper assessment, clean-machine token storage, and full Desktop UI first-run upload smoke still need protected-release validation.
 
+To repeat the local DMG smoke for a release candidate, run:
+
+```bash
+scripts/smoke_desktop_dmg.sh --dmg "target/release/bundle/dmg/InferGrade Runner_0.2.0_aarch64.dmg"
+```
+
+The script prints stable `desktop_dmg_*` evidence lines for the artifact path, size, SHA-256 digest, code-signature verification, clean-`PATH` sidecar version, app launch observation, and the fact that local smoke does not check notarization.
+
 ## Non-Goals
 
 - no signing secrets in the repo
