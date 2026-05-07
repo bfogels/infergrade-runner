@@ -59,18 +59,9 @@
             <button type="button" class="button-secondary" data-reset-pairing>Reset Pairing</button>
           </div>
           <p class="hint" data-pair-state>Click Pair Local Runner in the Hub, then paste the one-time code here.</p>
-          <details class="advanced-token-panel">
-            <summary>Advanced token fallback</summary>
-          <label>
-            <span>Runner token</span>
-            <input name="hubToken" type="password" autocomplete="off" placeholder="Paste a paired runner token" />
-          </label>
-          <div class="button-row">
-            <button type="button" data-save-token>Save token</button>
-            <button type="button" data-clear-token>Clear</button>
-          </div>
-          <p class="hint" data-token-state>Token storage is local to this window.</p>
-          </details>
+          <p class="hint" data-token-state>
+            Pairing stores the runner token in the OS credential store. Tokens are not shown in this browser UI.
+          </p>
         </form>
 
         <section class="panel">

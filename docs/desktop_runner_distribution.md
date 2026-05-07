@@ -132,12 +132,12 @@ For each candidate build, record:
 
 ## Latest Local Candidate Evidence
 
-The current local macOS Apple Silicon candidate was built from the v0.2.0 `develop` train with ad-hoc signing:
+The current local macOS Apple Silicon candidate was built from the v0.2.1 stabilization train with ad-hoc signing:
 
 ```text
-artifact: target/release/bundle/dmg/InferGrade Runner_0.2.0_aarch64.dmg
-size: 6897857 bytes
-sha256: 2cba43695b65500e8ac114f64d38a9be1fa760d18a8736fdbe55b29b84fab762
+artifact: target/release/bundle/dmg/InferGrade Runner_0.2.1_aarch64.dmg
+size: 6900725 bytes
+sha256: 90755cdb91efc255d22ae8c978887d6087649fcf95a862cdb6371cf5613c8041
 signing: ad-hoc local signing
 notarization: skipped locally because Apple notarization credentials were not present
 ```
@@ -145,7 +145,7 @@ notarization: skipped locally because Apple notarization credentials were not pr
 Local package smoke mounted the DMG, verified the app with `codesign --verify --deep --strict`, launched `InferGrade Runner.app`, observed the packaged `infergrade_desktop_runner` process, and confirmed the bundled sidecar responds under a clean shell environment with only `/usr/bin:/bin` on `PATH`:
 
 ```text
-infergrade 0.2.0
+infergrade 0.2.1
 ```
 
 This proves the local package opens and carries the sidecar without a global `infergrade` command, repo checkout, or Docker. It does not replace public-release gates: Developer ID signing, notarization, Gatekeeper assessment, clean-machine token storage, and full Desktop UI first-run upload smoke still need protected-release validation.
@@ -153,7 +153,7 @@ This proves the local package opens and carries the sidecar without a global `in
 To repeat the local DMG smoke for a release candidate, run:
 
 ```bash
-scripts/smoke_desktop_dmg.sh --dmg "target/release/bundle/dmg/InferGrade Runner_0.2.0_aarch64.dmg"
+scripts/smoke_desktop_dmg.sh --dmg "target/release/bundle/dmg/InferGrade Runner_0.2.1_aarch64.dmg"
 ```
 
 The script prints stable `desktop_dmg_*` evidence lines for the artifact path, size, SHA-256 digest, code-signature verification, clean-`PATH` sidecar version, app launch observation, and the fact that local smoke does not check notarization.

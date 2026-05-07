@@ -27,6 +27,11 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(html.includes("Paste the one-time code from Hub"));
   assert.ok(html.includes("data-reset-pairing"));
   assert.ok(html.includes("data-runner-self-test"));
+  assert.ok(html.includes("Tokens are not shown in this browser UI."));
+  assert.equal(html.includes("Advanced token fallback"), false);
+  assert.equal(html.includes('name="hubToken"'), false);
+  assert.equal(html.includes("data-save-token"), false);
+  assert.equal(html.includes("data-clear-token"), false);
   assert.ok(js.includes("normalizeDesktopApiUrl"));
   assert.ok(js.includes("desktop-self-test"));
   assert.ok(js.includes('invoke("redeem_runner_pairing"'));
@@ -38,6 +43,10 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(js.includes('listen("runner-listener-event"'));
   assert.equal(js.includes('Command.sidecar(SIDECAR_NAME, ["start"'), false);
   assert.equal(js.includes('invoke("load_runner_token"'), false);
+  assert.equal(js.includes("previewToken"), false);
+  assert.equal(js.includes("form.elements.hubToken"), false);
+  assert.ok(js.includes("typedToken: null"));
+  assert.ok(js.includes("typedTokenPresent: false"));
   assert.ok(js.includes("Runner profile and OS token saved"));
   assert.ok(js.includes("Runner profile is saved, but the token is unavailable. Pair again or reset pairing."));
   assert.ok(js.includes("Runner token is saved, but the profile is unavailable. Pair again or reset pairing."));
