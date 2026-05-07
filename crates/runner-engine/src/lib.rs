@@ -1496,6 +1496,92 @@ pub fn install_managed_llama_cpp_runtime(
     install_managed_llama_cpp_runtime_from_manifest_entry(entry, options)
 }
 
+fn managed_runtime_root_for_selection(selection: &Value) -> Result<Option<PathBuf>, String> {
+    if selection.get("source").and_then(Value::as_str) != Some("managed_download") {
+        return Ok(None);
+    }
+    let runtime_id = selection
+        .get("runtime_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "managed runtime selection is missing runtime_id".to_string())?;
+    let runtime_id = safe_runtime_id(Some(runtime_id))?;
+    managed_runtime_install_root(&runtime_id).map(Some)
+}
+
+pub fn remove_selected_llama_cpp_runtime(remove_managed_files: bool) -> Result<Value, String> {
+    let selected_path = selected_llama_cpp_runtime_path()?;
+    let selected_text = match fs::read_to_string(&selected_path) {
+        Ok(text) => Some(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!(
+                "could not read selected runtime `{}`: {error}",
+                selected_path.display()
+            ))
+        }
+    };
+    let selection = selected_text
+        .as_deref()
+        .map(|text| {
+            serde_json::from_str::<Value>(text)
+                .map_err(|error| format!("could not parse selected runtime: {error}"))
+        })
+        .transpose()?;
+    let managed_root = selection
+        .as_ref()
+        .and_then(|value| managed_runtime_root_for_selection(value).transpose())
+        .transpose()?;
+    let removed_selection = match fs::remove_file(&selected_path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(format!(
+                "could not remove selected runtime `{}`: {error}",
+                selected_path.display()
+            ))
+        }
+    };
+    let removed_managed_files = if remove_managed_files {
+        match managed_root.as_ref() {
+            Some(root) => match fs::remove_dir_all(root) {
+                Ok(()) => true,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                Err(error) => {
+                    return Err(format!(
+                        "could not remove managed runtime files `{}`: {error}",
+                        root.display()
+                    ))
+                }
+            },
+            None => false,
+        }
+    } else {
+        false
+    };
+    let selected_source = selection
+        .as_ref()
+        .and_then(|value| value.get("source"))
+        .and_then(Value::as_str)
+        .unwrap_or("not_selected");
+    Ok(json!({
+        "status": if removed_selection || removed_managed_files { "removed" } else { "not_selected" },
+        "removed_selection": removed_selection,
+        "removed_managed_files": removed_managed_files,
+        "selected_runtime_path": selected_path.display().to_string(),
+        "managed_runtime_root": managed_root.map(|path| path.display().to_string()),
+        "selected_source": selected_source,
+        "message": if removed_selection || removed_managed_files {
+            "Selected llama.cpp runtime cleared. Install the managed runtime again or select a runnable local binary before native first-run."
+        } else {
+            "No selected llama.cpp runtime was recorded. Install or select a runtime before native first-run."
+        },
+        "next_actions": [
+            "install_managed_runtime",
+            "select_existing_runtime"
+        ],
+    }))
+}
+
 pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
     entry: Value,
     options: ManagedRuntimeInstallOptions,
@@ -2519,6 +2605,69 @@ mod tests {
         )
         .expect_err("unsafe runtime id rejected");
         assert!(error.contains("runtime_id"));
+    }
+
+    #[test]
+    fn removes_selected_managed_runtime_without_touching_local_binary_selections() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-remove-runtime-cache-{}",
+            std::process::id()
+        ));
+        let local_binary = env::temp_dir().join(format!(
+            "infergrade-runner-engine-local-binary-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&runtime_cache_dir).expect("runtime cache dir");
+        fs::write(&local_binary, b"local llama-cli").expect("local runtime binary");
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let local_selection = json!({
+            "runtime_id": "llama-cpp-local-test",
+            "source": "selected_existing",
+            "channel": "local_binary",
+            "binaries": {
+                "cli": local_binary.display().to_string(),
+            },
+        });
+        write_selected_llama_cpp_runtime(&local_selection).expect("selected local runtime");
+        let removed = remove_selected_llama_cpp_runtime(true).expect("local selection removed");
+        assert_eq!(removed["removed_selection"], true);
+        assert_eq!(removed["removed_managed_files"], false);
+        assert!(local_binary.exists());
+        assert_eq!(load_selected_llama_cpp_runtime()["status"], "not_selected");
+
+        let managed_root = managed_runtime_install_root(MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID)
+            .expect("managed root");
+        fs::create_dir_all(&managed_root).expect("managed runtime root");
+        fs::write(managed_root.join("llama-cli"), b"managed llama-cli")
+            .expect("managed runtime binary");
+        let managed_selection = json!({
+            "runtime_id": MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID,
+            "source": "managed_download",
+            "channel": "infergrade_stable",
+            "binaries": {
+                "cli": managed_root.join("llama-cli").display().to_string(),
+            },
+        });
+        write_selected_llama_cpp_runtime(&managed_selection).expect("selected managed runtime");
+        let removed = remove_selected_llama_cpp_runtime(true).expect("managed runtime removed");
+        assert_eq!(removed["removed_selection"], true);
+        assert_eq!(removed["removed_managed_files"], true);
+        assert!(!managed_root.exists());
+        assert!(removed["message"]
+            .as_str()
+            .expect("message")
+            .contains("Install the managed runtime again"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_file(local_binary);
+        let _ = fs::remove_dir_all(runtime_cache_dir);
     }
 
     #[test]

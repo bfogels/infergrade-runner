@@ -27,6 +27,8 @@ const clearLogsButton = document.querySelector("[data-clear-logs]");
 const themeChoiceButtons = [...document.querySelectorAll("[data-theme-choice]")];
 const runtimePlanButton = document.querySelector("[data-runtime-plan]");
 const runtimeInstallManagedButton = document.querySelector("[data-runtime-install-managed]");
+const runtimeReinstallManagedButton = document.querySelector("[data-runtime-reinstall-managed]");
+const runtimeRemoveSelectedButton = document.querySelector("[data-runtime-remove-selected]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
 const firstRunStartButton = document.querySelector("[data-first-run-start]");
 const retryFirstRunUploadButton = document.querySelector("[data-retry-first-run-upload]");
@@ -724,6 +726,94 @@ function managedRuntimeInstallSummary(result = {}) {
   return `Managed runtime selected: ${runtimeId}. SHA-256 verified; ${signature}.`;
 }
 
+function runtimeRemovalSummary(result = {}) {
+  if (result.removed_selection || result.removed_managed_files) {
+    return result.message || "Selected llama.cpp runtime removed. Install or select a runtime before native first-run.";
+  }
+  return result.message || "No selected llama.cpp runtime was recorded. Install or select a runtime before native first-run.";
+}
+
+function setRuntimeActionDisabled(disabled) {
+  if (runtimeInstallManagedButton) {
+    runtimeInstallManagedButton.disabled = disabled;
+  }
+  if (runtimeReinstallManagedButton) {
+    runtimeReinstallManagedButton.disabled = disabled;
+  }
+  if (runtimeRemoveSelectedButton) {
+    runtimeRemoveSelectedButton.disabled = disabled;
+  }
+  if (runtimeSelectExistingButton) {
+    runtimeSelectExistingButton.disabled = disabled;
+  }
+}
+
+async function inspectRuntimePlan() {
+  llamaRuntimeReadiness = "Checking the llama.cpp runtime plan...";
+  renderLocalReadinessChecklist();
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    appendLog("Open the desktop app to inspect the native llama.cpp runtime plan.");
+    llamaRuntimeReadiness = "Runtime plan is available inside the desktop app.";
+    renderLocalReadinessChecklist();
+    return null;
+  }
+  const plan = await invoke("llama_cpp_runtime_plan");
+  llamaRuntimeReadiness = runtimePlanSummary(plan);
+  renderLocalReadinessChecklist();
+  appendLog(`llama.cpp runtime plan: ${JSON.stringify(plan)}`);
+  return plan;
+}
+
+async function installManagedRuntime({ reinstall = false } = {}) {
+  const runtimeId = form.elements.runtimeId?.value.trim() || null;
+  llamaRuntimeReadiness = reinstall
+    ? "Replacing the selected llama.cpp runtime with the managed runtime. Local binaries are not deleted."
+    : "Installing the recommended llama.cpp runtime. This can take a minute...";
+  renderLocalReadinessChecklist();
+  setRuntimeActionDisabled(true);
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    appendLog("Open the desktop app to install the managed llama.cpp runtime.");
+    llamaRuntimeReadiness = "Managed runtime install is available inside the desktop app.";
+    renderLocalReadinessChecklist();
+    return null;
+  }
+  if (reinstall) {
+    const removed = await invoke("remove_selected_llama_cpp_runtime", {
+      removeManagedFiles: true,
+    });
+    appendLog(`Cleared selected llama.cpp runtime before reinstall: ${JSON.stringify(removed)}`);
+  }
+  const result = await invoke("install_managed_llama_cpp_runtime", {
+    runtimeId,
+  });
+  llamaRuntimeReadiness = managedRuntimeInstallSummary(result);
+  renderLocalReadinessChecklist();
+  appendLog(`Installed managed llama.cpp runtime: ${JSON.stringify(result)}`);
+  return result;
+}
+
+async function removeSelectedRuntime() {
+  llamaRuntimeReadiness = "Removing the selected llama.cpp runtime record...";
+  renderLocalReadinessChecklist();
+  setRuntimeActionDisabled(true);
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    appendLog("Open the desktop app to remove the selected llama.cpp runtime.");
+    llamaRuntimeReadiness = "Runtime removal is available inside the desktop app.";
+    renderLocalReadinessChecklist();
+    return null;
+  }
+  const result = await invoke("remove_selected_llama_cpp_runtime", {
+    removeManagedFiles: true,
+  });
+  llamaRuntimeReadiness = runtimeRemovalSummary(result);
+  renderLocalReadinessChecklist();
+  appendLog(`Removed selected llama.cpp runtime: ${JSON.stringify(result)}`);
+  return result;
+}
+
 function readFirstRunModelPath() {
   const modelPath = form.elements.firstRunModelPath?.value.trim() || "";
   if (!modelPath) {
@@ -1184,65 +1274,50 @@ themeChoiceButtons.forEach((button) => {
 });
 
 runtimePlanButton?.addEventListener("click", () => {
-  llamaRuntimeReadiness = "Checking the llama.cpp runtime plan...";
-  renderLocalReadinessChecklist();
-  loadTauriInvoke()
-    .then((invoke) => {
-      if (!invoke) {
-        appendLog("Open the desktop app to inspect the native llama.cpp runtime plan.");
-        llamaRuntimeReadiness = "Runtime plan is available inside the desktop app.";
-        return null;
-      }
-      return invoke("llama_cpp_runtime_plan");
-    })
-    .then((plan) => {
-      if (!plan) {
-        return;
-      }
-      llamaRuntimeReadiness = runtimePlanSummary(plan);
-      renderLocalReadinessChecklist();
-      appendLog(`llama.cpp runtime plan: ${JSON.stringify(plan)}`);
-    })
-    .catch((error) => {
-      llamaRuntimeReadiness = "Runtime plan unavailable. See logs for the technical detail.";
-      renderLocalReadinessChecklist();
-      setStatus("Runtime check failed", "error");
-      appendLog(`Could not inspect llama.cpp runtime plan: ${error.message || error}`);
-    });
+  inspectRuntimePlan().catch((error) => {
+    llamaRuntimeReadiness = "Runtime plan unavailable. See logs for the technical detail.";
+    renderLocalReadinessChecklist();
+    setStatus("Runtime check failed", "error");
+    appendLog(`Could not inspect llama.cpp runtime plan: ${error.message || error}`);
+  });
 });
 
 runtimeInstallManagedButton?.addEventListener("click", () => {
-  const runtimeId = form.elements.runtimeId?.value.trim() || null;
-  llamaRuntimeReadiness = "Installing the recommended llama.cpp runtime. This can take a minute...";
-  renderLocalReadinessChecklist();
-  runtimeInstallManagedButton.disabled = true;
-  loadTauriInvoke()
-    .then((invoke) => {
-      if (!invoke) {
-        appendLog("Open the desktop app to install the managed llama.cpp runtime.");
-        llamaRuntimeReadiness = "Managed runtime install is available inside the desktop app.";
-        return null;
-      }
-      return invoke("install_managed_llama_cpp_runtime", {
-        runtimeId,
-      });
-    })
-    .then((result) => {
-      if (!result) {
-        return;
-      }
-      llamaRuntimeReadiness = managedRuntimeInstallSummary(result);
-      renderLocalReadinessChecklist();
-      appendLog(`Installed managed llama.cpp runtime: ${JSON.stringify(result)}`);
-    })
+  installManagedRuntime()
     .catch((error) => {
-      llamaRuntimeReadiness = "Managed runtime install failed. See logs for the technical detail.";
+      llamaRuntimeReadiness = "Managed runtime install failed. Retry install, remove the selected runtime, or select an existing llama.cpp binary.";
       renderLocalReadinessChecklist();
       setStatus("Runtime install failed", "error");
       appendLog(`Could not install managed llama.cpp runtime: ${error.message || error}`);
     })
     .finally(() => {
-      runtimeInstallManagedButton.disabled = false;
+      setRuntimeActionDisabled(false);
+    });
+});
+
+runtimeReinstallManagedButton?.addEventListener("click", () => {
+  installManagedRuntime({ reinstall: true })
+    .catch((error) => {
+      llamaRuntimeReadiness = "Managed runtime reinstall failed. Remove the selected runtime or select an existing llama.cpp binary.";
+      renderLocalReadinessChecklist();
+      setStatus("Runtime reinstall failed", "error");
+      appendLog(`Could not reinstall managed llama.cpp runtime: ${error.message || error}`);
+    })
+    .finally(() => {
+      setRuntimeActionDisabled(false);
+    });
+});
+
+runtimeRemoveSelectedButton?.addEventListener("click", () => {
+  removeSelectedRuntime()
+    .catch((error) => {
+      llamaRuntimeReadiness = "Runtime removal failed. See logs for the technical detail.";
+      renderLocalReadinessChecklist();
+      setStatus("Runtime removal failed", "error");
+      appendLog(`Could not remove selected llama.cpp runtime: ${error.message || error}`);
+    })
+    .finally(() => {
+      setRuntimeActionDisabled(false);
     });
 });
 
