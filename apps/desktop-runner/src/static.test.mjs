@@ -87,8 +87,14 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
   assert.ok(js.includes("renderLocalReadinessChecklist"));
   assert.ok(js.includes("await stopRunner()"));
   assert.ok(js.includes('invoke("llama_cpp_runtime_plan"'));
+  assert.ok(js.includes('invoke("select_existing_llama_cpp_runtime"'));
+  assert.equal(js.includes("executeSidecar(runtimeCommandArgs([\"--select-existing\"])"), false);
   assert.ok(rust.includes("fn llama_cpp_runtime_plan"));
+  assert.ok(rust.includes("fn select_existing_llama_cpp_runtime"));
+  assert.ok(rust.includes("engine_select_existing_llama_cpp_runtime"));
   assert.ok(engine.includes("No install command was run"));
+  assert.ok(engine.includes("fn select_existing_llama_cpp_runtime"));
+  assert.ok(engine.includes("selected_existing"));
   assert.ok(engine.includes("fn verify_runtime_download_manifest"));
   assert.ok(engine.includes("signature_url"));
   assert.ok(engine.includes("rollback_runtime_id"));
@@ -203,5 +209,7 @@ test("desktop runner engine logic is separated from the Tauri adapter", () => {
   assert.ok(rootCargo.includes("apps/runner-cli"));
   assert.ok(cliCargo.includes("infergrade_runner_engine"));
   assert.ok(cliRust.includes("runtime plan"));
+  assert.ok(cliRust.includes("runtime select-existing --runtime-path <path>"));
+  assert.ok(cliRust.includes("select_existing_llama_cpp_runtime"));
   assert.ok(cliRust.includes("llama_cpp_runtime_plan"));
 });

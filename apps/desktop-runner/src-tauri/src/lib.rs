@@ -6,11 +6,12 @@ use infergrade_runner_engine::{
     normalize_api_url, pairing_error_detail, pairing_status_payload, preferred_execution_mode,
     profile_string, redact_listener_text, redact_worker_response, reset_pairing_state,
     run_native_first_run_with_events as engine_run_native_first_run_with_events,
-    runner_id_from_profile, selected_llama_cpp_runtime_path, worker_request_url,
-    write_native_first_run_artifact, write_native_first_run_bundle_payload, HubMethod,
-    LlamaCppRuntime, NativeFirstRunBundleOptions, NativeFirstRunInput, NativeFirstRunResult,
-    PairingInput, ProfileStore, RunnerError, RunnerEvent, RunnerProfile, RunnerProtocolPingInput,
-    RunnerProtocolPreviewInput, TokenStore,
+    runner_id_from_profile,
+    select_existing_llama_cpp_runtime as engine_select_existing_llama_cpp_runtime,
+    selected_llama_cpp_runtime_path, worker_request_url, write_native_first_run_artifact,
+    write_native_first_run_bundle_payload, HubMethod, LlamaCppRuntime, NativeFirstRunBundleOptions,
+    NativeFirstRunInput, NativeFirstRunResult, PairingInput, ProfileStore, RunnerError,
+    RunnerEvent, RunnerProfile, RunnerProtocolPingInput, RunnerProtocolPreviewInput, TokenStore,
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
@@ -522,6 +523,15 @@ fn llama_cpp_runtime_plan() -> Value {
     engine_llama_cpp_runtime_plan(selected_llama_cpp_runtime())
 }
 
+#[tauri::command]
+fn select_existing_llama_cpp_runtime(runtime_path: Option<String>) -> Result<Value, String> {
+    let cli_path = runtime_path
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    engine_select_existing_llama_cpp_runtime(None, cli_path, None, None)
+}
+
 fn native_first_run_input(model_path: &str) -> NativeFirstRunInput {
     NativeFirstRunInput {
         model_path: PathBuf::from(model_path.trim()),
@@ -796,6 +806,7 @@ pub fn run() {
             stop_runner_listener,
             reset_runner_pairing,
             llama_cpp_runtime_plan,
+            select_existing_llama_cpp_runtime,
             run_desktop_native_first_run,
             redeem_runner_pairing
         ])
@@ -1034,6 +1045,40 @@ mod tests {
             );
             assert_eq!(plan["recommended_runtime"]["accelerator"], "metal");
         }
+    }
+
+    #[test]
+    fn desktop_selects_existing_runtime_through_runner_engine() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-desktop-runtime-cache-{}",
+            std::process::id()
+        ));
+        let runtime_path = env::temp_dir().join(format!(
+            "infergrade-desktop-llama-cli-{}",
+            std::process::id()
+        ));
+        fs::write(&runtime_path, b"fake llama-cli").expect("runtime file");
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let selection = select_existing_llama_cpp_runtime(Some(runtime_path.display().to_string()))
+            .expect("runtime selected");
+
+        assert_eq!(selection["status"], "selected");
+        assert_eq!(selection["selection"]["source"], "selected_existing");
+        assert!(selection["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("No download or install command was run"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_file(runtime_path);
+        let _ = fs::remove_dir_all(runtime_cache_dir);
     }
 
     #[test]
