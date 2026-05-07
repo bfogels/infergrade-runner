@@ -85,6 +85,17 @@
   ],
   "evidence_lanes": [
     {
+      "lane_id": "smoke",
+      "display_name": "Smoke evidence",
+      "short_label": "Smoke",
+      "description": "Minimal execution evidence that proves a setup can run one small path without supporting quality conclusions.",
+      "claim_strength": "execution_smoke",
+      "claim_boundary": "Useful for confirming the setup runs. Not enough for model quality, recommendation, or leaderboard-style claims.",
+      "local_feasibility": "default_local",
+      "recommended_first": false,
+      "sort_order": 0
+    },
+    {
       "lane_id": "decision",
       "display_name": "Decision evidence",
       "short_label": "Decision",
@@ -118,9 +129,42 @@
       "sort_order": 30
     }
   ],
+  "capability_surfaces": [
+    {
+      "surface_id": "local_assistant_capability",
+      "display_name": "Local assistant capability",
+      "description": "Instruction-following, structured-output, conversational retention, and assistant behavior evidence from pinned local tasks.",
+      "claim_boundary": "Useful for a local assistant setup choice when paired with clear task counts and caveats. Not a global assistant ranking."
+    },
+    {
+      "surface_id": "local_coding_capability",
+      "display_name": "Local coding capability",
+      "description": "Coding generation, repair, structured patch, and bounded repo-edit evidence from deterministic local tasks.",
+      "claim_boundary": "Useful for coding-oriented setup choices. Not a SWE-bench or agentic software engineering claim unless gold gates are met."
+    },
+    {
+      "surface_id": "local_reasoning_capability",
+      "display_name": "Local reasoning capability",
+      "description": "Exact-answer, multiple-choice, or structured reasoning checks that can run locally under pinned fixture rules.",
+      "claim_boundary": "Useful as a narrow reasoning signal. Not an expert reasoning or restricted-dataset claim without reference or gold controls."
+    },
+    {
+      "surface_id": "quant_fidelity",
+      "display_name": "Quant fidelity",
+      "description": "Perplexity or reference-output evidence for nearby quantized artifacts.",
+      "claim_boundary": "Useful for quant-to-quant comparison. Not a general capability score."
+    },
+    {
+      "surface_id": "deployment_fitness",
+      "display_name": "Deployment fitness",
+      "description": "Runtime, latency, throughput, memory, and stability evidence for a local setup.",
+      "claim_boundary": "Useful for whether a setup fits the hardware and interaction pattern. Not proof that the model answers well."
+    }
+  ],
   "suites": [
     {
       "suite_id": "chat_instruction_following",
+      "surface_id": "local_assistant_capability",
       "display_name": "Chat and instruction following",
       "description": "Assistant-style prompting, instruction adherence, and the latency signals people use to judge everyday chat quality.",
       "primary_use_case": "general_assistant",
@@ -135,6 +179,7 @@
     },
     {
       "suite_id": "coding_code_editing",
+      "surface_id": "local_coding_capability",
       "display_name": "Coding and code editing",
       "description": "Coding completions, practical editing behavior, and the longer interactive prompts that matter for local coding assistants.",
       "primary_use_case": "agentic_coding",
@@ -149,6 +194,7 @@
     },
     {
       "suite_id": "quant_fidelity",
+      "surface_id": "quant_fidelity",
       "display_name": "Quant fidelity and perplexity",
       "description": "Reference-text perplexity that helps compare nearby quantized variants when task scores cluster tightly.",
       "primary_use_case": null,
@@ -169,6 +215,7 @@
       "display_name": "Instruction following",
       "description": "Run IFEval to check whether the model follows detailed textual instructions cleanly.",
       "evidence_kind": "capability",
+      "surface_id": "local_assistant_capability",
       "default_check_ids": [
         "ifeval"
       ],
@@ -184,6 +231,7 @@
       "display_name": "Chat memory",
       "description": "Run short multi-turn transcript checks for remembered facts, corrections, and output constraints.",
       "evidence_kind": "capability",
+      "surface_id": "local_assistant_capability",
       "default_check_ids": [
         "multiturn_chat_memory_v1"
       ],
@@ -199,6 +247,7 @@
       "display_name": "Broad reasoning knowledge",
       "description": "Run a sampled MMLU-Pro reference pass for harder broad knowledge and reasoning coverage.",
       "evidence_kind": "capability",
+      "surface_id": "local_reasoning_capability",
       "default_check_ids": [
         "mmlu_pro_reference_v1"
       ],
@@ -214,6 +263,7 @@
       "display_name": "Coding core",
       "description": "Run HumanEval+ for the most important pass@1 coding signal.",
       "evidence_kind": "capability",
+      "surface_id": "local_coding_capability",
       "default_check_ids": [
         "evalplus_humaneval"
       ],
@@ -229,6 +279,7 @@
       "display_name": "Coding breadth",
       "description": "Add MBPP+ for broader everyday coding coverage beyond the core set.",
       "evidence_kind": "capability",
+      "surface_id": "local_coding_capability",
       "default_check_ids": [
         "evalplus_mbpp"
       ],
@@ -244,6 +295,7 @@
       "display_name": "Interactive chat latency",
       "description": "Measure TTFT, load time, and output speed for interactive requests.",
       "evidence_kind": "deployment",
+      "surface_id": "deployment_fitness",
       "default_check_ids": [
         "interactive_chat_v1"
       ],
@@ -259,6 +311,7 @@
       "display_name": "Batch generation throughput",
       "description": "Measure throughput-oriented generation behavior under a small batch load.",
       "evidence_kind": "deployment",
+      "surface_id": "deployment_fitness",
       "default_check_ids": [
         "batch_generation_v1"
       ],
@@ -274,6 +327,7 @@
       "display_name": "Long context latency",
       "description": "Measure latency and memory pressure under longer prompts.",
       "evidence_kind": "deployment",
+      "surface_id": "deployment_fitness",
       "default_check_ids": [
         "long_context_v1"
       ],
@@ -289,6 +343,7 @@
       "display_name": "Quant fidelity",
       "description": "Run the shared perplexity reference pass for quant-to-quant comparisons.",
       "evidence_kind": "fidelity",
+      "surface_id": "quant_fidelity",
       "default_check_ids": [
         "perplexity_reference_v1"
       ],
@@ -310,6 +365,7 @@
       "description": "Instruction-following benchmark.",
       "evidence_kind": "capability",
       "group_id": "instruction_following",
+      "surface_id": "local_assistant_capability",
       "runner_target": "ifeval",
       "supported_backends": [
         "llama.cpp",
@@ -335,6 +391,7 @@
       "description": "Short transcript-retention benchmark for corrected facts, remembered preferences, and output constraints.",
       "evidence_kind": "capability",
       "group_id": "chat_memory",
+      "surface_id": "local_assistant_capability",
       "runner_target": "multiturn_chat_memory_v1",
       "supported_backends": [
         "llama.cpp",
@@ -366,6 +423,7 @@
       "description": "Sampled harder broad knowledge and reasoning benchmark.",
       "evidence_kind": "capability",
       "group_id": "broad_reasoning_knowledge",
+      "surface_id": "local_reasoning_capability",
       "runner_target": "mmlu_pro_reference_v1",
       "supported_backends": [
         "llama.cpp",
@@ -401,6 +459,7 @@
       "description": "Core coding benchmark for code generation quality.",
       "evidence_kind": "capability",
       "group_id": "coding_core",
+      "surface_id": "local_coding_capability",
       "runner_target": "evalplus_humaneval",
       "supported_backends": [
         "llama.cpp",
@@ -426,6 +485,7 @@
       "description": "Broader coding benchmark focused on practical Python tasks.",
       "evidence_kind": "capability",
       "group_id": "coding_breadth",
+      "surface_id": "local_coding_capability",
       "runner_target": "evalplus_mbpp",
       "supported_backends": [
         "llama.cpp",
@@ -451,6 +511,7 @@
       "description": "Interactive deployment profile for TTFT, load, and output speed.",
       "evidence_kind": "deployment",
       "group_id": "deployment_chat",
+      "surface_id": "deployment_fitness",
       "runner_target": "interactive_chat_v1",
       "supported_backends": [
         "llama.cpp",
@@ -481,6 +542,7 @@
       "description": "Batch deployment profile for throughput-oriented comparisons.",
       "evidence_kind": "deployment",
       "group_id": "deployment_batch",
+      "surface_id": "deployment_fitness",
       "runner_target": "batch_generation_v1",
       "supported_backends": [
         "llama.cpp",
@@ -510,6 +572,7 @@
       "description": "Deployment profile for longer-context latency and memory behavior.",
       "evidence_kind": "deployment",
       "group_id": "deployment_long_context",
+      "surface_id": "deployment_fitness",
       "runner_target": "long_context_v1",
       "supported_backends": [
         "llama.cpp",
@@ -540,6 +603,7 @@
       "description": "Quant fidelity signal based on the shared reference corpus.",
       "evidence_kind": "fidelity",
       "group_id": "quant_fidelity",
+      "surface_id": "quant_fidelity",
       "runner_target": "perplexity_reference_v1",
       "supported_backends": [
         "llama.cpp"
@@ -734,7 +798,7 @@
       "check_id": "swe_bench_verified_reference_v1",
       "display_name": "SWE-bench Verified reference",
       "value": "Adds high-legitimacy software-engineering task evidence for the strongest coding setups.",
-      "cost": "very large token volume and long wall-clock runtime; likely cloud or curated reference lane first",
+      "cost": "very large token volume and long wall-clock runtime; likely cloud or maintainer-reviewed gold lane first",
       "implementation_risk": "very_high",
       "suite_placement": "coding_code_editing/reference",
       "primary_use_case": "agentic_coding",
@@ -743,7 +807,7 @@
       "score_dimension": "software_engineering_task_success",
       "planned_score_policy_id": "repository_issue_resolution_v1",
       "local_feasibility": "curated_reference_first",
-      "why_not_default": "Operationally expensive enough that it should start as curated reference evidence, not a default laptop run.",
+      "why_not_default": "Operationally expensive enough that it should start as maintainer-reviewed gold evidence, not a default laptop run.",
       "status": "planned"
     }
   ],

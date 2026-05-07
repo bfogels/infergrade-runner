@@ -1,0 +1,193 @@
+import json
+import sys
+import unittest
+
+sys.path.insert(0, "python/runner-core/src")
+
+from infergrade.capability_contract import (
+    CAPABILITY_STATES,
+    EVIDENCE_LANES,
+    capability_run_schema_path,
+    load_capability_run_schema,
+    validate_capability_run_artifact,
+)
+from infergrade.contracts import load_contract_manifest
+
+
+def _artifact():
+    return {
+        "artifact_spec_version": "0.1.0",
+        "artifact_kind": "capability_run",
+        "capability_run_id": "caprun_20260507_example",
+        "created_at": "2026-05-07T12:00:00Z",
+        "runner": {"name": "infergrade-runner", "version": "0.2.7-dev", "contract_version": "0.1.0"},
+        "evidence": {
+            "lane": "decision",
+            "surface": "local_assistant_capability",
+            "grade": "thin_local_sample",
+            "experimental": True,
+            "confidence_label": "thin_local_sample",
+        },
+        "subject": {
+            "model": {"model_base": "example-local-model", "quant_artifact_sha256": "abc123"},
+            "runtime": {"backend_engine": "llama.cpp", "backend_version": "example"},
+            "hardware": {"os": "macOS", "accelerator_type": "metal"},
+            "generation_preset": {"temperature": 0.0, "max_tokens": 128},
+        },
+        "protocol": {
+            "task_family": "assistant_instruction_following",
+            "prompt_version": "assistant_decision_v1",
+            "task_version": "assistant_decision_v1",
+            "fixture_revision": "fixtures-assistant-v1",
+            "dataset_revision": None,
+            "scorer_type": "exact_match",
+            "scoring_policy": "instruction_following_primary_accuracy_v1",
+            "repetitions": 1,
+        },
+        "summary": {
+            "state": "scored",
+            "score": 1.0,
+            "score_dimension": "instruction_following",
+            "passed_count": 1,
+            "failed_count": 0,
+            "partial_count": 0,
+            "skipped_count": 0,
+            "not_comparable_count": 0,
+            "duration_seconds": 2.4,
+            "time_to_first_token_ms": 120.0,
+            "tokens_per_second": 32.0,
+            "input_tokens": 42,
+            "output_tokens": 12,
+        },
+        "tasks": [
+            {
+                "task_id": "assistant_fixture_001",
+                "task_family": "assistant_instruction_following",
+                "state": "scored",
+                "score": 1.0,
+                "score_dimension": "instruction_following",
+                "scorer_type": "exact_match",
+                "scoring_policy": "instruction_following_primary_accuracy_v1",
+                "output_artifact": "raw_outputs/assistant_fixture_001.json",
+                "error_class": None,
+                "latency_ms": 2400.0,
+                "time_to_first_token_ms": 120.0,
+                "tokens_per_second": 32.0,
+                "input_tokens": 42,
+                "output_tokens": 12,
+            }
+        ],
+        "artifacts": {
+            "manifest": "manifest.json",
+            "raw_outputs": ["raw_outputs/assistant_fixture_001.json"],
+            "scoring_outputs": ["scoring/assistant_fixture_001.json"],
+            "supporting_files": [],
+        },
+        "claim_boundary": {
+            "supported_claims": ["This setup completed one pinned local assistant task."],
+            "unsupported_claims": ["This is not a global model ranking."],
+        },
+    }
+
+
+class CapabilityContractTests(unittest.TestCase):
+    def test_capability_run_schema_is_declared_in_contract_manifest(self):
+        schema = load_capability_run_schema()
+        self.assertEqual(schema["properties"]["artifact_kind"]["const"], "capability_run")
+        self.assertEqual(schema["properties"]["evidence"]["properties"]["lane"]["enum"], list(EVIDENCE_LANES))
+        self.assertIn("scorer_type", schema["properties"]["protocol"]["required"])
+        self.assertTrue(schema["properties"]["summary"]["allOf"])
+        self.assertTrue(schema["properties"]["tasks"]["items"]["allOf"])
+        self.assertTrue(capability_run_schema_path().exists())
+        manifest = load_contract_manifest()
+        self.assertIn("schemas/json/capability_run.schema.json", manifest["schema_files"])
+
+    def test_valid_capability_run_artifact_passes_semantic_validation(self):
+        self.assertEqual(validate_capability_run_artifact(_artifact()), [])
+
+    def test_failed_partial_skipped_and_not_comparable_states_stay_distinct(self):
+        states = set(CAPABILITY_STATES)
+        self.assertEqual(states, {"scored", "partial", "failed", "skipped", "not_yet_benchmarked", "not_comparable"})
+        artifact = _artifact()
+        artifact["summary"]["state"] = "partial"
+        artifact["summary"]["score"] = 0.5
+        artifact["tasks"] = [
+            {
+                "task_id": "scored",
+                "task_family": "assistant_instruction_following",
+                "state": "scored",
+                "score": 1.0,
+                "scorer_type": "exact_match",
+                "scoring_policy": "instruction_following_primary_accuracy_v1",
+                "output_artifact": "raw/scored.json",
+            },
+            {
+                "task_id": "failed",
+                "task_family": "assistant_instruction_following",
+                "state": "failed",
+                "score": None,
+                "output_artifact": "raw/failed.json",
+                "error_class": "runtime_failure",
+            },
+            {
+                "task_id": "skipped",
+                "task_family": "assistant_instruction_following",
+                "state": "skipped",
+                "score": None,
+                "output_artifact": None,
+            },
+            {
+                "task_id": "not_comparable",
+                "task_family": "assistant_instruction_following",
+                "state": "not_comparable",
+                "score": None,
+                "output_artifact": None,
+            },
+        ]
+
+        self.assertEqual(validate_capability_run_artifact(artifact), [])
+        self.assertEqual([task["state"] for task in artifact["tasks"]], ["scored", "failed", "skipped", "not_comparable"])
+
+    def test_failed_states_require_failure_metadata_and_do_not_accept_scores(self):
+        artifact = _artifact()
+        artifact["summary"]["state"] = "failed"
+        artifact["summary"]["score"] = 0.0
+        artifact["tasks"][0]["state"] = "failed"
+        artifact["tasks"][0]["score"] = 0.0
+        artifact["tasks"][0]["error_class"] = None
+
+        errors = validate_capability_run_artifact(artifact)
+
+        self.assertIn("summary.score must be null unless the run is scored or partial", errors)
+        self.assertIn("tasks[0].score must be null unless the task is scored or partial", errors)
+        self.assertIn("tasks[0].error_class is required when state is failed", errors)
+
+    def test_scored_artifacts_require_scorer_metadata(self):
+        artifact = _artifact()
+        del artifact["protocol"]["scorer_type"]
+        del artifact["tasks"][0]["scorer_type"]
+        del artifact["tasks"][0]["scoring_policy"]
+
+        errors = validate_capability_run_artifact(artifact)
+
+        self.assertTrue(any("protocol.scorer_type" in error for error in errors), errors)
+        self.assertIn("tasks[0].scorer_type is required", errors)
+        self.assertIn("tasks[0].scoring_policy is required", errors)
+
+    def test_invalid_lane_and_surface_are_rejected(self):
+        artifact = _artifact()
+        artifact["evidence"]["lane"] = "gold/curated"
+        artifact["evidence"]["surface"] = "general_assistant"
+
+        errors = validate_capability_run_artifact(artifact)
+
+        self.assertTrue(any("evidence.lane" in error for error in errors), errors)
+        self.assertTrue(any("evidence.surface" in error for error in errors), errors)
+
+    def test_schema_json_round_trips(self):
+        payload = json.loads(json.dumps(load_capability_run_schema()))
+        self.assertEqual(payload["title"], "InferGrade Capability Run Artifact")
+
+
+if __name__ == "__main__":
+    unittest.main()

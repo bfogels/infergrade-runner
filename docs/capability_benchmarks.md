@@ -31,7 +31,7 @@ InferGrade needs capability benchmarks that are:
 
 - `EvalPlus MBPP+`
   - Why: expands beyond HumanEval-style tasks, uses the same container/evaluation ecosystem, and gives us a second coding signal without introducing a completely separate harness.
-  - InferGrade role: gold-tier extension for `agentic_coding`.
+  - InferGrade role: reference extension for `agentic_coding`.
 
 ## Selected Next
 
@@ -51,16 +51,16 @@ These are selected as high-value next additions, but are not yet wired into the 
 
 - `SWE-bench Verified`
   - Why: highest-value software engineering benchmark in this space, but much more operationally expensive than the first-pass coding lanes.
-  - InferGrade role: gold/curated reference evidence first, not a default laptop run.
+  - InferGrade role: gold evidence first, with curated provenance and maintainer review, not a default laptop run.
 
 ## Expansion Principle
 
 InferGrade should move toward benchmark legitimacy comparable to serious model-analysis products without making first users wait hours for a first answer. That means every new benchmark candidate should declare:
 
 - the use case it supports,
-- whether it belongs in the short decision lane, reference lane, or gold/curated lane,
+- whether it belongs in the smoke, decision, reference, or gold lane,
 - the score dimension and planned score policy,
-- local feasibility and expected cost,
+- local feasibility, expected wall-clock duration, and expected token volume,
 - and why it is not part of the default quick path yet.
 
 Planned candidates are roadmap metadata only. They must not be rendered or validated as runnable checks until Runner owns a reproducible harness, scoring policy, fixture/version pin, and runtime-cost story.
@@ -112,6 +112,18 @@ The currently implemented first-user catalog is:
 
 Compatibility breadth labels like `canary`, `standard`, and `gold` are still derived from the selected checks for older flows and release planning, but they are no longer the main user-facing benchmark abstraction.
 
+## Capability Surfaces
+
+Runner-owned capability artifacts use these surfaces:
+
+- `local_assistant_capability`: instruction following, structured output, conversational retention, and assistant behavior.
+- `local_coding_capability`: code generation, repair, structured patch output, and bounded repo-edit tasks.
+- `local_reasoning_capability`: exact-answer, multiple-choice, or structured reasoning checks.
+- `quant_fidelity`: quant-to-quant fidelity signals such as perplexity or controlled reference outputs.
+- `deployment_fitness`: latency, throughput, memory, runtime stability, and local hardware fit.
+
+These surfaces must remain separate. Deployment fitness is not capability quality, and quant fidelity is not a general capability score.
+
 ## Capability State Semantics
 
 The current supported suites should report capability truthfully rather than softening failures into generic missing data:
@@ -123,12 +135,21 @@ The current supported suites should report capability truthfully rather than sof
 - `not_yet_benchmarked`: the slice is meaningful, but no benchmark execution has happened yet
 - `not_comparable`: the run does not define a meaningful capability slice
 
-The currently supported first-user benchmark lanes are:
+The currently supported first-user benchmark surfaces are:
 
-- assistant lane: `chat_instruction_following` via `ifeval`, `multiturn_chat_memory_v1`, and explicit sampled `mmlu_pro_reference_v1`
-- coding lane: `coding_code_editing` via `evalplus_humaneval` and `evalplus_mbpp`
+- assistant surface: `chat_instruction_following` via `ifeval`, `multiturn_chat_memory_v1`, and explicit sampled `mmlu_pro_reference_v1`
+- coding surface: `coding_code_editing` via `evalplus_humaneval` and `evalplus_mbpp`
+- reasoning surface: `mmlu_pro_reference_v1` when selected intentionally as reference evidence
+- quant-fidelity surface: `perplexity_reference_v1`
+- deployment-fitness surface: `interactive_chat_v1`, `batch_generation_v1`, and `long_context_v1`
 
 Those are the lanes we expect to keep locally regression-tested and operationally trustworthy first.
+
+## Capability Run Artifact
+
+`native_first_run` proves a local setup can execute and upload first-run evidence. A `capability_run` artifact is different: it records a benchmark protocol, evidence lane, capability surface, task fixture revisions, scorer policy, raw outputs, scoring outputs, failure states, runtime provenance, hardware provenance, duration, token counts where available, and claim boundaries.
+
+The schema is `schemas/json/capability_run.schema.json`; the methodology is [Local Benchmark Methodology](local_benchmark_methodology.md).
 
 ## Container Contract
 

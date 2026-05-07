@@ -7,7 +7,7 @@ This document defines the next implementation stack after the first local-friend
 1. sampled MMLU-Pro reference
 2. sampled GPQA reference
 3. LiveCodeBench reference
-4. SWE-bench Verified curated/gold evidence
+4. SWE-bench Verified gold evidence
 
 ## Shared Acceptance Gates
 
@@ -117,9 +117,9 @@ Acceptance:
 - Timeouts and runtime errors are structured benchmark failures or task failures according to the score policy.
 - The Hub warns that it is a heavier reference lane.
 
-### Phase D: SWE-bench Verified Curated/Gold
+### Phase D: SWE-bench Verified Gold
 
-SWE-bench Verified should begin as curated or cloud/gold evidence, not as a general laptop default.
+SWE-bench Verified should begin as gold evidence with curated provenance and maintainer review, not as a general laptop default.
 
 Source candidates:
 
@@ -128,14 +128,14 @@ Source candidates:
 
 Runner scope:
 
-- Treat it as a curated reference lane until runtime, dependency, and sandboxing costs are understood.
+- Treat it as a gold lane candidate until runtime, dependency, and sandboxing costs are understood.
 - Require pinned task IDs and environment preparation metadata.
 - Emit patch artifacts and task-resolution metrics.
 
 Acceptance:
 
 - No default local laptop preset includes this lane.
-- Result metadata distinguishes curated reference evidence from self-run local evidence.
+- Result metadata distinguishes maintainer-reviewed gold evidence from self-run local evidence.
 - The Hub explains why this is gold evidence and why most users should not start here.
 
 ## Product Copy Rule
