@@ -34,6 +34,14 @@ Local equivalent:
 ./scripts/build_release_bundle.sh
 ```
 
+Before a public release candidate, also run the local readiness summary:
+
+```bash
+python3 ./scripts/check_public_release_readiness.py
+```
+
+The expected healthy local result from a clean Git worktree is `public_release_readiness=manual_required`, not `pass`. The command checks repository-local docs, scripts, workflow posture, Git state, and suspicious secret-looking filenames. It deliberately leaves GitHub settings, release-environment secrets, signing credentials, notarization credentials, and published artifact verification as manual gates.
+
 ## Desktop App On Main
 
 Every push to `main` also runs `.github/workflows/desktop-runner-release.yml`. That workflow:
@@ -83,6 +91,19 @@ When the workflow fails at `Validate Apple signing certificate password`, fix th
    - `APPLE_CERTIFICATE_PASSWORD`: the password used by the local `openssl pkcs12` check
 
 After you update the certificate and password secrets together, rerun the `Desktop Runner Release` workflow from `main`. A passing preflight only proves the certificate opens; the workflow must still complete signing, notarization, Gatekeeper assessment, and stapled-ticket checks before the DMG is user-ready.
+
+### Verify Published Desktop Artifacts
+
+After the protected workflow publishes `desktop-runner-latest`, download the release files into one directory and verify the local manifests:
+
+```bash
+scripts/verify_desktop_release_artifacts.py \
+  --directory /path/to/downloaded/desktop-runner-latest \
+  --require-dmg \
+  --require-updater
+```
+
+This check verifies `SHA256SUMS`, confirms the updater manifest points at a local updater archive, and confirms the updater signature artifact exists and is non-empty. It is a manifest consistency check only. It does not replace Developer ID signing, notarization, Gatekeeper assessment, stapled-ticket checks, or clean-machine launch smoke.
 
 ## Prepare The Release Images
 
