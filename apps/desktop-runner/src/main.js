@@ -694,10 +694,20 @@ function runtimeCommandArgs(extraArgs = []) {
 function runtimePlanSummary(plan = {}) {
   const recommended = plan.recommended_runtime || {};
   const selected = plan.selected_runtime || {};
+  const selectedChannel = plan.selected_channel || {};
+  const updatePolicy = plan.update_policy || {};
   const selectedText = selected.status === "selected" ? "Selected runtime is recorded." : "No managed runtime is selected yet.";
   const runtimeText = plan.message || "No install command was run. Review the runtime plan before selecting a runtime.";
   const lane = recommended.platform?.human || recommended.platform_label || recommended.platform || recommended.accelerator || "this machine";
-  return `${runtimeText} Recommended lane: ${lane}. ${selectedText}`;
+  const channel = selectedChannel.label
+    ? `Runtime channel: ${selectedChannel.label}.`
+    : "";
+  const update = updatePolicy.automatic_updates === false
+    ? "Updates are manual."
+    : "";
+  return [runtimeText, `Recommended lane: ${lane}.`, selectedText, channel, update]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function managedRuntimeInstallSummary(result = {}) {
