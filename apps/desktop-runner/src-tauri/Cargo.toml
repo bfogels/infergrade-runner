@@ -1,6 +1,6 @@
 [package]
 name = "infergrade_desktop_runner"
-version = "0.2.0"
+version = "0.2.1"
 description = "Desktop companion app for the InferGrade Runner"
 authors = ["Brian Fogelson"]
 license = "Apache-2.0"

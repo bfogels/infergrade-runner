@@ -22,8 +22,6 @@ const form = document.querySelector("[data-runner-form]");
 const startButton = document.querySelector("[data-start-runner]");
 const stopButton = document.querySelector("[data-stop-runner]");
 const pairButton = document.querySelector("[data-pair-runner]");
-const saveTokenButton = document.querySelector("[data-save-token]");
-const clearTokenButton = document.querySelector("[data-clear-token]");
 const resetPairingButton = document.querySelector("[data-reset-pairing]");
 const clearLogsButton = document.querySelector("[data-clear-logs]");
 const themeChoiceButtons = [...document.querySelectorAll("[data-theme-choice]")];
@@ -64,7 +62,6 @@ let runnerListenerEventsReady = false;
 let firstRunEventsReady = false;
 let runnerStartupLines = [];
 let runnerStartupWaiters = [];
-let previewToken = "";
 let pendingUpdate = null;
 let lastNormalizedApiUrl = "https://api.infergrade.com/";
 let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp jobs.";
@@ -264,7 +261,7 @@ function renderLocalReadinessChecklist() {
   if (pairingReadinessStatus) {
     if (childProcess) {
       pairingReadinessStatus.textContent = "Paired and listening for Hub runs.";
-    } else if ((savedTokenAvailable && runnerProfileAvailable) || previewToken || form.elements.hubToken.value.trim()) {
+    } else if (savedTokenAvailable && runnerProfileAvailable) {
       pairingReadinessStatus.textContent = savedTokenAvailable && runnerProfileAvailable
         ? "Pairing token and profile are saved. Start listening when ready."
         : "Pairing token is available. Start listening when ready.";
@@ -517,30 +514,11 @@ async function ensureFirstRunEvents() {
   });
 }
 
-async function loadStoredToken() {
-  const invoke = await loadTauriInvoke();
-  if (invoke) {
-    return null;
-  }
-  return previewToken;
-}
-
-async function saveStoredToken(token) {
-  const invoke = await loadTauriInvoke();
-  if (invoke) {
-    await invoke("save_runner_token", { token });
-    return;
-  }
-  previewToken = token;
-}
-
 async function clearStoredToken() {
   const invoke = await loadTauriInvoke();
   if (invoke) {
     await invoke("clear_runner_token");
-    return;
   }
-  previewToken = "";
 }
 
 async function updateTokenState() {
@@ -565,7 +543,7 @@ async function updateTokenState() {
       renderLocalReadinessChecklist();
       return;
     }
-    hasToken = Boolean(await loadStoredToken());
+    hasToken = false;
   } catch (error) {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
@@ -578,7 +556,7 @@ async function updateTokenState() {
   if (isTauriRuntime()) {
     tokenState.textContent = hasToken
       ? "Runner token saved in the OS credential store."
-      : "No token saved. Paste a paired runner token before listening for Hub runs.";
+      : "No token saved. Pair with a Hub one-time code before listening for Hub runs.";
     if (hasToken && pairingReadinessStatus) {
       pairingReadinessStatus.textContent = "Pairing token is saved. Start listening when ready.";
     }
@@ -586,7 +564,7 @@ async function updateTokenState() {
   }
 
   tokenState.textContent = hasToken
-    ? "Development token held in memory until this page is closed."
+    ? "Runner token is available."
     : "Development view does not persist tokens; the app uses the OS credential store.";
 }
 
@@ -674,17 +652,9 @@ async function executeSidecar(args) {
   return output;
 }
 
-async function runnerEnvironment() {
-  const typedToken = form.elements.hubToken.value.trim();
-  if (typedToken) {
-    return { INFERGRADE_HUB_TOKEN: typedToken };
-  }
-  return {};
-}
-
 function credentialSourceLabel(source = "") {
   if (source === "typed_input") {
-    return "the pasted token";
+    return "typed credentials";
   }
   if (source === "saved_pairing") {
     return "the saved Runner profile and OS credential store";
@@ -699,7 +669,7 @@ async function listenerStartPlan(apiUrl) {
   }
   return invoke("listener_start_plan", {
     apiUrl,
-    typedTokenPresent: Boolean(form.elements.hubToken.value.trim()),
+    typedTokenPresent: false,
   });
 }
 
@@ -875,7 +845,7 @@ async function startRunner({ confirmStarted = false } = {}) {
   runnerStartupLines = [];
   const output = await invoke("start_runner_listener", {
     apiUrl,
-    typedToken: form.elements.hubToken.value.trim() || null,
+    typedToken: null,
   });
   const plan = output?.plan || {};
   const runner = plan.runner_id ? ` for ${plan.runner_id}` : "";
@@ -956,7 +926,6 @@ async function resetPairing() {
     stopButton.disabled = true;
   }
   form.elements.pairCode.value = "";
-  form.elements.hubToken.value = "";
   const invoke = await loadTauriInvoke();
   if (invoke) {
     const payload = await invoke("reset_runner_pairing");
@@ -1068,32 +1037,6 @@ pairButton.addEventListener("click", () => {
     pairState.textContent = "Pairing failed before this machine was saved. Check that the code has not expired, then try again.";
     appendLog(`Could not pair Runner: ${error.message || error}`);
   });
-});
-
-saveTokenButton.addEventListener("click", () => {
-  const token = form.elements.hubToken.value.trim();
-  saveStoredToken(token)
-    .then(() => {
-      form.elements.hubToken.value = "";
-      window.localStorage.setItem(API_URL_STORAGE_KEY, form.elements.apiUrl.value.trim());
-      return updateTokenState();
-    })
-    .catch((error) => {
-      tokenState.textContent = userSafeTokenFailure(error.message || error);
-      appendLog(`Could not save token: ${error.message || error}`);
-    });
-});
-
-clearTokenButton.addEventListener("click", () => {
-  clearStoredToken()
-    .then(() => {
-      form.elements.hubToken.value = "";
-      return updateTokenState();
-    })
-    .catch((error) => {
-      tokenState.textContent = userSafeTokenFailure(error.message || error);
-      appendLog(`Could not clear token: ${error.message || error}`);
-    });
 });
 
 resetPairingButton?.addEventListener("click", () => {
