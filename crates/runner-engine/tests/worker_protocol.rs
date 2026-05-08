@@ -185,7 +185,7 @@ fn worker_protocol_preview_trims_identity_fields_and_rejects_bad_hub_urls() {
     }
     .build()
     .expect_err("runner id required");
-    assert_eq!(missing_runner.code(), "runner_id_missing");
+    assert_eq!(missing_runner.code(), "runner_id_invalid");
 
     let missing_mode = RunnerProtocolPreviewInput {
         api_url: "api.infergrade.com".to_string(),
@@ -225,4 +225,30 @@ fn worker_protocol_ping_plan_uses_typed_register_and_heartbeat_requests() {
     let serialized = serde_json::to_value(&plan).expect("ping plan json");
     assert!(!serialized.to_string().contains("qbhr_"));
     assert!(!serialized.to_string().contains("Authorization"));
+}
+
+#[test]
+fn worker_protocol_preview_rejects_unsafe_runner_ids_for_path_interpolation() {
+    let overlong = "x".repeat(200);
+    let bad_inputs: Vec<&str> = vec![
+        "../admin",
+        "runner/with/slash",
+        "runner?query=1",
+        "runner#frag",
+        "runner with space",
+        ".",
+        "..",
+        overlong.as_str(),
+    ];
+    for bad in &bad_inputs {
+        let error = infergrade_runner_engine::RunnerProtocolPreviewInput {
+            api_url: "api.infergrade.com".to_string(),
+            runner_id: (*bad).to_string(),
+            execution_mode: "local_native".to_string(),
+            hostname: None,
+        }
+        .build()
+        .expect_err("unsafe runner_id rejected");
+        assert_eq!(error.code(), "runner_id_invalid", "input: {bad}");
+    }
 }

@@ -1,4 +1,4 @@
-use crate::{desktop_environment, normalize_api_url, RunnerError};
+use crate::{desktop_environment, normalize_api_url, validate_hub_path_id, RunnerError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -157,13 +157,9 @@ impl RunnerProtocolPreviewInput {
     pub fn build(self) -> Result<RunnerProtocolPreview, RunnerError> {
         let api_url = normalize_api_url(&self.api_url)
             .map_err(|error| RunnerError::new("hub_url_invalid", error))?;
-        let runner_id = self.runner_id.trim().to_string();
-        if runner_id.is_empty() {
-            return Err(RunnerError::new(
-                "runner_id_missing",
-                "Runner protocol preview requires a runner id.",
-            ));
-        }
+        let runner_id = validate_hub_path_id(self.runner_id.trim(), "runner_id")
+            .map_err(|error| RunnerError::new("runner_id_invalid", error.message()))?
+            .to_string();
         let execution_mode = self.execution_mode.trim().to_string();
         if execution_mode.is_empty() {
             return Err(RunnerError::new(

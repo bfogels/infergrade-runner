@@ -1,6 +1,35 @@
 use crate::{normalize_api_url, worker_protocol::claim_run_job_payload, RunnerError};
 use serde_json::{json, Value};
 use std::fmt;
+use std::sync::OnceLock;
+use std::time::Duration;
+
+pub const HUB_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+pub const HUB_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+pub const HUB_BUNDLE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(300);
+
+fn build_hub_client(timeout: Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(HUB_CONNECT_TIMEOUT)
+        .timeout(timeout)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+/// Shared async client for typical Hub JSON requests. Reuses connections and
+/// applies sane connect/request timeouts to avoid indefinite hangs on flaky
+/// networks.
+pub fn shared_hub_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| build_hub_client(HUB_REQUEST_TIMEOUT))
+}
+
+/// Shared async client for large bundle uploads. Same connect timeout, longer
+/// request timeout to accommodate slow uploads.
+pub fn shared_hub_upload_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| build_hub_client(HUB_BUNDLE_UPLOAD_TIMEOUT))
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HubMethod {
@@ -106,7 +135,11 @@ pub fn build_hub_json_request(
 pub async fn execute_hub_json_request(
     request: &HubJsonRequest,
 ) -> Result<HubJsonResponse, RunnerError> {
-    let client = reqwest::Client::new();
+    let client = if request.url.contains("/bundle") {
+        shared_hub_upload_client()
+    } else {
+        shared_hub_client()
+    };
     let mut builder = match request.method {
         HubMethod::Get => client.get(&request.url),
         HubMethod::Post => client.post(&request.url),
@@ -235,7 +268,11 @@ fn validate_bundle_upload_payload(payload: &Value) -> Result<(), RunnerError> {
     Ok(())
 }
 
-fn validate_hub_path_id<'a>(value: &'a str, field_name: &str) -> Result<&'a str, RunnerError> {
+/// Validate a string before interpolating it into a Hub URL path fragment.
+/// Rejects whitespace, `/`, `?`, `#`, `.`/`..`, empty strings, and overlong
+/// values. Used for run/runner/bundle ids and any other identifier the runner
+/// puts directly into a URL.
+pub fn validate_hub_path_id<'a>(value: &'a str, field_name: &str) -> Result<&'a str, RunnerError> {
     let trimmed = value.trim();
     if value != trimmed
         || trimmed.is_empty()
