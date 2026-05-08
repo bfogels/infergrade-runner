@@ -12,6 +12,7 @@ from infergrade.benchmark_catalog import (
     selection_metadata_for_request,
 )
 from infergrade.capability_contract import validate_capability_run_artifact
+from infergrade.capability_summary import write_capability_summary_artifact
 from infergrade.images import install_image
 from infergrade.models import CapabilityExecution, RunRequest
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcnow_iso, write_json
@@ -223,6 +224,7 @@ def summarize_capability_execution(
         "capability_component_scores": dict(execution.component_scores or {}),
         "capability_component_reports": component_reports,
         "capability_confidence": execution.confidence,
+        "capability_artifacts": dict(execution.artifacts or {}),
         "capability_run_count": 1 if execution.status not in ("skipped", "failed") or scored_count else 0,
         "capability_timestamp": completed_at if execution.status not in ("skipped", "failed") else None,
         "capability_status": execution.status,
@@ -515,6 +517,18 @@ def execute_capability_suite(
             elif failure_severity == "all_failed":
                 hard_failed += 1
         except Exception as exc:
+            failure_summary = {
+                "benchmark_id": benchmark_id,
+                "display_name": spec.display_name,
+                "status": "failed",
+                "error": str(exc),
+                "primary_metric": {
+                    "name": spec.primary_metric_name,
+                    "value": None,
+                },
+            }
+            summary_path = os.path.join(benchmark_dir, "summary.json")
+            write_json(summary_path, failure_summary)
             if progress_callback:
                 progress_callback(
                     {
@@ -526,17 +540,11 @@ def execute_capability_suite(
                         "error": str(exc),
                     }
                 )
-            benchmark_results[benchmark_id] = {
-                "benchmark_id": benchmark_id,
-                "display_name": spec.display_name,
-                "status": "failed",
-                "error": str(exc),
-                "primary_metric": {
-                    "name": spec.primary_metric_name,
-                    "value": None,
-                },
+            benchmark_results[benchmark_id] = failure_summary
+            benchmark_artifacts[benchmark_id] = {
+                "benchmark_dir": benchmark_dir,
+                "summary_path": summary_path,
             }
-            benchmark_artifacts[benchmark_id] = {"benchmark_dir": benchmark_dir}
 
     status = "failed"
     if completed == len(benchmark_ids):
@@ -556,7 +564,7 @@ def execute_capability_suite(
     elif status == "partial":
         confidence = 0.6
 
-    return CapabilityExecution(
+    execution = CapabilityExecution(
         use_case=request.use_case,
         suite_id=primary_suite_id,
         suite_ids=suite_ids,
@@ -572,6 +580,9 @@ def execute_capability_suite(
         benchmark_results=benchmark_results,
         artifacts=benchmark_artifacts,
     )
+    summary_path = write_capability_summary_artifact(request, execution, request.output_dir or os.path.dirname(os.path.dirname(benchmark_root)))
+    execution.artifacts["_summary"] = {"capability_summary_path": summary_path}
+    return execution
 
 
 def _generation_failure_severity(total_cases: int, failure_count: int) -> str:

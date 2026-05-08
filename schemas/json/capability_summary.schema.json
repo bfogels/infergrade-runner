@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infergrade.dev/schemas/capability_summary.schema.json",
+  "title": "InferGrade Capability Summary Artifact",
+  "type": "object",
+  "required": [
+    "artifact_spec_version",
+    "artifact_kind",
+    "summary_id",
+    "created_at",
+    "runner",
+    "subject",
+    "surfaces",
+    "capability_artifacts",
+    "unsupported_claim_summary",
+    "next_recommended_benchmark_action"
+  ],
+  "properties": {
+    "artifact_spec_version": { "type": "string", "minLength": 1 },
+    "artifact_kind": { "const": "capability_summary" },
+    "summary_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "runner": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "contract_version": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "subject": {
+      "type": "object",
+      "properties": {
+        "model": { "type": "object", "additionalProperties": true },
+        "runtime": { "type": "object", "additionalProperties": true },
+        "hardware": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "surfaces": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/surface_summary" }
+    },
+    "capability_artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact_pointer" }
+    },
+    "unsupported_claim_summary": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "next_recommended_benchmark_action": {
+      "type": "object",
+      "required": ["action", "reason"],
+      "properties": {
+        "action": { "type": "string", "minLength": 1 },
+        "surface": {
+          "enum": [
+            "local_assistant_capability",
+            "local_coding_capability",
+            "local_reasoning_capability",
+            "quant_fidelity",
+            "deployment_fitness",
+            null
+          ]
+        },
+        "benchmark_check_id": { "type": ["string", "null"] },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "state": {
+      "enum": ["scored", "partial", "failed", "skipped", "not_yet_benchmarked", "not_comparable"]
+    },
+    "lane": {
+      "enum": ["smoke", "decision", "reference", "gold"]
+    },
+    "confidence_label": {
+      "enum": [
+        "single_smoke",
+        "thin_local_sample",
+        "repeated_local_run",
+        "stronger_local_sample",
+        "reference_sample",
+        "gold"
+      ]
+    },
+    "surface_id": {
+      "enum": [
+        "local_assistant_capability",
+        "local_coding_capability",
+        "local_reasoning_capability",
+        "quant_fidelity",
+        "deployment_fitness"
+      ]
+    },
+    "surface_summary": {
+      "type": "object",
+      "required": [
+        "surface",
+        "state",
+        "score",
+        "lane",
+        "confidence_label",
+        "repetition_count",
+        "task_count",
+        "failure_count",
+        "partial_count",
+        "capability_artifacts",
+        "unsupported_claims"
+      ],
+      "properties": {
+        "surface": { "$ref": "#/$defs/surface_id" },
+        "state": { "$ref": "#/$defs/state" },
+        "score": { "type": ["number", "null"] },
+        "lane": { "anyOf": [{ "$ref": "#/$defs/lane" }, { "type": "null" }] },
+        "confidence_label": { "anyOf": [{ "$ref": "#/$defs/confidence_label" }, { "type": "null" }] },
+        "experimental": { "type": ["boolean", "null"] },
+        "repetition_count": { "type": "integer", "minimum": 0 },
+        "task_count": { "type": "integer", "minimum": 0 },
+        "failure_count": { "type": "integer", "minimum": 0 },
+        "partial_count": { "type": "integer", "minimum": 0 },
+        "capability_artifacts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/artifact_pointer" }
+        },
+        "unsupported_claims": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": true
+    },
+    "artifact_pointer": {
+      "type": "object",
+      "required": ["artifact_kind", "benchmark_id", "surface", "state", "lane", "confidence_label", "path"],
+      "properties": {
+        "artifact_kind": { "enum": ["capability_run", "benchmark_summary", "unreadable_capability_run"] },
+        "benchmark_id": { "type": "string", "minLength": 1 },
+        "surface": { "$ref": "#/$defs/surface_id" },
+        "state": { "$ref": "#/$defs/state" },
+        "lane": { "$ref": "#/$defs/lane" },
+        "confidence_label": { "$ref": "#/$defs/confidence_label" },
+        "path": { "type": "string", "minLength": 1 },
+        "score": { "type": ["number", "null"] },
+        "task_count": { "type": "integer", "minimum": 0 },
+        "failure_count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

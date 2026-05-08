@@ -8,8 +8,11 @@ from infergrade.capability_contract import (
     CAPABILITY_STATES,
     EVIDENCE_LANES,
     capability_run_schema_path,
+    capability_summary_schema_path,
     load_capability_run_schema,
+    load_capability_summary_schema,
     validate_capability_run_artifact,
+    validate_capability_summary_artifact,
 )
 from infergrade.contracts import load_contract_manifest
 
@@ -102,6 +105,13 @@ class CapabilityContractTests(unittest.TestCase):
         manifest = load_contract_manifest()
         self.assertIn("schemas/json/capability_run.schema.json", manifest["schema_files"])
 
+    def test_capability_summary_schema_is_declared_in_contract_manifest(self):
+        schema = load_capability_summary_schema()
+        self.assertEqual(schema["properties"]["artifact_kind"]["const"], "capability_summary")
+        self.assertTrue(capability_summary_schema_path().exists())
+        manifest = load_contract_manifest()
+        self.assertIn("schemas/json/capability_summary.schema.json", manifest["schema_files"])
+
     def test_valid_capability_run_artifact_passes_semantic_validation(self):
         self.assertEqual(validate_capability_run_artifact(_artifact()), [])
 
@@ -187,6 +197,123 @@ class CapabilityContractTests(unittest.TestCase):
     def test_schema_json_round_trips(self):
         payload = json.loads(json.dumps(load_capability_run_schema()))
         self.assertEqual(payload["title"], "InferGrade Capability Run Artifact")
+        summary_payload = json.loads(json.dumps(load_capability_summary_schema()))
+        self.assertEqual(summary_payload["title"], "InferGrade Capability Summary Artifact")
+
+    def test_valid_capability_summary_artifact_passes_semantic_validation(self):
+        artifact = {
+            "artifact_spec_version": "0.1.0",
+            "artifact_kind": "capability_summary",
+            "summary_id": "capsum_example",
+            "created_at": "2026-05-08T12:00:00Z",
+            "runner": {"name": "infergrade-runner", "version": "0.2.11-dev"},
+            "subject": {"model": {"model": "example"}, "runtime": {"backend": "llama.cpp"}, "hardware": {"source": "run_bundle_environment"}},
+            "surfaces": [
+                {
+                    "surface": "local_assistant_capability",
+                    "state": "scored",
+                    "score": 1.0,
+                    "lane": "decision",
+                    "confidence_label": "thin_local_sample",
+                    "repetition_count": 1,
+                    "task_count": 3,
+                    "failure_count": 0,
+                    "partial_count": 0,
+                    "capability_artifacts": [],
+                    "unsupported_claims": ["This is not a global assistant capability score."],
+                }
+            ],
+            "capability_artifacts": [
+                {
+                    "artifact_kind": "capability_run",
+                    "benchmark_id": "multiturn_chat_memory_v1",
+                    "surface": "local_assistant_capability",
+                    "state": "scored",
+                    "lane": "decision",
+                    "confidence_label": "thin_local_sample",
+                    "path": "artifacts/capability/multiturn_chat_memory_v1/capability_run.json",
+                }
+            ],
+            "unsupported_claim_summary": ["This summary is not a global intelligence score."],
+            "next_recommended_benchmark_action": {
+                "action": "run_coding_decision_lane",
+                "surface": "local_coding_capability",
+                "benchmark_check_id": "coding_static_repair_v1",
+                "reason": "This surface is missing local decision-lane evidence.",
+            },
+        }
+
+        self.assertEqual(validate_capability_summary_artifact(artifact), [])
+
+    def test_summary_confidence_cannot_exceed_evidence_lane_controls(self):
+        artifact = {
+            "artifact_spec_version": "0.1.0",
+            "artifact_kind": "capability_summary",
+            "summary_id": "capsum_bad_confidence",
+            "created_at": "2026-05-08T12:00:00Z",
+            "runner": {"name": "infergrade-runner", "version": "0.2.11-dev"},
+            "subject": {},
+            "surfaces": [
+                {
+                    "surface": "local_coding_capability",
+                    "state": "scored",
+                    "score": 1.0,
+                    "lane": "decision",
+                    "confidence_label": "reference_sample",
+                    "repetition_count": 1,
+                    "task_count": 3,
+                    "failure_count": 0,
+                    "partial_count": 0,
+                    "capability_artifacts": [],
+                    "unsupported_claims": ["Thin local sample only."],
+                }
+            ],
+            "capability_artifacts": [
+                {
+                    "artifact_kind": "capability_run",
+                    "benchmark_id": "coding_static_repair_v1",
+                    "surface": "local_coding_capability",
+                    "state": "scored",
+                    "lane": "decision",
+                    "confidence_label": "reference_sample",
+                    "path": "artifacts/capability/coding_static_repair_v1/capability_run.json",
+                }
+            ],
+            "unsupported_claim_summary": ["This summary is not a global intelligence score."],
+            "next_recommended_benchmark_action": {"action": "repeat_local_capability_run", "reason": "Repeat local capability checks."},
+        }
+
+        errors = validate_capability_summary_artifact(artifact)
+
+        self.assertIn("surfaces[0].confidence_label cannot exceed evidence lane controls", errors)
+        self.assertIn("capability_artifacts[0].confidence_label cannot exceed evidence lane controls", errors)
+
+    def test_summary_artifact_pointers_require_explicit_kind(self):
+        artifact = {
+            "artifact_spec_version": "0.1.0",
+            "artifact_kind": "capability_summary",
+            "summary_id": "capsum_missing_kind",
+            "created_at": "2026-05-08T12:00:00Z",
+            "runner": {"name": "infergrade-runner", "version": "0.2.11-dev"},
+            "subject": {},
+            "surfaces": [],
+            "capability_artifacts": [
+                {
+                    "benchmark_id": "coding_static_repair_v1",
+                    "surface": "local_coding_capability",
+                    "state": "scored",
+                    "lane": "decision",
+                    "confidence_label": "thin_local_sample",
+                    "path": "artifacts/capability/coding_static_repair_v1/capability_run.json",
+                }
+            ],
+            "unsupported_claim_summary": ["This summary is not a global intelligence score."],
+            "next_recommended_benchmark_action": {"action": "repeat_local_capability_run", "reason": "Repeat local capability checks."},
+        }
+
+        errors = validate_capability_summary_artifact(artifact)
+
+        self.assertTrue(any("capability_artifacts[0].artifact_kind" in error for error in errors), errors)
 
 
 if __name__ == "__main__":

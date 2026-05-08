@@ -4,6 +4,7 @@
   "ontology_source": "schemas/json/model_ontology.schema.json",
   "schema_files": [
     "schemas/json/capability_run.schema.json",
+    "schemas/json/capability_summary.schema.json",
     "schemas/json/manifest.schema.json",
     "schemas/json/model_ontology.schema.json",
     "schemas/json/result_record.schema.json",
