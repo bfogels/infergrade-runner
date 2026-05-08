@@ -165,6 +165,50 @@ class CapabilitySummaryTests(unittest.TestCase):
         self.assertEqual(summary["capability_artifacts"][0]["artifact_kind"], "benchmark_summary")
         self.assertEqual(summary["capability_artifacts"][0]["path"], "artifacts/capability/evalplus_humaneval/summary.json")
 
+    def test_summary_keeps_humaneval_and_mbpp_artifacts_distinct(self):
+        execution = self._execution(
+            {
+                "evalplus_humaneval": self._write_capability_run(
+                    "evalplus_humaneval",
+                    surface="local_coding_capability",
+                    state="scored",
+                    score=0.75,
+                    task_states=["scored", "scored"],
+                    lane="reference",
+                    grade="reference_sample",
+                    confidence_label="reference_sample",
+                ),
+                "evalplus_mbpp": self._write_capability_run(
+                    "evalplus_mbpp",
+                    surface="local_coding_capability",
+                    state="scored",
+                    score=0.5,
+                    task_states=["scored", "scored"],
+                    lane="reference",
+                    grade="reference_sample",
+                    confidence_label="reference_sample",
+                ),
+            }
+        )
+
+        summary = build_capability_summary_artifact(self._request(), execution, self.tempdir)
+
+        self.assertEqual(validate_capability_summary_artifact(summary), [])
+        by_surface = {item["surface"]: item for item in summary["surfaces"]}
+        coding = by_surface["local_coding_capability"]
+        self.assertEqual(coding["state"], "scored")
+        self.assertEqual(coding["lane"], "reference")
+        self.assertEqual(coding["confidence_label"], "reference_sample")
+        self.assertEqual(coding["task_count"], 4)
+        self.assertEqual(
+            [item["benchmark_id"] for item in coding["capability_artifacts"]],
+            ["evalplus_humaneval", "evalplus_mbpp"],
+        )
+        self.assertEqual(
+            [item["benchmark_id"] for item in summary["capability_artifacts"]],
+            ["evalplus_humaneval", "evalplus_mbpp"],
+        )
+
     def _request(self):
         return RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",
@@ -196,7 +240,17 @@ class CapabilitySummaryTests(unittest.TestCase):
             artifacts=artifacts,
         )
 
-    def _write_capability_run(self, benchmark_id, surface, state, score, task_states):
+    def _write_capability_run(
+        self,
+        benchmark_id,
+        surface,
+        state,
+        score,
+        task_states,
+        lane="decision",
+        grade="thin_local_sample",
+        confidence_label="thin_local_sample",
+    ):
         benchmark_dir = os.path.join(self.tempdir, "artifacts", "capability", benchmark_id)
         path = os.path.join(benchmark_dir, "capability_run.json")
         tasks = []
@@ -217,11 +271,11 @@ class CapabilitySummaryTests(unittest.TestCase):
             "created_at": "2026-05-08T12:00:00Z",
             "runner": {"name": "infergrade-runner", "version": "0.2.11-dev"},
             "evidence": {
-                "lane": "decision",
+                "lane": lane,
                 "surface": surface,
-                "grade": "thin_local_sample",
+                "grade": grade,
                 "experimental": True,
-                "confidence_label": "thin_local_sample",
+                "confidence_label": confidence_label,
             },
             "subject": {
                 "model": {"model": "Qwen/Qwen2.5-7B-Instruct"},

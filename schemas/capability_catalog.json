@@ -182,19 +182,20 @@
       "check_id": "evalplus_mbpp",
       "surface_id": "local_coding_capability",
       "evidence_lane_id": "reference",
-      "maturity": "reference_candidate",
-      "runnable_status": "runnable_container",
+      "maturity": "reference_runnable",
+      "runnable_status": "runnable_intentional_reference",
       "default_inclusion_status": "intentional_reference_only",
-      "fixture_or_dataset_revision_status": "upstream_harness_revision_needs_explicit_pin",
+      "fixture_or_dataset_revision_status": "pinned_upstream_harness_revision",
       "harness_status": "container_harness_implemented",
       "scoring_policy_id": "coding_primary_pass_at_1_v1",
-      "sample_policy": "MBPP+ breadth signal after HumanEval+; intentionally heavier than the first coding default.",
+      "sample_policy": "Pinned EvalPlus MBPP+ revision with canary, sampled local reference, and full local reference limits.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "container_required_for_generated_code_execution",
-      "claim_boundary": "Coding breadth evidence under EvalPlus-style tests; not SWE-bench, LiveCodeBench, or repo-edit proof.",
+      "claim_boundary": "EvalPlus MBPP+ reference coding breadth evidence under pass@1 unit tests; not repo-edit, LiveCodeBench, SWE-bench, gold, or broad agentic coding proof.",
       "promotion_blockers": [
-        "Pin upstream EvalPlus revision and sample policy.",
-        "Preserve execution failure classes in capability artifacts before treating this as reference-runnable."
+        "Observed duration and token-volume metadata are needed for stronger local recommendation copy.",
+        "Real dogfood runs are needed to calibrate local duration and failure behavior.",
+        "Gold or leaderboard-style claims require separate publication controls and maintainer review."
       ]
     },
     {

@@ -39,7 +39,7 @@ InferGrade needs capability benchmarks that are:
 
 - `EvalPlus MBPP+`
   - Why: expands beyond HumanEval-style tasks, uses the same container/evaluation ecosystem, and gives us a second coding signal without introducing a completely separate harness.
-  - InferGrade role: reference extension for `agentic_coding`.
+  - InferGrade role: executable coding breadth reference lane for `agentic_coding`, separate from HumanEval+. It preserves MBPP task ids and prompts, generated samples, EvalPlus revision, sample policy, pass@1 base/plus scoring, raw outputs, scoring outputs, and task-level execution failure classes. It is not LiveCodeBench, SWE-bench, repo-edit proof, gold evidence, broad agentic software-engineering proof, or a public leaderboard claim.
 
 ## Selected Next
 

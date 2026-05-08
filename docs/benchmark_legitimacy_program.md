@@ -69,14 +69,14 @@ The first thin local samples are:
 - `coding_static_repair_v1`
 - `reasoning_exact_answer_v1`
 
-The first reference-runnable lane is:
+The first reference-runnable lanes are:
 
 - `mmlu_pro_reference_v1`
+- `evalplus_humaneval`
+- `evalplus_mbpp`
 
 Important candidates that are not yet promoted:
 
-- `evalplus_humaneval`: implemented coding evidence, but still needs explicit upstream revision/sandbox/failure-class controls before reference-runnable product claims.
-- `evalplus_mbpp`: reference candidate for coding breadth.
 - `perplexity_reference_v1`: quant-fidelity reference candidate that needs corpus/revision and summary representation hardening.
 - `gpqa_reference_v1`: planned, access-gated, non-runnable.
 - `livecodebench_reference_v1`: planned, non-runnable until task-window and sandbox controls exist.
