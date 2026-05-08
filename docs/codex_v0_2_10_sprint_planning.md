@@ -105,3 +105,52 @@ Reviewer findings:
 
 - P1: reasoning initially appeared in the assistant suite defaults. Fixed by keeping reasoning explicit so assistant and reasoning surfaces are not averaged by default.
 - P2: exact-answer scoring initially required the entire normalized response to equal the answer. Fixed by extracting one unambiguous yes/no, numeric, or option-letter answer and rejecting ambiguous multi-answer text.
+
+## v0.2.10 Release Candidate Evidence
+
+Branch: `codex/runner-v0210-release`
+PR: pending
+
+Scope:
+
+- Promote the reviewed v0.2.10 reasoning lane feature from `develop` to `main`.
+- Bump version declarations from `0.2.9` to `0.2.10` only in the release branch.
+- Preserve the release boundary: native exact-answer reasoning decision evidence, not GPQA, broad MMLU-Pro defaults, quant-fidelity expansion, Hub display, or stronger evidence claims.
+
+Branch-distance proof before release branch:
+
+```bash
+git rev-list --left-right --count origin/main...origin/develop
+# 0 2
+
+git diff --name-status origin/main...origin/develop
+# M docs/capability_benchmarks.md
+# A docs/codex_v0_2_10_sprint_planning.md
+# M python/runner-core/src/infergrade/capabilities.py
+# M python/runner-core/tests/test_benchmark_catalog.py
+# M python/runner-core/tests/test_capabilities.py
+# M schemas/capability_catalog.json
+```
+
+Validation passed locally on the release branch:
+
+```bash
+python3 -m unittest python/runner-core/tests/test_capabilities.py python/runner-core/tests/test_benchmark_catalog.py python/runner-core/tests/test_capability_contract.py python/runner-core/tests/test_request_resolution.py python/runner-core/tests/test_runner.py python/runner-core/tests/test_end_to_end_proof_path.py
+python3 ./scripts/sync_versions.py --check
+python3 ./scripts/check_versions.py
+git diff --check
+python3 -m json.tool schemas/capability_catalog.json >/tmp/capability_catalog.json.check
+python3 -m json.tool schemas/json/capability_run.schema.json >/tmp/capability_run.schema.json.check
+cargo test --manifest-path crates/runner-engine/Cargo.toml --locked
+cargo test --manifest-path apps/runner-cli/Cargo.toml --locked
+gitleaks detect --source=. --redact --no-banner --exit-code 0
+npm ci --prefix apps/desktop-runner
+npm run check --prefix apps/desktop-runner
+./scripts/build_desktop_sidecar.sh
+```
+
+Release evidence honesty:
+
+- v0.2.10 does not add runnable GPQA, broad MMLU-Pro defaults, public leaderboard mechanics, local dollar-cost estimates, adaptive testing, or global reasoning/intelligence claims.
+- Quant fidelity remains represented as a separate reference surface by `perplexity_reference_v1`; it is not generalized in this release.
+- GitHub Actions may still show the known pre-step `steps: []` failure shape; local validation and reviewer passes are the release evidence if that infra issue persists.
