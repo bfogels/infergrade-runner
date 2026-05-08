@@ -18,6 +18,7 @@ from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcn
 
 CAPABILITY_REGISTRY_VERSION = "2026-04-multiturn-preview"
 CODING_STATIC_REPAIR_FIXTURE_REVISION = "2026-05-coding-static-preview"
+REASONING_EXACT_ANSWER_FIXTURE_REVISION = "2026-05-reasoning-exact-preview"
 _DOMINANT_GENERATION_FAILURE_RATE = 0.5
 
 DEFAULT_CAPABILITY_IMAGES = {
@@ -88,6 +89,15 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         benchmark_kind="static_code_repair",
         primary_metric_name="static_constraint_accuracy",
         generation_max_tokens=256,
+        execution_mode="native",
+        case_limits={"canary": 2, "standard": 3, "gold": 3},
+    ),
+    "reasoning_exact_answer_v1": CapabilityBenchmarkSpec(
+        benchmark_id="reasoning_exact_answer_v1",
+        display_name="Reasoning exact answer",
+        benchmark_kind="exact_reasoning",
+        primary_metric_name="exact_answer_accuracy",
+        generation_max_tokens=32,
         execution_mode="native",
         case_limits={"canary": 2, "standard": 3, "gold": 3},
     ),
@@ -718,6 +728,8 @@ def _native_scorer_type(spec: CapabilityBenchmarkSpec) -> str:
         return "exact_match"
     if spec.benchmark_id == "coding_static_repair_v1":
         return "static_check"
+    if spec.benchmark_id == "reasoning_exact_answer_v1":
+        return "exact_match"
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -726,6 +738,8 @@ def _native_scoring_policy(spec: CapabilityBenchmarkSpec) -> str:
         return "deterministic_required_phrase_match_v1"
     if spec.benchmark_id == "coding_static_repair_v1":
         return "deterministic_static_code_constraints_v1"
+    if spec.benchmark_id == "reasoning_exact_answer_v1":
+        return "deterministic_exact_answer_v1"
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -734,6 +748,8 @@ def _native_fixture_revision(spec: CapabilityBenchmarkSpec) -> str:
         return CAPABILITY_REGISTRY_VERSION
     if spec.benchmark_id == "coding_static_repair_v1":
         return CODING_STATIC_REPAIR_FIXTURE_REVISION
+    if spec.benchmark_id == "reasoning_exact_answer_v1":
+        return REASONING_EXACT_ANSWER_FIXTURE_REVISION
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -815,7 +831,38 @@ def _native_artifact_claim_boundary(spec: CapabilityBenchmarkSpec, state: str) -
         return _assistant_artifact_claim_boundary(state)
     if spec.benchmark_id == "coding_static_repair_v1":
         return _coding_artifact_claim_boundary(state)
+    if spec.benchmark_id == "reasoning_exact_answer_v1":
+        return _reasoning_artifact_claim_boundary(state)
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
+
+
+def _reasoning_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    unsupported = [
+        "This is not a global reasoning or intelligence score.",
+        "This is not public leaderboard evidence.",
+        "This is not MMLU-Pro, GPQA, or gold evidence.",
+        "This does not prove broad factual knowledge or expert reasoning ability.",
+    ]
+    if state == "scored":
+        supported = [
+            "This local setup completed the pinned exact-answer reasoning fixture set.",
+            "The score reports deterministic exact-answer checks for this thin local sample.",
+        ]
+    elif state == "partial":
+        supported = [
+            "This local setup attempted the pinned exact-answer reasoning fixture set with partial generation failures.",
+            "The artifact preserves scored and failed task rows separately for this thin local sample.",
+        ]
+    elif state == "failed":
+        supported = [
+            "This local setup attempted the pinned exact-answer reasoning fixture set.",
+            "The artifact preserves generation failures without converting them to broad reasoning scores.",
+        ]
+    else:
+        supported = [
+            "This artifact records that the pinned exact-answer reasoning fixture set was not yet scored.",
+        ]
+    return {"supported_claims": supported, "unsupported_claims": unsupported}
 
 
 def _capability_artifact_state(status: Any, score: Any, generation_failure_severity: Any = None) -> str:
@@ -973,15 +1020,34 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
         checks = list(case.get("checks") or [])
         response = str(prediction.get("response") or prediction.get("completion") or "")
         if prediction.get("generation_status") != "completed":
-            total_constraints += len(checks)
+            total_constraints += len(checks) if checks else 1
             case_results.append(
                 {
                     "case_id": case_id,
                     "state": "failed",
                     "error_class": "generation_failed",
                     "passed_constraints": 0,
-                    "total_constraints": len(checks),
+                    "total_constraints": len(checks) if checks else 1,
                     "score": None,
+                }
+            )
+            continue
+        expected_answers = list(case.get("expected_answers") or [])
+        if expected_answers:
+            total_constraints += 1
+            expected = [_normalize_exact_answer(item) for item in expected_answers]
+            extracted_answer = _extract_exact_answer(response, expected_answers)
+            passed = extracted_answer in expected
+            if passed:
+                passed_constraints += 1
+            case_results.append(
+                {
+                    "case_id": case_id,
+                    "state": "scored",
+                    "error_class": None,
+                    "passed_constraints": 1 if passed else 0,
+                    "total_constraints": 1,
+                    "score": 1.0 if passed else 0.0,
                 }
             )
             continue
@@ -1031,6 +1097,7 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
         )
     score = round(passed_constraints / float(total_constraints), 6) if total_constraints else None
     malformed_output_count = len([item for item in case_results if item.get("error_class") == "malformed_output"])
+    correct_count = len([item for item in case_results if item.get("score") == 1.0])
     status = "partial" if malformed_output_count else "completed"
     return {
         "benchmark_id": spec.benchmark_id,
@@ -1041,6 +1108,8 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
             spec.primary_metric_name: score,
             "passed_constraints": passed_constraints,
             "total_constraints": total_constraints,
+            "correct_count": correct_count,
+            "total_count": len(case_results),
             "malformed_output_count": malformed_output_count,
             "case_accuracy": round(
                 len([item for item in case_results if item.get("score") == 1.0]) / float(len(case_results)),
@@ -1056,6 +1125,39 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
 
 def _normalize_score_text(value: Any) -> str:
     return " ".join(str(value or "").lower().split())
+
+
+def _normalize_exact_answer(value: Any) -> str:
+    return _normalize_score_text(str(value or "").strip().strip(".:;!?,"))
+
+
+def _extract_exact_answer(value: Any, expected_answers: List[Any]) -> Optional[str]:
+    normalized = _normalize_score_text(value)
+    expected = [_normalize_exact_answer(item) for item in expected_answers]
+    if normalized in expected:
+        return normalized
+
+    if set(expected) <= {"yes", "no"}:
+        hits = [item for item in ("yes", "no") if re.search(r"\b%s\b" % re.escape(item), normalized)]
+        return hits[0] if len(hits) == 1 else None
+
+    if all(re.fullmatch(r"-?\d+", item or "") for item in expected):
+        hits = re.findall(r"\b-?\d+\b", normalized)
+        unique_hits = []
+        for item in hits:
+            if item not in unique_hits:
+                unique_hits.append(item)
+        return unique_hits[0] if len(unique_hits) == 1 else None
+
+    if all(re.fullmatch(r"[a-z]", item or "") for item in expected):
+        hits = re.findall(r"\b([a-z])\b(?:\)|\.|:)?", normalized)
+        unique_hits = []
+        for item in hits:
+            if item not in unique_hits:
+                unique_hits.append(item)
+        return unique_hits[0] if len(unique_hits) == 1 else None
+
+    return None
 
 
 def _extract_single_code_fence(value: str, language: Any = None) -> Optional[str]:
@@ -1083,7 +1185,45 @@ def _native_benchmark_cases(spec: CapabilityBenchmarkSpec) -> List[Dict[str, Any
         return _multiturn_chat_memory_cases()
     if spec.benchmark_id == "coding_static_repair_v1":
         return _coding_static_repair_cases()
+    if spec.benchmark_id == "reasoning_exact_answer_v1":
+        return _reasoning_exact_answer_cases()
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
+
+
+def _reasoning_exact_answer_cases() -> List[Dict[str, Any]]:
+    return [
+        {
+            "case_id": "reasoning-exact-syllogism",
+            "task_id": "reasoning_exact_answer_v1/syllogism",
+            "prompt": (
+                "Answer exactly yes or no.\n"
+                "Every dax is a wug. No wug is red. Can a dax be red?"
+            ),
+            "expected_answers": ["no"],
+        },
+        {
+            "case_id": "reasoning-exact-token-count",
+            "task_id": "reasoning_exact_answer_v1/token-count",
+            "prompt": (
+                "Answer only the number.\n"
+                "A box has 3 blue tokens and 2 red tokens. Add 4 blue tokens and remove 1 red token. "
+                "How many blue tokens are in the box?"
+            ),
+            "expected_answers": ["7"],
+        },
+        {
+            "case_id": "reasoning-exact-ordering",
+            "task_id": "reasoning_exact_answer_v1/ordering",
+            "prompt": (
+                "Answer only the option letter.\n"
+                "If A is greater than B, and B is greater than C, what is A relative to C?\n"
+                "A) less than\n"
+                "B) greater than\n"
+                "C) equal"
+            ),
+            "expected_answers": ["B"],
+        },
+    ]
 
 
 def _coding_static_repair_cases() -> List[Dict[str, Any]]:
