@@ -159,6 +159,45 @@ fn run_claim_request_rejects_unsafe_ids_and_missing_mode() {
     )
     .expect_err("execution mode required");
     assert_eq!(missing_mode.code(), "hub_execution_mode_invalid");
+
+    for bad_mode in [
+        "cloud_worker",
+        " local_native ",
+        "LOCAL_NATIVE",
+        "local_native; rm -rf /",
+    ] {
+        let error = build_run_claim_request(
+            "api.infergrade.com",
+            "run_cfg_abc_123",
+            "runner_local_native_1",
+            bad_mode,
+            Some("qbhr_runner_secret"),
+        )
+        .expect_err("invalid execution mode rejected");
+        assert_eq!(
+            error.code(),
+            "hub_execution_mode_invalid",
+            "input: {bad_mode}"
+        );
+        assert!(
+            error.message().contains("cloud_container"),
+            "error should advertise supported vocabulary, got: {}",
+            error.message()
+        );
+    }
+
+    let cloud_container = build_run_claim_request(
+        "api.infergrade.com",
+        "run_cfg_abc_123",
+        "runner_cloud_1",
+        "cloud_container",
+        Some("qbhr_runner_secret"),
+    )
+    .expect("cloud_container accepted");
+    assert_eq!(
+        cloud_container.sanitized_preview()["payload"]["execution_mode"],
+        "cloud_container"
+    );
 }
 
 #[test]

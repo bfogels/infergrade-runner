@@ -7,6 +7,8 @@ use std::time::Duration;
 pub const HUB_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const HUB_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 pub const HUB_BUNDLE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(300);
+const SUPPORTED_HUB_EXECUTION_MODES: &[&str] =
+    &["local_native", "local_container", "cloud_container"];
 
 fn build_hub_client(timeout: Duration) -> reqwest::Client {
     // Builder failure here would indicate a broken TLS/runtime config, in
@@ -220,11 +222,13 @@ pub fn build_run_claim_request(
 ) -> Result<HubJsonRequest, RunnerError> {
     let run_id = validate_hub_path_id(run_id, "run_id")?;
     let worker_id = validate_hub_path_id(worker_id, "worker_id")?;
-    let execution_mode = execution_mode.trim();
-    if execution_mode.is_empty() {
+    if !SUPPORTED_HUB_EXECUTION_MODES.contains(&execution_mode) {
         return Err(RunnerError::new(
             "hub_execution_mode_invalid",
-            "execution_mode is required to claim a Hub run.",
+            format!(
+                "execution_mode `{execution_mode}` is not one of: {}",
+                SUPPORTED_HUB_EXECUTION_MODES.join(", ")
+            ),
         ));
     }
     build_hub_json_request(
