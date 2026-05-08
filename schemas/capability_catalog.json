@@ -154,6 +154,7 @@
       "claim_boundary": "Sampled MMLU-Pro reference evidence; useful as a broad knowledge/reasoning reference signal, not a leaderboard or gold claim.",
       "promotion_blockers": [
         "Observed duration and token-volume metadata are needed for stronger local recommendation copy.",
+        "Real dogfood runs are needed to calibrate local duration and failure behavior.",
         "Leaderboard-style claims require the full official protocol and separate publication controls."
       ]
     },
