@@ -39,6 +39,8 @@ The Runner-owned `capability_run` artifact is distinct from `native_first_run` a
 
 Every artifact must remain useful without Hub. Hub may summarize or compare, but Runner owns execution truth.
 
+Runner may also emit a `capability_summary` artifact at `artifacts/capability/capability_summary.json`. The summary is a bundle-level index and explanation layer over one or more `capability_run` artifacts. It is meant to help users and Hub locate evidence, see missing or failed surfaces, and choose the next benchmark action. It does not replace raw `capability_run` artifacts and must not compute a global assistant/coding/reasoning/intelligence score.
+
 ## State Semantics
 
 Capability states are explicit:
@@ -64,6 +66,8 @@ Confidence labels describe evidence weight, not prestige:
 - `gold`
 
 Runner must not automatically promote evidence into a stronger confidence label just because a score is high. Promotion requires the corresponding protocol controls, sample size, repetition, and validation gates.
+
+For local decision-lane summaries, `thin_local_sample` remains the default confidence label. Repeating the same local lane may support `repeated_local_run`, but it still does not make the evidence a reference sample, gold evidence, or public leaderboard claim.
 
 ## Local-First Protocol
 

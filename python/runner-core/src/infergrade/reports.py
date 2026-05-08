@@ -130,6 +130,8 @@ def render_bundle_report(
             "- Capability state: %s" % _dash(capability.get("capability_state")),
             "- Capability score: %s" % _dash(capability.get("capability_score")),
             "- Capability status: %s" % _dash(capability.get("capability_status")),
+            "- Capability summary artifact: %s" % _dash((manifest.get("files") or {}).get("capability_summary")),
+            "- Capability run artifacts: %s" % _dash(_capability_run_artifact_paths(capability)),
             "- Fidelity state: %s" % _dash(fidelity.get("fidelity_state")),
             "- Perplexity: %s" % _dash(((fidelity.get("perplexity") or {}).get("value"))),
             "",
@@ -168,6 +170,19 @@ def _deployment_rows(results: List[Dict[str, Any]]) -> List[str]:
             )
         )
     return rows
+
+
+def _capability_run_artifact_paths(capability: Dict[str, Any]) -> str:
+    artifacts = capability.get("capability_artifacts") or {}
+    paths = []
+    if isinstance(artifacts, dict):
+        for benchmark_id, payload in sorted(artifacts.items()):
+            if benchmark_id == "_summary" or not isinstance(payload, dict):
+                continue
+            path = payload.get("capability_run_path")
+            if path:
+                paths.append("%s=%s" % (benchmark_id, path))
+    return ", ".join(paths)
 
 
 def _write_text(path: str, content: str) -> None:
