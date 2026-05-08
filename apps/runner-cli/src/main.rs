@@ -359,6 +359,14 @@ where
         if run_id.is_none() {
             return Err("--upload requires --run-id".to_string());
         }
+        let token_source_count = (run_token.is_some() as u8)
+            + (run_token_env_var.is_some() as u8)
+            + (run_token_stdin as u8);
+        if token_source_count > 1 {
+            return Err(
+                "first-run accepts at most one of --runner-token, --runner-token-env, or --runner-token-stdin".to_string(),
+            );
+        }
         if run_token.is_none() {
             run_token = resolve_runner_token(
                 run_token_env_var.as_deref(),
