@@ -110,6 +110,7 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         "claim_boundary",
         "promotion_blockers",
     }
+    required_non_empty_fields = required_status_fields - {"promotion_blockers"}
     declared_check_ids = {str(item.get("check_id")) for item in list(payload.get("checks") or []) if item.get("check_id")}
     planned_check_ids = {
         str(item.get("check_id"))
@@ -124,16 +125,27 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         missing = sorted(field for field in required_status_fields if field not in status)
         if missing:
             failures.append(f"{check_id}: missing status field(s): {', '.join(missing)}")
+        for field in sorted(required_non_empty_fields):
+            if field in status and not str(status.get(field) or "").strip():
+                failures.append(f"{check_id}: status field {field} must be non-empty")
         if str(status.get("evidence_lane_id") or "") not in lanes:
             failures.append(f"{check_id}: unknown evidence_lane_id {status.get('evidence_lane_id')!r}")
         if str(status.get("surface_id") or "") not in surfaces:
             failures.append(f"{check_id}: unknown surface_id {status.get('surface_id')!r}")
         if str(status.get("maturity") or "") not in maturity_levels:
             failures.append(f"{check_id}: unknown maturity {status.get('maturity')!r}")
-        if str(status.get("scoring_policy_id") or "") not in score_policy_ids and not str(
-            status.get("scoring_policy_id") or ""
-        ).endswith("_v1"):
-            failures.append(f"{check_id}: scoring_policy_id is not declared or planned")
+        status_policy = str(status.get("scoring_policy_id") or "").strip()
+        declared_check = next((item for item in list(payload.get("checks") or []) if item.get("check_id") == check_id), None)
+        planned_candidate = next(
+            (item for item in list(payload.get("planned_benchmark_candidates") or []) if item.get("check_id") == check_id),
+            None,
+        )
+        if declared_check and status_policy != str(declared_check.get("score_policy_id") or "").strip():
+            failures.append(f"{check_id}: status scoring_policy_id does not match check score_policy_id")
+        if planned_candidate and status_policy != str(planned_candidate.get("planned_score_policy_id") or "").strip():
+            failures.append(f"{check_id}: status scoring_policy_id does not match planned_score_policy_id")
+        if not declared_check and not planned_candidate and status_policy not in score_policy_ids:
+            failures.append(f"{check_id}: scoring_policy_id is not declared")
         if not isinstance(status.get("promotion_blockers"), list) or not status.get("promotion_blockers"):
             failures.append(f"{check_id}: promotion_blockers must be a non-empty list")
     extra_status_ids = sorted(set(status_by_check) - (declared_check_ids | planned_check_ids))
@@ -571,6 +583,7 @@ def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dic
         "fixture_or_dataset_revision_status": legitimacy_status.get("fixture_or_dataset_revision_status"),
         "harness_status": legitimacy_status.get("harness_status"),
         "sample_policy": legitimacy_status.get("sample_policy"),
+        "benchmark_claim_boundary": legitimacy_status.get("claim_boundary"),
         "expected_duration_token_volume_status": legitimacy_status.get("expected_duration_token_volume_status"),
         "sandbox_requirement": legitimacy_status.get("sandbox_requirement"),
         "promotion_blockers": list(legitimacy_status.get("promotion_blockers") or []),
@@ -633,10 +646,21 @@ def _planned_benchmark_candidate_payload(catalog: Dict[str, Any], item: Dict[str
     candidate = dict(item)
     lane_id = _evidence_lane_id_for_item(catalog, candidate)
     lane = _evidence_lane_payload(catalog, lane_id)
+    legitimacy_status = benchmark_status_index(catalog).get(str(candidate.get("check_id") or ""), {})
     candidate["evidence_lane_id"] = lane_id
     candidate["evidence_lane_label"] = lane.get("display_name")
     candidate["claim_strength"] = lane.get("claim_strength")
     candidate["claim_boundary"] = lane.get("claim_boundary")
+    candidate["benchmark_maturity"] = legitimacy_status.get("maturity")
+    candidate["runnable_status"] = legitimacy_status.get("runnable_status")
+    candidate["default_inclusion_status"] = legitimacy_status.get("default_inclusion_status")
+    candidate["fixture_or_dataset_revision_status"] = legitimacy_status.get("fixture_or_dataset_revision_status")
+    candidate["harness_status"] = legitimacy_status.get("harness_status")
+    candidate["sample_policy"] = legitimacy_status.get("sample_policy")
+    candidate["benchmark_claim_boundary"] = legitimacy_status.get("claim_boundary")
+    candidate["expected_duration_token_volume_status"] = legitimacy_status.get("expected_duration_token_volume_status")
+    candidate["sandbox_requirement"] = legitimacy_status.get("sandbox_requirement")
+    candidate["promotion_blockers"] = list(legitimacy_status.get("promotion_blockers") or [])
     return candidate
 
 

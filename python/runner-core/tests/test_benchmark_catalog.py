@@ -1,5 +1,6 @@
 import sys
 import unittest
+from copy import deepcopy
 
 sys.path.insert(0, "python/runner-core/src")
 
@@ -100,6 +101,20 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.assertNotIn("reference", statuses[check_id]["maturity"])
             self.assertNotIn("gold", statuses[check_id]["maturity"])
             self.assertTrue(statuses[check_id]["promotion_blockers"])
+
+    def test_catalog_legitimacy_validation_rejects_weak_or_mismatched_status(self):
+        catalog = load_capability_catalog()
+        mutated = deepcopy(catalog)
+        statuses = {item["check_id"]: item for item in mutated["benchmark_status_matrix"]}
+        statuses["multiturn_chat_memory_v1"]["claim_boundary"] = ""
+        statuses["multiturn_chat_memory_v1"]["runnable_status"] = ""
+        statuses["multiturn_chat_memory_v1"]["scoring_policy_id"] = "typo_policy_v1"
+        statuses["gpqa_reference_v1"]["scoring_policy_id"] = "typo_policy_v1"
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+        self.assertTrue(any("status field claim_boundary must be non-empty" in item for item in failures))
+        self.assertTrue(any("status field runnable_status must be non-empty" in item for item in failures))
+        self.assertTrue(any("multiturn_chat_memory_v1" in item and "does not match check" in item for item in failures))
+        self.assertTrue(any("gpqa_reference_v1" in item and "does not match planned" in item for item in failures))
 
     def test_evidence_lane_index_exposes_claim_boundaries(self):
         lanes = evidence_lane_index()
@@ -280,11 +295,17 @@ class BenchmarkCatalogTests(unittest.TestCase):
         planned = {item["check_id"]: item for item in guidance["planned_benchmark_candidates"]}
         self.assertNotIn("mmlu_pro_reference_v1", planned)
         self.assertEqual(planned["gpqa_reference_v1"]["status"], "planned_access_gated")
+        self.assertEqual(planned["gpqa_reference_v1"]["benchmark_maturity"], "planned")
+        self.assertEqual(planned["gpqa_reference_v1"]["runnable_status"], "not_runnable_access_gated")
+        self.assertEqual(planned["gpqa_reference_v1"]["harness_status"], "not_implemented")
         self.assertEqual(planned["gpqa_reference_v1"]["access_status"], "gated_contact_share_required")
         self.assertIn("Do not commit", planned["gpqa_reference_v1"]["dataset_handling_policy"])
         self.assertEqual(planned["swebench_verified_gold_v1"]["benchmark_tier"], "gold")
         self.assertEqual(planned["swebench_verified_gold_v1"]["evidence_lane_id"], "gold")
         self.assertEqual(planned["swebench_verified_gold_v1"]["claim_strength"], "curated_reference")
+        self.assertEqual(planned["swebench_verified_gold_v1"]["benchmark_maturity"], "gold_candidate")
+        self.assertEqual(planned["swebench_verified_gold_v1"]["runnable_status"], "not_runnable")
+        self.assertIn("Future gold evidence candidate", planned["swebench_verified_gold_v1"]["benchmark_claim_boundary"])
         self.assertTrue(planned["swebench_verified_gold_v1"]["why_not_default"])
         self.assertTrue(any(action["action"] == "add_capability_check" for action in guidance["next_actions"]))
 
@@ -308,6 +329,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(interactive["claim_strength"], "first_pass_local_decision")
         self.assertEqual(interactive["benchmark_maturity"], "strong_local_candidate")
         self.assertEqual(interactive["runnable_status"], "runnable_default_local")
+        self.assertIn("Deployment fitness evidence only", interactive["benchmark_claim_boundary"])
         self.assertFalse(interactive["higher_is_better"])
         self.assertEqual(interactive["primary_score_weight"], 0.0)
         self.assertIn("time_to_first_token_ms", interactive["score_breakdown_fields"])
@@ -323,6 +345,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         )
         metadata = selection_metadata_for_request(request)
         self.assertEqual(metadata["benchmark_checks"][0]["score_dimension"], "multiturn_instruction_retention")
+        self.assertEqual(metadata["benchmark_checks"][0]["benchmark_maturity"], "thin_local_sample")
+        self.assertIn("Thin local assistant sample", metadata["benchmark_checks"][0]["benchmark_claim_boundary"])
         self.assertEqual(metadata["benchmark_checks"][0]["primary_score_metric"], "constraint_retention_accuracy")
         self.assertIn("case_accuracy", metadata["benchmark_checks"][0]["score_breakdown_fields"])
         self.assertEqual(metadata["score_policies"][0]["score_policy_id"], "multiturn_constraint_retention_v1")
