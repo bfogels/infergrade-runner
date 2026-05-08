@@ -63,6 +63,72 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(progress["status"], "completed")
         self.assertEqual(progress["deployment_profiles"]["interactive_chat_v1"]["status"], "completed")
 
+    def test_default_output_dir_writes_capability_summary_inside_bundle(self):
+        class FakeAdapter(object):
+            def default_backend_flags(self):
+                return []
+
+            def resolve_version(self, simulate=True, request=None):
+                return "llama.cpp-test"
+
+            def runtime_metadata(self, request):
+                return {"container_image": None, "container_runtime": None}
+
+            def run_capability(self, request, progress_callback=None):
+                from infergrade.capabilities import execute_capability_suite
+
+                return execute_capability_suite(self, request, progress_callback=progress_callback)
+
+            def generate_text(self, request, prompt, max_tokens):
+                if "HARBOR-17" in prompt:
+                    return {"text": "HARBOR-17 uses q4_k_m.", "status": "completed", "error": None}
+                if "READY" in prompt:
+                    return {"text": "READY local runner", "status": "completed", "error": None}
+                return {"text": "simulated answer", "status": "completed", "error": None}
+
+            def run_deployment_profile(self, request, profile_id, progress_callback=None):
+                return DeploymentExecution(
+                    profile_id=profile_id,
+                    metrics={
+                        "ttft_p50_ms": 100.0,
+                        "ttft_p95_ms": 100.0,
+                        "latency_p50_ms": 400.0,
+                        "latency_p95_ms": 400.0,
+                        "decode_tokens_per_second_p50": 50.0,
+                        "decode_tokens_per_second_p95": 50.0,
+                        "request_throughput_per_minute": 150.0,
+                        "peak_vram_mb": 1024.0,
+                        "load_time_ms": 250.0,
+                        "oom_or_failure_rate": 0.0,
+                        "deployment_confidence": 0.9,
+                    },
+                    status="completed",
+                    artifacts={},
+                )
+
+        output_dir = os.path.join("runs", "capability-summary-default-output-test")
+        shutil.rmtree(output_dir, ignore_errors=True)
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["multiturn_chat_memory_v1"],
+            simulate=False,
+        )
+
+        result = None
+        try:
+            with mock.patch("infergrade.runner.get_adapter", return_value=FakeAdapter()):
+                with mock.patch("infergrade.runner._bundle_id", return_value="capability-summary-default-output-test"):
+                    result = run_infergrade(request)
+            output_dir = result["output_dir"]
+            with open(os.path.join(output_dir, "manifest.json"), "r", encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            self.assertEqual(manifest["files"]["capability_summary"], "artifacts/capability/capability_summary.json")
+            self.assertTrue(os.path.exists(os.path.join(output_dir, "artifacts", "capability", "capability_summary.json")))
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
+
     def test_real_run_records_artifact_resolution_metadata(self):
         artifact_path = os.path.join(self.tempdir, "model.gguf")
         with open(artifact_path, "wb") as handle:

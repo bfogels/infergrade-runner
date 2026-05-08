@@ -1,4 +1,4 @@
-"""Validation helpers for Runner-owned capability run artifacts."""
+"""Validation helpers for Runner-owned capability artifacts."""
 
 import json
 from pathlib import Path
@@ -32,6 +32,7 @@ SCORER_TYPES = (
     "metric_only",
     "manual_review",
 )
+CAPABILITY_ARTIFACT_POINTER_KINDS = ("capability_run", "benchmark_summary", "unreadable_capability_run")
 
 
 def repo_root() -> Path:
@@ -45,9 +46,20 @@ def capability_run_schema_path(root: Optional[Path] = None) -> Path:
     return base / "schemas" / "json" / "capability_run.schema.json"
 
 
+def capability_summary_schema_path(root: Optional[Path] = None) -> Path:
+    """Return the path to the capability summary artifact schema."""
+    base = Path(root) if root is not None else repo_root()
+    return base / "schemas" / "json" / "capability_summary.schema.json"
+
+
 def load_capability_run_schema(root: Optional[Path] = None) -> Dict[str, Any]:
     """Load the capability run artifact schema."""
     return json.loads(capability_run_schema_path(root).read_text(encoding="utf-8"))
+
+
+def load_capability_summary_schema(root: Optional[Path] = None) -> Dict[str, Any]:
+    """Load the capability summary artifact schema."""
+    return json.loads(capability_summary_schema_path(root).read_text(encoding="utf-8"))
 
 
 def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
@@ -134,6 +146,80 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
     return errors
 
 
+def validate_capability_summary_artifact(artifact: Dict[str, Any]) -> List[str]:
+    """Return validation errors for the v1 capability summary artifact semantics."""
+    errors: List[str] = []
+    _require(artifact, "artifact_spec_version", errors)
+    if artifact.get("artifact_kind") != "capability_summary":
+        errors.append("artifact_kind must be capability_summary")
+    _require(artifact, "summary_id", errors)
+    _require(artifact, "created_at", errors)
+
+    runner = artifact.get("runner")
+    if not isinstance(runner, dict):
+        errors.append("runner must be an object")
+    else:
+        _require(runner, "name", errors, prefix="runner.")
+        _require(runner, "version", errors, prefix="runner.")
+
+    surfaces = artifact.get("surfaces")
+    if not isinstance(surfaces, list):
+        errors.append("surfaces must be an array")
+    else:
+        seen_surfaces = set()
+        for index, surface in enumerate(surfaces):
+            if not isinstance(surface, dict):
+                errors.append("surfaces[%d] must be an object" % index)
+                continue
+            prefix = "surfaces[%d]." % index
+            _enum(surface, "surface", CAPABILITY_SURFACES, errors, prefix=prefix)
+            _enum(surface, "state", CAPABILITY_STATES, errors, prefix=prefix)
+            _optional_enum(surface, "lane", EVIDENCE_LANES, errors, prefix=prefix)
+            _optional_enum(surface, "confidence_label", CONFIDENCE_LABELS, errors, prefix=prefix)
+            if surface.get("surface") in seen_surfaces:
+                errors.append(prefix + "surface must be unique")
+            seen_surfaces.add(surface.get("surface"))
+            if surface.get("state") == "scored" and surface.get("score") is None:
+                errors.append(prefix + "score is required when state is scored")
+            if surface.get("state") in ("failed", "skipped", "not_yet_benchmarked", "not_comparable") and surface.get("score") is not None:
+                errors.append(prefix + "score must be null unless the surface is scored or partial")
+            if not isinstance(surface.get("capability_artifacts"), list):
+                errors.append(prefix + "capability_artifacts must be an array")
+            if not _confidence_allowed_for_lane(surface.get("lane"), surface.get("confidence_label")):
+                errors.append(prefix + "confidence_label cannot exceed evidence lane controls")
+
+    artifacts = artifact.get("capability_artifacts")
+    if not isinstance(artifacts, list):
+        errors.append("capability_artifacts must be an array")
+    else:
+        for index, item in enumerate(artifacts):
+            if not isinstance(item, dict):
+                errors.append("capability_artifacts[%d] must be an object" % index)
+                continue
+            prefix = "capability_artifacts[%d]." % index
+            _enum(item, "artifact_kind", CAPABILITY_ARTIFACT_POINTER_KINDS, errors, prefix=prefix)
+            _enum(item, "surface", CAPABILITY_SURFACES, errors, prefix=prefix)
+            _enum(item, "state", CAPABILITY_STATES, errors, prefix=prefix)
+            _enum(item, "lane", EVIDENCE_LANES, errors, prefix=prefix)
+            _enum(item, "confidence_label", CONFIDENCE_LABELS, errors, prefix=prefix)
+            _require(item, "path", errors, prefix=prefix)
+            if not _confidence_allowed_for_lane(item.get("lane"), item.get("confidence_label")):
+                errors.append(prefix + "confidence_label cannot exceed evidence lane controls")
+
+    next_action = artifact.get("next_recommended_benchmark_action")
+    if not isinstance(next_action, dict):
+        errors.append("next_recommended_benchmark_action must be an object")
+    else:
+        _require(next_action, "action", errors, prefix="next_recommended_benchmark_action.")
+        _require(next_action, "reason", errors, prefix="next_recommended_benchmark_action.")
+
+    unsupported = artifact.get("unsupported_claim_summary")
+    if not isinstance(unsupported, list) or not all(isinstance(item, str) and item.strip() for item in unsupported):
+        errors.append("unsupported_claim_summary must be a non-empty string array")
+
+    return errors
+
+
 def _require(payload: Dict[str, Any], key: str, errors: List[str], prefix: str = "") -> None:
     value = payload.get(key)
     if value is None or (isinstance(value, str) and not value.strip()):
@@ -143,3 +229,22 @@ def _require(payload: Dict[str, Any], key: str, errors: List[str], prefix: str =
 def _enum(payload: Dict[str, Any], key: str, values: tuple, errors: List[str], prefix: str = "") -> None:
     if payload.get(key) not in values:
         errors.append(prefix + key + " must be one of: " + ", ".join(values))
+
+
+def _optional_enum(payload: Dict[str, Any], key: str, values: tuple, errors: List[str], prefix: str = "") -> None:
+    if payload.get(key) is not None and payload.get(key) not in values:
+        errors.append(prefix + key + " must be one of: " + ", ".join(values))
+
+
+def _confidence_allowed_for_lane(lane: Optional[str], confidence_label: Optional[str]) -> bool:
+    if confidence_label is None:
+        return True
+    if lane is None:
+        return confidence_label in ("single_smoke", "thin_local_sample")
+    allowed = {
+        "smoke": ("single_smoke",),
+        "decision": ("single_smoke", "thin_local_sample", "repeated_local_run"),
+        "reference": ("single_smoke", "thin_local_sample", "repeated_local_run", "stronger_local_sample", "reference_sample"),
+        "gold": CONFIDENCE_LABELS,
+    }
+    return confidence_label in allowed.get(lane, ())

@@ -378,6 +378,8 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
     else:
         bundle_id = provisional_bundle_id
 
+    request.output_dir = output_dir
+
     if not request.resume and _output_dir_has_existing_state(output_dir):
         raise ValueError(
             "Output directory already contains InferGrade state. Re-run with --resume or choose a new --output path."
@@ -658,6 +660,9 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             manifest_files["artifact_resolution"] = "artifacts/receipts/artifact_resolution.json"
         if fidelity_execution.metrics or fidelity_execution.context or fidelity_execution.reason_codes:
             manifest_files["fidelity"] = "artifacts/fidelity.json"
+        capability_summary_path = ((capability_execution.artifacts or {}).get("_summary") or {}).get("capability_summary_path")
+        if capability_summary_path:
+            manifest_files["capability_summary"] = os.path.relpath(capability_summary_path, output_dir)
         manifest = {
             "bundle_spec_version": "0.1-draft",
             "result_spec_version": "0.1-draft",
@@ -725,6 +730,8 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             "simulated": request.simulate,
             "validation": final_validation.to_dict(),
         }
+        if capability_summary_path:
+            summary["capability_summary"] = os.path.relpath(capability_summary_path, output_dir)
         write_json(os.path.join(output_dir, "summary.json"), summary)
         manifest["status"]["validation_status"] = "valid" if final_validation.valid else "invalid"
         manifest["files"]["report"] = "report.md"

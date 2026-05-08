@@ -224,6 +224,15 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored"})
         self.assertEqual(artifact["protocol"]["scorer_type"], "exact_match")
         self.assertIn("This is not a global assistant capability score.", artifact["claim_boundary"]["unsupported_claims"])
+        capability_summary_path = execution.artifacts["_summary"]["capability_summary_path"]
+        self.assertTrue(os.path.exists(capability_summary_path))
+        with open(capability_summary_path, "r", encoding="utf-8") as handle:
+            capability_summary = json.load(handle)
+        self.assertEqual(capability_summary["artifact_kind"], "capability_summary")
+        self.assertEqual(
+            capability_summary["next_recommended_benchmark_action"]["action"],
+            "run_coding_decision_lane",
+        )
 
     def test_native_multiturn_preserves_generation_failures_without_docker(self):
         class _FailingMemoryAdapter(object):
@@ -872,6 +881,32 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(execution.benchmark_results["ifeval"]["status"], "failed")
         self.assertEqual(execution.benchmark_results["ifeval"]["generation_failure_severity"], "all_failed")
         self.assertEqual(execution.benchmark_results["ifeval"]["generation_failure_count"], 3)
+
+    def test_execute_capability_suite_writes_real_failure_summary_artifact(self):
+        def fake_prepare(spec, benchmark_dir, tier):
+            raise RuntimeError("prepare failed")
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["ifeval"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            execution = execute_capability_suite(_FakeAdapter(), request)
+
+        summary_path = execution.artifacts["ifeval"]["summary_path"]
+        self.assertTrue(os.path.exists(summary_path))
+        capability_summary_path = execution.artifacts["_summary"]["capability_summary_path"]
+        with open(capability_summary_path, "r", encoding="utf-8") as handle:
+            capability_summary = json.load(handle)
+        pointers = capability_summary["capability_artifacts"]
+        self.assertEqual(pointers[0]["artifact_kind"], "benchmark_summary")
+        self.assertEqual(pointers[0]["path"], "artifacts/capability/ifeval/summary.json")
+        self.assertTrue(os.path.exists(os.path.join(self.tempdir, pointers[0]["path"])))
 
     def test_summarize_capability_execution_marks_dominant_generation_failures_as_degraded(self):
         request = RunRequest(

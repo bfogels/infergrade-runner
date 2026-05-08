@@ -169,6 +169,14 @@ The first local coding artifact path is `coding_static_repair_v1`: it emits a `c
 
 The first local reasoning artifact path is `reasoning_exact_answer_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. It checks a compact synthetic exact-answer fixture set. It does not use GPQA, does not replace MMLU-Pro reference evidence, and does not support broad reasoning, expert knowledge, or gold-evidence claims.
 
+## Capability Summary Artifact
+
+Runner also emits `artifacts/capability/capability_summary.json` when local capability execution runs. This is a discoverability and import artifact, not a new benchmark lane.
+
+The summary lists the capability artifacts produced in the bundle, keeps each surface separate, and records per-surface state, score where meaningful, evidence lane, confidence label, task count, failure count, repetition count, unsupported claim boundaries, and a cautious next benchmark action.
+
+The summary may recommend actions such as running a missing assistant/coding/reasoning decision lane, retrying a failed or partial lane, or repeating local capability checks after all thin samples are present. It must not combine assistant, coding, reasoning, quant fidelity, and deployment fitness into a global intelligence score.
+
 ## Container Contract
 
 Each benchmark container follows the same basic contract:
