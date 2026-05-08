@@ -19,8 +19,8 @@ Target user promise:
 
 ## Planned PRs
 
-- Capability summary PR: add a Runner-owned `capability_summary.json` artifact, conservative confidence/next-action helpers, schema/semantic validation, report discoverability, and tests for scored, failed, partial, and missing surfaces.
-- Release PR: promote the reviewed summary work from `develop` to `main` and bump version to `0.2.11` only in the release branch.
+- Capability summary PR: #177, merged to `develop`, added a Runner-owned `capability_summary.json` artifact, conservative confidence/next-action helpers, schema/semantic validation, report discoverability, and tests for scored, failed, partial, and missing surfaces.
+- Release PR: promote reviewed #177 content from `develop` to `main` and bump version to `0.2.11` only in the release branch.
 
 ## Implementation Notes
 
@@ -77,3 +77,47 @@ gitleaks detect --source=. --redact --no-banner --exit-code 0
 
 - None for Runner-owned local summary artifacts.
 - Hub display remains deferred to v0.2.12 because Hub `develop` is currently behind `main`.
+
+## Capability Summary PR Evidence
+
+Branch: `codex/runner-v0211-capability-summary`
+PR: #177
+Status: merged to `develop`
+
+Implemented:
+
+- Added `schemas/json/capability_summary.schema.json` and semantic validation helpers.
+- Added `artifacts/capability/capability_summary.json` generation after capability execution.
+- Added per-surface summary states, raw artifact pointers, unsupported claim summaries, and cautious next benchmark actions.
+- Added report, bundle manifest, result-record capability payload, and summary JSON pointers for artifact discovery.
+- Added fallback indexing for legacy/container benchmark `summary.json` artifacts without presenting them as `capability_run` artifacts.
+
+Reviewer findings:
+
+- P1: default-output runs initially wrote `capability_summary.json` outside the bundle. Fixed by assigning the effective bundle output directory to `request.output_dir` before capability execution.
+- P1: failed legacy/container benchmarks could point to a missing `summary.json`. Fixed by writing a real failure summary artifact and storing its path.
+- P2: artifact pointers did not require an explicit artifact kind. Fixed by adding `artifact_kind` to summary artifact pointers and validator/schema coverage.
+
+Validation passed locally on the feature branch after reviewer fixes:
+
+```bash
+python3 -m unittest python/runner-core/tests/test_capability_contract.py python/runner-core/tests/test_capability_summary.py python/runner-core/tests/test_capabilities.py python/runner-core/tests/test_runner.py
+python3 -m unittest python/runner-core/tests/test_release_ci.py
+python3 -m unittest discover python/runner-core/tests
+python3 -m json.tool schemas/capability_catalog.json >/tmp/capability_catalog.json.check
+python3 -m json.tool schemas/json/capability_run.schema.json >/tmp/capability_run.schema.json.check
+python3 -m json.tool schemas/json/capability_summary.schema.json >/tmp/capability_summary.schema.json.check
+python3 -m json.tool schemas/contract_manifest.json >/tmp/contract_manifest.json.check
+python3 ./scripts/sync_versions.py --check
+python3 ./scripts/check_versions.py
+git diff --check
+gitleaks detect --source=. --redact --no-banner --exit-code 0
+cargo test --manifest-path crates/runner-engine/Cargo.toml --locked
+cargo test --manifest-path apps/runner-cli/Cargo.toml --locked
+```
+
+Known limits:
+
+- v0.2.11 does not add true repeated-run execution or variance metrics.
+- The summary preserves repetition counts already declared by artifacts, but broader repeatability remains future work.
+- Hub import/display is intentionally deferred to v0.2.12.
