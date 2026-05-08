@@ -132,6 +132,70 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         }
         self.assertEqual(module._jsonl_ready_task("humaneval", task), task)
 
+    def test_evalplus_runner_extracts_task_failure_classes(self):
+        fake_evalplus_data = types.SimpleNamespace(
+            get_human_eval_plus=lambda: {},
+            get_mbpp_plus=lambda: {},
+            write_jsonl=lambda *args, **kwargs: None,
+        )
+        fake_mbpp = types.SimpleNamespace(mbpp_serialize_inputs=lambda task_id, inputs: inputs)
+        fake_evalplus_evaluate = types.SimpleNamespace(evaluate=lambda *args, **kwargs: None)
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-evalplus", "runner.py")
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "evalplus": types.SimpleNamespace(),
+                "evalplus.data": fake_evalplus_data,
+                "evalplus.data.mbpp": fake_mbpp,
+                "evalplus.evaluate": fake_evalplus_evaluate,
+            },
+        ):
+            module = _load_module("evalplus_runner_status_test_module", module_path)
+
+        self.assertEqual(
+            module._case_result_for_task(
+                "HumanEval/0",
+                [{"base_status": "pass", "plus_status": "pass"}],
+            )["failure_class"],
+            None,
+        )
+        passing = module._case_result_for_task(
+            "HumanEval/0",
+            [{"base_status": "pass", "plus_status": "pass"}],
+        )
+        self.assertTrue(passing["base_passed"])
+        self.assertTrue(passing["plus_passed"])
+        self.assertTrue(passing["passed"])
+        self.assertEqual(
+            module._case_result_for_task(
+                "HumanEval/1",
+                [{"base_status": "pass", "plus_status": "fail"}],
+            )["failure_class"],
+            "test_failed",
+        )
+        self.assertEqual(
+            module._case_result_for_task(
+                "HumanEval/2",
+                [{"base_status": "timeout", "plus_status": "timeout"}],
+            )["failure_class"],
+            "timeout",
+        )
+        self.assertEqual(
+            module._case_result_for_task("HumanEval/3", [{"base_status": "fail"}])["plus_passed"],
+            False,
+        )
+
+    def test_evalplus_dockerfile_pins_upstream_revision(self):
+        dockerfile_path = os.path.join(ROOT_DIR, "containers", "capability-evalplus", "Dockerfile")
+        with open(dockerfile_path, "r", encoding="utf-8") as handle:
+            dockerfile = handle.read()
+        runner_path = os.path.join(ROOT_DIR, "containers", "capability-evalplus", "runner.py")
+        with open(runner_path, "r", encoding="utf-8") as handle:
+            runner = handle.read()
+
+        self.assertIn("26d6d00bb1fd0fa37f39c99d5290da67891d1c5e", dockerfile)
+        self.assertIn('EVALPLUS_REVISION = "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e"', runner)
+
     def test_mmlu_pro_prepares_sampled_cases_and_scores_accuracy(self):
         module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
         module = _load_module("mmlu_pro_runner_test_module", module_path)

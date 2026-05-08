@@ -73,6 +73,32 @@ Non-goals:
 - No leaderboard claim from the sampled lane.
 - No default quick-run inclusion.
 
+### Phase A2: EvalPlus HumanEval+ Coding Reference
+
+HumanEval+ is the first executable coding reference lane because it has a compact local shape, deterministic unit-test scoring, and a recognized EvalPlus harness without broad agentic repo-edit scope.
+
+Status: Runner harness implemented as `evalplus_humaneval` with the EvalPlus upstream revision pinned in the container image, canary/full local sample limits, pass@1 base/plus scoring, and containerized generated-code execution.
+
+Source:
+
+- EvalPlus upstream: https://github.com/evalplus/evalplus
+- Pinned revision: `26d6d00bb1fd0fa37f39c99d5290da67891d1c5e`
+
+Runner scope:
+
+- Keep generated-code execution inside the EvalPlus container path.
+- Emit a validated `capability_run.json` and include it in `capability_summary.json`.
+- Preserve `predictions.jsonl`, `samples.jsonl`, `eval_results.json`, `summary.json`, `cases.jsonl`, and `benchmark_metadata.json`.
+- Preserve task-level `generation_failed`, `malformed_output`, `test_failed`, and `timeout` classes where available from generated outputs and EvalPlus status rows.
+- Keep claim boundaries clear: HumanEval+ is executable coding reference evidence, not LiveCodeBench, SWE-bench, repo-edit proof, gold evidence, or public leaderboard evidence.
+
+Acceptance:
+
+- `evalplus_humaneval` is reference evidence with `reference_sample` confidence.
+- It is not promoted to gold evidence.
+- MBPP+ remains a follow-up reference candidate until the same artifact and dogfood checks are reviewed.
+- Real dogfood runs still need to calibrate expected duration, token volume, and degraded behavior.
+
 ### Phase B: GPQA Sampled Reference
 
 GPQA is harder and more differentiating, but it should reuse the multiple-choice harness shape from MMLU-Pro.
