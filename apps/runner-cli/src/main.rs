@@ -898,7 +898,7 @@ mod tests {
         ])
         .expect("first-run jsonl output");
 
-        assert_eq!(jsonl, true);
+        assert!(jsonl);
         assert_eq!(events.len(), output["events"].as_array().unwrap().len());
         assert!(matches!(
             events.first(),

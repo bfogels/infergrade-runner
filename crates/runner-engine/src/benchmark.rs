@@ -557,8 +557,7 @@ fn parse_tokens_per_second(line: &str) -> Option<f64> {
     let before_marker = &line[..marker_start];
     before_marker
         .split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
-        .filter(|part| !part.is_empty())
-        .last()?
+        .rfind(|part| !part.is_empty())?
         .parse()
         .ok()
 }
@@ -586,7 +585,7 @@ fn timing_decode_tokens_per_second(
     generated_tokens: u32,
 ) -> Result<f64, String> {
     if let Some(value) = timings.eval_tokens_per_second {
-        if value.is_finite() && value >= 0.0 && value <= MAX_DECODE_TOKENS_PER_SECOND {
+        if value.is_finite() && (0.0..=MAX_DECODE_TOKENS_PER_SECOND).contains(&value) {
             return Ok(value);
         }
     }

@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  python:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -35,5 +35,98 @@ jobs:
           git fetch origin main --depth=1
           python3 ./scripts/check_version_bump.py --base-ref origin/main
 
-      - name: Run test suite
+      - name: Run Python test suite
         run: ./scripts/test_all.sh
+
+  rust:
+    name: Rust workspace (build, test, clippy, fmt)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo build (engine + cli + sidecar)
+        run: cargo build --workspace --exclude infergrade_desktop_runner --locked
+
+      - name: cargo test (engine + cli + sidecar)
+        run: cargo test --workspace --exclude infergrade_desktop_runner --locked
+
+      - name: Build desktop sidecar binary (needed by Tauri shell)
+        run: bash ./scripts/build_desktop_sidecar.sh
+
+      - name: cargo build (desktop shell)
+        run: cargo build -p infergrade_desktop_runner --lib --locked
+
+      - name: cargo test (desktop shell)
+        run: cargo test -p infergrade_desktop_runner --lib --locked
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  cargo-audit:
+    name: cargo audit (advisory snapshot, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: cargo audit
+        run: cargo audit --file Cargo.lock || true
+
+  cargo-deny:
+    name: cargo deny (advisories + bans + licenses)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
+      - name: cargo deny check
+        run: cargo deny check --hide-inclusion-graph
