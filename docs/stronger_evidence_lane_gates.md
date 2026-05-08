@@ -9,6 +9,8 @@ This document defines the next implementation stack after the first local-friend
 3. LiveCodeBench reference
 4. SWE-bench Verified gold evidence
 
+The maturity ladder and status matrix live in [Benchmark Legitimacy Program](benchmark_legitimacy_program.md) and `schemas/capability_catalog.json`. Those catalog fields are validated by tests so stronger-evidence work cannot land as undocumented prose only.
+
 ## Shared Acceptance Gates
 
 Every new third-party evidence lane must land in stacked PRs:
@@ -120,6 +122,8 @@ Acceptance:
 ### Phase D: SWE-bench Verified Gold
 
 SWE-bench Verified should begin as gold evidence with curated provenance and maintainer review, not as a general laptop default.
+
+Catalog id: `swebench_verified_gold_v1`.
 
 Source candidates:
 
