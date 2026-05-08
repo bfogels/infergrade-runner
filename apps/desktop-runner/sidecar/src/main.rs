@@ -1,3 +1,4 @@
+use serde_json::json;
 use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -140,13 +141,6 @@ fn command_exists_quiet(program: &str, args: &[&str]) -> bool {
     matches!(run_command_output(program, &args, None), Ok(output) if output.status.success())
 }
 
-fn json_escape(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-}
-
 fn verify_repo_python_invocation(repo_root: &Path) -> Result<String, String> {
     let pythonpath = pythonpath_with_runner(repo_root, env::var_os("PYTHONPATH"))?;
     let args = repo_python_args(&[OsString::from("--version")]);
@@ -269,35 +263,20 @@ fn desktop_readiness() -> String {
         native_suite_status(runtime_first_run);
     let (docker_status, docker_message) = optional_container_status("docker");
     let (podman_status, podman_message) = optional_container_status("podman");
-    format!(
-        concat!(
-            "{{",
-            "\"status\":\"ok\",",
-            "\"hardware_class\":\"{}\",",
-            "\"accelerator_api\":\"{}\",",
-            "\"native_benchmark_suite\":\"{}\",",
-            "\"native_benchmark_message\":\"{}\",",
-            "\"llama_cpp_runtime\":\"{}\",",
-            "\"llama_cpp_message\":\"{}\",",
-            "\"first_run\":\"{}\",",
-            "\"first_run_message\":\"{}\",",
-            "\"docker\":{{\"status\":\"{}\",\"message\":\"{}\"}},",
-            "\"podman\":{{\"status\":\"{}\",\"message\":\"{}\"}}",
-            "}}"
-        ),
-        json_escape(hardware_class),
-        json_escape(accelerator_api),
-        json_escape(native_suite),
-        json_escape(native_message),
-        json_escape(runtime_status),
-        json_escape(runtime_message),
-        json_escape(first_run),
-        json_escape(first_run_message),
-        json_escape(docker_status),
-        json_escape(&docker_message),
-        json_escape(podman_status),
-        json_escape(&podman_message),
-    )
+    json!({
+        "status": "ok",
+        "hardware_class": hardware_class,
+        "accelerator_api": accelerator_api,
+        "native_benchmark_suite": native_suite,
+        "native_benchmark_message": native_message,
+        "llama_cpp_runtime": runtime_status,
+        "llama_cpp_message": runtime_message,
+        "first_run": first_run,
+        "first_run_message": first_run_message,
+        "docker": {"status": docker_status, "message": docker_message},
+        "podman": {"status": podman_status, "message": podman_message},
+    })
+    .to_string()
 }
 
 fn desktop_self_test() -> Result<String, String> {
@@ -308,14 +287,22 @@ fn desktop_self_test() -> Result<String, String> {
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "unknown".to_string());
         let version = verify_repo_python_invocation(&repo_root)?;
-        return Ok(format!(
-            "{{\"status\":\"ok\",\"runner_core\":\"bundled_or_repo\",\"invocation\":\"ok\",\"path\":\"{}\",\"version\":\"{}\"}}",
-            json_escape(&first_path),
-            json_escape(&version)
-        ));
+        return Ok(json!({
+            "status": "ok",
+            "runner_core": "bundled_or_repo",
+            "invocation": "ok",
+            "path": first_path,
+            "version": version,
+        })
+        .to_string());
     }
     if command_exists("infergrade") {
-        return Ok("{\"status\":\"ok\",\"runner_core\":\"path\",\"detail\":\"infergrade is available on PATH\"}".to_string());
+        return Ok(json!({
+            "status": "ok",
+            "runner_core": "path",
+            "detail": "infergrade is available on PATH",
+        })
+        .to_string());
     }
     Err(
         "Packaged Runner core is unavailable. The desktop app could not find its bundled runner-core resource, and infergrade is not on PATH.".to_string(),

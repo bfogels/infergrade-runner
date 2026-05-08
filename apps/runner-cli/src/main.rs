@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const HELP_TEXT: &str =
-    "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime list                               Show the managed llama.cpp runtime manifest as JSON\n    runtime channels                           Show managed/local/experimental runtime channel policy as JSON\n    runtime status                             Show selected/detected/managed runtime status as JSON\n    runtime install [--runtime-id <id>]        Explicitly download, verify, extract, smoke, and select a managed llama.cpp runtime\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    support summary [--first-run-artifact <path>] [--error <text>]\n                                               Print a secret-free support summary with runtime, pairing, first-run, and upload recovery hints\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> --runner-token <token> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence through a paired Hub runner token\n    first-run --model <path> --runtime auto --upload --run-id <id> --run-token <token> ...\n                                               Deprecated debug alias for --runner-token; normal Hub handoff is token-free\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nThis Rust CLI is an early frontend over runner-engine. The Python runner-core CLI remains the execution bridge during migration.";
+    "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime list                               Show the managed llama.cpp runtime manifest as JSON\n    runtime channels                           Show managed/local/experimental runtime channel policy as JSON\n    runtime status                             Show selected/detected/managed runtime status as JSON\n    runtime install [--runtime-id <id>]        Explicitly download, verify, extract, smoke, and select a managed llama.cpp runtime\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    support summary [--first-run-artifact <path>] [--error <text>]\n                                               Print a secret-free support summary with runtime, pairing, first-run, and upload recovery hints\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence. The runner token is read from INFERGRADE_HUB_TOKEN by default;\n                                               override with --runner-token-env <VAR>, --runner-token-stdin, or (last resort, leaks via ps) --runner-token <token>.\n                                               --run-token <token> is a deprecated alias of --runner-token.\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nArchitecture note: this Rust CLI plus runner-engine is the supported entry point. The desktop app shell is Rust, but the long-running listener still bridges to the Python runner-core during migration.";
 
 fn print_help() {
     println!("{HELP_TEXT}");
@@ -224,6 +224,9 @@ where
     let mut api_url = "https://api.infergrade.com".to_string();
     let mut run_id: Option<String> = None;
     let mut run_token: Option<String> = None;
+    let mut run_token_source: Option<&'static str> = None;
+    let mut run_token_env_var: Option<String> = None;
+    let mut run_token_stdin = false;
     let mut worker_id = "infergrade-runner-cli".to_string();
     let mut runtime_command: Option<PathBuf> = None;
     let mut runtime_path: Option<PathBuf> = None;
@@ -306,6 +309,21 @@ where
                         .ok_or_else(|| format!("{flag} requires a value"))?
                         .to_string(),
                 );
+                run_token_source = Some("argv");
+                eprintln!(
+                    "warning: passing the runner token on the command line exposes it to other local users via `ps`/`/proc`. Prefer INFERGRADE_HUB_TOKEN, --runner-token-env <VAR>, or --runner-token-stdin."
+                );
+            }
+            "--runner-token-env" => {
+                index += 1;
+                let name = args
+                    .get(index)
+                    .ok_or_else(|| "--runner-token-env requires a variable name".to_string())?
+                    .to_string();
+                run_token_env_var = Some(name);
+            }
+            "--runner-token-stdin" => {
+                run_token_stdin = true;
             }
             "--worker-id" => {
                 index += 1;
@@ -342,9 +360,20 @@ where
             return Err("--upload requires --run-id".to_string());
         }
         if run_token.is_none() {
-            return Err("--upload requires --runner-token".to_string());
+            run_token = resolve_runner_token(
+                run_token_env_var.as_deref(),
+                run_token_stdin,
+                &mut run_token_source,
+            )?;
+        }
+        if run_token.is_none() {
+            return Err(
+                "--upload requires a runner token. Set INFERGRADE_HUB_TOKEN, pass --runner-token-env <VAR>, --runner-token-stdin, or (less safe) --runner-token <token>."
+                    .to_string(),
+            );
         }
     }
+    let _ = run_token_source;
     if dry_run && runtime_command.is_some() {
         return Err(
             "first-run accepts either --dry-run or --runtime-command, not both".to_string(),
@@ -497,6 +526,43 @@ where
     }
     payload["events"] = serde_json::to_value(&events).map_err(|error| error.to_string())?;
     Ok((payload, events, jsonl))
+}
+
+fn resolve_runner_token(
+    env_var: Option<&str>,
+    from_stdin: bool,
+    source: &mut Option<&'static str>,
+) -> Result<Option<String>, String> {
+    if from_stdin {
+        let mut buffer = String::new();
+        io::stdin()
+            .read_line(&mut buffer)
+            .map_err(|error| format!("could not read runner token from stdin: {error}"))?;
+        let trimmed = buffer.trim().to_string();
+        if trimmed.is_empty() {
+            return Err("--runner-token-stdin received empty input".to_string());
+        }
+        *source = Some("stdin");
+        return Ok(Some(trimmed));
+    }
+    if let Some(name) = env_var {
+        let value = env::var(name)
+            .map_err(|_| format!("environment variable `{name}` is not set or not unicode"))?;
+        let trimmed = value.trim().to_string();
+        if trimmed.is_empty() {
+            return Err(format!("environment variable `{name}` is empty"));
+        }
+        *source = Some("env_explicit");
+        return Ok(Some(trimmed));
+    }
+    if let Ok(value) = env::var("INFERGRADE_HUB_TOKEN") {
+        let trimmed = value.trim().to_string();
+        if !trimmed.is_empty() {
+            *source = Some("env_default");
+            return Ok(Some(trimmed));
+        }
+    }
+    Ok(None)
 }
 
 fn block_on_hub_request(
@@ -837,10 +903,9 @@ mod tests {
     }
 
     #[test]
-    fn help_prefers_runner_token_and_marks_run_token_deprecated() {
-        assert!(HELP_TEXT.contains("--runner-token <token>"));
-        assert!(HELP_TEXT.contains("Deprecated debug alias for --runner-token"));
-        assert!(HELP_TEXT.contains("normal Hub handoff is token-free"));
+    fn help_marks_run_token_deprecated_alias() {
+        assert!(HELP_TEXT.contains("--run-token <token>"));
+        assert!(HELP_TEXT.contains("deprecated alias of --runner-token"));
     }
 
     #[test]
@@ -1276,6 +1341,9 @@ mod tests {
 
     #[test]
     fn first_run_upload_requires_run_scope_and_rejects_dry_run() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let saved_hub_token = env::var("INFERGRADE_HUB_TOKEN").ok();
+        env::remove_var("INFERGRADE_HUB_TOKEN");
         let model_path = env::temp_dir().join(format!(
             "infergrade-runner-cli-upload-validation-model-{}.gguf",
             std::process::id()
@@ -1315,7 +1383,8 @@ mod tests {
             "run_cli_upload_123".to_string(),
         ])
         .expect_err("runner token required");
-        assert!(missing_runner_token.contains("--upload requires --runner-token"));
+        assert!(missing_runner_token.contains("INFERGRADE_HUB_TOKEN"));
+        assert!(missing_runner_token.contains("--runner-token"));
 
         let missing_deprecated_alias_value = command_first_run(&[
             "--model".to_string(),
@@ -1331,6 +1400,9 @@ mod tests {
         assert!(missing_deprecated_alias_value.contains("--run-token requires a value"));
 
         let _ = std::fs::remove_file(model_path);
+        if let Some(token) = saved_hub_token {
+            env::set_var("INFERGRADE_HUB_TOKEN", token);
+        }
     }
 
     fn spawn_cli_hub_server() -> (String, mpsc::Receiver<String>) {
@@ -1388,5 +1460,64 @@ mod tests {
             bytes.extend_from_slice(&buffer[..bytes_read]);
         }
         String::from_utf8_lossy(&bytes).to_string()
+    }
+
+    #[test]
+    fn resolve_runner_token_prefers_explicit_env_var_over_default() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let var_name = format!("INFERGRADE_TEST_TOKEN_{}", std::process::id());
+        env::set_var(&var_name, "explicit_env_value");
+        env::set_var("INFERGRADE_HUB_TOKEN", "default_env_value");
+        let mut source: Option<&'static str> = None;
+        let token = resolve_runner_token(Some(&var_name), false, &mut source)
+            .expect("explicit env var")
+            .expect("token returned");
+        assert_eq!(token, "explicit_env_value");
+        assert_eq!(source, Some("env_explicit"));
+        env::remove_var(&var_name);
+        env::remove_var("INFERGRADE_HUB_TOKEN");
+    }
+
+    #[test]
+    fn resolve_runner_token_falls_back_to_infergrade_hub_token_env() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        env::set_var("INFERGRADE_HUB_TOKEN", "default_token_value");
+        let mut source: Option<&'static str> = None;
+        let token = resolve_runner_token(None, false, &mut source)
+            .expect("default env")
+            .expect("token returned");
+        assert_eq!(token, "default_token_value");
+        assert_eq!(source, Some("env_default"));
+        env::remove_var("INFERGRADE_HUB_TOKEN");
+    }
+
+    #[test]
+    fn resolve_runner_token_returns_none_when_no_source_configured() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        env::remove_var("INFERGRADE_HUB_TOKEN");
+        let mut source: Option<&'static str> = None;
+        let token = resolve_runner_token(None, false, &mut source).expect("no source");
+        assert!(token.is_none());
+        assert!(source.is_none());
+    }
+
+    #[test]
+    fn resolve_runner_token_errors_when_explicit_env_var_missing() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let var_name = format!("INFERGRADE_NOT_SET_{}", std::process::id());
+        env::remove_var(&var_name);
+        let mut source: Option<&'static str> = None;
+        let error = resolve_runner_token(Some(&var_name), false, &mut source)
+            .expect_err("missing env var rejected");
+        assert!(error.contains(&var_name));
+    }
+
+    #[test]
+    fn help_documents_token_handling_without_contradiction() {
+        assert!(HELP_TEXT.contains("INFERGRADE_HUB_TOKEN"));
+        assert!(HELP_TEXT.contains("--runner-token-env"));
+        assert!(HELP_TEXT.contains("--runner-token-stdin"));
+        assert!(HELP_TEXT.contains("leaks via ps"));
+        assert!(!HELP_TEXT.contains("normal Hub handoff is token-free"));
     }
 }
