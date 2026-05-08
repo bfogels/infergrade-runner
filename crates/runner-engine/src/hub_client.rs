@@ -9,11 +9,15 @@ pub const HUB_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 pub const HUB_BUNDLE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 
 fn build_hub_client(timeout: Duration) -> reqwest::Client {
+    // Builder failure here would indicate a broken TLS/runtime config, in
+    // which case silently dropping the connect/request timeout is worse
+    // than crashing -- the timeout guarantee is the whole point of this
+    // shared client.
     reqwest::Client::builder()
         .connect_timeout(HUB_CONNECT_TIMEOUT)
         .timeout(timeout)
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+        .expect("valid Hub HTTP client configuration")
 }
 
 /// Shared async client for typical Hub JSON requests. Reuses connections and

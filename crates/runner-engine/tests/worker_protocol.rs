@@ -146,11 +146,14 @@ fn worker_protocol_preview_uses_typed_protocol_and_stays_secret_free() {
 }
 
 #[test]
-fn worker_protocol_preview_trims_identity_fields_and_rejects_bad_hub_urls() {
+fn worker_protocol_preview_normalizes_api_url_and_rejects_bad_hub_urls() {
+    // api_url tolerates surrounding whitespace via normalize_api_url. The
+    // identity fields (runner_id, execution_mode) must be already-trimmed:
+    // the validator rejects whitespace explicitly so callers see fast.
     let preview = RunnerProtocolPreviewInput {
         api_url: " localhost:8000 ".to_string(),
-        runner_id: " runner_123 ".to_string(),
-        execution_mode: " local_native ".to_string(),
+        runner_id: "runner_123".to_string(),
+        execution_mode: "local_native".to_string(),
         hostname: None,
     }
     .build()
@@ -159,6 +162,26 @@ fn worker_protocol_preview_trims_identity_fields_and_rejects_bad_hub_urls() {
     assert_eq!(preview.api_url, "http://localhost:8000/");
     assert_eq!(preview.runner_id, "runner_123");
     assert_eq!(preview.execution_mode, "local_native");
+
+    let whitespace_runner_id = RunnerProtocolPreviewInput {
+        api_url: "api.infergrade.com".to_string(),
+        runner_id: " runner_123 ".to_string(),
+        execution_mode: "local_native".to_string(),
+        hostname: None,
+    }
+    .build()
+    .expect_err("whitespace runner_id rejected");
+    assert_eq!(whitespace_runner_id.code(), "runner_id_invalid");
+
+    let whitespace_mode = RunnerProtocolPreviewInput {
+        api_url: "api.infergrade.com".to_string(),
+        runner_id: "runner_123".to_string(),
+        execution_mode: " local_native ".to_string(),
+        hostname: None,
+    }
+    .build()
+    .expect_err("whitespace execution_mode rejected");
+    assert_eq!(whitespace_mode.code(), "execution_mode_invalid");
     assert_eq!(
         preview.endpoints.heartbeat,
         "/v1/runners/runner_123/heartbeat"
