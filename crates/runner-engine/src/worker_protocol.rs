@@ -2,7 +2,13 @@ use crate::{desktop_environment, normalize_api_url, validate_hub_path_id, Runner
 
 /// Execution modes the runner is allowed to claim. Anything outside this set
 /// is treated as untrusted input and rejected by the protocol builders.
-pub const SUPPORTED_EXECUTION_MODES: &[&str] = &["local_native", "local_container", "cloud_worker"];
+///
+/// `cloud_worker` is a runner *kind*, not an execution mode -- the protocol
+/// derives `runner_kind = "cloud_worker"` when `execution_mode == "cloud_container"`
+/// (see `RunnerRegisterRequest::new`). Keeping `cloud_worker` in this list
+/// simultaneously accepts the wrong vocabulary and rejects the right one.
+pub const SUPPORTED_EXECUTION_MODES: &[&str] =
+    &["local_native", "local_container", "cloud_container"];
 
 fn validate_execution_mode(value: &str) -> Result<&str, RunnerError> {
     // Reject any surrounding whitespace so callers fail fast instead of

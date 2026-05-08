@@ -222,6 +222,37 @@ fn worker_protocol_preview_normalizes_api_url_and_rejects_bad_hub_urls() {
 }
 
 #[test]
+fn worker_protocol_preview_accepts_cloud_container_and_rejects_cloud_worker() {
+    // cloud_container is the execution mode that drives runner_kind=cloud_worker.
+    // cloud_worker itself is not a valid execution mode.
+    let preview = infergrade_runner_engine::RunnerProtocolPreviewInput {
+        api_url: "api.infergrade.com".to_string(),
+        runner_id: "runner_123".to_string(),
+        execution_mode: "cloud_container".to_string(),
+        hostname: None,
+    }
+    .build()
+    .expect("cloud_container accepted");
+    assert_eq!(preview.execution_mode, "cloud_container");
+    assert_eq!(preview.register.runner_kind, "cloud_worker");
+
+    let rejected = infergrade_runner_engine::RunnerProtocolPreviewInput {
+        api_url: "api.infergrade.com".to_string(),
+        runner_id: "runner_123".to_string(),
+        execution_mode: "cloud_worker".to_string(),
+        hostname: None,
+    }
+    .build()
+    .expect_err("cloud_worker rejected as execution mode");
+    assert_eq!(rejected.code(), "execution_mode_invalid");
+    assert!(
+        rejected.message().contains("cloud_container"),
+        "error should advertise the correct vocabulary, got: {}",
+        rejected.message()
+    );
+}
+
+#[test]
 fn worker_protocol_ping_plan_uses_typed_register_and_heartbeat_requests() {
     let plan = RunnerProtocolPingInput {
         api_url: "api.infergrade.com".to_string(),
