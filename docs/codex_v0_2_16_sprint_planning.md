@@ -19,7 +19,7 @@ Target user promise:
 
 ## Planned PRs
 
-- MBPP+ reference PR: emit validated `capability_run.json` for `evalplus_mbpp`, preserve EvalPlus revision, MBPP sample policy, raw outputs, generated samples, scoring outputs, pass@1 base/plus metrics, task status classes, and MBPP-specific claim boundaries.
+- PR #197: emit validated `capability_run.json` for `evalplus_mbpp`, preserve EvalPlus revision, MBPP sample policy, raw outputs, generated samples, scoring outputs, pass@1 base/plus metrics, task status classes, and MBPP-specific claim boundaries. Merged to `develop`.
 - Release PR: promote reviewed MBPP+ reference work from `develop` to `main` and bump version only in the release branch.
 
 ## Implementation Notes
@@ -45,13 +45,33 @@ Target user promise:
 
 ```bash
 python3 -m unittest python/runner-core/tests/test_capabilities.py python/runner-core/tests/test_capability_container_runners.py python/runner-core/tests/test_benchmark_catalog.py python/runner-core/tests/test_capability_summary.py
+python3 -m unittest discover python/runner-core/tests
 python3 -m json.tool schemas/capability_catalog.json >/tmp/capability_catalog.json.check
 python3 -m json.tool schemas/json/capability_run.schema.json >/tmp/capability_run.schema.json.check
 python3 -m json.tool schemas/json/capability_summary.schema.json >/tmp/capability_summary.schema.json.check
 python3 ./scripts/sync_versions.py --check
 python3 ./scripts/check_versions.py
 git diff --check
+cargo fmt --all -- --check
+gitleaks detect --source=. --redact --no-banner --exit-code 0
 ```
+
+## Validation Evidence
+
+- PR #197 targeted suite: 75 tests passed across capability artifacts, EvalPlus container runner, catalog, and summary coverage.
+- PR #197 broad suite after commit: 288 Python runner-core tests passed.
+- JSON schema parse checks passed for capability catalog, `capability_run`, and `capability_summary`.
+- Version checks passed before the release bump.
+- `cargo fmt --all -- --check` passed.
+- `gitleaks detect --source=. --redact --no-banner --exit-code 0` found no leaks.
+- GitHub Actions remained in the known pre-step failure shape with empty `steps: []`; local validation and reviewer evidence were used as release gates.
+
+## Reviewer Findings
+
+- Reviewer found one blocking issue in PR #197: EvalPlus primary metric used truthy fallback, so `plus.pass@1 == 0.0` could be replaced by `base.pass@1`.
+- Fixed in `containers/capability-evalplus/runner.py` by separating missing metrics from zero metrics.
+- Added regression coverage in `test_evalplus_primary_metric_preserves_zero_plus_score`.
+- Focused re-review found no blocking or non-blocking issues.
 
 ## Evidence Honesty Notes
 
@@ -73,7 +93,6 @@ git diff --check
 
 ## Next Actions
 
-- Finish MBPP+ artifact tests and docs.
-- Open the feature PR.
-- After review and merge, release the MBPP+ productization slice if quality remains high.
+- Land the v0.2.16 release PR after review and validation.
+- Sync `develop` after release.
 - Continue into quant-fidelity reference productization.
