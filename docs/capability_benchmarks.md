@@ -75,6 +75,8 @@ Planned candidates are roadmap metadata only. They must not be rendered or valid
 
 The detailed acceptance gates for heavier third-party lanes live in [Stronger Evidence Lane Gates](stronger_evidence_lane_gates.md).
 
+The machine-readable catalog now also includes a benchmark legitimacy status matrix. See [Benchmark Legitimacy Program](benchmark_legitimacy_program.md) for the maturity levels and promotion gates. Every runnable check and planned candidate must declare its maturity, runnable status, fixture or dataset status, harness status, sample policy, claim boundary, and promotion blockers.
+
 ## Capability Catalog Shape
 
 InferGrade now treats benchmark scope as:
@@ -123,6 +125,18 @@ The currently implemented first-user catalog is:
   - check: `perplexity_reference_v1`
 
 Compatibility breadth labels like `canary`, `standard`, and `gold` are still derived from the selected checks for older flows and release planning, but they are no longer the main user-facing benchmark abstraction.
+
+## Benchmark Maturity
+
+Benchmark maturity is separate from evidence lane:
+
+- `thin_local_sample` means a small local task set can guide setup, but cannot support reference or global claims.
+- `strong_local_candidate` means the lane is useful locally but still needs broader samples, repeatability, and observed metadata before stronger claims.
+- `reference_candidate` means the benchmark is promising for reference evidence but still has open harness, data, scoring, or sandbox blockers.
+- `reference_runnable` means the reference lane has enough controls to run intentionally and emit artifact-backed reference evidence.
+- `gold_candidate` and `gold_runnable` are reserved for high-legitimacy evidence with stronger controls and maintainer review.
+
+Thin local samples cannot be promoted because their score is high. Promotion requires protocol controls.
 
 ## Capability Surfaces
 
