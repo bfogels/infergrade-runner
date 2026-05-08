@@ -19,7 +19,7 @@ fn typed_runner_profile_sanitizes_token_before_ui_use() {
     let sanitized = profile.sanitized();
 
     assert_eq!(sanitized.runner_id, "runner_123");
-    assert_eq!(sanitized.has_access_token, true);
+    assert!(sanitized.has_access_token);
     assert!(!serde_json::to_string(&sanitized)
         .unwrap()
         .contains("qbhr_secret"));

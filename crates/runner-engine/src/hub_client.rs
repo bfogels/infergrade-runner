@@ -232,9 +232,9 @@ pub fn build_run_claim_request(
         api_url,
         "/v1/runs/claim",
         Some(claim_run_job_payload(
-            &worker_id,
+            worker_id,
             execution_mode,
-            Some(&run_id),
+            Some(run_id),
             None,
             None,
         )),

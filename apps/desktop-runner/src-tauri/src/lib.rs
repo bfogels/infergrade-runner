@@ -1118,7 +1118,7 @@ mod tests {
         assert_eq!(input.model_path, PathBuf::from("/tmp/model.gguf"));
         assert_eq!(input.runtime_hint.as_deref(), Some("auto"));
         assert_eq!(input.max_tokens, 32);
-        assert_eq!(input.upload, false);
+        assert!(!input.upload);
         assert!(input.prompt.contains("InferGrade runner"));
     }
 
