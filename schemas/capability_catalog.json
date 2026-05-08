@@ -51,6 +51,12 @@
       "score_method": "primary_metric_value_v1"
     },
     {
+      "score_policy_id": "reasoning_exact_answer_v1",
+      "display_name": "Reasoning exact answer",
+      "description": "Score compact local reasoning prompts with deterministic exact-answer matching.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
       "score_policy_id": "coding_primary_pass_at_1_v1",
       "display_name": "Coding primary pass@1",
       "description": "Use EvalPlus pass@1+ as the primary coding score. HumanEval+ is the core decision signal; MBPP+ adds breadth.",
@@ -266,6 +272,22 @@
       "execution_pattern": "throughput_oriented_offline_suite"
     },
     {
+      "group_id": "reasoning_exact_answer",
+      "display_name": "Reasoning exact answer",
+      "description": "Run small native exact-answer reasoning prompts scored by deterministic answer matching.",
+      "evidence_kind": "capability",
+      "surface_id": "local_reasoning_capability",
+      "default_check_ids": [
+        "reasoning_exact_answer_v1"
+      ],
+      "effort_hint": "short",
+      "suite_scope": "decision",
+      "expected_duration_band": "1-5 min",
+      "token_volume_band": "tiny",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "native_capability_microcheck"
+    },
+    {
       "group_id": "coding_static_repair",
       "display_name": "Coding static repair",
       "description": "Run small native coding repair prompts scored by deterministic static output constraints.",
@@ -475,6 +497,38 @@
       "source": "https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro",
       "source_code": "https://github.com/TIGER-AI-Lab/MMLU-Pro",
       "dataset_revision": "54611cde22c74cca43dd78732198de6abe971398"
+    },
+    {
+      "check_id": "reasoning_exact_answer_v1",
+      "display_name": "Reasoning exact answer",
+      "description": "Small local reasoning prompts scored by deterministic exact-answer matching.",
+      "evidence_kind": "capability",
+      "group_id": "reasoning_exact_answer",
+      "surface_id": "local_reasoning_capability",
+      "runner_target": "reasoning_exact_answer_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "decision",
+      "evidence_lane_id": "decision",
+      "effort_level": "short",
+      "expected_duration_band": "1-5 min",
+      "token_volume_band": "tiny",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "native_capability_microcheck",
+      "selection_guidance": "Adds a quick native reasoning signal for exact-answer tasks. It is a thin local sample and not a broad reasoning benchmark.",
+      "score_dimension": "exact_reasoning",
+      "primary_score_metric": "exact_answer_accuracy",
+      "score_floor": 0.0,
+      "primary_score_weight": 1.0,
+      "higher_is_better": true,
+      "score_policy_id": "reasoning_exact_answer_v1",
+      "score_breakdown_fields": [
+        "correct_count",
+        "total_count",
+        "case_accuracy"
+      ]
     },
     {
       "check_id": "coding_static_repair_v1",

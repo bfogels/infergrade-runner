@@ -82,6 +82,39 @@ class _CodingStaticPassingAdapter(object):
         return {"text": "```python\npass\n```", "status": "completed", "error": None}
 
 
+class _ReasoningPassingAdapter(object):
+    def generate_text(self, request, prompt, max_tokens):
+        if "Can a dax be red" in prompt:
+            return {"text": "no", "status": "completed", "error": None}
+        if "How many blue tokens" in prompt:
+            return {"text": "7", "status": "completed", "error": None}
+        if "A) less than" in prompt:
+            return {"text": "B", "status": "completed", "error": None}
+        return {"text": "", "status": "completed", "error": None}
+
+
+class _ReasoningFormattedAnswerAdapter(object):
+    def generate_text(self, request, prompt, max_tokens):
+        if "Can a dax be red" in prompt:
+            return {"text": "Answer: no.", "status": "completed", "error": None}
+        if "How many blue tokens" in prompt:
+            return {"text": "The answer is 7.", "status": "completed", "error": None}
+        if "A) less than" in prompt:
+            return {"text": "B) greater than", "status": "completed", "error": None}
+        return {"text": "", "status": "completed", "error": None}
+
+
+class _ReasoningAmbiguousAnswerAdapter(object):
+    def generate_text(self, request, prompt, max_tokens):
+        if "Can a dax be red" in prompt:
+            return {"text": "No, not yes.", "status": "completed", "error": None}
+        if "How many blue tokens" in prompt:
+            return {"text": "Either 6 or 7.", "status": "completed", "error": None}
+        if "A) less than" in prompt:
+            return {"text": "A or B", "status": "completed", "error": None}
+        return {"text": "", "status": "completed", "error": None}
+
+
 class CapabilityTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.mkdtemp(prefix="infergrade-capability-")
@@ -128,6 +161,17 @@ class CapabilityTests(unittest.TestCase):
             backend="llama.cpp",
             tier="standard",
             benchmark_check_ids=["coding_static_repair_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        self.assertEqual(capability_images_for_request(request), [])
+
+    def test_capability_images_skip_native_reasoning_benchmark(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["reasoning_exact_answer_v1"],
             output_dir=self.tempdir,
             simulate=False,
         )
@@ -444,6 +488,107 @@ class CapabilityTests(unittest.TestCase):
         clamp_result = next(item for item in case_results if item["case_id"] == "coding-static-clamp-score")
         self.assertEqual(clamp_result["state"], "failed")
         self.assertEqual(clamp_result["error_class"], "malformed_output")
+
+    def test_execute_native_reasoning_exact_answer_scores_without_docker(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["reasoning_exact_answer_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        with mock.patch("infergrade.capabilities._run_capability_container") as container_mock:
+            execution = execute_capability_suite(_ReasoningPassingAdapter(), request)
+
+        container_mock.assert_not_called()
+        self.assertEqual(execution.status, "completed")
+        self.assertEqual(execution.score, 1.0)
+        result = execution.benchmark_results["reasoning_exact_answer_v1"]
+        self.assertEqual(result["primary_metric"]["name"], "exact_answer_accuracy")
+        self.assertEqual(result["metrics"]["correct_count"], result["metrics"]["total_count"])
+        capability_run_path = execution.artifacts["reasoning_exact_answer_v1"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["evidence"]["lane"], "decision")
+        self.assertEqual(artifact["evidence"]["surface"], "local_reasoning_capability")
+        self.assertEqual(artifact["evidence"]["grade"], "thin_local_sample")
+        self.assertEqual(artifact["evidence"]["confidence_label"], "thin_local_sample")
+        self.assertTrue(artifact["evidence"]["experimental"])
+        self.assertEqual(artifact["summary"]["state"], "scored")
+        self.assertEqual(artifact["summary"]["score"], 1.0)
+        self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored"})
+        self.assertEqual(artifact["protocol"]["scorer_type"], "exact_match")
+        self.assertEqual(artifact["protocol"]["scoring_policy"], "deterministic_exact_answer_v1")
+        self.assertIn("This is not a global reasoning or intelligence score.", artifact["claim_boundary"]["unsupported_claims"])
+
+    def test_native_reasoning_exact_answer_preserves_generation_failure_as_partial(self):
+        class _PartiallyFailingReasoningAdapter(object):
+            def generate_text(self, request, prompt, max_tokens):
+                if "How many blue tokens" in prompt:
+                    raise RuntimeError("native reasoning generation failed")
+                return _ReasoningPassingAdapter().generate_text(request, prompt, max_tokens)
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="general_assistant",
+            benchmark_check_ids=["reasoning_exact_answer_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        with mock.patch("infergrade.capabilities._run_capability_container") as container_mock:
+            execution = execute_capability_suite(_PartiallyFailingReasoningAdapter(), request)
+
+        container_mock.assert_not_called()
+        self.assertEqual(execution.status, "partial")
+        result = execution.benchmark_results["reasoning_exact_answer_v1"]
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["generation_failure_severity"], "partial")
+        capability_run_path = execution.artifacts["reasoning_exact_answer_v1"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["summary"]["state"], "partial")
+        self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored", "failed"})
+        self.assertEqual({task["error_class"] for task in artifact["tasks"] if task["state"] == "failed"}, {"generation_failed"})
+        self.assertIn("partial generation failures", artifact["claim_boundary"]["supported_claims"][0])
+
+    def test_native_reasoning_exact_answer_extracts_common_answer_formats(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["reasoning_exact_answer_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        execution = execute_capability_suite(_ReasoningFormattedAnswerAdapter(), request)
+
+        self.assertEqual(execution.status, "completed")
+        self.assertEqual(execution.score, 1.0)
+        result = execution.benchmark_results["reasoning_exact_answer_v1"]
+        self.assertEqual(result["metrics"]["correct_count"], result["metrics"]["total_count"])
+
+    def test_native_reasoning_exact_answer_rejects_ambiguous_answers(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["reasoning_exact_answer_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        execution = execute_capability_suite(_ReasoningAmbiguousAnswerAdapter(), request)
+
+        self.assertEqual(execution.status, "completed")
+        self.assertEqual(execution.score, 0.0)
+        result = execution.benchmark_results["reasoning_exact_answer_v1"]
+        self.assertEqual(result["metrics"]["correct_count"], 0)
 
     def test_execute_capability_suite_aggregates_primary_scores(self):
         def fake_prepare(spec, benchmark_dir, tier):

@@ -23,6 +23,10 @@ InferGrade needs capability benchmarks that are:
   - Why: recognized broad knowledge and reasoning benchmark with harder, more robust multiple-choice questions than legacy MMLU.
   - InferGrade role: explicit sampled assistant reference lane with category breakdowns; useful for stronger evidence, but not a quick default or leaderboard claim.
 
+- `Reasoning exact answer`
+  - Why: gives local users a compact reasoning decision signal without shipping restricted datasets or making reference-suite claims.
+  - InferGrade role: native local-friendly exact-answer reasoning check for thin local sample evidence.
+
 ### Agentic Coding
 
 - `Coding static repair`
@@ -87,6 +91,8 @@ The currently implemented first-user catalog is:
   - check: `ifeval`
 - group: `chat_memory`
   - check: `multiturn_chat_memory_v1`
+- group: `reasoning_exact_answer`
+  - check: `reasoning_exact_answer_v1`
 - group: `broad_reasoning_knowledge`
   - check: `mmlu_pro_reference_v1`
 - group: `deployment_chat`
@@ -160,6 +166,8 @@ The schema is `schemas/json/capability_run.schema.json`; the methodology is [Loc
 The first local assistant artifact path is `multiturn_chat_memory_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. This is a thin local sample and remains experimental decision evidence.
 
 The first local coding artifact path is `coding_static_repair_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. It checks fenced Python outputs against deterministic static constraints. It does not execute generated code, run unit tests, sandbox a repository, or support SWE-bench/LiveCodeBench-style claims.
+
+The first local reasoning artifact path is `reasoning_exact_answer_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. It checks a compact synthetic exact-answer fixture set. It does not use GPQA, does not replace MMLU-Pro reference evidence, and does not support broad reasoning, expert knowledge, or gold-evidence claims.
 
 ## Container Contract
 
