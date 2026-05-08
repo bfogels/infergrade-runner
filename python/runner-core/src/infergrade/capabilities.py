@@ -476,6 +476,15 @@ def execute_capability_suite(
                     predictions=predictions,
                     summary=summary,
                 )
+            elif spec.benchmark_id == "mmlu_pro_reference_v1":
+                capability_run_path = _write_mmlu_pro_capability_run_artifact(
+                    request=request,
+                    spec=spec,
+                    benchmark_dir=benchmark_dir,
+                    cases=cases,
+                    predictions=predictions,
+                    summary=summary,
+                )
             if progress_callback:
                 progress_callback(
                     {
@@ -734,6 +743,157 @@ def _native_task_error_class(generation_status: str, case_score: Dict[str, Any])
     return None
 
 
+def _write_mmlu_pro_capability_run_artifact(
+    request: RunRequest,
+    spec: CapabilityBenchmarkSpec,
+    benchmark_dir: str,
+    cases: List[Dict[str, Any]],
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> str:
+    check_metadata = _selected_check_metadata(request, spec.benchmark_id)
+    primary_metric = dict(summary.get("primary_metric") or {})
+    score = primary_metric.get("value")
+    summary_state = _capability_artifact_state(summary.get("status"), score, summary.get("generation_failure_severity"))
+    case_results = {
+        str(item.get("task_id") or item.get("case_id") or ""): dict(item)
+        for item in list(summary.get("case_results") or [])
+    }
+    metadata = _read_optional_json(os.path.join(benchmark_dir, "benchmark_metadata.json"))
+    tasks = []
+    for prediction in predictions:
+        task_id = str(prediction.get("task_id") or prediction.get("case_id") or "")
+        case = _case_by_task_id(cases, task_id)
+        result = case_results.get(task_id, {})
+        generation_status = str(prediction.get("generation_status") or "")
+        predicted = result.get("predicted")
+        if generation_status != "completed":
+            task_state = "failed"
+            task_score = None
+            error_class = "generation_failed"
+        elif predicted is None:
+            task_state = "failed"
+            task_score = None
+            error_class = "malformed_output"
+        else:
+            task_state = "scored"
+            task_score = 1.0 if result.get("correct") else 0.0
+            error_class = None
+        tasks.append(
+            {
+                "task_id": task_id or str(case.get("task_id") or ""),
+                "task_family": spec.benchmark_kind,
+                "state": task_state,
+                "score": task_score,
+                "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
+                "scorer_type": "multiple_choice" if task_state == "scored" else None,
+                "scoring_policy": summary.get("scoring_policy") if task_state == "scored" else None,
+                "output_artifact": "predictions.jsonl#%s" % (task_id or str(case.get("case_id") or "")),
+                "error_class": error_class,
+                "latency_ms": None,
+                "time_to_first_token_ms": None,
+                "tokens_per_second": None,
+                "input_tokens": None,
+                "output_tokens": None,
+                "category": result.get("category") or case.get("category"),
+                "expected": result.get("expected") or case.get("answer"),
+                "predicted": predicted,
+            }
+        )
+    metrics = dict(summary.get("metrics") or {})
+    artifact = {
+        "artifact_spec_version": "0.1.0",
+        "artifact_kind": "capability_run",
+        "capability_run_id": "caprun_%s_%s" % (
+            spec.benchmark_id,
+            stable_hash(
+                {
+                    "model": request.model,
+                    "benchmark_id": spec.benchmark_id,
+                    "dataset_revision": metadata.get("dataset_revision"),
+                    "summary": summary,
+                },
+                length=10,
+            ),
+        ),
+        "created_at": utcnow_iso(),
+        "runner": {
+            "name": "infergrade-runner",
+            "version": __version__,
+            "contract_version": "0.1.0",
+        },
+        "evidence": {
+            "lane": "reference",
+            "surface": check_metadata.get("surface_id") or "local_reasoning_capability",
+            "grade": "reference_sample",
+            "experimental": True,
+            "confidence_label": "reference_sample",
+        },
+        "subject": {
+            "model": {
+                "model": request.model,
+                "quant_artifact": request.quant_artifact,
+                "quant_artifact_sha256": request.quant_artifact_sha256,
+                "quant_artifact_filename": request.quant_artifact_filename,
+            },
+            "runtime": {
+                "backend": request.backend,
+                "execution_mode": request.execution_mode,
+                "llama_cpp_cli_path": request.llama_cpp_cli_path,
+            },
+            "hardware": {
+                "source": "run_bundle_environment",
+            },
+            "generation_preset": {
+                "generation_preset_id": request.generation_preset,
+                "max_tokens": spec.generation_max_tokens,
+            },
+        },
+        "protocol": {
+            "task_family": spec.benchmark_kind,
+            "prompt_version": "mmlu_pro_reference_v1_prompt_v1",
+            "task_version": spec.benchmark_id,
+            "fixture_revision": str(metadata.get("sample_policy") or "mmlu_pro_snapshot"),
+            "dataset_revision": metadata.get("dataset_revision"),
+            "scorer_type": "multiple_choice",
+            "scoring_policy": summary.get("scoring_policy") or "exact_multiple_choice_letter_accuracy_v1",
+            "repetitions": 1,
+            "sample_policy": metadata.get("sample_policy"),
+            "category_count": metadata.get("category_count"),
+        },
+        "summary": {
+            "state": summary_state,
+            "score": score if summary_state in ("scored", "partial") else None,
+            "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
+            "passed_count": metrics.get("correct_count"),
+            "failed_count": metrics.get("invalid_count"),
+            "partial_count": summary.get("generation_failure_count") or 0,
+            "skipped_count": 0,
+            "not_comparable_count": 0,
+            "duration_seconds": None,
+            "time_to_first_token_ms": None,
+            "tokens_per_second": None,
+            "input_tokens": None,
+            "output_tokens": None,
+            "category_metrics": dict(summary.get("category_metrics") or {}),
+        },
+        "tasks": tasks,
+        "artifacts": {
+            "manifest": "capability_run.json",
+            "raw_outputs": ["predictions.jsonl"],
+            "scoring_outputs": ["summary.json"],
+            "supporting_files": ["cases.jsonl", "benchmark_metadata.json"],
+        },
+        "claim_boundary": _mmlu_pro_artifact_claim_boundary(summary_state),
+    }
+    errors = validate_capability_run_artifact(artifact)
+    if errors:
+        raise ValueError("Invalid capability_run artifact: %s" % "; ".join(errors))
+    path = os.path.join(benchmark_dir, "capability_run.json")
+    write_json(path, artifact)
+    return path
+
+
 def _native_scorer_type(spec: CapabilityBenchmarkSpec) -> str:
     if spec.benchmark_id == "multiturn_chat_memory_v1":
         return "exact_match"
@@ -778,6 +938,21 @@ def _case_by_id(cases: List[Dict[str, Any]], case_id: str) -> Dict[str, Any]:
         if candidate == case_id:
             return dict(case)
     return {}
+
+
+def _case_by_task_id(cases: List[Dict[str, Any]], task_id: str) -> Dict[str, Any]:
+    for case in cases:
+        if str(case.get("task_id") or case.get("case_id") or "") == task_id:
+            return dict(case)
+    return {}
+
+
+def _read_optional_json(path: str) -> Dict[str, Any]:
+    try:
+        payload = read_json(path)
+    except Exception:
+        return {}
+    return dict(payload or {}) if isinstance(payload, dict) else {}
 
 
 def _assistant_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
@@ -872,6 +1047,35 @@ def _reasoning_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
     else:
         supported = [
             "This artifact records that the pinned exact-answer reasoning fixture set was not yet scored.",
+        ]
+    return {"supported_claims": supported, "unsupported_claims": unsupported}
+
+
+def _mmlu_pro_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    unsupported = [
+        "This is not a global intelligence score.",
+        "This is not public leaderboard evidence.",
+        "This is not gold evidence.",
+        "Sampled MMLU-Pro reference evidence does not prove broad real-world assistant quality by itself.",
+    ]
+    if state == "scored":
+        supported = [
+            "This setup completed the pinned MMLU-Pro sampled reference protocol recorded in this artifact.",
+            "The score reports exact multiple-choice answer-letter accuracy with category breakdowns.",
+        ]
+    elif state == "partial":
+        supported = [
+            "This setup attempted the pinned MMLU-Pro sampled reference protocol with partial generation or malformed-output failures.",
+            "The artifact preserves scored, malformed, and failed task rows separately.",
+        ]
+    elif state == "failed":
+        supported = [
+            "This setup attempted the pinned MMLU-Pro sampled reference protocol.",
+            "The artifact preserves generation, malformed-output, or scoring failures without turning them into a broad reasoning score.",
+        ]
+    else:
+        supported = [
+            "This artifact records that the pinned MMLU-Pro sampled reference protocol was not yet scored.",
         ]
     return {"supported_claims": supported, "unsupported_claims": unsupported}
 

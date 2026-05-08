@@ -58,11 +58,13 @@ Runner scope:
 - Prepare a sampled local split first, for example 100-300 questions, with full reference left as an intentional deeper path. Done for canary/standard/gold limits.
 - Score exact multiple-choice accuracy. Done.
 - Emit subject/category breakdowns. Done.
+- Emit a validated `capability_run.json` and include it in `capability_summary.json`. Done.
 
 Acceptance:
 
 - `mmlu_pro_reference_v1` moves from planned to runnable only after the container can run offline against a pinned snapshot. Done.
 - `summary.json` includes `accuracy`, `correct_count`, `total_count`, and per-category metrics.
+- `capability_run.json` preserves dataset revision, sample policy, raw outputs, scoring outputs, task states, category metrics, and reference-sample claim boundaries.
 - Local canary test uses tiny fixtures and does not require network.
 - Full Runner test suite passes without pulling the real dataset.
 
