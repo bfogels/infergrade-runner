@@ -1,6 +1,39 @@
 use crate::{normalize_api_url, worker_protocol::claim_run_job_payload, RunnerError};
 use serde_json::{json, Value};
 use std::fmt;
+use std::sync::OnceLock;
+use std::time::Duration;
+
+pub const HUB_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+pub const HUB_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+pub const HUB_BUNDLE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(300);
+
+fn build_hub_client(timeout: Duration) -> reqwest::Client {
+    // Builder failure here would indicate a broken TLS/runtime config, in
+    // which case silently dropping the connect/request timeout is worse
+    // than crashing -- the timeout guarantee is the whole point of this
+    // shared client.
+    reqwest::Client::builder()
+        .connect_timeout(HUB_CONNECT_TIMEOUT)
+        .timeout(timeout)
+        .build()
+        .expect("valid Hub HTTP client configuration")
+}
+
+/// Shared async client for typical Hub JSON requests. Reuses connections and
+/// applies sane connect/request timeouts to avoid indefinite hangs on flaky
+/// networks.
+pub fn shared_hub_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| build_hub_client(HUB_REQUEST_TIMEOUT))
+}
+
+/// Shared async client for large bundle uploads. Same connect timeout, longer
+/// request timeout to accommodate slow uploads.
+pub fn shared_hub_upload_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| build_hub_client(HUB_BUNDLE_UPLOAD_TIMEOUT))
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HubMethod {
@@ -23,6 +56,9 @@ pub struct HubJsonRequest {
     pub url: String,
     pub body: Option<Value>,
     bearer_token: Option<String>,
+    /// True for large bundle uploads. Set explicitly by the bundle-upload
+    /// request builder; controls which shared timeout client is used.
+    is_upload: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -100,13 +136,30 @@ pub fn build_hub_json_request(
             .map(str::trim)
             .filter(|token| !token.is_empty())
             .map(str::to_string),
+        is_upload: false,
     })
+}
+
+fn build_hub_upload_request(
+    method: HubMethod,
+    api_url: &str,
+    path: &str,
+    body: Option<Value>,
+    bearer_token: Option<&str>,
+) -> Result<HubJsonRequest, RunnerError> {
+    let mut request = build_hub_json_request(method, api_url, path, body, bearer_token)?;
+    request.is_upload = true;
+    Ok(request)
 }
 
 pub async fn execute_hub_json_request(
     request: &HubJsonRequest,
 ) -> Result<HubJsonResponse, RunnerError> {
-    let client = reqwest::Client::new();
+    let client = if request.is_upload {
+        shared_hub_upload_client()
+    } else {
+        shared_hub_client()
+    };
     let mut builder = match request.method {
         HubMethod::Get => client.get(&request.url),
         HubMethod::Post => client.post(&request.url),
@@ -149,7 +202,7 @@ pub fn build_run_bundle_upload_request(
 ) -> Result<HubJsonRequest, RunnerError> {
     let run_id = validate_hub_path_id(run_id, "run_id")?;
     validate_bundle_upload_payload(&bundle_payload)?;
-    build_hub_json_request(
+    build_hub_upload_request(
         HubMethod::Post,
         api_url,
         &format!("/v1/runs/{run_id}/bundle"),
@@ -235,7 +288,11 @@ fn validate_bundle_upload_payload(payload: &Value) -> Result<(), RunnerError> {
     Ok(())
 }
 
-fn validate_hub_path_id<'a>(value: &'a str, field_name: &str) -> Result<&'a str, RunnerError> {
+/// Validate a string before interpolating it into a Hub URL path fragment.
+/// Rejects whitespace, `/`, `?`, `#`, `.`/`..`, empty strings, and overlong
+/// values. Used for run/runner/bundle ids and any other identifier the runner
+/// puts directly into a URL.
+pub fn validate_hub_path_id<'a>(value: &'a str, field_name: &str) -> Result<&'a str, RunnerError> {
     let trimmed = value.trim();
     if value != trimmed
         || trimmed.is_empty()

@@ -177,7 +177,7 @@ async fn send_worker_json_request(
 ) -> Result<Value, String> {
     let url = worker_request_url(api_url, path)?;
     let token = token.trim();
-    let client = reqwest::Client::new();
+    let client = infergrade_runner_engine::shared_hub_client();
     let mut request = client.post(url).json(payload);
     if !token.is_empty() {
         request = request.bearer_auth(token);
@@ -991,7 +991,7 @@ async fn redeem_runner_pairing(
         None,
     )
     .map_err(|error| error.message().to_string())?;
-    let response = reqwest::Client::new()
+    let response = infergrade_runner_engine::shared_hub_client()
         .post(request.url)
         .json(&payload)
         .send()

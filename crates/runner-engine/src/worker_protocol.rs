@@ -1,4 +1,24 @@
-use crate::{desktop_environment, normalize_api_url, RunnerError};
+use crate::{desktop_environment, normalize_api_url, validate_hub_path_id, RunnerError};
+
+/// Execution modes the runner is allowed to claim. Anything outside this set
+/// is treated as untrusted input and rejected by the protocol builders.
+pub const SUPPORTED_EXECUTION_MODES: &[&str] = &["local_native", "local_container", "cloud_worker"];
+
+fn validate_execution_mode(value: &str) -> Result<&str, RunnerError> {
+    // Reject any surrounding whitespace so callers fail fast instead of
+    // silently normalizing. Matches the contract validate_hub_path_id uses.
+    if SUPPORTED_EXECUTION_MODES.contains(&value) {
+        Ok(value)
+    } else {
+        Err(RunnerError::new(
+            "execution_mode_invalid",
+            format!(
+                "execution_mode `{value}` is not one of: {}",
+                SUPPORTED_EXECUTION_MODES.join(", ")
+            ),
+        ))
+    }
+}
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -157,20 +177,14 @@ impl RunnerProtocolPreviewInput {
     pub fn build(self) -> Result<RunnerProtocolPreview, RunnerError> {
         let api_url = normalize_api_url(&self.api_url)
             .map_err(|error| RunnerError::new("hub_url_invalid", error))?;
-        let runner_id = self.runner_id.trim().to_string();
-        if runner_id.is_empty() {
-            return Err(RunnerError::new(
-                "runner_id_missing",
-                "Runner protocol preview requires a runner id.",
-            ));
-        }
-        let execution_mode = self.execution_mode.trim().to_string();
-        if execution_mode.is_empty() {
-            return Err(RunnerError::new(
-                "execution_mode_missing",
-                "Runner protocol preview requires an execution mode.",
-            ));
-        }
+        // Pass the raw runner_id straight to validate_hub_path_id. The
+        // validator rejects leading/trailing whitespace itself; trimming here
+        // would silently accept inputs the validator's contract says it
+        // refuses.
+        let runner_id = validate_hub_path_id(&self.runner_id, "runner_id")
+            .map_err(|error| RunnerError::new("runner_id_invalid", error.message()))?
+            .to_string();
+        let execution_mode = validate_execution_mode(&self.execution_mode)?.to_string();
 
         Ok(RunnerProtocolPreview {
             api_url,
