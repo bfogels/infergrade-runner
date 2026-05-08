@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -16,6 +17,7 @@ from infergrade.models import CapabilityExecution, RunRequest
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcnow_iso, write_json
 
 CAPABILITY_REGISTRY_VERSION = "2026-04-multiturn-preview"
+CODING_STATIC_REPAIR_FIXTURE_REVISION = "2026-05-coding-static-preview"
 _DOMINANT_GENERATION_FAILURE_RATE = 0.5
 
 DEFAULT_CAPABILITY_IMAGES = {
@@ -79,6 +81,15 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=96,
         execution_mode="native",
         case_limits={"canary": 3, "standard": 5, "gold": 5},
+    ),
+    "coding_static_repair_v1": CapabilityBenchmarkSpec(
+        benchmark_id="coding_static_repair_v1",
+        display_name="Coding static repair",
+        benchmark_kind="static_code_repair",
+        primary_metric_name="static_constraint_accuracy",
+        generation_max_tokens=256,
+        execution_mode="native",
+        case_limits={"canary": 2, "standard": 3, "gold": 3},
     ),
     "mmlu_pro_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="mmlu_pro_reference_v1",
@@ -485,10 +496,11 @@ def execute_capability_suite(
             if capability_run_path:
                 benchmark_artifacts[benchmark_id]["capability_run_path"] = capability_run_path
             primary_value = summary.get("primary_metric", {}).get("value")
-            if primary_value is not None and failure_severity == "none":
+            summary_status = str(summary.get("status") or "")
+            if primary_value is not None and failure_severity == "none" and summary_status == "completed":
                 component_scores[benchmark_id] = round(float(primary_value), 6)
                 completed += 1
-            elif failure_severity in {"dominant", "partial"}:
+            elif failure_severity in {"dominant", "partial"} or summary_status in {"degraded", "partial"}:
                 degraded += 1
             elif failure_severity == "all_failed":
                 hard_failed += 1
@@ -570,8 +582,6 @@ def _write_native_capability_run_artifact(
     predictions: List[Dict[str, Any]],
     summary: Dict[str, Any],
 ) -> str:
-    if spec.benchmark_id != "multiturn_chat_memory_v1":
-        raise ValueError("Unsupported native capability artifact: %s" % spec.benchmark_id)
     check_metadata = _selected_check_metadata(request, spec.benchmark_id)
     primary_metric = dict(summary.get("primary_metric") or {})
     score = primary_metric.get("value")
@@ -586,7 +596,8 @@ def _write_native_capability_run_artifact(
         case = _case_by_id(cases, case_id)
         case_score = task_scores.get(case_id, {})
         generation_status = str(prediction.get("generation_status") or "")
-        task_state = "scored" if generation_status == "completed" and case_score.get("score") is not None else "failed"
+        task_error_class = _native_task_error_class(generation_status, case_score)
+        task_state = "failed" if task_error_class else ("scored" if case_score.get("score") is not None else "failed")
         tasks.append(
             {
                 "task_id": str(case.get("task_id") or case_id),
@@ -594,10 +605,10 @@ def _write_native_capability_run_artifact(
                 "state": task_state,
                 "score": case_score.get("score") if task_state == "scored" else None,
                 "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
-                "scorer_type": "exact_match" if task_state == "scored" else None,
+                "scorer_type": _native_scorer_type(spec) if task_state == "scored" else None,
                 "scoring_policy": summary.get("scoring_policy") if task_state == "scored" else None,
                 "output_artifact": "predictions.jsonl#%s" % case_id,
-                "error_class": None if task_state == "scored" else "generation_failed",
+                "error_class": None if task_state == "scored" else (task_error_class or "scoring_failed"),
                 "latency_ms": None,
                 "time_to_first_token_ms": None,
                 "tokens_per_second": None,
@@ -654,12 +665,12 @@ def _write_native_capability_run_artifact(
         },
         "protocol": {
             "task_family": spec.benchmark_kind,
-            "prompt_version": "multiturn_chat_memory_v1",
-            "task_version": "multiturn_chat_memory_v1",
-            "fixture_revision": CAPABILITY_REGISTRY_VERSION,
+            "prompt_version": spec.benchmark_id,
+            "task_version": spec.benchmark_id,
+            "fixture_revision": _native_fixture_revision(spec),
             "dataset_revision": None,
-            "scorer_type": "exact_match",
-            "scoring_policy": summary.get("scoring_policy") or "deterministic_required_phrase_match_v1",
+            "scorer_type": _native_scorer_type(spec),
+            "scoring_policy": summary.get("scoring_policy") or _native_scoring_policy(spec),
             "repetitions": 1,
         },
         "summary": {
@@ -668,7 +679,7 @@ def _write_native_capability_run_artifact(
             "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
             "passed_count": summary.get("metrics", {}).get("passed_constraints"),
             "failed_count": summary.get("generation_failure_count"),
-            "partial_count": 0,
+            "partial_count": summary.get("metrics", {}).get("malformed_output_count", 0),
             "skipped_count": 0,
             "not_comparable_count": 0,
             "duration_seconds": None,
@@ -684,7 +695,7 @@ def _write_native_capability_run_artifact(
             "scoring_outputs": ["summary.json"],
             "supporting_files": ["cases.jsonl"],
         },
-        "claim_boundary": _assistant_artifact_claim_boundary(summary_state),
+        "claim_boundary": _native_artifact_claim_boundary(spec, summary_state),
     }
     errors = validate_capability_run_artifact(artifact)
     if errors:
@@ -692,6 +703,38 @@ def _write_native_capability_run_artifact(
     path = os.path.join(benchmark_dir, "capability_run.json")
     write_json(path, artifact)
     return path
+
+
+def _native_task_error_class(generation_status: str, case_score: Dict[str, Any]) -> Optional[str]:
+    if generation_status != "completed":
+        return "generation_failed"
+    if str(case_score.get("state") or "") == "failed":
+        return str(case_score.get("error_class") or "scoring_failed")
+    return None
+
+
+def _native_scorer_type(spec: CapabilityBenchmarkSpec) -> str:
+    if spec.benchmark_id == "multiturn_chat_memory_v1":
+        return "exact_match"
+    if spec.benchmark_id == "coding_static_repair_v1":
+        return "static_check"
+    raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
+
+
+def _native_scoring_policy(spec: CapabilityBenchmarkSpec) -> str:
+    if spec.benchmark_id == "multiturn_chat_memory_v1":
+        return "deterministic_required_phrase_match_v1"
+    if spec.benchmark_id == "coding_static_repair_v1":
+        return "deterministic_static_code_constraints_v1"
+    raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
+
+
+def _native_fixture_revision(spec: CapabilityBenchmarkSpec) -> str:
+    if spec.benchmark_id == "multiturn_chat_memory_v1":
+        return CAPABILITY_REGISTRY_VERSION
+    if spec.benchmark_id == "coding_static_repair_v1":
+        return CODING_STATIC_REPAIR_FIXTURE_REVISION
+    raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
 def _selected_check_metadata(request: RunRequest, benchmark_id: str) -> Dict[str, Any]:
@@ -736,6 +779,43 @@ def _assistant_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
             "This artifact records that the pinned multi-turn assistant memory fixture set was not yet scored.",
         ]
     return {"supported_claims": supported, "unsupported_claims": unsupported}
+
+
+def _coding_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    unsupported = [
+        "This is not a global coding capability score.",
+        "This is not public leaderboard evidence.",
+        "This is not a SWE-bench or LiveCodeBench result.",
+        "This does not prove arbitrary repository-editing or unit-test execution skill.",
+    ]
+    if state == "scored":
+        supported = [
+            "This local setup completed the pinned coding static-repair fixture set.",
+            "The score reports deterministic static code-output constraints for this thin local sample.",
+        ]
+    elif state == "partial":
+        supported = [
+            "This local setup attempted the pinned coding static-repair fixture set with partial generation or malformed-output failures.",
+            "The artifact preserves scored and failed task rows separately for this thin local sample.",
+        ]
+    elif state == "failed":
+        supported = [
+            "This local setup attempted the pinned coding static-repair fixture set.",
+            "The artifact preserves generation and malformed-output failures without converting them to broad coding scores.",
+        ]
+    else:
+        supported = [
+            "This artifact records that the pinned coding static-repair fixture set was not yet scored.",
+        ]
+    return {"supported_claims": supported, "unsupported_claims": unsupported}
+
+
+def _native_artifact_claim_boundary(spec: CapabilityBenchmarkSpec, state: str) -> Dict[str, List[str]]:
+    if spec.benchmark_id == "multiturn_chat_memory_v1":
+        return _assistant_artifact_claim_boundary(state)
+    if spec.benchmark_id == "coding_static_repair_v1":
+        return _coding_artifact_claim_boundary(state)
+    raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
 def _capability_artifact_state(status: Any, score: Any, generation_failure_severity: Any = None) -> str:
@@ -871,9 +951,7 @@ def _generate_predictions(
 
 
 def _prepare_native_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir: str, tier: str) -> None:
-    if spec.benchmark_id != "multiturn_chat_memory_v1":
-        raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
-    cases = _multiturn_chat_memory_cases()
+    cases = _native_benchmark_cases(spec)
     limit = spec.case_limits.get(tier)
     if limit:
         cases = cases[:limit]
@@ -881,8 +959,6 @@ def _prepare_native_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir
 
 
 def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str) -> Dict[str, Any]:
-    if spec.benchmark_id != "multiturn_chat_memory_v1":
-        raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
     cases_by_id = {
         str(item.get("case_id") or item.get("task_id") or stable_hash(item, length=12)): item
         for item in _read_jsonl(os.path.join(benchmark_dir, "cases.jsonl"))
@@ -896,16 +972,49 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
         case = cases_by_id.get(case_id) or {}
         checks = list(case.get("checks") or [])
         response = str(prediction.get("response") or prediction.get("completion") or "")
-        normalized_response = _normalize_score_text(response)
+        if prediction.get("generation_status") != "completed":
+            total_constraints += len(checks)
+            case_results.append(
+                {
+                    "case_id": case_id,
+                    "state": "failed",
+                    "error_class": "generation_failed",
+                    "passed_constraints": 0,
+                    "total_constraints": len(checks),
+                    "score": None,
+                }
+            )
+            continue
+        score_target = response
+        if case.get("requires_code_fence"):
+            extracted_code = _extract_single_code_fence(response, case.get("code_fence_language"))
+            if extracted_code is None:
+                total_constraints += len(checks)
+                case_results.append(
+                    {
+                        "case_id": case_id,
+                        "state": "failed",
+                        "error_class": "malformed_output",
+                        "passed_constraints": 0,
+                        "total_constraints": len(checks),
+                        "score": None,
+                    }
+                )
+                continue
+            score_target = extracted_code
+        normalized_response = _normalize_score_text(score_target)
         case_passed = 0
         for check in checks:
             required_any = [_normalize_score_text(item) for item in list(check.get("required_any") or [])]
             required_all = [_normalize_score_text(item) for item in list(check.get("required_all") or [])]
+            forbidden_any = [_normalize_score_text(item) for item in list(check.get("forbidden_any") or [])]
             passed = False
             if required_any:
                 passed = any(item and item in normalized_response for item in required_any)
             elif required_all:
                 passed = all(item and item in normalized_response for item in required_all)
+            if passed and forbidden_any:
+                passed = not any(item and item in normalized_response for item in forbidden_any)
             total_constraints += 1
             if passed:
                 passed_constraints += 1
@@ -913,21 +1022,26 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
         case_results.append(
             {
                 "case_id": case_id,
+                "state": "scored",
+                "error_class": None,
                 "passed_constraints": case_passed,
                 "total_constraints": len(checks),
                 "score": round(case_passed / float(len(checks)), 6) if checks else None,
             }
         )
     score = round(passed_constraints / float(total_constraints), 6) if total_constraints else None
+    malformed_output_count = len([item for item in case_results if item.get("error_class") == "malformed_output"])
+    status = "partial" if malformed_output_count else "completed"
     return {
         "benchmark_id": spec.benchmark_id,
         "display_name": spec.display_name,
-        "status": "completed",
+        "status": status,
         "primary_metric": {"name": spec.primary_metric_name, "value": score},
         "metrics": {
             spec.primary_metric_name: score,
             "passed_constraints": passed_constraints,
             "total_constraints": total_constraints,
+            "malformed_output_count": malformed_output_count,
             "case_accuracy": round(
                 len([item for item in case_results if item.get("score") == 1.0]) / float(len(case_results)),
                 6,
@@ -936,12 +1050,100 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
             else None,
         },
         "case_results": case_results,
-        "scoring_policy": "deterministic_required_phrase_match_v1",
+        "scoring_policy": _native_scoring_policy(spec),
     }
 
 
 def _normalize_score_text(value: Any) -> str:
     return " ".join(str(value or "").lower().split())
+
+
+def _extract_single_code_fence(value: str, language: Any = None) -> Optional[str]:
+    text = str(value or "")
+    fence_pattern = re.compile(
+        r"```(?P<language>[A-Za-z0-9_+-]*)[ \t]*\r?\n(?P<code>.*?)\r?\n```",
+        flags=re.DOTALL,
+    )
+    matches = list(fence_pattern.finditer(text))
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    expected_language = str(language or "").strip().lower()
+    actual_language = str(match.group("language") or "").strip().lower()
+    if expected_language and actual_language != expected_language:
+        return None
+    outside = text[: match.start()] + text[match.end() :]
+    if outside.strip():
+        return None
+    return match.group("code")
+
+
+def _native_benchmark_cases(spec: CapabilityBenchmarkSpec) -> List[Dict[str, Any]]:
+    if spec.benchmark_id == "multiturn_chat_memory_v1":
+        return _multiturn_chat_memory_cases()
+    if spec.benchmark_id == "coding_static_repair_v1":
+        return _coding_static_repair_cases()
+    raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
+
+
+def _coding_static_repair_cases() -> List[Dict[str, Any]]:
+    return [
+        {
+            "case_id": "coding-static-clamp-score",
+            "task_id": "coding_static_repair_v1/clamp-score",
+            "prompt": (
+                "Return only a fenced Python code block. Repair this function without using min() or max():\n\n"
+                "def clamp_score(value):\n"
+                "    # Return 0 when value is below 0, 1 when above 1, otherwise the original value.\n"
+                "    pass\n"
+            ),
+            "requires_code_fence": True,
+            "code_fence_language": "python",
+            "checks": [
+                {"label": "function name preserved", "required_all": ["def clamp_score(value):"]},
+                {"label": "lower bound branch", "required_all": ["if value < 0", "return 0"]},
+                {"label": "upper bound branch", "required_all": ["if value > 1", "return 1"]},
+                {"label": "identity return", "required_all": ["return value"]},
+                {"label": "no min max shortcut", "required_all": ["def clamp_score"], "forbidden_any": ["min(", "max("]},
+            ],
+        },
+        {
+            "case_id": "coding-static-parse-model-pair",
+            "task_id": "coding_static_repair_v1/parse-model-pair",
+            "prompt": (
+                "Return only a fenced Python code block. Implement parse_model_pair(text) so input like "
+                "'Qwen2.5@q4_k_m' returns {'model': 'Qwen2.5', 'quant': 'q4_k_m'}. Split only once on '@' "
+                "and strip whitespace from both fields.\n"
+            ),
+            "requires_code_fence": True,
+            "code_fence_language": "python",
+            "checks": [
+                {"label": "function name", "required_all": ["def parse_model_pair(text):"]},
+                {"label": "single split", "required_any": ["split('@', 1)", "split(\"@\", 1)"]},
+                {"label": "model key", "required_any": ["'model'", "\"model\""]},
+                {"label": "quant key", "required_any": ["'quant'", "\"quant\""]},
+                {"label": "strip whitespace", "required_all": [".strip()"]},
+            ],
+        },
+        {
+            "case_id": "coding-static-render-status-line",
+            "task_id": "coding_static_repair_v1/render-status-line",
+            "prompt": (
+                "Return only a fenced Python code block. Implement render_status_line(status) for a dictionary "
+                "with keys state and model. The returned string must include 'status=' followed by the state and "
+                "'model=' followed by the model.\n"
+            ),
+            "requires_code_fence": True,
+            "code_fence_language": "python",
+            "checks": [
+                {"label": "function name", "required_all": ["def render_status_line(status):"]},
+                {"label": "status label", "required_any": ["status=", "status ="]},
+                {"label": "model label", "required_any": ["model=", "model ="]},
+                {"label": "state field", "required_any": ["['state']", "[\"state\"]"]},
+                {"label": "model field", "required_any": ["['model']", "[\"model\"]"]},
+            ],
+        },
+    ]
 
 
 def _multiturn_chat_memory_cases() -> List[Dict[str, Any]]:
