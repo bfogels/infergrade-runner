@@ -742,6 +742,114 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(reasoning["lane"], "reference")
         self.assertEqual(reasoning["confidence_label"], "reference_sample")
 
+    def test_mmlu_pro_artifact_distinguishes_wrong_malformed_and_generation_failed_tasks(self):
+        def fake_prepare(spec, benchmark_dir, tier):
+            cases = [
+                {
+                    "case_id": "mmlu_pro/1",
+                    "task_id": "mmlu_pro/1",
+                    "category": "math",
+                    "prompt": "Wrong answer case",
+                    "answer": "D",
+                },
+                {
+                    "case_id": "mmlu_pro/2",
+                    "task_id": "mmlu_pro/2",
+                    "category": "other",
+                    "prompt": "Malformed answer case",
+                    "answer": "B",
+                },
+                {
+                    "case_id": "mmlu_pro/3",
+                    "task_id": "mmlu_pro/3",
+                    "category": "science",
+                    "prompt": "Generation failure case",
+                    "answer": "C",
+                },
+            ]
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for case in cases:
+                    handle.write(json.dumps(case) + "\n")
+            with open(os.path.join(benchmark_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "benchmark_id": "mmlu_pro_reference_v1",
+                        "dataset_revision": "54611cde22c74cca43dd78732198de6abe971398",
+                        "sample_policy": "category_round_robin_v1",
+                        "category_count": 3,
+                    },
+                    handle,
+                )
+
+        def fake_generate(request, prompt, max_tokens):
+            if "Wrong answer" in prompt:
+                return {"text": "A", "status": "completed", "error": None}
+            if "Malformed answer" in prompt:
+                return {"text": "I am not sure.", "status": "completed", "error": None}
+            return {"text": "", "status": "failed", "error": "runtime stopped"}
+
+        def fake_evaluate(spec, benchmark_dir):
+            return {
+                "benchmark_id": "mmlu_pro_reference_v1",
+                "display_name": "MMLU-Pro reference",
+                "status": "partial",
+                "primary_metric": {"name": "accuracy", "value": 0.0},
+                "metrics": {"accuracy": 0.0, "correct_count": 0, "total_count": 2, "invalid_count": 1},
+                "category_metrics": {
+                    "math": {"accuracy": 0.0, "correct_count": 0, "total_count": 1},
+                    "other": {"accuracy": 0.0, "correct_count": 0, "total_count": 1},
+                },
+                "case_results": [
+                    {
+                        "case_id": "mmlu_pro/1",
+                        "task_id": "mmlu_pro/1",
+                        "category": "math",
+                        "expected": "D",
+                        "predicted": "A",
+                        "correct": False,
+                    },
+                    {
+                        "case_id": "mmlu_pro/2",
+                        "task_id": "mmlu_pro/2",
+                        "category": "other",
+                        "expected": "B",
+                        "predicted": None,
+                        "correct": False,
+                    },
+                ],
+                "scoring_policy": "exact_multiple_choice_letter_accuracy_v1",
+            }
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="general_assistant",
+            output_dir=self.tempdir,
+            benchmark_check_ids=["mmlu_pro_reference_v1"],
+            simulate=False,
+        )
+        adapter = mock.Mock()
+        adapter.generate_text.side_effect = fake_generate
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                execution = execute_capability_suite(adapter, request)
+
+        capability_run_path = execution.artifacts["mmlu_pro_reference_v1"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        tasks = {task["task_id"]: task for task in artifact["tasks"]}
+        self.assertEqual(tasks["mmlu_pro/1"]["state"], "scored")
+        self.assertEqual(tasks["mmlu_pro/1"]["score"], 0.0)
+        self.assertIsNone(tasks["mmlu_pro/1"]["error_class"])
+        self.assertEqual(tasks["mmlu_pro/2"]["state"], "failed")
+        self.assertIsNone(tasks["mmlu_pro/2"]["score"])
+        self.assertEqual(tasks["mmlu_pro/2"]["error_class"], "malformed_output")
+        self.assertEqual(tasks["mmlu_pro/3"]["state"], "failed")
+        self.assertIsNone(tasks["mmlu_pro/3"]["score"])
+        self.assertEqual(tasks["mmlu_pro/3"]["error_class"], "generation_failed")
+        self.assertEqual(artifact["summary"]["state"], "partial")
+
     def test_execute_capability_suite_handles_partial_failures(self):
         def fake_prepare(spec, benchmark_dir, tier):
             with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
