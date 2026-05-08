@@ -638,6 +638,8 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(execution.component_scores["evalplus_mbpp"], 0.6)
         self.assertIn("evalplus_humaneval", execution.benchmark_results)
         self.assertTrue(os.path.exists(os.path.join(self.tempdir, "artifacts", "capability", "evalplus_humaneval", "predictions.jsonl")))
+        self.assertIn("capability_run_path", execution.artifacts["evalplus_humaneval"])
+        self.assertNotIn("capability_run_path", execution.artifacts["evalplus_mbpp"])
 
     def test_execute_evalplus_humaneval_emits_valid_reference_capability_run_artifact(self):
         def fake_prepare(spec, benchmark_dir, tier):
