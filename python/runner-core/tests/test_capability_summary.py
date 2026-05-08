@@ -209,6 +209,33 @@ class CapabilitySummaryTests(unittest.TestCase):
             ["evalplus_humaneval", "evalplus_mbpp"],
         )
 
+    def test_summary_indexes_quant_fidelity_reference_artifact(self):
+        execution = self._execution(
+            {
+                "perplexity_reference_v1": self._write_capability_run(
+                    "perplexity_reference_v1",
+                    surface="quant_fidelity",
+                    state="scored",
+                    score=3.25,
+                    task_states=["scored"],
+                    lane="reference",
+                    grade="reference_sample",
+                    confidence_label="reference_sample",
+                )
+            }
+        )
+
+        summary = build_capability_summary_artifact(self._request(), execution, self.tempdir)
+
+        self.assertEqual(validate_capability_summary_artifact(summary), [])
+        by_surface = {item["surface"]: item for item in summary["surfaces"]}
+        quant = by_surface["quant_fidelity"]
+        self.assertEqual(quant["state"], "scored")
+        self.assertEqual(quant["lane"], "reference")
+        self.assertEqual(quant["confidence_label"], "reference_sample")
+        self.assertEqual(quant["score"], 3.25)
+        self.assertEqual(quant["capability_artifacts"][0]["benchmark_id"], "perplexity_reference_v1")
+
     def _request(self):
         return RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",

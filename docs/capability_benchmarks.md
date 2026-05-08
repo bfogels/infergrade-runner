@@ -187,6 +187,8 @@ The first local reasoning artifact path is `reasoning_exact_answer_v1`: it emits
 
 The first sampled reasoning reference artifact path is `mmlu_pro_reference_v1`: when intentionally selected, it emits a validated `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, `benchmark_metadata.json`, and `summary.json`. It preserves the pinned dataset revision, sample policy, category breakdowns, and reference-sample claim boundaries. It remains experimental reference evidence, not gold evidence or a public leaderboard claim.
 
+The first quant-fidelity reference artifact path is `perplexity_reference_v1`: when intentionally selected, it emits a validated `capability_run.json` beside `fidelity_raw.json` and `summary.json`. It preserves the pinned `infergrade_quantfidelity_v1` corpus revision, `infergrade_perplexity_v1` protocol parameters, perplexity, bits-per-byte where derivable, token/byte counts where available, duration, and same-family comparability key. It remains experimental reference evidence for comparing quants of the same model family/checkpoint/tokenizer/corpus/protocol only; it is not assistant, coding, reasoning, general model-quality, gold, or leaderboard evidence.
+
 ## Capability Summary Artifact
 
 Runner also emits `artifacts/capability/capability_summary.json` when local capability execution runs. This is a discoverability and import artifact, not a new benchmark lane.

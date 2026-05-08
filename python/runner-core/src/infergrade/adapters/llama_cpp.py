@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import shlex
@@ -51,7 +52,9 @@ _PINNED_LLAMA_CPP_REF = "9f102a140"
 _UNSUPPORTED_ARCHITECTURES = {
     "gemma4": "the pinned llama.cpp runtime predates Gemma 4 GGUF support",
 }
-_PERPLEXITY_CORPUS_ID = "infergrade_preview_text_v1"
+_PERPLEXITY_CORPUS_ID = "infergrade_quantfidelity_v1"
+_PERPLEXITY_CORPUS_REVISION = "sha256:ca86babd3cb6e69ca5db20f7625723da6951f98bcaab98f12291db36deef3512"
+_PERPLEXITY_PROTOCOL_ID = "infergrade_perplexity_v1"
 _PERPLEXITY_CONTEXT_SIZE = 128
 _PERPLEXITY_OUTPUT_TYPE = 0
 _PERPLEXITY_STRIDE = 0
@@ -370,18 +373,28 @@ class LlamaCppAdapter(BaseAdapter):
         started = time.perf_counter()
         try:
             result = self._run_perplexity(request, model_path)
+            bits_per_byte = _bits_per_byte(
+                result.get("perplexity"),
+                result.get("corpus_token_count"),
+                result.get("corpus_byte_count"),
+            )
             metrics = {
                 "perplexity": {
                     "metric_name": "perplexity",
                     "value": result["perplexity"],
                     "stderr": result.get("stderr"),
+                    "bits_per_byte": bits_per_byte,
                     "lower_is_better": True,
                     "evaluation_backend": result.get("evaluation_backend"),
                     "duration_seconds": result.get("duration_seconds"),
                     "corpus_token_count": result.get("corpus_token_count"),
+                    "corpus_byte_count": result.get("corpus_byte_count"),
                     "status": "measured",
-                    "comparability_key": self._perplexity_comparability_key(),
+                    "comparability_key": self._perplexity_comparability_key(request),
+                    "protocol_id": _PERPLEXITY_PROTOCOL_ID,
                     "corpus_id": _PERPLEXITY_CORPUS_ID,
+                    "corpus_revision": _PERPLEXITY_CORPUS_REVISION,
+                    "protocol_parameters": self._perplexity_protocol_parameters(),
                 }
             }
             return FidelityExecution(
@@ -768,22 +781,50 @@ class LlamaCppAdapter(BaseAdapter):
     def _perplexity_context(self) -> Dict[str, object]:
         return {
             "corpus_id": _PERPLEXITY_CORPUS_ID,
-            "corpus_label": "InferGrade Reference Text v1",
+            "corpus_revision": _PERPLEXITY_CORPUS_REVISION,
+            "corpus_label": "InferGrade Quant Fidelity v1",
             "metric_family": "quantization_fidelity",
             "tool": "llama-perplexity",
-            "context_size": _PERPLEXITY_CONTEXT_SIZE,
-            "stride": _PERPLEXITY_STRIDE,
-            "output_type": _PERPLEXITY_OUTPUT_TYPE,
-            "comparability_key": self._perplexity_comparability_key(),
-            "interpretation": "Lower perplexity suggests better quantization fidelity on the shared corpus, but it does not replace task-level capability scores.",
+            "protocol_id": _PERPLEXITY_PROTOCOL_ID,
+            "protocol_parameters": self._perplexity_protocol_parameters(),
+            "comparability_key_basis": [
+                "model_family",
+                "checkpoint",
+                "tokenizer_id",
+                "corpus_id",
+                "corpus_revision",
+                "protocol_id",
+            ],
+            "interpretation": "Lower perplexity is a same-family quant-fidelity signal on the pinned corpus and protocol; it is not general model quality or task capability.",
         }
 
-    def _perplexity_comparability_key(self) -> str:
-        return "llama.cpp:%s:ctx%s:stride%s:out%s" % (
-            _PERPLEXITY_CORPUS_ID,
-            _PERPLEXITY_CONTEXT_SIZE,
-            _PERPLEXITY_STRIDE,
-            _PERPLEXITY_OUTPUT_TYPE,
+    def _perplexity_protocol_parameters(self) -> Dict[str, object]:
+        return {
+            "ctx_size": _PERPLEXITY_CONTEXT_SIZE,
+            "stride": _PERPLEXITY_STRIDE,
+            "ppl_output_type": _PERPLEXITY_OUTPUT_TYPE,
+            "threads": 4,
+            "warmup": False,
+        }
+
+    def _perplexity_comparability_key(self, request: RunRequest = None) -> str:
+        if request is None:
+            return "pending_subject:%s:%s:%s" % (
+                _PERPLEXITY_CORPUS_ID,
+                _PERPLEXITY_CORPUS_REVISION,
+                _PERPLEXITY_PROTOCOL_ID,
+            )
+        tokenizer_id = "%s_default" % re.sub(r"[^a-z0-9]+", "_", request.model.split("/")[-1].lower()).strip("_")
+        return stable_hash(
+            {
+                "model_ref": request.model,
+                "tokenizer_id": tokenizer_id,
+                "corpus_id": _PERPLEXITY_CORPUS_ID,
+                "corpus_revision": _PERPLEXITY_CORPUS_REVISION,
+                "protocol_id": _PERPLEXITY_PROTOCOL_ID,
+                "protocol_parameters": self._perplexity_protocol_parameters(),
+            },
+            length=24,
         )
 
     def _run_perplexity(self, request: RunRequest, model_path: str) -> Dict[str, object]:
@@ -855,6 +896,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "perplexity": parsed.get("perplexity"),
                 "stderr": parsed.get("stderr"),
                 "corpus_token_count": parsed.get("corpus_token_count"),
+                "corpus_byte_count": len(_PERPLEXITY_CORPUS_TEXT.encode("utf-8")),
                 "duration_seconds": parsed.get("duration_seconds") or round(time.perf_counter() - started, 4),
                 "evaluation_backend": "llama-perplexity",
                 "log_tail": raw_log.splitlines()[-40:],
@@ -951,6 +993,18 @@ def _parse_perplexity_output(raw_log: str) -> Dict[str, float]:
         if match and "corpus_token_count" not in payload:
             payload["corpus_token_count"] = int(float(match.group(1)))
     return payload
+
+
+def _bits_per_byte(perplexity: Any, token_count: Any, byte_count: Any) -> Optional[float]:
+    try:
+        ppl = float(perplexity)
+        tokens = float(token_count)
+        bytes_scored = float(byte_count)
+    except (TypeError, ValueError):
+        return None
+    if ppl <= 0 or tokens <= 0 or bytes_scored <= 0:
+        return None
+    return round(math.log(ppl, 2) * tokens / bytes_scored, 6)
 
 
 def _compute_ttft_ms(parsed: Dict[str, float]) -> Optional[float]:
