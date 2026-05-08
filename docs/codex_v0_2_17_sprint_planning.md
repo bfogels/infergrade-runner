@@ -51,7 +51,7 @@ python3 -m json.tool schemas/json/capability_summary.schema.json >/tmp/capabilit
 python3 ./scripts/sync_versions.py --check
 python3 ./scripts/check_versions.py
 git diff --check
-gitleaks detect --source=. --redact --no-banner --exit-code 0
+gitleaks detect --source=. --redact --no-banner --exit-code 1
 ```
 
 ## Validation Evidence
