@@ -5,6 +5,7 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.benchmark_catalog import (
     benchmark_scope_summary_for_selection,
+    benchmark_status_index,
     capability_coverage_guidance_for_selection,
     capability_benchmark_ids_for_request,
     capability_surface_index,
@@ -14,6 +15,7 @@ from infergrade.benchmark_catalog import (
     normalize_request_selection,
     selection_metadata_for_request,
     shortcut_selection,
+    validate_benchmark_legitimacy_metadata,
 )
 from infergrade.models import RunRequest
 
@@ -27,6 +29,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("metadata_ordering", catalog)
         self.assertTrue(catalog["score_policies"])
         self.assertIn("evidence_lanes", catalog)
+        self.assertIn("benchmark_maturity_levels", catalog)
+        self.assertIn("benchmark_status_matrix", catalog)
         self.assertEqual([item["lane_id"] for item in catalog["evidence_lanes"]], ["smoke", "decision", "reference", "gold"])
         self.assertIn("capability_surfaces", catalog)
         self.assertEqual(
@@ -65,6 +69,37 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.assertIn("primary_score_weight", check)
             self.assertTrue(check["score_policy_id"])
         self.assertTrue(catalog["planned_benchmark_candidates"])
+
+    def test_catalog_legitimacy_metadata_is_complete_and_conservative(self):
+        catalog = load_capability_catalog()
+        self.assertEqual(validate_benchmark_legitimacy_metadata(catalog), [])
+        statuses = benchmark_status_index(catalog)
+        required_ids = {
+            "multiturn_chat_memory_v1",
+            "coding_static_repair_v1",
+            "reasoning_exact_answer_v1",
+            "mmlu_pro_reference_v1",
+            "evalplus_humaneval",
+            "evalplus_mbpp",
+            "perplexity_reference_v1",
+            "gpqa_reference_v1",
+            "livecodebench_reference_v1",
+            "swebench_verified_gold_v1",
+            "repository_edit_smoke_v1",
+        }
+        self.assertTrue(required_ids.issubset(set(statuses)))
+        self.assertEqual(statuses["multiturn_chat_memory_v1"]["maturity"], "thin_local_sample")
+        self.assertEqual(statuses["coding_static_repair_v1"]["maturity"], "thin_local_sample")
+        self.assertEqual(statuses["reasoning_exact_answer_v1"]["maturity"], "thin_local_sample")
+        self.assertEqual(statuses["mmlu_pro_reference_v1"]["maturity"], "reference_runnable")
+        self.assertEqual(statuses["swebench_verified_gold_v1"]["maturity"], "gold_candidate")
+        self.assertEqual(statuses["swebench_verified_gold_v1"]["runnable_status"], "not_runnable")
+        self.assertIn("not runnable", statuses["swebench_verified_gold_v1"]["claim_boundary"])
+        for check_id in ("multiturn_chat_memory_v1", "coding_static_repair_v1", "reasoning_exact_answer_v1"):
+            self.assertEqual(statuses[check_id]["evidence_lane_id"], "decision")
+            self.assertNotIn("reference", statuses[check_id]["maturity"])
+            self.assertNotIn("gold", statuses[check_id]["maturity"])
+            self.assertTrue(statuses[check_id]["promotion_blockers"])
 
     def test_evidence_lane_index_exposes_claim_boundaries(self):
         lanes = evidence_lane_index()
@@ -247,10 +282,10 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(planned["gpqa_reference_v1"]["status"], "planned_access_gated")
         self.assertEqual(planned["gpqa_reference_v1"]["access_status"], "gated_contact_share_required")
         self.assertIn("Do not commit", planned["gpqa_reference_v1"]["dataset_handling_policy"])
-        self.assertEqual(planned["swe_bench_verified_reference_v1"]["benchmark_tier"], "gold")
-        self.assertEqual(planned["swe_bench_verified_reference_v1"]["evidence_lane_id"], "gold")
-        self.assertEqual(planned["swe_bench_verified_reference_v1"]["claim_strength"], "curated_reference")
-        self.assertTrue(planned["swe_bench_verified_reference_v1"]["why_not_default"])
+        self.assertEqual(planned["swebench_verified_gold_v1"]["benchmark_tier"], "gold")
+        self.assertEqual(planned["swebench_verified_gold_v1"]["evidence_lane_id"], "gold")
+        self.assertEqual(planned["swebench_verified_gold_v1"]["claim_strength"], "curated_reference")
+        self.assertTrue(planned["swebench_verified_gold_v1"]["why_not_default"])
         self.assertTrue(any(action["action"] == "add_capability_check" for action in guidance["next_actions"]))
 
     def test_selection_metadata_includes_scope_and_coverage_guidance(self):
@@ -271,6 +306,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(interactive["surface_id"], "deployment_fitness")
         self.assertEqual(interactive["evidence_lane_id"], "decision")
         self.assertEqual(interactive["claim_strength"], "first_pass_local_decision")
+        self.assertEqual(interactive["benchmark_maturity"], "strong_local_candidate")
+        self.assertEqual(interactive["runnable_status"], "runnable_default_local")
         self.assertFalse(interactive["higher_is_better"])
         self.assertEqual(interactive["primary_score_weight"], 0.0)
         self.assertIn("time_to_first_token_ms", interactive["score_breakdown_fields"])

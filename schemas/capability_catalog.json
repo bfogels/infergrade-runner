@@ -31,6 +31,341 @@
     "failure_rate": "unknown",
     "calibration_status": "estimated_static_catalog_v1"
   },
+  "benchmark_maturity_levels": [
+    {
+      "maturity": "planned",
+      "gate_summary": "Roadmap metadata only. The benchmark is not runnable until a fixture or dataset policy, harness, scoring policy, and claim boundary exist."
+    },
+    {
+      "maturity": "thin_local_sample",
+      "gate_summary": "Runnable only for small pinned local fixtures with deterministic scoring and explicit thin-sample caveats."
+    },
+    {
+      "maturity": "strong_local_candidate",
+      "gate_summary": "Candidate for stronger local evidence after broader samples, repeatability, and observed duration or failure-rate metadata are reviewed."
+    },
+    {
+      "maturity": "reference_candidate",
+      "gate_summary": "Recognized or justified reference benchmark candidate that still needs a complete reproducible harness, scoring, dataset, or sandbox review."
+    },
+    {
+      "maturity": "reference_runnable",
+      "gate_summary": "Runnable intentionally selected reference evidence with pinned dataset or fixture revision, preserved raw/scoring artifacts, and explicit claim boundaries."
+    },
+    {
+      "maturity": "gold_candidate",
+      "gate_summary": "Potential high-legitimacy evidence that requires legal/access controls, stronger sandbox/runtime controls, and maintainer review before runnable product claims."
+    },
+    {
+      "maturity": "gold_runnable",
+      "gate_summary": "Runnable gold evidence only after reference gates, dataset/legal/access gates, sandbox controls, and maintainer-review gates are all satisfied."
+    }
+  ],
+  "benchmark_status_matrix": [
+    {
+      "check_id": "ifeval",
+      "surface_id": "local_assistant_capability",
+      "evidence_lane_id": "decision",
+      "maturity": "strong_local_candidate",
+      "runnable_status": "runnable_container",
+      "default_inclusion_status": "quick_default",
+      "fixture_or_dataset_revision_status": "fixture_policy_known_upstream_pinning_needed",
+      "harness_status": "container_harness_implemented",
+      "scoring_policy_id": "instruction_following_primary_accuracy_v1",
+      "sample_policy": "Decision-sized instruction-following sample; not a leaderboard protocol.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "container_optional_for_scoring",
+      "claim_boundary": "Instruction-following decision evidence only; not broad assistant quality or leaderboard evidence.",
+      "promotion_blockers": [
+        "Pin exact sample/revision policy before promoting to reference evidence.",
+        "Replace estimated duration and token-volume metadata with observed bands."
+      ]
+    },
+    {
+      "check_id": "multiturn_chat_memory_v1",
+      "surface_id": "local_assistant_capability",
+      "evidence_lane_id": "decision",
+      "maturity": "thin_local_sample",
+      "runnable_status": "runnable_default_local",
+      "default_inclusion_status": "quick_default",
+      "fixture_or_dataset_revision_status": "pinned_runner_fixture",
+      "harness_status": "native_harness_implemented",
+      "scoring_policy_id": "multiturn_constraint_retention_v1",
+      "sample_policy": "Five pinned synthetic transcript-retention cases for quick local setup guidance.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "none_native_generation_only",
+      "claim_boundary": "Thin local assistant sample; useful for setup guidance, not a global assistant or reference claim.",
+      "promotion_blockers": [
+        "Broader assistant task family coverage is required before stronger local evidence.",
+        "Repeated-run variance and observed duration metadata are not yet required."
+      ]
+    },
+    {
+      "check_id": "coding_static_repair_v1",
+      "surface_id": "local_coding_capability",
+      "evidence_lane_id": "decision",
+      "maturity": "thin_local_sample",
+      "runnable_status": "runnable_default_local",
+      "default_inclusion_status": "explicit_coding_decision",
+      "fixture_or_dataset_revision_status": "pinned_runner_fixture",
+      "harness_status": "native_harness_implemented_static_only",
+      "scoring_policy_id": "coding_static_constraints_v1",
+      "sample_policy": "Three pinned static repair prompts with deterministic constraint scoring and no generated-code execution.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "none_no_generated_code_execution",
+      "claim_boundary": "Thin local coding sample; not HumanEval+, LiveCodeBench, SWE-bench, or executable code-correctness evidence.",
+      "promotion_blockers": [
+        "Executable coding evidence needs sandboxed unit-test execution.",
+        "Broader coding samples and repeated-run reporting are required before stronger local evidence."
+      ]
+    },
+    {
+      "check_id": "reasoning_exact_answer_v1",
+      "surface_id": "local_reasoning_capability",
+      "evidence_lane_id": "decision",
+      "maturity": "thin_local_sample",
+      "runnable_status": "runnable_default_local",
+      "default_inclusion_status": "explicit_reasoning_decision",
+      "fixture_or_dataset_revision_status": "pinned_runner_fixture",
+      "harness_status": "native_harness_implemented",
+      "scoring_policy_id": "reasoning_exact_answer_v1",
+      "sample_policy": "Three pinned synthetic exact-answer cases for quick local reasoning setup guidance.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "none_native_generation_only",
+      "claim_boundary": "Thin local reasoning sample; not GPQA, MMLU-Pro, expert reasoning, reference, or gold evidence.",
+      "promotion_blockers": [
+        "Larger exact-answer sample and leakage-reviewed source policy are needed before stronger local evidence.",
+        "Reference reasoning requires recognized benchmark controls."
+      ]
+    },
+    {
+      "check_id": "mmlu_pro_reference_v1",
+      "surface_id": "local_reasoning_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "reference_runnable",
+      "runnable_status": "runnable_intentional_reference",
+      "default_inclusion_status": "not_quick_default",
+      "fixture_or_dataset_revision_status": "pinned_dataset_revision",
+      "harness_status": "container_harness_implemented",
+      "scoring_policy_id": "multiple_choice_accuracy_v1",
+      "sample_policy": "Pinned MMLU-Pro snapshot with canary, sampled local reference, and deeper/full reference limits.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "container_for_prepare_and_scoring",
+      "claim_boundary": "Sampled MMLU-Pro reference evidence; useful as a broad knowledge/reasoning reference signal, not a leaderboard or gold claim.",
+      "promotion_blockers": [
+        "Observed duration and token-volume metadata are needed for stronger local recommendation copy.",
+        "Leaderboard-style claims require the full official protocol and separate publication controls."
+      ]
+    },
+    {
+      "check_id": "evalplus_humaneval",
+      "surface_id": "local_coding_capability",
+      "evidence_lane_id": "decision",
+      "maturity": "strong_local_candidate",
+      "runnable_status": "runnable_container",
+      "default_inclusion_status": "coding_default",
+      "fixture_or_dataset_revision_status": "upstream_harness_revision_needs_explicit_pin",
+      "harness_status": "container_harness_implemented",
+      "scoring_policy_id": "coding_primary_pass_at_1_v1",
+      "sample_policy": "HumanEval+ pass@1 container path; treated as coding evidence but not yet promoted to reference-runnable status in product copy.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "container_required_for_generated_code_execution",
+      "claim_boundary": "Coding generation evidence under EvalPlus-style tests; not repo-edit, LiveCodeBench, SWE-bench, or broad agentic coding proof.",
+      "promotion_blockers": [
+        "Pin upstream EvalPlus revision and document sandbox limits before reference-runnable promotion.",
+        "Ensure capability_run emission preserves compile, runtime, timeout, and scoring failure states."
+      ]
+    },
+    {
+      "check_id": "evalplus_mbpp",
+      "surface_id": "local_coding_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "reference_candidate",
+      "runnable_status": "runnable_container",
+      "default_inclusion_status": "intentional_reference_only",
+      "fixture_or_dataset_revision_status": "upstream_harness_revision_needs_explicit_pin",
+      "harness_status": "container_harness_implemented",
+      "scoring_policy_id": "coding_primary_pass_at_1_v1",
+      "sample_policy": "MBPP+ breadth signal after HumanEval+; intentionally heavier than the first coding default.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "container_required_for_generated_code_execution",
+      "claim_boundary": "Coding breadth evidence under EvalPlus-style tests; not SWE-bench, LiveCodeBench, or repo-edit proof.",
+      "promotion_blockers": [
+        "Pin upstream EvalPlus revision and sample policy.",
+        "Preserve execution failure classes in capability artifacts before treating this as reference-runnable."
+      ]
+    },
+    {
+      "check_id": "perplexity_reference_v1",
+      "surface_id": "quant_fidelity",
+      "evidence_lane_id": "reference",
+      "maturity": "reference_candidate",
+      "runnable_status": "runnable_optional_llama_cpp",
+      "default_inclusion_status": "intentional_reference_only",
+      "fixture_or_dataset_revision_status": "reference_corpus_policy_needed",
+      "harness_status": "llama_cpp_perplexity_path_available",
+      "scoring_policy_id": "quant_fidelity_perplexity_v1",
+      "sample_policy": "Reference corpus perplexity signal for comparing nearby quantized artifacts under the same protocol.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "none_native_llama_cpp_perplexity",
+      "claim_boundary": "Quant-fidelity evidence only; perplexity does not prove assistant, coding, reasoning, or general model capability.",
+      "promotion_blockers": [
+        "Pin reference corpus revision and same-family quant metadata.",
+        "Emit validated capability_run and summary representation before reference-runnable promotion."
+      ]
+    },
+    {
+      "check_id": "interactive_chat_v1",
+      "surface_id": "deployment_fitness",
+      "evidence_lane_id": "decision",
+      "maturity": "strong_local_candidate",
+      "runnable_status": "runnable_default_local",
+      "default_inclusion_status": "quick_default",
+      "fixture_or_dataset_revision_status": "profile_prompt_policy_pinned",
+      "harness_status": "native_deployment_profile_implemented",
+      "scoring_policy_id": "deployment_profile_metrics_v1",
+      "sample_policy": "Short local deployment profile for TTFT, load time, and output speed.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "none_native_runtime",
+      "claim_boundary": "Deployment fitness evidence only; speed does not prove answer quality.",
+      "promotion_blockers": [
+        "Observed hardware/runtime duration bands are needed before stronger local comparison claims."
+      ]
+    },
+    {
+      "check_id": "batch_generation_v1",
+      "surface_id": "deployment_fitness",
+      "evidence_lane_id": "reference",
+      "maturity": "strong_local_candidate",
+      "runnable_status": "runnable_intentional_local",
+      "default_inclusion_status": "intentional_reference_only",
+      "fixture_or_dataset_revision_status": "profile_prompt_policy_pinned",
+      "harness_status": "native_deployment_profile_implemented",
+      "scoring_policy_id": "deployment_profile_metrics_v1",
+      "sample_policy": "Throughput-oriented local deployment profile for offline generation.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "none_native_runtime",
+      "claim_boundary": "Deployment throughput evidence only; not task capability or quant fidelity.",
+      "promotion_blockers": [
+        "Observed duration, variance, and hardware normalization metadata are needed for stronger comparison copy."
+      ]
+    },
+    {
+      "check_id": "long_context_v1",
+      "surface_id": "deployment_fitness",
+      "evidence_lane_id": "reference",
+      "maturity": "strong_local_candidate",
+      "runnable_status": "runnable_intentional_local",
+      "default_inclusion_status": "intentional_reference_only",
+      "fixture_or_dataset_revision_status": "profile_prompt_policy_pinned",
+      "harness_status": "native_deployment_profile_implemented",
+      "scoring_policy_id": "deployment_profile_metrics_v1",
+      "sample_policy": "Longer-context local deployment profile for latency and memory behavior.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "none_native_runtime",
+      "claim_boundary": "Long-context deployment fitness evidence only; not long-context reasoning quality.",
+      "promotion_blockers": [
+        "Observed memory and variance metadata are needed before stronger local comparison copy."
+      ]
+    },
+    {
+      "check_id": "arena_hard_local_reference_v1",
+      "surface_id": "local_assistant_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "planned",
+      "runnable_status": "not_runnable",
+      "default_inclusion_status": "not_default",
+      "fixture_or_dataset_revision_status": "judge_policy_and_prompt_fixture_needed",
+      "harness_status": "not_implemented",
+      "scoring_policy_id": "assistant_preference_win_rate_v1",
+      "sample_policy": "Future local preference-style reference candidate only after judge policy and prompt set are reviewed.",
+      "expected_duration_token_volume_status": "unknown",
+      "sandbox_requirement": "none_for_generation_judge_policy_required",
+      "claim_boundary": "Future preference-style assistant reference candidate; not a default local lane or leaderboard-style result.",
+      "promotion_blockers": [
+        "Define deterministic or reviewed judge policy.",
+        "Pin prompt fixtures and isolate subjective scoring limitations."
+      ]
+    },
+    {
+      "check_id": "repository_edit_smoke_v1",
+      "surface_id": "local_coding_capability",
+      "evidence_lane_id": "decision",
+      "maturity": "planned",
+      "runnable_status": "not_runnable",
+      "default_inclusion_status": "not_default",
+      "fixture_or_dataset_revision_status": "fixture_repo_policy_needed",
+      "harness_status": "not_implemented",
+      "scoring_policy_id": "repo_edit_task_success_v1",
+      "sample_policy": "Future tiny pinned repo-edit fixtures with rollback-safe execution and deterministic assertions.",
+      "expected_duration_token_volume_status": "unknown",
+      "sandbox_requirement": "required_before_generated_patch_execution",
+      "claim_boundary": "Future local repo-edit smoke only; not SWE-bench, LiveCodeBench, or broad agentic coding evidence.",
+      "promotion_blockers": [
+        "Define fixture repositories and rollback policy.",
+        "Design sandboxed patch application and deterministic scoring."
+      ]
+    },
+    {
+      "check_id": "gpqa_reference_v1",
+      "surface_id": "local_reasoning_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "planned",
+      "runnable_status": "not_runnable_access_gated",
+      "default_inclusion_status": "not_default",
+      "fixture_or_dataset_revision_status": "access_gated_dataset_policy_needed",
+      "harness_status": "not_implemented",
+      "scoring_policy_id": "multiple_choice_accuracy_v1",
+      "sample_policy": "Synthetic shape-only fixtures until local accepted dataset snapshots and leakage controls are implemented.",
+      "expected_duration_token_volume_status": "unknown",
+      "sandbox_requirement": "local_dataset_access_and_redaction_controls_required",
+      "claim_boundary": "Future hard reasoning reference candidate; not runnable and not gold evidence.",
+      "promotion_blockers": [
+        "No committed restricted data.",
+        "Define access-gated local dataset flow and leakage-safe artifacts.",
+        "Pin dataset revision after access controls exist."
+      ]
+    },
+    {
+      "check_id": "livecodebench_reference_v1",
+      "surface_id": "local_coding_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "planned",
+      "runnable_status": "not_runnable",
+      "default_inclusion_status": "not_default",
+      "fixture_or_dataset_revision_status": "task_window_pin_needed",
+      "harness_status": "not_implemented",
+      "scoring_policy_id": "code_task_pass_rate_v1",
+      "sample_policy": "Future pinned task-window pass@1 generation mode before broader LiveCodeBench modes.",
+      "expected_duration_token_volume_status": "unknown",
+      "sandbox_requirement": "sandbox_required_for_generated_code_execution",
+      "claim_boundary": "Future coding reference candidate; not SWE-bench, not repo-edit proof, and not a default local lane.",
+      "promotion_blockers": [
+        "Pin task window and upstream version.",
+        "Implement sandbox, timeout, and failure-state preservation."
+      ]
+    },
+    {
+      "check_id": "swebench_verified_gold_v1",
+      "surface_id": "local_coding_capability",
+      "evidence_lane_id": "gold",
+      "maturity": "gold_candidate",
+      "runnable_status": "not_runnable",
+      "default_inclusion_status": "not_default",
+      "fixture_or_dataset_revision_status": "pinned_task_subset_policy_needed",
+      "harness_status": "not_implemented",
+      "scoring_policy_id": "repository_issue_resolution_v1",
+      "sample_policy": "Future tiny pinned SWE-bench Verified subset with maintainer review and sandboxed environment metadata.",
+      "expected_duration_token_volume_status": "unknown",
+      "sandbox_requirement": "strong_sandbox_and_environment_controls_required",
+      "claim_boundary": "Future gold evidence candidate only; not runnable, not default laptop evidence, and not a public leaderboard claim.",
+      "promotion_blockers": [
+        "Define legal/access and task-subset policy.",
+        "Implement sandboxed environment prep and maintainer-review workflow.",
+        "Block product copy from presenting this as self-run local default evidence."
+      ]
+    }
+  ],
   "score_policies": [
     {
       "score_policy_id": "instruction_following_primary_accuracy_v1",
@@ -849,7 +1184,7 @@
       "status": "planned"
     },
     {
-      "check_id": "repo_edit_smoke_v1",
+      "check_id": "repository_edit_smoke_v1",
       "display_name": "Repository edit smoke",
       "value": "Adds a small local coding-agent edit task before broader SWE-style suites.",
       "cost": "small-to-medium token volume; needs deterministic fixture repos",
@@ -905,8 +1240,8 @@
       "status": "planned"
     },
     {
-      "check_id": "swe_bench_verified_reference_v1",
-      "display_name": "SWE-bench Verified reference",
+      "check_id": "swebench_verified_gold_v1",
+      "display_name": "SWE-bench Verified gold candidate",
       "value": "Adds high-legitimacy software-engineering task evidence for the strongest coding setups.",
       "cost": "very large token volume and long wall-clock runtime; likely cloud or maintainer-reviewed gold lane first",
       "implementation_risk": "very_high",
