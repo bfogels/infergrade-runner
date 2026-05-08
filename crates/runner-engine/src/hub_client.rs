@@ -52,6 +52,9 @@ pub struct HubJsonRequest {
     pub url: String,
     pub body: Option<Value>,
     bearer_token: Option<String>,
+    /// True for large bundle uploads. Set explicitly by the bundle-upload
+    /// request builder; controls which shared timeout client is used.
+    is_upload: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -129,13 +132,26 @@ pub fn build_hub_json_request(
             .map(str::trim)
             .filter(|token| !token.is_empty())
             .map(str::to_string),
+        is_upload: false,
     })
+}
+
+fn build_hub_upload_request(
+    method: HubMethod,
+    api_url: &str,
+    path: &str,
+    body: Option<Value>,
+    bearer_token: Option<&str>,
+) -> Result<HubJsonRequest, RunnerError> {
+    let mut request = build_hub_json_request(method, api_url, path, body, bearer_token)?;
+    request.is_upload = true;
+    Ok(request)
 }
 
 pub async fn execute_hub_json_request(
     request: &HubJsonRequest,
 ) -> Result<HubJsonResponse, RunnerError> {
-    let client = if request.url.contains("/bundle") {
+    let client = if request.is_upload {
         shared_hub_upload_client()
     } else {
         shared_hub_client()
@@ -182,7 +198,7 @@ pub fn build_run_bundle_upload_request(
 ) -> Result<HubJsonRequest, RunnerError> {
     let run_id = validate_hub_path_id(run_id, "run_id")?;
     validate_bundle_upload_payload(&bundle_payload)?;
-    build_hub_json_request(
+    build_hub_upload_request(
         HubMethod::Post,
         api_url,
         &format!("/v1/runs/{run_id}/bundle"),

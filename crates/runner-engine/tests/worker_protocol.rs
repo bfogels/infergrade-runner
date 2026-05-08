@@ -195,7 +195,7 @@ fn worker_protocol_preview_trims_identity_fields_and_rejects_bad_hub_urls() {
     }
     .build()
     .expect_err("execution mode required");
-    assert_eq!(missing_mode.code(), "execution_mode_missing");
+    assert_eq!(missing_mode.code(), "execution_mode_invalid");
 }
 
 #[test]
@@ -225,6 +225,27 @@ fn worker_protocol_ping_plan_uses_typed_register_and_heartbeat_requests() {
     let serialized = serde_json::to_value(&plan).expect("ping plan json");
     assert!(!serialized.to_string().contains("qbhr_"));
     assert!(!serialized.to_string().contains("Authorization"));
+}
+
+#[test]
+fn worker_protocol_preview_rejects_unknown_execution_modes() {
+    for bad in [
+        "",
+        "   ",
+        "remote-shell",
+        "local_native; rm -rf /",
+        "LOCAL_NATIVE",
+    ] {
+        let error = infergrade_runner_engine::RunnerProtocolPreviewInput {
+            api_url: "api.infergrade.com".to_string(),
+            runner_id: "runner_123".to_string(),
+            execution_mode: bad.to_string(),
+            hostname: None,
+        }
+        .build()
+        .expect_err("unknown execution_mode rejected");
+        assert_eq!(error.code(), "execution_mode_invalid", "input: {bad}");
+    }
 }
 
 #[test]

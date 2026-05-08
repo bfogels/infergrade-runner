@@ -1,4 +1,23 @@
 use crate::{desktop_environment, normalize_api_url, validate_hub_path_id, RunnerError};
+
+/// Execution modes the runner is allowed to claim. Anything outside this set
+/// is treated as untrusted input and rejected by the protocol builders.
+pub const SUPPORTED_EXECUTION_MODES: &[&str] = &["local_native", "local_container", "cloud_worker"];
+
+fn validate_execution_mode(value: &str) -> Result<&str, RunnerError> {
+    let trimmed = value.trim();
+    if SUPPORTED_EXECUTION_MODES.contains(&trimmed) {
+        Ok(trimmed)
+    } else {
+        Err(RunnerError::new(
+            "execution_mode_invalid",
+            format!(
+                "execution_mode `{trimmed}` is not one of: {}",
+                SUPPORTED_EXECUTION_MODES.join(", ")
+            ),
+        ))
+    }
+}
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -160,13 +179,7 @@ impl RunnerProtocolPreviewInput {
         let runner_id = validate_hub_path_id(self.runner_id.trim(), "runner_id")
             .map_err(|error| RunnerError::new("runner_id_invalid", error.message()))?
             .to_string();
-        let execution_mode = self.execution_mode.trim().to_string();
-        if execution_mode.is_empty() {
-            return Err(RunnerError::new(
-                "execution_mode_missing",
-                "Runner protocol preview requires an execution mode.",
-            ));
-        }
+        let execution_mode = validate_execution_mode(&self.execution_mode)?.to_string();
 
         Ok(RunnerProtocolPreview {
             api_url,
