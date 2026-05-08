@@ -79,7 +79,7 @@ Broader release validation will be selected after the feature PR lands in `devel
 ## Coding Lane PR Local Evidence
 
 Branch: `codex/runner-v029-coding-lane`
-PR: pending
+PR: #171, merged to `develop` as `8e83947`.
 
 Implemented:
 
@@ -112,3 +112,53 @@ Reviewer findings:
 - P1: static scoring initially checked the full response rather than the fenced Python output. Fixed by requiring one closed Python fence and scoring only its captured code block.
 - P2: the initial fence detector accepted unclosed fences. Fixed with closed-fence extraction and regression coverage.
 - Re-review P1: multiple closed Python fences were accepted as one scored blob. Fixed by enumerating fenced blocks, requiring exactly one Python block, and rejecting non-whitespace outside it.
+
+## v0.2.9 Release Candidate Evidence
+
+Branch: `codex/runner-v029-release`
+PR: #172
+
+Scope:
+
+- Promote the reviewed v0.2.9 coding lane feature from `develop` to `main`.
+- Bump version declarations from `0.2.8` to `0.2.9` only in the release branch.
+- Preserve the release boundary: native static coding decision evidence, not sandboxed code execution, broad coding suites, Hub display, or stronger evidence claims.
+
+Branch-distance proof before release branch:
+
+```bash
+git rev-list --left-right --count origin/main...origin/develop
+# 0 1
+
+git diff --name-status origin/main...origin/develop
+# M docs/capability_benchmarks.md
+# A docs/codex_v0_2_9_sprint_planning.md
+# M python/runner-core/src/infergrade/capabilities.py
+# M python/runner-core/tests/test_benchmark_catalog.py
+# M python/runner-core/tests/test_capabilities.py
+# M schemas/capability_catalog.json
+```
+
+Validation passed locally on the release branch:
+
+```bash
+python3 -m unittest python/runner-core/tests/test_capabilities.py python/runner-core/tests/test_benchmark_catalog.py python/runner-core/tests/test_capability_contract.py python/runner-core/tests/test_request_resolution.py python/runner-core/tests/test_runner.py python/runner-core/tests/test_end_to_end_proof_path.py
+python3 ./scripts/sync_versions.py --check
+python3 ./scripts/check_versions.py
+git diff --check
+python3 -m json.tool schemas/capability_catalog.json >/tmp/capability_catalog.json.check
+python3 -m json.tool schemas/json/capability_run.schema.json >/tmp/capability_run.schema.json.check
+cargo test --manifest-path crates/runner-engine/Cargo.toml --locked
+cargo test --manifest-path apps/runner-cli/Cargo.toml --locked
+gitleaks detect --source=. --redact --no-banner --exit-code 0
+./scripts/build_desktop_sidecar.sh
+npm ci --prefix apps/desktop-runner
+npm run check --prefix apps/desktop-runner
+cargo test --manifest-path apps/desktop-runner/src-tauri/Cargo.toml --locked
+```
+
+Release evidence honesty:
+
+- v0.2.9 does not add public leaderboard mechanics, Hub recommendation consumption, local dollar-cost estimates, adaptive testing, or broad coding benchmark claims.
+- Generated code is not executed; the lane remains deterministic static scoring only.
+- GitHub Actions may still show the known pre-step `steps: []` failure shape; local validation and reviewer passes are the release evidence if that infra issue persists.
