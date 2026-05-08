@@ -6,6 +6,8 @@ from evalplus.data import get_human_eval_plus, get_mbpp_plus, write_jsonl
 from evalplus.data.mbpp import mbpp_serialize_inputs
 from evalplus.evaluate import evaluate as evalplus_evaluate
 
+EVALPLUS_REVISION = "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e"
+
 
 def _write_json(path: str, payload) -> None:
     with open(path, "w", encoding="utf-8") as handle:
@@ -40,6 +42,67 @@ def _jsonl_ready_task(dataset: str, task: dict) -> dict:
     return normalized
 
 
+def _status_value(value):
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"pass", "passed", "true", "success"}:
+            return True
+        if normalized in {"fail", "failed", "false", "error"}:
+            return False
+        if normalized == "timeout":
+            return False
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _status_failure_class(value):
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized == "timeout" or "timeout" in normalized:
+        return "timeout"
+    if normalized in {"fail", "failed", "false", "error"}:
+        return "test_failed"
+    return None
+
+
+def _evalplus_rows(payload):
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        if isinstance(payload.get("results"), list):
+            return [item for item in payload.get("results") if isinstance(item, dict)]
+        return [payload]
+    return []
+
+
+def _case_result_for_task(task_id: str, payload) -> dict:
+    rows = _evalplus_rows(payload)
+    base_passed = None
+    plus_passed = None
+    failure_classes = []
+    for row in rows:
+        if base_passed is None:
+            base_passed = _status_value(row.get("base_status"))
+        if plus_passed is None:
+            plus_passed = _status_value(row.get("plus_status"))
+        for key in ("base_status", "plus_status"):
+            failure_class = _status_failure_class(row.get(key))
+            if failure_class:
+                failure_classes.append(failure_class)
+    if plus_passed is None:
+        plus_passed = base_passed
+    passed = bool(plus_passed if plus_passed is not None else base_passed)
+    failure_class = None if passed else ("timeout" if "timeout" in failure_classes else "test_failed")
+    return {
+        "task_id": task_id,
+        "base_passed": base_passed,
+        "plus_passed": plus_passed,
+        "passed": passed,
+        "failure_class": failure_class,
+    }
+
 def prepare(dataset: str, output_dir: str, limit: int = None) -> None:
     problems = _dataset_problems(dataset)
     items = list(problems.items())
@@ -69,6 +132,8 @@ def prepare(dataset: str, output_dir: str, limit: int = None) -> None:
             "display_name": "EvalPlus %s" % dataset,
             "dataset": dataset,
             "case_count": len(selected_tasks),
+            "evalplus_revision": EVALPLUS_REVISION,
+            "sample_policy": "%s_first_%d_from_evalplus_revision" % (dataset, len(selected_tasks)),
             "override_path": override_path,
         },
     )
@@ -107,12 +172,19 @@ def evaluate(dataset: str, output_dir: str) -> None:
         i_just_wanna_run=True,
     )
     results = json.load(open(results_path, "r", encoding="utf-8"))
+    case_results = [
+        _case_result_for_task(task_id, payload)
+        for task_id, payload in sorted((results.get("eval") or {}).items())
+    ]
     summary = {
         "benchmark_id": "evalplus_%s" % dataset,
         "display_name": "EvalPlus %s" % dataset,
         "status": "completed",
         "dataset": dataset,
         "case_count": len(results.get("eval", {})),
+        "evalplus_revision": EVALPLUS_REVISION,
+        "sample_policy": "%s_first_%d_from_evalplus_revision" % (dataset, len(results.get("eval", {}))),
+        "scoring_policy": "evalplus_pass_at_1_base_plus_v1",
         "primary_metric": {
             "name": "pass_at_1_plus",
             "value": round(
@@ -125,7 +197,10 @@ def evaluate(dataset: str, output_dir: str) -> None:
         "metrics": {
             "pass_at_1_base": round(float(results.get("pass_at_k", {}).get("base", {}).get("pass@1") or 0.0), 6),
             "pass_at_1_plus": round(float(results.get("pass_at_k", {}).get("plus", {}).get("pass@1") or 0.0), 6),
+            "passed_count": len([item for item in case_results if item.get("passed")]),
+            "failed_count": len([item for item in case_results if not item.get("passed")]),
         },
+        "case_results": case_results,
         "artifacts": {
             "results_path": results_path,
             "samples_path": samples_path,

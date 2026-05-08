@@ -161,20 +161,21 @@
     {
       "check_id": "evalplus_humaneval",
       "surface_id": "local_coding_capability",
-      "evidence_lane_id": "decision",
-      "maturity": "strong_local_candidate",
-      "runnable_status": "runnable_container",
+      "evidence_lane_id": "reference",
+      "maturity": "reference_runnable",
+      "runnable_status": "runnable_intentional_reference",
       "default_inclusion_status": "coding_default",
-      "fixture_or_dataset_revision_status": "upstream_harness_revision_needs_explicit_pin",
+      "fixture_or_dataset_revision_status": "pinned_upstream_harness_revision",
       "harness_status": "container_harness_implemented",
       "scoring_policy_id": "coding_primary_pass_at_1_v1",
-      "sample_policy": "HumanEval+ pass@1 container path; treated as coding evidence but not yet promoted to reference-runnable status in product copy.",
+      "sample_policy": "Pinned EvalPlus HumanEval+ revision with canary and full local reference limits.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "container_required_for_generated_code_execution",
-      "claim_boundary": "Coding generation evidence under EvalPlus-style tests; not repo-edit, LiveCodeBench, SWE-bench, or broad agentic coding proof.",
+      "claim_boundary": "EvalPlus HumanEval+ reference coding evidence under pass@1 unit tests; not repo-edit, LiveCodeBench, SWE-bench, gold, or broad agentic coding proof.",
       "promotion_blockers": [
-        "Pin upstream EvalPlus revision and document sandbox limits before reference-runnable promotion.",
-        "Ensure capability_run emission preserves compile, runtime, timeout, and scoring failure states."
+        "Observed duration and token-volume metadata are needed for stronger local recommendation copy.",
+        "Real dogfood runs are needed to calibrate local duration and failure behavior.",
+        "Gold or leaderboard-style claims require separate publication controls and maintainer review."
       ]
     },
     {
@@ -911,8 +912,8 @@
         "llama.cpp",
         "vllm"
       ],
-      "suite_scope": "decision",
-      "evidence_lane_id": "decision",
+      "suite_scope": "reference",
+      "evidence_lane_id": "reference",
       "effort_level": "balanced",
       "expected_duration_band": "10-25 min",
       "token_volume_band": "small",

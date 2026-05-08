@@ -638,6 +638,183 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(execution.component_scores["evalplus_mbpp"], 0.6)
         self.assertIn("evalplus_humaneval", execution.benchmark_results)
         self.assertTrue(os.path.exists(os.path.join(self.tempdir, "artifacts", "capability", "evalplus_humaneval", "predictions.jsonl")))
+        self.assertIn("capability_run_path", execution.artifacts["evalplus_humaneval"])
+        self.assertNotIn("capability_run_path", execution.artifacts["evalplus_mbpp"])
+
+    def test_execute_evalplus_humaneval_emits_valid_reference_capability_run_artifact(self):
+        def fake_prepare(spec, benchmark_dir, tier):
+            cases = [
+                {"case_id": "HumanEval/0", "task_id": "HumanEval/0", "prompt": "Write add.", "entry_point": "add"},
+                {"case_id": "HumanEval/1", "task_id": "HumanEval/1", "prompt": "Write sub.", "entry_point": "sub"},
+            ]
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for case in cases:
+                    handle.write(json.dumps(case) + "\n")
+            with open(os.path.join(benchmark_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "benchmark_id": "evalplus_humaneval",
+                        "dataset": "humaneval",
+                        "case_count": 2,
+                        "evalplus_revision": "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e",
+                        "sample_policy": "humaneval_first_2_from_evalplus_revision",
+                    },
+                    handle,
+                )
+
+        def fake_evaluate(spec, benchmark_dir):
+            with open(os.path.join(benchmark_dir, "predictions.jsonl"), "r", encoding="utf-8") as handle:
+                predictions = [json.loads(line) for line in handle if line.strip()]
+            self.assertEqual(len(predictions), 2)
+            return {
+                "benchmark_id": "evalplus_humaneval",
+                "display_name": "EvalPlus HumanEval+",
+                "status": "completed",
+                "dataset": "humaneval",
+                "case_count": 2,
+                "evalplus_revision": "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e",
+                "sample_policy": "humaneval_first_2_from_evalplus_revision",
+                "scoring_policy": "evalplus_pass_at_1_base_plus_v1",
+                "primary_metric": {"name": "pass_at_1_plus", "value": 0.5},
+                "metrics": {
+                    "pass_at_1_base": 1.0,
+                    "pass_at_1_plus": 0.5,
+                    "passed_count": 1,
+                    "failed_count": 1,
+                },
+                "case_results": [
+                    {
+                        "task_id": "HumanEval/0",
+                        "base_passed": True,
+                        "plus_passed": True,
+                        "passed": True,
+                        "failure_class": None,
+                    },
+                    {
+                        "task_id": "HumanEval/1",
+                        "base_passed": True,
+                        "plus_passed": False,
+                        "passed": False,
+                        "failure_class": "test_failed",
+                    },
+                ],
+            }
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="agentic_coding",
+            output_dir=self.tempdir,
+            benchmark_check_ids=["evalplus_humaneval"],
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                execution = execute_capability_suite(_FakeAdapter(), request)
+
+        capability_run_path = execution.artifacts["evalplus_humaneval"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["evidence"]["lane"], "reference")
+        self.assertEqual(artifact["evidence"]["surface"], "local_coding_capability")
+        self.assertEqual(artifact["evidence"]["confidence_label"], "reference_sample")
+        self.assertEqual(artifact["protocol"]["dataset_revision"], "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e")
+        self.assertEqual(artifact["protocol"]["sample_policy"], "humaneval_first_2_from_evalplus_revision")
+        self.assertEqual(artifact["protocol"]["scorer_type"], "unit_test")
+        self.assertEqual(artifact["summary"]["state"], "scored")
+        self.assertEqual(artifact["summary"]["score"], 0.5)
+        tasks = {task["task_id"]: task for task in artifact["tasks"]}
+        self.assertEqual(tasks["HumanEval/0"]["score"], 1.0)
+        self.assertEqual(tasks["HumanEval/1"]["score"], 0.0)
+        self.assertEqual(tasks["HumanEval/1"]["error_class"], "test_failed")
+        self.assertIn("eval_results.json", artifact["artifacts"]["scoring_outputs"])
+        self.assertIn("This is not gold evidence.", artifact["claim_boundary"]["unsupported_claims"])
+
+        summary_path = execution.artifacts["_summary"]["capability_summary_path"]
+        with open(summary_path, "r", encoding="utf-8") as handle:
+            summary = json.load(handle)
+        coding = next(item for item in summary["surfaces"] if item["surface"] == "local_coding_capability")
+        self.assertEqual(coding["state"], "scored")
+        self.assertEqual(coding["lane"], "reference")
+        self.assertEqual(coding["confidence_label"], "reference_sample")
+
+    def test_evalplus_artifact_preserves_generation_malformed_and_status_failure_states(self):
+        def fake_prepare(spec, benchmark_dir, tier):
+            cases = [
+                {"case_id": "HumanEval/0", "task_id": "HumanEval/0", "prompt": "Passing task", "entry_point": "ok"},
+                {"case_id": "HumanEval/1", "task_id": "HumanEval/1", "prompt": "Malformed task", "entry_point": "bad"},
+                {"case_id": "HumanEval/2", "task_id": "HumanEval/2", "prompt": "Test failure task", "entry_point": "test"},
+                {"case_id": "HumanEval/3", "task_id": "HumanEval/3", "prompt": "Timeout task", "entry_point": "timeout"},
+                {"case_id": "HumanEval/4", "task_id": "HumanEval/4", "prompt": "Generation task", "entry_point": "gen"},
+            ]
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for case in cases:
+                    handle.write(json.dumps(case) + "\n")
+            with open(os.path.join(benchmark_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "benchmark_id": "evalplus_humaneval",
+                        "dataset": "humaneval",
+                        "case_count": 5,
+                        "evalplus_revision": "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e",
+                        "sample_policy": "humaneval_first_5_from_evalplus_revision",
+                    },
+                    handle,
+                )
+
+        def fake_generate(request, prompt, max_tokens):
+            if "Malformed" in prompt:
+                return {"text": "", "status": "completed", "error": None}
+            if "Generation" in prompt:
+                return {"text": "", "status": "failed", "error": "backend stopped"}
+            return {"text": "def solution():\n    return 1", "status": "completed", "error": None}
+
+        def fake_evaluate(spec, benchmark_dir):
+            return {
+                "benchmark_id": "evalplus_humaneval",
+                "display_name": "EvalPlus HumanEval+",
+                "status": "partial",
+                "dataset": "humaneval",
+                "case_count": 5,
+                "evalplus_revision": "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e",
+                "sample_policy": "humaneval_first_5_from_evalplus_revision",
+                "scoring_policy": "evalplus_pass_at_1_base_plus_v1",
+                "primary_metric": {"name": "pass_at_1_plus", "value": 0.2},
+                "metrics": {"pass_at_1_base": 0.2, "pass_at_1_plus": 0.2, "passed_count": 1, "failed_count": 3},
+                "case_results": [
+                    {"task_id": "HumanEval/0", "base_passed": True, "plus_passed": True, "passed": True},
+                    {"task_id": "HumanEval/2", "passed": False, "failure_class": "test_failed"},
+                    {"task_id": "HumanEval/3", "passed": False, "failure_class": "timeout"},
+                ],
+            }
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="agentic_coding",
+            output_dir=self.tempdir,
+            benchmark_check_ids=["evalplus_humaneval"],
+            simulate=False,
+        )
+        adapter = mock.Mock()
+        adapter.generate_text.side_effect = fake_generate
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                execution = execute_capability_suite(adapter, request)
+
+        capability_run_path = execution.artifacts["evalplus_humaneval"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        tasks = {task["task_id"]: task for task in artifact["tasks"]}
+        self.assertEqual(tasks["HumanEval/0"]["state"], "scored")
+        self.assertEqual(tasks["HumanEval/1"]["state"], "failed")
+        self.assertEqual(tasks["HumanEval/1"]["error_class"], "malformed_output")
+        self.assertEqual(tasks["HumanEval/2"]["error_class"], "test_failed")
+        self.assertEqual(tasks["HumanEval/3"]["error_class"], "timeout")
+        self.assertEqual(tasks["HumanEval/4"]["error_class"], "generation_failed")
+        self.assertEqual(artifact["summary"]["state"], "partial")
 
     def test_execute_mmlu_pro_reference_emits_valid_capability_run_artifact(self):
         def fake_prepare(spec, benchmark_dir, tier):

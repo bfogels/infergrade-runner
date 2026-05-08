@@ -476,6 +476,15 @@ def execute_capability_suite(
                     predictions=predictions,
                     summary=summary,
                 )
+            elif spec.benchmark_id == "evalplus_humaneval":
+                capability_run_path = _write_evalplus_capability_run_artifact(
+                    request=request,
+                    spec=spec,
+                    benchmark_dir=benchmark_dir,
+                    cases=cases,
+                    predictions=predictions,
+                    summary=summary,
+                )
             elif spec.benchmark_id == "mmlu_pro_reference_v1":
                 capability_run_path = _write_mmlu_pro_capability_run_artifact(
                     request=request,
@@ -894,6 +903,180 @@ def _write_mmlu_pro_capability_run_artifact(
     return path
 
 
+def _write_evalplus_capability_run_artifact(
+    request: RunRequest,
+    spec: CapabilityBenchmarkSpec,
+    benchmark_dir: str,
+    cases: List[Dict[str, Any]],
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> str:
+    check_metadata = _selected_check_metadata(request, spec.benchmark_id)
+    primary_metric = dict(summary.get("primary_metric") or {})
+    score = primary_metric.get("value")
+    summary_state = _capability_artifact_state(summary.get("status"), score, summary.get("generation_failure_severity"))
+    case_results = {
+        str(item.get("task_id") or item.get("case_id") or ""): dict(item)
+        for item in list(summary.get("case_results") or [])
+    }
+    metadata = _read_optional_json(os.path.join(benchmark_dir, "benchmark_metadata.json"))
+    tasks = []
+    for prediction in predictions:
+        task_id = str(prediction.get("task_id") or prediction.get("case_id") or "")
+        case = _case_by_task_id(cases, task_id)
+        result = case_results.get(task_id, {})
+        generation_status = str(prediction.get("generation_status") or "")
+        completion = str(prediction.get("completion") or "")
+        if generation_status != "completed":
+            task_state = "failed"
+            task_score = None
+            error_class = "generation_failed"
+            scorer_type = None
+            scoring_policy = None
+        elif not completion.strip():
+            task_state = "failed"
+            task_score = None
+            error_class = "malformed_output"
+            scorer_type = None
+            scoring_policy = None
+        else:
+            failure_class = str(result.get("failure_class") or "")
+            passed = bool(result.get("passed"))
+            task_state = "scored" if failure_class in {"", "test_failed"} else "failed"
+            task_score = (1.0 if passed else 0.0) if task_state == "scored" else None
+            error_class = "test_failed" if task_state == "scored" and not passed else (None if task_state == "scored" else failure_class)
+            scorer_type = "unit_test" if task_state == "scored" else None
+            scoring_policy = (
+                summary.get("scoring_policy") or "evalplus_pass_at_1_base_plus_v1"
+            ) if task_state == "scored" else None
+        tasks.append(
+            {
+                "task_id": task_id or str(case.get("task_id") or ""),
+                "task_family": spec.benchmark_kind,
+                "state": task_state,
+                "score": task_score,
+                "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
+                "scorer_type": scorer_type,
+                "scoring_policy": scoring_policy,
+                "output_artifact": "predictions.jsonl#%s" % (task_id or str(case.get("case_id") or "")),
+                "error_class": error_class,
+                "latency_ms": None,
+                "time_to_first_token_ms": None,
+                "tokens_per_second": None,
+                "input_tokens": None,
+                "output_tokens": None,
+                "entry_point": case.get("entry_point"),
+                "dataset": metadata.get("dataset") or summary.get("dataset"),
+                "base_passed": result.get("base_passed"),
+                "plus_passed": result.get("plus_passed"),
+                "test_failure_class": result.get("failure_class") if task_state == "scored" and task_score == 0.0 else None,
+            }
+        )
+    metrics = dict(summary.get("metrics") or {})
+    artifact = {
+        "artifact_spec_version": "0.1.0",
+        "artifact_kind": "capability_run",
+        "capability_run_id": "caprun_%s_%s" % (
+            spec.benchmark_id,
+            stable_hash(
+                {
+                    "model": request.model,
+                    "benchmark_id": spec.benchmark_id,
+                    "evalplus_revision": metadata.get("evalplus_revision") or summary.get("evalplus_revision"),
+                    "summary": summary,
+                },
+                length=10,
+            ),
+        ),
+        "created_at": utcnow_iso(),
+        "runner": {
+            "name": "infergrade-runner",
+            "version": __version__,
+            "contract_version": "0.1.0",
+        },
+        "evidence": {
+            "lane": check_metadata.get("evidence_lane_id") or "reference",
+            "surface": check_metadata.get("surface_id") or "local_coding_capability",
+            "grade": "reference_sample",
+            "experimental": True,
+            "confidence_label": "reference_sample",
+        },
+        "subject": {
+            "model": {
+                "model": request.model,
+                "quant_artifact": request.quant_artifact,
+                "quant_artifact_sha256": request.quant_artifact_sha256,
+                "quant_artifact_filename": request.quant_artifact_filename,
+            },
+            "runtime": {
+                "backend": request.backend,
+                "execution_mode": request.execution_mode,
+                "llama_cpp_cli_path": request.llama_cpp_cli_path,
+                "container_image": spec.container_image,
+            },
+            "hardware": {
+                "source": "run_bundle_environment",
+            },
+            "generation_preset": {
+                "generation_preset_id": request.generation_preset,
+                "max_tokens": spec.generation_max_tokens,
+            },
+        },
+        "protocol": {
+            "task_family": spec.benchmark_kind,
+            "prompt_version": "%s_prompt_v1" % spec.benchmark_id,
+            "task_version": spec.benchmark_id,
+            "fixture_revision": str(
+                metadata.get("sample_policy")
+                or summary.get("sample_policy")
+                or "%s_evalplus_revision" % (metadata.get("dataset") or summary.get("dataset") or "evalplus")
+            ),
+            "dataset_revision": metadata.get("evalplus_revision") or summary.get("evalplus_revision"),
+            "scorer_type": "unit_test",
+            "scoring_policy": summary.get("scoring_policy") or "evalplus_pass_at_1_base_plus_v1",
+            "repetitions": 1,
+            "sample_policy": metadata.get("sample_policy") or summary.get("sample_policy"),
+            "case_count": metadata.get("case_count") or summary.get("case_count"),
+            "dataset": metadata.get("dataset") or summary.get("dataset"),
+        },
+        "summary": {
+            "state": summary_state,
+            "score": score if summary_state in ("scored", "partial") else None,
+            "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
+            "passed_count": metrics.get("passed_count"),
+            "failed_count": metrics.get("failed_count"),
+            "partial_count": summary.get("generation_failure_count") or 0,
+            "skipped_count": 0,
+            "not_comparable_count": 0,
+            "duration_seconds": None,
+            "time_to_first_token_ms": None,
+            "tokens_per_second": None,
+            "input_tokens": None,
+            "output_tokens": None,
+            "pass_at_1_base": metrics.get("pass_at_1_base"),
+            "pass_at_1_plus": metrics.get("pass_at_1_plus"),
+        },
+        "tasks": tasks,
+        "artifacts": {
+            "manifest": "capability_run.json",
+            "raw_outputs": ["predictions.jsonl", "samples.jsonl"],
+            "scoring_outputs": ["summary.json", "eval_results.json"],
+            "supporting_files": [
+                "cases.jsonl",
+                "benchmark_metadata.json",
+                "%s_override.jsonl" % (metadata.get("dataset") or summary.get("dataset") or "evalplus"),
+            ],
+        },
+        "claim_boundary": _evalplus_artifact_claim_boundary(spec.benchmark_id, summary_state),
+    }
+    errors = validate_capability_run_artifact(artifact)
+    if errors:
+        raise ValueError("Invalid capability_run artifact: %s" % "; ".join(errors))
+    path = os.path.join(benchmark_dir, "capability_run.json")
+    write_json(path, artifact)
+    return path
+
+
 def _native_scorer_type(spec: CapabilityBenchmarkSpec) -> str:
     if spec.benchmark_id == "multiturn_chat_memory_v1":
         return "exact_match"
@@ -1076,6 +1259,36 @@ def _mmlu_pro_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
     else:
         supported = [
             "This artifact records that the pinned MMLU-Pro sampled reference protocol was not yet scored.",
+        ]
+    return {"supported_claims": supported, "unsupported_claims": unsupported}
+
+
+def _evalplus_artifact_claim_boundary(benchmark_id: str, state: str) -> Dict[str, List[str]]:
+    label = "HumanEval+" if benchmark_id == "evalplus_humaneval" else "MBPP+"
+    unsupported = [
+        "This is not a global coding capability score.",
+        "This is not public leaderboard evidence.",
+        "This is not gold evidence.",
+        "This is not LiveCodeBench, SWE-bench, repository-edit, or broad agentic software-engineering proof.",
+    ]
+    if state == "scored":
+        supported = [
+            "This setup completed the pinned EvalPlus %s reference protocol recorded in this artifact." % label,
+            "The score reports pass@1 unit-test execution results under the EvalPlus harness.",
+        ]
+    elif state == "partial":
+        supported = [
+            "This setup attempted the pinned EvalPlus %s reference protocol with partial generation or execution failures." % label,
+            "The artifact preserves scored, malformed, generation, timeout, and test-failed rows separately where EvalPlus reports them.",
+        ]
+    elif state == "failed":
+        supported = [
+            "This setup attempted the pinned EvalPlus %s reference protocol." % label,
+            "The artifact preserves generation, malformed-output, timeout, test, sandbox, or scoring failures without turning them into a broad coding score.",
+        ]
+    else:
+        supported = [
+            "This artifact records that the pinned EvalPlus %s reference protocol was not yet scored." % label,
         ]
     return {"supported_claims": supported, "unsupported_claims": unsupported}
 
