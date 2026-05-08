@@ -39,6 +39,49 @@ class _MemoryPassingAdapter(object):
         return {"text": "", "status": "completed", "error": None}
 
 
+class _CodingStaticPassingAdapter(object):
+    def generate_text(self, request, prompt, max_tokens):
+        if "clamp_score" in prompt:
+            return {
+                "text": (
+                    "```python\n"
+                    "def clamp_score(value):\n"
+                    "    if value < 0:\n"
+                    "        return 0\n"
+                    "    if value > 1:\n"
+                    "        return 1\n"
+                    "    return value\n"
+                    "```"
+                ),
+                "status": "completed",
+                "error": None,
+            }
+        if "parse_model_pair" in prompt:
+            return {
+                "text": (
+                    "```python\n"
+                    "def parse_model_pair(text):\n"
+                    "    model, quant = text.split('@', 1)\n"
+                    "    return {'model': model.strip(), 'quant': quant.strip()}\n"
+                    "```"
+                ),
+                "status": "completed",
+                "error": None,
+            }
+        if "render_status_line" in prompt:
+            return {
+                "text": (
+                    "```python\n"
+                    "def render_status_line(status):\n"
+                    "    return f\"status={status['state']} model={status['model']}\"\n"
+                    "```"
+                ),
+                "status": "completed",
+                "error": None,
+            }
+        return {"text": "```python\npass\n```", "status": "completed", "error": None}
+
+
 class CapabilityTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.mkdtemp(prefix="infergrade-capability-")
@@ -74,6 +117,17 @@ class CapabilityTests(unittest.TestCase):
             backend="llama.cpp",
             tier="standard",
             benchmark_check_ids=["multiturn_chat_memory_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        self.assertEqual(capability_images_for_request(request), [])
+
+    def test_capability_images_skip_native_coding_static_benchmark(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["coding_static_repair_v1"],
             output_dir=self.tempdir,
             simulate=False,
         )
@@ -201,6 +255,195 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored", "failed"})
         self.assertIn("partial generation failures", artifact["claim_boundary"]["supported_claims"][0])
         self.assertNotIn("completed the pinned multi-turn assistant", " ".join(artifact["claim_boundary"]["supported_claims"]))
+
+    def test_execute_native_coding_static_benchmark_scores_constraints_without_docker(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["coding_static_repair_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        with mock.patch("infergrade.capabilities._run_capability_container") as container_mock:
+            execution = execute_capability_suite(_CodingStaticPassingAdapter(), request)
+
+        container_mock.assert_not_called()
+        self.assertEqual(execution.status, "completed")
+        self.assertEqual(execution.score, 1.0)
+        self.assertEqual(execution.component_scores["coding_static_repair_v1"], 1.0)
+        result = execution.benchmark_results["coding_static_repair_v1"]
+        self.assertEqual(result["primary_metric"]["name"], "static_constraint_accuracy")
+        self.assertEqual(result["metrics"]["passed_constraints"], result["metrics"]["total_constraints"])
+        benchmark_dir = os.path.join(self.tempdir, "artifacts", "capability", "coding_static_repair_v1")
+        self.assertTrue(os.path.exists(os.path.join(benchmark_dir, "cases.jsonl")))
+        self.assertTrue(os.path.exists(os.path.join(benchmark_dir, "predictions.jsonl")))
+        self.assertTrue(os.path.exists(os.path.join(benchmark_dir, "summary.json")))
+        capability_run_path = execution.artifacts["coding_static_repair_v1"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["artifact_kind"], "capability_run")
+        self.assertEqual(artifact["evidence"]["lane"], "decision")
+        self.assertEqual(artifact["evidence"]["surface"], "local_coding_capability")
+        self.assertEqual(artifact["evidence"]["grade"], "thin_local_sample")
+        self.assertEqual(artifact["evidence"]["confidence_label"], "thin_local_sample")
+        self.assertTrue(artifact["evidence"]["experimental"])
+        self.assertEqual(artifact["summary"]["state"], "scored")
+        self.assertEqual(artifact["summary"]["score"], 1.0)
+        self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored"})
+        self.assertEqual(artifact["protocol"]["scorer_type"], "static_check")
+        self.assertEqual(artifact["protocol"]["scoring_policy"], "deterministic_static_code_constraints_v1")
+        self.assertIn("This is not a SWE-bench or LiveCodeBench result.", artifact["claim_boundary"]["unsupported_claims"])
+
+    def test_native_coding_static_benchmark_preserves_malformed_and_generation_failures(self):
+        class _MixedFailureCodingAdapter(object):
+            def generate_text(self, request, prompt, max_tokens):
+                if "clamp_score" in prompt:
+                    return {"text": "I would clamp it with a conditional.", "status": "completed", "error": None}
+                if "parse_model_pair" in prompt:
+                    raise RuntimeError("native coding generation failed")
+                return _CodingStaticPassingAdapter().generate_text(request, prompt, max_tokens)
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="agentic_coding",
+            benchmark_check_ids=["coding_static_repair_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        with mock.patch("infergrade.capabilities._run_capability_container") as container_mock:
+            execution = execute_capability_suite(_MixedFailureCodingAdapter(), request)
+
+        container_mock.assert_not_called()
+        self.assertEqual(execution.status, "partial")
+        result = execution.benchmark_results["coding_static_repair_v1"]
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["generation_failure_severity"], "partial")
+        self.assertEqual(result["metrics"]["malformed_output_count"], 1)
+        capability_run_path = execution.artifacts["coding_static_repair_v1"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["summary"]["state"], "partial")
+        self.assertEqual(
+            {task["error_class"] for task in artifact["tasks"] if task["state"] == "failed"},
+            {"malformed_output", "generation_failed"},
+        )
+        self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored", "failed"})
+        self.assertIn("partial generation or malformed-output failures", artifact["claim_boundary"]["supported_claims"][0])
+        self.assertNotIn("completed the pinned coding", " ".join(artifact["claim_boundary"]["supported_claims"]))
+
+    def test_native_coding_static_scores_only_closed_python_fence(self):
+        class _ProseOnlyCodingAdapter(object):
+            def generate_text(self, request, prompt, max_tokens):
+                if "clamp_score" in prompt:
+                    return {
+                        "text": (
+                            "Use def clamp_score(value): if value < 0 return 0 if value > 1 return 1 return value.\n"
+                            "```python\n"
+                            "pass\n"
+                            "```"
+                        ),
+                        "status": "completed",
+                        "error": None,
+                    }
+                return _CodingStaticPassingAdapter().generate_text(request, prompt, max_tokens)
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["coding_static_repair_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        execution = execute_capability_suite(_ProseOnlyCodingAdapter(), request)
+
+        self.assertEqual(execution.status, "partial")
+        case_results = execution.benchmark_results["coding_static_repair_v1"]["case_results"]
+        clamp_result = next(item for item in case_results if item["case_id"] == "coding-static-clamp-score")
+        self.assertEqual(clamp_result["state"], "failed")
+        self.assertEqual(clamp_result["error_class"], "malformed_output")
+
+    def test_native_coding_static_rejects_unclosed_python_fence(self):
+        class _UnclosedFenceCodingAdapter(object):
+            def generate_text(self, request, prompt, max_tokens):
+                if "clamp_score" in prompt:
+                    return {
+                        "text": (
+                            "```python\n"
+                            "def clamp_score(value):\n"
+                            "    if value < 0:\n"
+                            "        return 0\n"
+                            "    if value > 1:\n"
+                            "        return 1\n"
+                            "    return value\n"
+                        ),
+                        "status": "completed",
+                        "error": None,
+                    }
+                return _CodingStaticPassingAdapter().generate_text(request, prompt, max_tokens)
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["coding_static_repair_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        execution = execute_capability_suite(_UnclosedFenceCodingAdapter(), request)
+
+        self.assertEqual(execution.status, "partial")
+        case_results = execution.benchmark_results["coding_static_repair_v1"]["case_results"]
+        clamp_result = next(item for item in case_results if item["case_id"] == "coding-static-clamp-score")
+        self.assertEqual(clamp_result["state"], "failed")
+        self.assertEqual(clamp_result["error_class"], "malformed_output")
+
+    def test_native_coding_static_rejects_multiple_python_fences(self):
+        class _MultipleFenceCodingAdapter(object):
+            def generate_text(self, request, prompt, max_tokens):
+                if "clamp_score" in prompt:
+                    return {
+                        "text": (
+                            "```python\n"
+                            "pass\n"
+                            "```\n"
+                            "```python\n"
+                            "def clamp_score(value):\n"
+                            "    if value < 0:\n"
+                            "        return 0\n"
+                            "    if value > 1:\n"
+                            "        return 1\n"
+                            "    return value\n"
+                            "```"
+                        ),
+                        "status": "completed",
+                        "error": None,
+                    }
+                return _CodingStaticPassingAdapter().generate_text(request, prompt, max_tokens)
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["coding_static_repair_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        execution = execute_capability_suite(_MultipleFenceCodingAdapter(), request)
+
+        self.assertEqual(execution.status, "partial")
+        case_results = execution.benchmark_results["coding_static_repair_v1"]["case_results"]
+        clamp_result = next(item for item in case_results if item["case_id"] == "coding-static-clamp-score")
+        self.assertEqual(clamp_result["state"], "failed")
+        self.assertEqual(clamp_result["error_class"], "malformed_output")
 
     def test_execute_capability_suite_aggregates_primary_scores(self):
         def fake_prepare(spec, benchmark_dir, tier):

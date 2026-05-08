@@ -45,8 +45,10 @@ class BenchmarkCatalogTests(unittest.TestCase):
         check_ids = {item["check_id"] for item in catalog["checks"]}
         planned_ids = {item["check_id"] for item in catalog["planned_benchmark_candidates"]}
         self.assertIn("multiturn_chat_memory_v1", check_ids)
+        self.assertIn("coding_static_repair_v1", check_ids)
         self.assertIn("mmlu_pro_reference_v1", check_ids)
         self.assertNotIn("multiturn_chat_memory_v1", planned_ids)
+        self.assertNotIn("coding_static_repair_v1", planned_ids)
         self.assertNotIn("mmlu_pro_reference_v1", planned_ids)
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
@@ -91,6 +93,20 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(request.benchmark_group_ids, ["chat_memory"])
         self.assertEqual(request.benchmark_check_ids, ["multiturn_chat_memory_v1"])
         self.assertEqual(capability_benchmark_ids_for_request(request), ["multiturn_chat_memory_v1"])
+        self.assertEqual(request.capability, "auto")
+
+    def test_native_coding_static_check_can_be_selected_explicitly(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            benchmark_group_ids=["coding_static_repair"],
+        )
+        normalize_request_selection(request)
+        self.assertEqual(request.benchmark_group_ids, ["coding_static_repair"])
+        self.assertEqual(request.benchmark_check_ids, ["coding_static_repair_v1"])
+        self.assertEqual(capability_benchmark_ids_for_request(request), ["coding_static_repair_v1"])
+        self.assertEqual(request.use_case, "agentic_coding")
         self.assertEqual(request.capability, "auto")
 
     def test_shortcut_selection_resolves_catalog_shortcut(self):
@@ -247,6 +263,22 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(metadata["benchmark_checks"][0]["primary_score_metric"], "constraint_retention_accuracy")
         self.assertIn("case_accuracy", metadata["benchmark_checks"][0]["score_breakdown_fields"])
         self.assertEqual(metadata["score_policies"][0]["score_policy_id"], "multiturn_constraint_retention_v1")
+
+    def test_selection_metadata_includes_coding_static_score_policy(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            benchmark_check_ids=["coding_static_repair_v1"],
+        )
+        metadata = selection_metadata_for_request(request)
+        self.assertEqual(metadata["benchmark_scope"]["scope"], "decision")
+        self.assertEqual(metadata["benchmark_checks"][0]["surface_id"], "local_coding_capability")
+        self.assertEqual(metadata["benchmark_checks"][0]["evidence_lane_id"], "decision")
+        self.assertEqual(metadata["benchmark_checks"][0]["score_dimension"], "static_code_repair")
+        self.assertEqual(metadata["benchmark_checks"][0]["primary_score_metric"], "static_constraint_accuracy")
+        self.assertIn("malformed_output_count", metadata["benchmark_checks"][0]["score_breakdown_fields"])
+        self.assertEqual(metadata["score_policies"][0]["score_policy_id"], "coding_static_constraints_v1")
 
     def test_selection_metadata_includes_mmlu_pro_reference_score_policy(self):
         request = RunRequest(

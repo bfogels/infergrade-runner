@@ -25,6 +25,10 @@ InferGrade needs capability benchmarks that are:
 
 ### Agentic Coding
 
+- `Coding static repair`
+  - Why: gives local users a quick coding decision lane before sandboxed code execution is safe enough for broader default use.
+  - InferGrade role: first native local-friendly coding decision check. It scores deterministic static constraints and preserves malformed output or generation failures explicitly.
+
 - `EvalPlus HumanEval+`
   - Why: high-signal code generation benchmark, much more rigorous than the original HumanEval, and explicitly designed for safe evaluation workflows.
   - InferGrade role: first real coding capability benchmark for `agentic_coding`.
@@ -94,6 +98,8 @@ The currently implemented first-user catalog is:
 
 ### `coding_code_editing`
 
+- group: `coding_static_repair`
+  - check: `coding_static_repair_v1`
 - group: `coding_core`
   - check: `evalplus_humaneval`
 - group: `coding_breadth`
@@ -152,6 +158,8 @@ Those are the lanes we expect to keep locally regression-tested and operationall
 The schema is `schemas/json/capability_run.schema.json`; the methodology is [Local Benchmark Methodology](local_benchmark_methodology.md).
 
 The first local assistant artifact path is `multiturn_chat_memory_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. This is a thin local sample and remains experimental decision evidence.
+
+The first local coding artifact path is `coding_static_repair_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. It checks fenced Python outputs against deterministic static constraints. It does not execute generated code, run unit tests, sandbox a repository, or support SWE-bench/LiveCodeBench-style claims.
 
 ## Container Contract
 
