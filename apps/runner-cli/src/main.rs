@@ -372,8 +372,17 @@ where
                     .to_string(),
             );
         }
+        if let Some(source) = run_token_source {
+            let label = match source {
+                "env_default" => "INFERGRADE_HUB_TOKEN environment variable",
+                "env_explicit" => "explicit --runner-token-env variable",
+                "stdin" => "--runner-token-stdin",
+                "argv" => "--runner-token argv (visible via ps/proc)",
+                other => other,
+            };
+            eprintln!("info: using runner token from {label}");
+        }
     }
-    let _ = run_token_source;
     if dry_run && runtime_command.is_some() {
         return Err(
             "first-run accepts either --dry-run or --runtime-command, not both".to_string(),

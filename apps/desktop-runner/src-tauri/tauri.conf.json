@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://api.infergrade.com http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+      "csp": "default-src 'self' tauri: https://tauri.localhost; script-src 'self' tauri: https://tauri.localhost; style-src 'self' 'unsafe-inline' tauri: https://tauri.localhost; img-src 'self' data: asset: http://asset.localhost https://asset.localhost tauri: https://tauri.localhost; font-src 'self' data: tauri: https://tauri.localhost; connect-src 'self' ipc: http://ipc.localhost tauri: https://tauri.localhost https: http://localhost:* http://127.0.0.1:* http://[::1]:*; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
     }
   },
   "bundle": {
