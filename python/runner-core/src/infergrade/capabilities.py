@@ -476,7 +476,7 @@ def execute_capability_suite(
                     predictions=predictions,
                     summary=summary,
                 )
-            elif spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:
+            elif spec.benchmark_id == "evalplus_humaneval":
                 capability_run_path = _write_evalplus_capability_run_artifact(
                     request=request,
                     spec=spec,
