@@ -115,6 +115,13 @@ class _ReasoningAmbiguousAnswerAdapter(object):
         return {"text": "", "status": "completed", "error": None}
 
 
+class _MmluProAdapter(object):
+    def generate_text(self, request, prompt, max_tokens):
+        if "2 + 2" in prompt:
+            return {"text": "D", "status": "completed", "error": None}
+        return {"text": "A", "status": "completed", "error": None}
+
+
 class CapabilityTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.mkdtemp(prefix="infergrade-capability-")
@@ -631,6 +638,109 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(execution.component_scores["evalplus_mbpp"], 0.6)
         self.assertIn("evalplus_humaneval", execution.benchmark_results)
         self.assertTrue(os.path.exists(os.path.join(self.tempdir, "artifacts", "capability", "evalplus_humaneval", "predictions.jsonl")))
+
+    def test_execute_mmlu_pro_reference_emits_valid_capability_run_artifact(self):
+        def fake_prepare(spec, benchmark_dir, tier):
+            cases = [
+                {
+                    "case_id": "mmlu_pro/1",
+                    "task_id": "mmlu_pro/1",
+                    "category": "math",
+                    "prompt": "What is 2 + 2? Final answer letter:",
+                    "answer": "D",
+                },
+                {
+                    "case_id": "mmlu_pro/2",
+                    "task_id": "mmlu_pro/2",
+                    "category": "other",
+                    "prompt": "Which option is first? Final answer letter:",
+                    "answer": "B",
+                },
+            ]
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for case in cases:
+                    handle.write(json.dumps(case) + "\n")
+            with open(os.path.join(benchmark_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "benchmark_id": "mmlu_pro_reference_v1",
+                        "dataset_revision": "54611cde22c74cca43dd78732198de6abe971398",
+                        "sample_policy": "category_round_robin_v1",
+                        "category_count": 2,
+                    },
+                    handle,
+                )
+
+        def fake_evaluate(spec, benchmark_dir):
+            with open(os.path.join(benchmark_dir, "predictions.jsonl"), "r", encoding="utf-8") as handle:
+                predictions = [json.loads(line) for line in handle if line.strip()]
+            case_results = [
+                {
+                    "case_id": "mmlu_pro/1",
+                    "task_id": "mmlu_pro/1",
+                    "category": "math",
+                    "expected": "D",
+                    "predicted": "D",
+                    "correct": True,
+                },
+                {
+                    "case_id": "mmlu_pro/2",
+                    "task_id": "mmlu_pro/2",
+                    "category": "other",
+                    "expected": "B",
+                    "predicted": "A",
+                    "correct": False,
+                },
+            ]
+            self.assertEqual(len(predictions), 2)
+            return {
+                "benchmark_id": "mmlu_pro_reference_v1",
+                "display_name": "MMLU-Pro reference",
+                "status": "completed",
+                "primary_metric": {"name": "accuracy", "value": 0.5},
+                "metrics": {"accuracy": 0.5, "correct_count": 1, "total_count": 2, "invalid_count": 0},
+                "category_metrics": {
+                    "math": {"accuracy": 1.0, "correct_count": 1, "total_count": 1},
+                    "other": {"accuracy": 0.0, "correct_count": 0, "total_count": 1},
+                },
+                "case_results": case_results,
+                "scoring_policy": "exact_multiple_choice_letter_accuracy_v1",
+            }
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="general_assistant",
+            output_dir=self.tempdir,
+            benchmark_check_ids=["mmlu_pro_reference_v1"],
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                execution = execute_capability_suite(_MmluProAdapter(), request)
+
+        capability_run_path = execution.artifacts["mmlu_pro_reference_v1"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["evidence"]["lane"], "reference")
+        self.assertEqual(artifact["evidence"]["confidence_label"], "reference_sample")
+        self.assertEqual(artifact["evidence"]["surface"], "local_reasoning_capability")
+        self.assertEqual(artifact["protocol"]["dataset_revision"], "54611cde22c74cca43dd78732198de6abe971398")
+        self.assertEqual(artifact["protocol"]["scorer_type"], "multiple_choice")
+        self.assertEqual(artifact["summary"]["state"], "scored")
+        self.assertEqual(artifact["summary"]["score"], 0.5)
+        self.assertEqual(artifact["summary"]["category_metrics"]["math"]["accuracy"], 1.0)
+        self.assertEqual([task["score"] for task in artifact["tasks"]], [1.0, 0.0])
+        self.assertIn("This is not public leaderboard evidence.", artifact["claim_boundary"]["unsupported_claims"])
+
+        summary_path = execution.artifacts["_summary"]["capability_summary_path"]
+        with open(summary_path, "r", encoding="utf-8") as handle:
+            summary = json.load(handle)
+        reasoning = next(item for item in summary["surfaces"] if item["surface"] == "local_reasoning_capability")
+        self.assertEqual(reasoning["state"], "scored")
+        self.assertEqual(reasoning["lane"], "reference")
+        self.assertEqual(reasoning["confidence_label"], "reference_sample")
 
     def test_execute_capability_suite_handles_partial_failures(self):
         def fake_prepare(spec, benchmark_dir, tier):
