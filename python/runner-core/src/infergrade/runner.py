@@ -8,7 +8,7 @@ from infergrade.adapters import get_adapter
 from infergrade.artifacts import resolve_quant_artifact
 from infergrade.benchmark_catalog import normalize_request_selection, selection_metadata_for_request
 from infergrade.environment import capture_environment
-from infergrade.capabilities import summarize_capability_execution
+from infergrade.capabilities import attach_quant_fidelity_capability_artifact, summarize_capability_execution
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.ontology import build_ontology, resolve_artifact_sha256, resolve_quant_format
 from infergrade.progress import (
@@ -498,6 +498,16 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         mark_stage_started(output_dir, progress, current_stage)
         _emit_progress(emit_progress, "Measuring quantization fidelity...")
         fidelity_execution = _run_fidelity(adapter, request)
+        attach_quant_fidelity_capability_artifact(
+            request=request,
+            execution=capability_execution,
+            fidelity=fidelity_execution,
+            output_dir=output_dir,
+            ontology=ontology,
+            environment=environment,
+            runtime_metadata=runtime_metadata,
+            backend_version=adapter_version,
+        )
         mark_stage_completed(output_dir, progress, current_stage, metadata={"state": fidelity_execution.state})
 
         deployment_artifacts: Dict[str, Any] = {}

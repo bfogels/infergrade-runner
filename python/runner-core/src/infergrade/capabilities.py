@@ -14,7 +14,7 @@ from infergrade.benchmark_catalog import (
 from infergrade.capability_contract import validate_capability_run_artifact
 from infergrade.capability_summary import write_capability_summary_artifact
 from infergrade.images import install_image
-from infergrade.models import CapabilityExecution, RunRequest
+from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcnow_iso, write_json
 
 CAPABILITY_REGISTRY_VERSION = "2026-04-multiturn-preview"
@@ -111,6 +111,15 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         container_image=DEFAULT_CAPABILITY_IMAGES["mmlu_pro_reference_v1"],
         case_limits={"canary": 25, "standard": 100, "gold": 300},
     ),
+    "perplexity_reference_v1": CapabilityBenchmarkSpec(
+        benchmark_id="perplexity_reference_v1",
+        display_name="Quant fidelity reference",
+        benchmark_kind="quant_fidelity",
+        primary_metric_name="perplexity",
+        generation_max_tokens=0,
+        execution_mode="fidelity",
+        case_limits={"canary": 1, "standard": 1, "gold": 1},
+    ),
 }
 
 
@@ -160,8 +169,14 @@ def resolve_capability_suite(use_case: Optional[str], tier: str):
 
 def capability_registry_for_request(request: RunRequest) -> List[Dict[str, Any]]:
     benchmark_ids = capability_benchmark_ids_for_request(request)
+    return _capability_registry_for_benchmark_ids(benchmark_ids)
+
+
+def _capability_registry_for_benchmark_ids(benchmark_ids: List[str]) -> List[Dict[str, Any]]:
     registry: List[Dict[str, Any]] = []
     for benchmark_id in benchmark_ids:
+        if benchmark_id not in CAPABILITY_BENCHMARKS:
+            continue
         spec = CAPABILITY_BENCHMARKS[benchmark_id]
         registry.append(
             {
@@ -182,7 +197,7 @@ def summarize_capability_execution(
 ) -> Dict[str, Any]:
     selection = selection_metadata_for_request(request)
     planned_benchmark_ids = list(execution.benchmark_check_ids or capability_benchmark_ids_for_request(request))
-    benchmark_registry = capability_registry_for_request(request)
+    benchmark_registry = _capability_registry_for_benchmark_ids(planned_benchmark_ids)
     benchmark_results = dict(execution.benchmark_results or {})
     simulated_scored_ids = [
         benchmark_id for benchmark_id in planned_benchmark_ids if benchmark_id in dict(execution.component_scores or {})
@@ -601,6 +616,334 @@ def execute_capability_suite(
     summary_path = write_capability_summary_artifact(request, execution, request.output_dir or os.path.dirname(os.path.dirname(benchmark_root)))
     execution.artifacts["_summary"] = {"capability_summary_path": summary_path}
     return execution
+
+
+def attach_quant_fidelity_capability_artifact(
+    request: RunRequest,
+    execution: CapabilityExecution,
+    fidelity: FidelityExecution,
+    output_dir: str,
+    ontology: Dict[str, Any],
+    environment: Dict[str, Any],
+    runtime_metadata: Dict[str, Any],
+    backend_version: str,
+) -> Optional[str]:
+    """Write the selected quant-fidelity reference artifact and refresh summary discovery."""
+    if "perplexity_reference_v1" not in list(request.benchmark_check_ids or []):
+        return None
+    benchmark_dir = os.path.join(output_dir, "artifacts", "capability", "perplexity_reference_v1")
+    ensure_dir(benchmark_dir)
+    raw_path = os.path.join(benchmark_dir, "fidelity_raw.json")
+    scoring_path = os.path.join(benchmark_dir, "summary.json")
+    final_comparability_key = _quant_fidelity_comparability_key(
+        ontology=ontology,
+        request=request,
+        corpus_id=_quant_fidelity_metric_or_context(fidelity, "corpus_id"),
+        corpus_revision=_quant_fidelity_metric_or_context(fidelity, "corpus_revision"),
+        protocol_id=_quant_fidelity_metric_or_context(fidelity, "protocol_id"),
+        protocol_parameters=_quant_fidelity_metric_or_context(fidelity, "protocol_parameters"),
+    )
+    _finalize_quant_fidelity_metrics(fidelity, final_comparability_key)
+    write_json(
+        raw_path,
+        {
+            "state": fidelity.state,
+            "reason_codes": list(fidelity.reason_codes or []),
+            "context": dict(fidelity.context or {}),
+            "metrics": dict(fidelity.metrics or {}),
+            "artifacts": dict(fidelity.artifacts or {}),
+        },
+    )
+    summary_payload = _quant_fidelity_summary_payload(fidelity)
+    summary_payload["comparability_key"] = final_comparability_key
+    write_json(scoring_path, summary_payload)
+    capability_run_path = _write_quant_fidelity_capability_run_artifact(
+        request=request,
+        fidelity=fidelity,
+        summary=summary_payload,
+        benchmark_dir=benchmark_dir,
+        ontology=ontology,
+        environment=environment,
+        runtime_metadata=runtime_metadata,
+        backend_version=backend_version,
+    )
+    execution.artifacts["perplexity_reference_v1"] = {
+        "benchmark_dir": benchmark_dir,
+        "summary_path": scoring_path,
+        "raw_path": raw_path,
+        "capability_run_path": capability_run_path,
+    }
+    execution.benchmark_results["perplexity_reference_v1"] = summary_payload
+    if "perplexity_reference_v1" not in list(execution.benchmark_check_ids or []):
+        execution.benchmark_check_ids = list(execution.benchmark_check_ids or []) + ["perplexity_reference_v1"]
+    summary_path = write_capability_summary_artifact(request, execution, output_dir)
+    execution.artifacts["_summary"] = {"capability_summary_path": summary_path}
+    return capability_run_path
+
+
+def _quant_fidelity_metric_or_context(fidelity: FidelityExecution, key: str) -> Any:
+    metric = dict((fidelity.metrics or {}).get("perplexity") or {})
+    if metric.get(key) is not None:
+        return metric.get(key)
+    return dict(fidelity.context or {}).get(key)
+
+
+def _finalize_quant_fidelity_metrics(fidelity: FidelityExecution, comparability_key: str) -> None:
+    metrics = fidelity.metrics or {}
+    metric = metrics.get("perplexity")
+    if isinstance(metric, dict):
+        metric["comparability_key"] = comparability_key
+
+
+def _quant_fidelity_summary_payload(fidelity: FidelityExecution) -> Dict[str, Any]:
+    metric = dict((fidelity.metrics or {}).get("perplexity") or {})
+    measured = fidelity.state == "measured" and metric.get("value") is not None
+    if measured:
+        state = "scored"
+    elif fidelity.state == "skipped":
+        state = "skipped"
+    elif fidelity.state == "not_comparable":
+        state = "not_comparable"
+    elif "simulated_run_skips_fidelity" in list(fidelity.reason_codes or []):
+        state = "not_comparable"
+    else:
+        state = "failed"
+    return {
+        "benchmark_id": "perplexity_reference_v1",
+        "display_name": "Quant fidelity reference",
+        "status": "completed" if measured else fidelity.state,
+        "state": state,
+        "primary_metric": {
+            "name": "perplexity",
+            "value": metric.get("value") if measured else None,
+            "lower_is_better": True,
+        },
+        "metrics": {
+            "perplexity": metric.get("value"),
+            "stderr": metric.get("stderr"),
+            "bits_per_byte": metric.get("bits_per_byte"),
+            "tokens_scored": metric.get("corpus_token_count"),
+            "bytes_scored": metric.get("corpus_byte_count"),
+            "duration_seconds": metric.get("duration_seconds"),
+        },
+        "reason_codes": list(fidelity.reason_codes or []),
+        "comparability_key": metric.get("comparability_key"),
+        "corpus_id": metric.get("corpus_id") or (fidelity.context or {}).get("corpus_id"),
+        "corpus_revision": metric.get("corpus_revision") or (fidelity.context or {}).get("corpus_revision"),
+        "protocol_id": metric.get("protocol_id") or (fidelity.context or {}).get("protocol_id"),
+        "protocol_parameters": metric.get("protocol_parameters") or (fidelity.context or {}).get("protocol_parameters"),
+        "claim_boundary": (
+            "Same-family quant-fidelity reference evidence only; not a cross-model score or general capability measure."
+        ),
+    }
+
+
+def _write_quant_fidelity_capability_run_artifact(
+    request: RunRequest,
+    fidelity: FidelityExecution,
+    summary: Dict[str, Any],
+    benchmark_dir: str,
+    ontology: Dict[str, Any],
+    environment: Dict[str, Any],
+    runtime_metadata: Dict[str, Any],
+    backend_version: str,
+) -> str:
+    metric = dict((fidelity.metrics or {}).get("perplexity") or {})
+    context = dict(fidelity.context or {})
+    measured = summary.get("state") == "scored"
+    error_class = None if measured else _quant_fidelity_error_class(fidelity)
+    task_state = "scored" if measured else str(summary.get("state") or "failed")
+    failed_count = 1 if task_state == "failed" else 0
+    skipped_count = 1 if task_state == "skipped" else 0
+    not_comparable_count = 1 if task_state == "not_comparable" else 0
+    comparability_key = str(summary.get("comparability_key") or _quant_fidelity_comparability_key(
+        ontology=ontology,
+        request=request,
+        corpus_id=summary.get("corpus_id"),
+        corpus_revision=summary.get("corpus_revision"),
+        protocol_id=summary.get("protocol_id"),
+        protocol_parameters=summary.get("protocol_parameters"),
+    ))
+    protocol_parameters = dict(summary.get("protocol_parameters") or {})
+    artifact = {
+        "artifact_spec_version": "0.1.0",
+        "artifact_kind": "capability_run",
+        "capability_run_id": "caprun_perplexity_reference_v1_%s" % stable_hash(
+            {
+                "model": request.model,
+                "artifact": request.quant_artifact_sha256 or request.quant_artifact,
+                "metric": metric.get("value"),
+                "comparability_key": comparability_key,
+                "state": summary.get("state"),
+            },
+            length=10,
+        ),
+        "created_at": utcnow_iso(),
+        "runner": {
+            "name": "infergrade-runner",
+            "version": __version__,
+            "contract_version": "0.1.0",
+        },
+        "evidence": {
+            "lane": "reference",
+            "surface": "quant_fidelity",
+            "grade": "reference_sample",
+            "experimental": True,
+            "confidence_label": "reference_sample",
+        },
+        "subject": {
+            "model": {
+                "model": request.model,
+                "model_family": dict(ontology.get("model_family") or {}),
+                "checkpoint": dict(ontology.get("checkpoint") or {}),
+                "quantization": dict(ontology.get("quantization") or {}),
+                "artifact": dict(ontology.get("artifact") or {}),
+                "quant_artifact": request.quant_artifact,
+                "quant_artifact_sha256": request.quant_artifact_sha256,
+                "quant_artifact_filename": request.quant_artifact_filename,
+                "tokenizer_id": _quant_fidelity_tokenizer_id(request, ontology),
+                "comparability_key": comparability_key,
+            },
+            "runtime": {
+                "backend": request.backend,
+                "backend_version": backend_version,
+                "execution_mode": request.execution_mode,
+                "runtime_metadata": dict(runtime_metadata or {}),
+            },
+            "hardware": {
+                "source": "run_bundle_environment",
+                "snapshot": dict(environment or {}),
+            },
+            "generation_preset": {
+                "generation_preset_id": request.generation_preset,
+            },
+        },
+        "protocol": {
+            "task_family": "quant_fidelity",
+            "prompt_version": None,
+            "task_version": "perplexity_reference_v1",
+            "fixture_revision": str(summary.get("corpus_revision") or context.get("corpus_revision") or "unknown"),
+            "dataset_revision": str(summary.get("corpus_revision") or context.get("corpus_revision") or "unknown"),
+            "corpus": {
+                "id": summary.get("corpus_id") or context.get("corpus_id"),
+                "revision": summary.get("corpus_revision") or context.get("corpus_revision"),
+            },
+            "protocol_id": summary.get("protocol_id") or context.get("protocol_id"),
+            "parameters": protocol_parameters,
+            "scorer_type": "perplexity",
+            "scoring_policy": "quant_fidelity_perplexity_v1",
+            "repetitions": 1,
+        },
+        "summary": {
+            "state": summary.get("state"),
+            "score": metric.get("value") if measured else None,
+            "score_dimension": "quant_fidelity_perplexity",
+            "passed_count": 1 if measured else 0,
+            "failed_count": failed_count,
+            "partial_count": 0,
+            "skipped_count": skipped_count,
+            "not_comparable_count": not_comparable_count,
+            "duration_seconds": metric.get("duration_seconds"),
+            "time_to_first_token_ms": None,
+            "tokens_per_second": None,
+            "input_tokens": metric.get("corpus_token_count"),
+            "output_tokens": None,
+            "primary_metric": summary.get("primary_metric"),
+            "metrics": summary.get("metrics"),
+            "comparability_key": comparability_key,
+            "lower_is_better": True,
+        },
+        "tasks": [
+            {
+                "task_id": "perplexity_reference_v1",
+                "task_family": "quant_fidelity",
+                "state": task_state,
+                "score": metric.get("value") if measured else None,
+                "score_dimension": "quant_fidelity_perplexity",
+                "scorer_type": "perplexity" if measured else None,
+                "scoring_policy": "quant_fidelity_perplexity_v1" if measured else None,
+                "output_artifact": "fidelity_raw.json",
+                "error_class": error_class,
+                "latency_ms": None,
+                "time_to_first_token_ms": None,
+                "tokens_per_second": None,
+                "input_tokens": metric.get("corpus_token_count"),
+                "output_tokens": None,
+                "metrics": summary.get("metrics"),
+            }
+        ],
+        "artifacts": {
+            "manifest": "capability_run.json",
+            "raw_outputs": ["fidelity_raw.json"],
+            "scoring_outputs": ["summary.json"],
+            "supporting_files": [],
+        },
+        "claim_boundary": {
+            "supported_claims": [
+                "This quant artifact produced the recorded perplexity on the pinned corpus and protocol.",
+                "Runs are directly comparable only when the same-family comparability key matches.",
+            ],
+            "unsupported_claims": [
+                "This is not a global model-quality score.",
+                "This is not assistant, coding, reasoning, LiveCodeBench, SWE-bench, or repo-edit proof.",
+                "This is not gold evidence.",
+                "This is not leaderboard-grade evidence.",
+                "This must not be compared across different model families, checkpoints, tokenizers, corpora, or protocols.",
+            ],
+        },
+    }
+    errors = validate_capability_run_artifact(artifact)
+    if errors:
+        raise ValueError("Invalid capability_run artifact: %s" % "; ".join(errors))
+    path = os.path.join(benchmark_dir, "capability_run.json")
+    write_json(path, artifact)
+    return path
+
+
+def _quant_fidelity_tokenizer_id(request: RunRequest, ontology: Dict[str, Any]) -> str:
+    hints = dict(request.ontology_hints or {})
+    if hints.get("tokenizer_id"):
+        return str(hints["tokenizer_id"])
+    checkpoint = dict(ontology.get("checkpoint") or {})
+    checkpoint_name = checkpoint.get("checkpoint_name") or request.model.split("/")[-1]
+    return "%s_default" % re.sub(r"[^a-z0-9]+", "_", str(checkpoint_name).lower()).strip("_")
+
+
+def _quant_fidelity_comparability_key(
+    ontology: Dict[str, Any],
+    request: RunRequest,
+    corpus_id: Any,
+    corpus_revision: Any,
+    protocol_id: Any,
+    protocol_parameters: Any,
+) -> str:
+    family = dict(ontology.get("model_family") or {})
+    checkpoint = dict(ontology.get("checkpoint") or {})
+    return stable_hash(
+        {
+            "family_name": family.get("family_name"),
+            "checkpoint_name": checkpoint.get("checkpoint_name"),
+            "tokenizer_id": _quant_fidelity_tokenizer_id(request, ontology),
+            "corpus_id": corpus_id,
+            "corpus_revision": corpus_revision,
+            "protocol_id": protocol_id,
+            "protocol_parameters": protocol_parameters,
+        },
+        length=24,
+    )
+
+
+def _quant_fidelity_error_class(fidelity: FidelityExecution) -> str:
+    codes = [str(code) for code in list(fidelity.reason_codes or [])]
+    if "fidelity_check_not_selected" in codes:
+        return "skipped"
+    if "execution_mode_not_supported_for_fidelity" in codes:
+        return "protocol_mismatch"
+    if "simulated_run_skips_fidelity" in codes:
+        return "not_comparable"
+    if "perplexity_measurement_failed" in codes:
+        return "runtime_failure"
+    return codes[0] if codes else "scoring_failed"
 
 
 def _generation_failure_severity(total_cases: int, failure_count: int) -> str:

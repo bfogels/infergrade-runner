@@ -110,12 +110,14 @@ Local capability artifacts may support narrow statements like:
 - this setup produced deterministic structured outputs for the declared fixtures
 - this setup had the recorded latency and token throughput on this hardware
 - this quant artifact produced the recorded fidelity signal under the declared scorer
+- this quant artifact is directly comparable only to runs with the same family, checkpoint, tokenizer, corpus revision, and protocol id
 
 They do not support claims like:
 
 - globally best model
 - public leaderboard evidence
 - broad assistant intelligence
+- cross-family quant or model-quality ranking from perplexity alone
 - decision-grade evidence without implemented thresholds and gates
 - public gold evidence without gold controls and maintainer review
 

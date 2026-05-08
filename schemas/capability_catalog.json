@@ -202,19 +202,20 @@
       "check_id": "perplexity_reference_v1",
       "surface_id": "quant_fidelity",
       "evidence_lane_id": "reference",
-      "maturity": "reference_candidate",
+      "maturity": "reference_runnable",
       "runnable_status": "runnable_optional_llama_cpp",
       "default_inclusion_status": "intentional_reference_only",
-      "fixture_or_dataset_revision_status": "reference_corpus_policy_needed",
+      "fixture_or_dataset_revision_status": "pinned_runner_corpus_revision",
       "harness_status": "llama_cpp_perplexity_path_available",
       "scoring_policy_id": "quant_fidelity_perplexity_v1",
-      "sample_policy": "Reference corpus perplexity signal for comparing nearby quantized artifacts under the same protocol.",
+      "sample_policy": "Pinned InferGrade quant-fidelity corpus under infergrade_perplexity_v1; directly comparable only when model family, checkpoint, tokenizer, corpus, and protocol match.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "none_native_llama_cpp_perplexity",
-      "claim_boundary": "Quant-fidelity evidence only; perplexity does not prove assistant, coding, reasoning, or general model capability.",
+      "claim_boundary": "Same-family quant-fidelity reference evidence only; perplexity does not prove assistant, coding, reasoning, cross-family quality, or general model capability.",
       "promotion_blockers": [
-        "Pin reference corpus revision and same-family quant metadata.",
-        "Emit validated capability_run and summary representation before reference-runnable promotion."
+        "Observed duration and token-volume metadata are needed across real local dogfood runs.",
+        "Reference precision baselines are needed before Hub can present quality-retention deltas.",
+        "Gold or leaderboard-style quant claims require deeper corpus controls and maintainer review."
       ]
     },
     {
@@ -1048,7 +1049,7 @@
     {
       "check_id": "perplexity_reference_v1",
       "display_name": "Perplexity reference v1",
-      "description": "Quant fidelity signal based on the shared reference corpus.",
+      "description": "Same-family quant fidelity signal based on a pinned InferGrade reference corpus.",
       "evidence_kind": "fidelity",
       "group_id": "quant_fidelity",
       "surface_id": "quant_fidelity",

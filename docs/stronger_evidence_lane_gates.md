@@ -126,6 +126,27 @@ Acceptance:
 - HumanEval+ and MBPP+ remain separate catalog checks, artifact protocol entries, summary artifact pointers, and Hub-facing evidence rows.
 - Real dogfood runs still need to calibrate expected duration, token volume, and degraded behavior.
 
+### Phase A4: Quant-Fidelity Perplexity Reference
+
+Quant fidelity is the first reference lane whose product value is specifically local-model selection. It helps compare nearby quants of the same checkpoint under a pinned corpus and protocol.
+
+Status: Runner uses the existing `llama-perplexity` path for `perplexity_reference_v1`, pins the Runner-owned `infergrade_quantfidelity_v1` corpus revision, emits validated `capability_run.json`, and includes the artifact in `capability_summary.json` under `quant_fidelity`.
+
+Runner scope:
+
+- Keep `perplexity_reference_v1` intentionally selected and out of quick/default first-run paths.
+- Preserve `fidelity_raw.json`, `summary.json`, and `capability_run.json`.
+- Record perplexity, stderr, bits-per-byte where derivable, token/byte counts where available, duration, corpus id/revision, protocol id/parameters, and same-family comparability key.
+- Make direct comparability require matching model family, checkpoint, tokenizer id, corpus id/revision, and protocol id/parameters.
+- Keep claim boundaries clear: perplexity reference is quant-fidelity evidence only, not assistant, coding, reasoning, global model-quality, gold, or leaderboard evidence.
+
+Acceptance:
+
+- `perplexity_reference_v1` is reference evidence with `reference_sample` confidence.
+- It is not promoted to gold evidence.
+- Hub-facing summaries can discover it under `quant_fidelity`.
+- Real dogfood runs and reference-precision baselines are still needed before showing quality-retention deltas.
+
 ### Phase B: GPQA Sampled Reference
 
 GPQA is harder and more differentiating, but it should reuse the multiple-choice harness shape from MMLU-Pro.

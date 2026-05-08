@@ -47,9 +47,10 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(payload["deployment"]["deployment_profile_id"], "interactive_chat_v1")
         self.assertEqual(payload["capability"]["use_case"], "agentic_coding")
         self.assertEqual(payload["capability"]["capability_state"], "scored")
-        self.assertEqual(payload["capability"]["benchmark_coverage"]["planned_count"], 2)
+        self.assertEqual(payload["capability"]["benchmark_coverage"]["planned_count"], 3)
         self.assertEqual(payload["capability"]["benchmark_coverage"]["scored_count"], 2)
-        self.assertEqual(len(payload["capability"]["capability_component_reports"]), 2)
+        self.assertIn("perplexity_reference_v1", payload["capability"]["selected_benchmark_check_ids"])
+        self.assertEqual(len(payload["capability"]["capability_component_reports"]), 3)
         self.assertEqual(payload["fidelity"]["fidelity_state"], "not_yet_measured")
         self.assertEqual(payload["verification"]["verification_level"], "experimental")
         with open(os.path.join(output_dir, "report.md"), "r", encoding="utf-8") as handle:
@@ -223,6 +224,149 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(payload["execution"]["container_image"], "infergrade-llama-cpp:test")
         self.assertEqual(payload["fidelity"]["fidelity_state"], "measured")
         self.assertEqual(payload["fidelity"]["perplexity"]["value"], 4.21)
+
+    def test_selected_quant_fidelity_emits_capability_artifact_and_summary(self):
+        artifact_path = os.path.join(self.tempdir, "model-q4_k_m.gguf")
+        with open(artifact_path, "wb") as handle:
+            handle.write(b"runner-quant-fidelity-test")
+
+        class FakeAdapter(object):
+            def default_backend_flags(self):
+                return []
+
+            def resolve_version(self, simulate=True, request=None):
+                return "llama.cpp-test"
+
+            def runtime_metadata(self, request):
+                return {"native_perplexity_binary": "/opt/llama-perplexity", "runtime_source": "test"}
+
+            def run_capability(self, request, progress_callback=None):
+                from infergrade.models import CapabilityExecution
+
+                return CapabilityExecution(
+                    use_case=None,
+                    suite_id=None,
+                    suite_ids=[],
+                    benchmark_tier=request.tier,
+                    benchmark_group_ids=[],
+                    benchmark_check_ids=[],
+                    components=[],
+                    score=None,
+                    score_method=None,
+                    component_scores={},
+                    confidence=None,
+                    status="skipped",
+                    artifacts={},
+                )
+
+            def run_fidelity(self, request):
+                from infergrade.models import FidelityExecution
+
+                return FidelityExecution(
+                    state="measured",
+                    reason_codes=["perplexity_measured"],
+                    metrics={
+                        "perplexity": {
+                            "metric_name": "perplexity",
+                            "value": 3.25,
+                            "stderr": 0.01,
+                            "bits_per_byte": 1.44,
+                            "duration_seconds": 12.5,
+                            "corpus_token_count": 2048,
+                            "corpus_byte_count": 8192,
+                            "status": "measured",
+                            "comparability_key": "legacy-key-replaced",
+                            "protocol_id": "infergrade_perplexity_v1",
+                            "corpus_id": "infergrade_quantfidelity_v1",
+                            "corpus_revision": "sha256:test",
+                            "protocol_parameters": {"ctx_size": 128, "stride": 0},
+                        }
+                    },
+                    context={
+                        "corpus_id": "infergrade_quantfidelity_v1",
+                        "corpus_revision": "sha256:test",
+                        "protocol_id": "infergrade_perplexity_v1",
+                        "protocol_parameters": {"ctx_size": 128, "stride": 0},
+                    },
+                )
+
+            def run_deployment_profile(self, request, profile_id, progress_callback=None):
+                return DeploymentExecution(
+                    profile_id=profile_id,
+                    metrics={
+                        "ttft_p50_ms": 100.0,
+                        "ttft_p95_ms": 100.0,
+                        "latency_p50_ms": 400.0,
+                        "latency_p95_ms": 400.0,
+                        "decode_tokens_per_second_p50": 50.0,
+                        "decode_tokens_per_second_p95": 50.0,
+                        "request_throughput_per_minute": 150.0,
+                        "peak_vram_mb": 1024.0,
+                        "load_time_ms": 250.0,
+                        "oom_or_failure_rate": 0.0,
+                        "deployment_confidence": 0.9,
+                    },
+                    status="completed",
+                    artifacts={},
+                )
+
+        output_dir = os.path.join(self.tempdir, "quant-fidelity-bundle")
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["perplexity_reference_v1"],
+            benchmark_group_ids=["quant_fidelity"],
+            capability_suite_ids=["quant_fidelity"],
+            quant_artifact=artifact_path,
+            output_dir=output_dir,
+            simulate=False,
+        )
+
+        with mock.patch("infergrade.runner.get_adapter", return_value=FakeAdapter()):
+            run_infergrade(request)
+
+        capability_run_path = os.path.join(output_dir, "artifacts", "capability", "perplexity_reference_v1", "capability_run.json")
+        self.assertTrue(os.path.exists(capability_run_path))
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["evidence"]["surface"], "quant_fidelity")
+        self.assertEqual(artifact["evidence"]["lane"], "reference")
+        self.assertEqual(artifact["evidence"]["confidence_label"], "reference_sample")
+        self.assertTrue(artifact["evidence"]["experimental"])
+        self.assertEqual(artifact["summary"]["score"], 3.25)
+        self.assertEqual(artifact["summary"]["metrics"]["bits_per_byte"], 1.44)
+        self.assertEqual(artifact["subject"]["model"]["model_family"]["family_name"], "Qwen2.5")
+        self.assertTrue(artifact["subject"]["model"]["comparability_key"])
+        self.assertNotEqual(artifact["subject"]["model"]["comparability_key"], "legacy-key-replaced")
+        self.assertIn("not a global model-quality score", " ".join(artifact["claim_boundary"]["unsupported_claims"]))
+
+        with open(os.path.join(output_dir, "artifacts", "capability", "perplexity_reference_v1", "summary.json"), "r", encoding="utf-8") as handle:
+            fidelity_summary = json.load(handle)
+        with open(os.path.join(output_dir, "artifacts", "capability", "perplexity_reference_v1", "fidelity_raw.json"), "r", encoding="utf-8") as handle:
+            fidelity_raw = json.load(handle)
+        self.assertEqual(fidelity_summary["comparability_key"], artifact["subject"]["model"]["comparability_key"])
+        self.assertEqual(
+            fidelity_raw["metrics"]["perplexity"]["comparability_key"],
+            artifact["subject"]["model"]["comparability_key"],
+        )
+
+        with open(os.path.join(output_dir, "artifacts", "capability", "capability_summary.json"), "r", encoding="utf-8") as handle:
+            summary = json.load(handle)
+        by_surface = {item["surface"]: item for item in summary["surfaces"]}
+        quant = by_surface["quant_fidelity"]
+        self.assertEqual(quant["state"], "scored")
+        self.assertEqual(quant["lane"], "reference")
+        self.assertEqual(quant["confidence_label"], "reference_sample")
+        self.assertEqual(quant["capability_artifacts"][0]["benchmark_id"], "perplexity_reference_v1")
+        with open(os.path.join(output_dir, "results", "interactive_chat_v1.json"), "r", encoding="utf-8") as handle:
+            result_record = json.load(handle)
+        self.assertIn("perplexity_reference_v1", result_record["capability"]["selected_benchmark_check_ids"])
+        self.assertIn("perplexity_reference_v1", result_record["capability"]["benchmark_coverage"]["planned_benchmark_ids"])
+        self.assertIn(
+            "perplexity_reference_v1",
+            [item["benchmark_id"] for item in result_record["capability"]["benchmark_registry"]],
+        )
 
     def test_skipped_capability_still_records_use_case(self):
         output_dir = os.path.join(self.tempdir, "capability-skipped")
