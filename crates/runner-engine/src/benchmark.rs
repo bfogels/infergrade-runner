@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+const MAX_PROCESS_STREAM_BYTES: usize = 4 * 1024 * 1024;
+const PROCESS_STREAM_TRUNCATED_MARKER: &str = "\n[stream truncated: exceeded 4 MiB cap]\n";
 const NATIVE_FIRST_RUN_ARTIFACT_FORMAT: &str = "infergrade.native_first_run.v1";
 const NATIVE_FIRST_RUN_BUNDLE_PAYLOAD_FORMAT: &str = "infergrade.bundle_upload.v1";
 const METRIC_ENVELOPE_PREFIX: &str = "INFERGRADE_NATIVE_FIRST_RUN_METRICS ";
@@ -137,6 +139,8 @@ struct LlamaTimings {
 struct ProcessStream {
     text: String,
     first_byte_ms: Option<u64>,
+    #[allow(dead_code)]
+    truncated: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -233,9 +237,10 @@ fn read_process_stream(
     mut stream: impl Read,
     started_at: Instant,
 ) -> Result<ProcessStream, String> {
-    let mut bytes = Vec::new();
+    let mut bytes: Vec<u8> = Vec::new();
     let mut first_byte_ms = None;
     let mut buffer = [0_u8; 8192];
+    let mut truncated = false;
     loop {
         let count = stream
             .read(&mut buffer)
@@ -246,11 +251,25 @@ fn read_process_stream(
         if first_byte_ms.is_none() {
             first_byte_ms = Some(duration_ms(started_at.elapsed()));
         }
-        bytes.extend_from_slice(&buffer[..count]);
+        if bytes.len() < MAX_PROCESS_STREAM_BYTES {
+            let remaining = MAX_PROCESS_STREAM_BYTES - bytes.len();
+            let take = remaining.min(count);
+            bytes.extend_from_slice(&buffer[..take]);
+            if take < count {
+                truncated = true;
+            }
+        } else {
+            truncated = true;
+        }
+    }
+    let mut text = String::from_utf8_lossy(&bytes).to_string();
+    if truncated {
+        text.push_str(PROCESS_STREAM_TRUNCATED_MARKER);
     }
     Ok(ProcessStream {
-        text: String::from_utf8_lossy(&bytes).to_string(),
+        text,
         first_byte_ms,
+        truncated,
     })
 }
 
@@ -557,8 +576,7 @@ fn parse_tokens_per_second(line: &str) -> Option<f64> {
     let before_marker = &line[..marker_start];
     before_marker
         .split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
-        .filter(|part| !part.is_empty())
-        .last()?
+        .rfind(|part| !part.is_empty())?
         .parse()
         .ok()
 }
@@ -586,7 +604,7 @@ fn timing_decode_tokens_per_second(
     generated_tokens: u32,
 ) -> Result<f64, String> {
     if let Some(value) = timings.eval_tokens_per_second {
-        if value.is_finite() && value >= 0.0 && value <= MAX_DECODE_TOKENS_PER_SECOND {
+        if value.is_finite() && (0.0..=MAX_DECODE_TOKENS_PER_SECOND).contains(&value) {
             return Ok(value);
         }
     }
@@ -1203,6 +1221,35 @@ fn native_first_run_hardware_summary() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_process_stream_caps_oversized_output_and_marks_truncated() {
+        // Sized stream double the cap -- ensures truncation triggers and
+        // the trailing marker is appended.
+        let payload = vec![b'A'; MAX_PROCESS_STREAM_BYTES * 2 + 1024];
+        let cursor = std::io::Cursor::new(payload);
+        let started = Instant::now();
+        let stream = read_process_stream(cursor, started).expect("read stream");
+        assert!(stream.truncated);
+        assert!(stream.text.ends_with(PROCESS_STREAM_TRUNCATED_MARKER));
+        // Body proper (excluding marker) capped at MAX_PROCESS_STREAM_BYTES.
+        let body_len = stream
+            .text
+            .strip_suffix(PROCESS_STREAM_TRUNCATED_MARKER)
+            .expect("marker stripped")
+            .len();
+        assert_eq!(body_len, MAX_PROCESS_STREAM_BYTES);
+    }
+
+    #[test]
+    fn read_process_stream_does_not_mark_normal_output_truncated() {
+        let payload = b"hello\nworld\n".to_vec();
+        let cursor = std::io::Cursor::new(payload);
+        let stream = read_process_stream(cursor, Instant::now()).expect("read stream");
+        assert!(!stream.truncated);
+        assert!(!stream.text.contains("[stream truncated"));
+        assert_eq!(stream.text, "hello\nworld\n");
+    }
 
     #[test]
     fn preview_is_bounded_and_redacts_sensitive_large_runtime_output() {

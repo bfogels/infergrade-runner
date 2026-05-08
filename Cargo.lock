@@ -1622,10 +1622,13 @@ dependencies = [
 [[package]]
 name = "infergrade-desktop-sidecar"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "infergrade-runner-cli"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "infergrade_runner_engine",
  "serde_json",
@@ -1634,7 +1637,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_desktop_runner"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "infergrade_runner_engine",
  "keyring",
@@ -1650,7 +1653,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_runner_engine"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "flate2",
  "reqwest 0.12.28",

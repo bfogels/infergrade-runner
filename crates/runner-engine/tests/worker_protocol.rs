@@ -146,11 +146,14 @@ fn worker_protocol_preview_uses_typed_protocol_and_stays_secret_free() {
 }
 
 #[test]
-fn worker_protocol_preview_trims_identity_fields_and_rejects_bad_hub_urls() {
+fn worker_protocol_preview_normalizes_api_url_and_rejects_bad_hub_urls() {
+    // api_url tolerates surrounding whitespace via normalize_api_url. The
+    // identity fields (runner_id, execution_mode) must be already-trimmed:
+    // the validator rejects whitespace explicitly so callers see fast.
     let preview = RunnerProtocolPreviewInput {
         api_url: " localhost:8000 ".to_string(),
-        runner_id: " runner_123 ".to_string(),
-        execution_mode: " local_native ".to_string(),
+        runner_id: "runner_123".to_string(),
+        execution_mode: "local_native".to_string(),
         hostname: None,
     }
     .build()
@@ -159,6 +162,26 @@ fn worker_protocol_preview_trims_identity_fields_and_rejects_bad_hub_urls() {
     assert_eq!(preview.api_url, "http://localhost:8000/");
     assert_eq!(preview.runner_id, "runner_123");
     assert_eq!(preview.execution_mode, "local_native");
+
+    let whitespace_runner_id = RunnerProtocolPreviewInput {
+        api_url: "api.infergrade.com".to_string(),
+        runner_id: " runner_123 ".to_string(),
+        execution_mode: "local_native".to_string(),
+        hostname: None,
+    }
+    .build()
+    .expect_err("whitespace runner_id rejected");
+    assert_eq!(whitespace_runner_id.code(), "runner_id_invalid");
+
+    let whitespace_mode = RunnerProtocolPreviewInput {
+        api_url: "api.infergrade.com".to_string(),
+        runner_id: "runner_123".to_string(),
+        execution_mode: " local_native ".to_string(),
+        hostname: None,
+    }
+    .build()
+    .expect_err("whitespace execution_mode rejected");
+    assert_eq!(whitespace_mode.code(), "execution_mode_invalid");
     assert_eq!(
         preview.endpoints.heartbeat,
         "/v1/runners/runner_123/heartbeat"
@@ -185,7 +208,7 @@ fn worker_protocol_preview_trims_identity_fields_and_rejects_bad_hub_urls() {
     }
     .build()
     .expect_err("runner id required");
-    assert_eq!(missing_runner.code(), "runner_id_missing");
+    assert_eq!(missing_runner.code(), "runner_id_invalid");
 
     let missing_mode = RunnerProtocolPreviewInput {
         api_url: "api.infergrade.com".to_string(),
@@ -195,7 +218,38 @@ fn worker_protocol_preview_trims_identity_fields_and_rejects_bad_hub_urls() {
     }
     .build()
     .expect_err("execution mode required");
-    assert_eq!(missing_mode.code(), "execution_mode_missing");
+    assert_eq!(missing_mode.code(), "execution_mode_invalid");
+}
+
+#[test]
+fn worker_protocol_preview_accepts_cloud_container_and_rejects_cloud_worker() {
+    // cloud_container is the execution mode that drives runner_kind=cloud_worker.
+    // cloud_worker itself is not a valid execution mode.
+    let preview = infergrade_runner_engine::RunnerProtocolPreviewInput {
+        api_url: "api.infergrade.com".to_string(),
+        runner_id: "runner_123".to_string(),
+        execution_mode: "cloud_container".to_string(),
+        hostname: None,
+    }
+    .build()
+    .expect("cloud_container accepted");
+    assert_eq!(preview.execution_mode, "cloud_container");
+    assert_eq!(preview.register.runner_kind, "cloud_worker");
+
+    let rejected = infergrade_runner_engine::RunnerProtocolPreviewInput {
+        api_url: "api.infergrade.com".to_string(),
+        runner_id: "runner_123".to_string(),
+        execution_mode: "cloud_worker".to_string(),
+        hostname: None,
+    }
+    .build()
+    .expect_err("cloud_worker rejected as execution mode");
+    assert_eq!(rejected.code(), "execution_mode_invalid");
+    assert!(
+        rejected.message().contains("cloud_container"),
+        "error should advertise the correct vocabulary, got: {}",
+        rejected.message()
+    );
 }
 
 #[test]
@@ -225,4 +279,51 @@ fn worker_protocol_ping_plan_uses_typed_register_and_heartbeat_requests() {
     let serialized = serde_json::to_value(&plan).expect("ping plan json");
     assert!(!serialized.to_string().contains("qbhr_"));
     assert!(!serialized.to_string().contains("Authorization"));
+}
+
+#[test]
+fn worker_protocol_preview_rejects_unknown_execution_modes() {
+    for bad in [
+        "",
+        "   ",
+        "remote-shell",
+        "local_native; rm -rf /",
+        "LOCAL_NATIVE",
+    ] {
+        let error = infergrade_runner_engine::RunnerProtocolPreviewInput {
+            api_url: "api.infergrade.com".to_string(),
+            runner_id: "runner_123".to_string(),
+            execution_mode: bad.to_string(),
+            hostname: None,
+        }
+        .build()
+        .expect_err("unknown execution_mode rejected");
+        assert_eq!(error.code(), "execution_mode_invalid", "input: {bad}");
+    }
+}
+
+#[test]
+fn worker_protocol_preview_rejects_unsafe_runner_ids_for_path_interpolation() {
+    let overlong = "x".repeat(200);
+    let bad_inputs: Vec<&str> = vec![
+        "../admin",
+        "runner/with/slash",
+        "runner?query=1",
+        "runner#frag",
+        "runner with space",
+        ".",
+        "..",
+        overlong.as_str(),
+    ];
+    for bad in &bad_inputs {
+        let error = infergrade_runner_engine::RunnerProtocolPreviewInput {
+            api_url: "api.infergrade.com".to_string(),
+            runner_id: (*bad).to_string(),
+            execution_mode: "local_native".to_string(),
+            hostname: None,
+        }
+        .build()
+        .expect_err("unsafe runner_id rejected");
+        assert_eq!(error.code(), "runner_id_invalid", "input: {bad}");
+    }
 }

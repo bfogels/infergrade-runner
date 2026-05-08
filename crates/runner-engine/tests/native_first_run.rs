@@ -78,7 +78,7 @@ fn native_first_run_uses_fake_runtime_and_labels_no_upload_evidence() {
 
     assert_eq!(result.status, "completed");
     assert_eq!(result.evidence_kind, "native_first_run");
-    assert_eq!(result.uploaded, false);
+    assert!(!result.uploaded);
     assert_eq!(result.model_path, model_path.display().to_string());
     assert_eq!(result.runtime_id, "fake-llama-cpp-metal");
     assert_eq!(result.metrics.decode_tokens_per_second, 42.5);
@@ -147,7 +147,7 @@ fn native_first_run_writes_local_no_upload_artifact_without_recursion() {
         write_native_first_run_artifact(&output_dir, &payload).expect("artifact written");
 
     assert_eq!(artifact.format, "infergrade.native_first_run.v1");
-    assert_eq!(artifact.uploaded, false);
+    assert!(!artifact.uploaded);
     let artifact_text = std::fs::read_to_string(&artifact.path).expect("artifact text");
     let artifact_json: Value = serde_json::from_str(&artifact_text).expect("artifact JSON");
     assert_eq!(artifact_json["execution"], "local_native");

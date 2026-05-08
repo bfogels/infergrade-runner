@@ -18,8 +18,8 @@ pub use errors::RunnerError;
 pub use events::{RunnerEvent, RuntimeInfo};
 pub use hub_client::{
     build_hub_json_request, build_run_bundle_upload_request, build_run_claim_request,
-    build_run_completion_request, execute_hub_json_request, hub_api_url, HubJsonRequest,
-    HubJsonResponse, HubMethod,
+    build_run_completion_request, execute_hub_json_request, hub_api_url, shared_hub_client,
+    shared_hub_upload_client, validate_hub_path_id, HubJsonRequest, HubJsonResponse, HubMethod,
 };
 pub use pairing::{
     build_pairing_redeem_request, complete_pairing_response, pairing_status_payload,
@@ -39,6 +39,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
@@ -643,9 +644,9 @@ fn is_executable_file(path: &Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        return fs::metadata(path)
+        fs::metadata(path)
             .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false);
+            .unwrap_or(false)
     }
     #[cfg(not(unix))]
     {
@@ -1328,9 +1329,16 @@ fn runtime_archive_sha256(entry: &Value) -> Result<&str, String> {
         .ok_or_else(|| "managed runtime manifest is missing archive.sha256".to_string())
 }
 
+/// Maximum size we accept when downloading a managed runtime archive.
+/// Sized for current macOS Metal builds (~9 MB) plus generous slack for
+/// future Linux/Windows lanes; refuses pathologically large URLs that would
+/// OOM the host.
+pub const MAX_MANAGED_RUNTIME_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
+
 fn fetch_runtime_archive(url: &str) -> Result<Vec<u8>, String> {
-    let response = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+    let mut response = reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(300))
         .build()
         .map_err(|error| format!("could not initialize runtime downloader: {error}"))?
         .get(url)
@@ -1342,10 +1350,32 @@ fn fetch_runtime_archive(url: &str) -> Result<Vec<u8>, String> {
             response.status()
         ));
     }
-    response
-        .bytes()
-        .map(|bytes| bytes.to_vec())
-        .map_err(|error| format!("could not read managed runtime archive: {error}"))
+    if let Some(declared) = response.content_length() {
+        if declared > MAX_MANAGED_RUNTIME_ARCHIVE_BYTES {
+            return Err(format!(
+                "managed runtime archive declares {} bytes, exceeding the {}-byte cap",
+                declared, MAX_MANAGED_RUNTIME_ARCHIVE_BYTES
+            ));
+        }
+    }
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = response
+            .read(&mut buffer)
+            .map_err(|error| format!("could not read managed runtime archive: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        if (bytes.len() as u64).saturating_add(read as u64) > MAX_MANAGED_RUNTIME_ARCHIVE_BYTES {
+            return Err(format!(
+                "managed runtime archive exceeded the {}-byte cap during download",
+                MAX_MANAGED_RUNTIME_ARCHIVE_BYTES
+            ));
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+    }
+    Ok(bytes)
 }
 
 fn set_executable_if_needed(path: &Path) -> Result<(), String> {
@@ -1381,7 +1411,15 @@ fn safe_extract_targz(bytes: &[u8], destination: &Path) -> Result<(), String> {
             .path()
             .map_err(|error| format!("could not read managed runtime archive path: {error}"))?;
         let entry_type = entry.header().entry_type();
-        if !entry_type.is_file() && !entry_type.is_dir() && !entry_type.is_symlink() {
+        // Reject every link form (hard link, symlink, fifo, char/block device,
+        // etc.) outright. The managed runtime archives we accept only need
+        // regular files and directories. This closes the soundness gap where a
+        // symlink-then-write sequence could be redirected through an
+        // attacker-controlled link target inside the destination tree.
+        if entry_type.is_symlink() || entry_type.is_hard_link() {
+            return Err("managed runtime archive contains a link entry".to_string());
+        }
+        if !entry_type.is_file() && !entry_type.is_dir() {
             return Err(
                 "managed runtime archive contains a link or special file entry".to_string(),
             );
@@ -1402,24 +1440,6 @@ fn safe_extract_targz(bytes: &[u8], destination: &Path) -> Result<(), String> {
                 "managed runtime archive attempted to write outside the runtime cache".to_string(),
             );
         }
-        if entry_type.is_symlink() {
-            let link_name = entry
-                .link_name()
-                .map_err(|error| {
-                    format!("could not read managed runtime archive link target: {error}")
-                })?
-                .ok_or_else(|| "managed runtime archive symlink is missing a target".to_string())?;
-            if link_name.components().any(|component| {
-                matches!(
-                    component,
-                    std::path::Component::ParentDir
-                        | std::path::Component::RootDir
-                        | std::path::Component::Prefix(_)
-                )
-            }) {
-                return Err("managed runtime archive contains an unsafe symlink target".to_string());
-            }
-        }
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent).map_err(|error| {
                 format!(
@@ -1431,6 +1451,53 @@ fn safe_extract_targz(bytes: &[u8], destination: &Path) -> Result<(), String> {
         entry
             .unpack(&output)
             .map_err(|error| format!("could not extract managed runtime archive: {error}"))?;
+    }
+    Ok(())
+}
+
+fn cleanup_stale_runtime_dir(path: &Path, label: &str) -> Result<(), String> {
+    match fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "could not clean stale managed runtime {label} directory `{}`: {error}",
+            path.display()
+        )),
+    }
+}
+
+fn assert_no_symlinks_under(root: &Path) -> Result<(), String> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        let metadata = fs::symlink_metadata(&path).map_err(|error| {
+            format!(
+                "could not inspect extracted managed runtime path `{}`: {error}",
+                path.display()
+            )
+        })?;
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() {
+            return Err(format!(
+                "managed runtime extraction produced a symlink at `{}`",
+                path.display()
+            ));
+        }
+        if file_type.is_dir() {
+            for entry in fs::read_dir(&path).map_err(|error| {
+                format!(
+                    "could not scan extracted managed runtime directory `{}`: {error}",
+                    path.display()
+                )
+            })? {
+                let entry = entry.map_err(|error| {
+                    format!(
+                        "could not scan extracted managed runtime directory `{}`: {error}",
+                        path.display()
+                    )
+                })?;
+                stack.push(entry.path());
+            }
+        }
     }
     Ok(())
 }
@@ -1609,9 +1676,10 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
     let install_root = managed_runtime_install_root(runtime_id)?;
     let staging_root = install_root.with_extension(format!("staging-{}", std::process::id()));
     let previous_root = install_root.with_extension(format!("previous-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&staging_root);
-    let _ = fs::remove_dir_all(&previous_root);
+    cleanup_stale_runtime_dir(&staging_root, "staging")?;
+    cleanup_stale_runtime_dir(&previous_root, "rollback")?;
     safe_extract_targz(&bytes, &staging_root)?;
+    assert_no_symlinks_under(&staging_root)?;
 
     let cli_name = entry
         .pointer("/binary_names/cli")
@@ -2228,7 +2296,11 @@ mod tests {
         )
         .expect_err("link entry rejected");
 
-        assert!(error.contains("unsafe symlink target") || error.contains("link or special file"));
+        assert!(
+            error.contains("link entry")
+                || error.contains("unsafe symlink target")
+                || error.contains("link or special file")
+        );
 
         if let Some(previous_cache_dir) = previous_cache_dir {
             env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
