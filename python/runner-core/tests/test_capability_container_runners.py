@@ -185,6 +185,31 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
             False,
         )
 
+    def test_evalplus_primary_metric_preserves_zero_plus_score(self):
+        fake_evalplus_data = types.SimpleNamespace(
+            get_human_eval_plus=lambda: {},
+            get_mbpp_plus=lambda: {},
+            write_jsonl=lambda *args, **kwargs: None,
+        )
+        fake_mbpp = types.SimpleNamespace(mbpp_serialize_inputs=lambda task_id, inputs: inputs)
+        fake_evalplus_evaluate = types.SimpleNamespace(evaluate=lambda *args, **kwargs: None)
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-evalplus", "runner.py")
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "evalplus": types.SimpleNamespace(),
+                "evalplus.data": fake_evalplus_data,
+                "evalplus.data.mbpp": fake_mbpp,
+                "evalplus.evaluate": fake_evalplus_evaluate,
+            },
+        ):
+            module = _load_module("evalplus_runner_metric_test_module", module_path)
+
+        results = {"pass_at_k": {"base": {"pass@1": 1.0}, "plus": {"pass@1": 0.0}}}
+        self.assertEqual(module._primary_plus_metric_value(results), 0.0)
+        self.assertEqual(module._rounded_metric_or_zero(results, "base", "pass@1"), 1.0)
+        self.assertEqual(module._rounded_metric_or_zero(results, "plus", "pass@1"), 0.0)
+
     def test_evalplus_dockerfile_pins_upstream_revision(self):
         dockerfile_path = os.path.join(ROOT_DIR, "containers", "capability-evalplus", "Dockerfile")
         with open(dockerfile_path, "r", encoding="utf-8") as handle:

@@ -96,7 +96,34 @@ Acceptance:
 
 - `evalplus_humaneval` is reference evidence with `reference_sample` confidence.
 - It is not promoted to gold evidence.
-- MBPP+ remains a follow-up reference candidate until the same artifact and dogfood checks are reviewed.
+- MBPP+ is a separate follow-up coding breadth reference lane with its own artifact, catalog, and review gates.
+- Real dogfood runs still need to calibrate expected duration, token volume, and degraded behavior.
+
+### Phase A3: EvalPlus MBPP+ Coding Breadth Reference
+
+MBPP+ is the second executable coding reference lane. It broadens coding coverage beyond HumanEval+-style tasks while keeping the same pinned EvalPlus revision, containerized execution boundary, and pass@1 base/plus scoring semantics.
+
+Status: Runner harness implemented as `evalplus_mbpp` with the EvalPlus upstream revision pinned in the container image, MBPP input serialization, canary/full local sample limits, pass@1 base/plus scoring, and containerized generated-code execution.
+
+Source:
+
+- EvalPlus upstream: https://github.com/evalplus/evalplus
+- Pinned revision: `26d6d00bb1fd0fa37f39c99d5290da67891d1c5e`
+
+Runner scope:
+
+- Keep generated-code execution inside the EvalPlus container path.
+- Preserve MBPP dataset semantics, including serialized base/plus inputs for EvalPlus JSONL overrides.
+- Emit a validated `capability_run.json` and include it in `capability_summary.json` under `local_coding_capability` without flattening it into HumanEval+.
+- Preserve `predictions.jsonl`, `samples.jsonl`, `eval_results.json`, `summary.json`, `cases.jsonl`, `benchmark_metadata.json`, and `mbpp_override.jsonl`.
+- Preserve task-level `generation_failed`, `malformed_output`, `test_failed`, and `timeout` classes where available from generated outputs and EvalPlus status rows.
+- Keep claim boundaries clear: MBPP+ is executable coding breadth reference evidence, not LiveCodeBench, SWE-bench, repo-edit proof, gold evidence, broad agentic software-engineering proof, or public leaderboard evidence.
+
+Acceptance:
+
+- `evalplus_mbpp` is reference evidence with `reference_sample` confidence.
+- It is not promoted to gold evidence.
+- HumanEval+ and MBPP+ remain separate catalog checks, artifact protocol entries, summary artifact pointers, and Hub-facing evidence rows.
 - Real dogfood runs still need to calibrate expected duration, token volume, and degraded behavior.
 
 ### Phase B: GPQA Sampled Reference
