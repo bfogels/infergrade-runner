@@ -639,7 +639,7 @@ class CapabilityTests(unittest.TestCase):
         self.assertIn("evalplus_humaneval", execution.benchmark_results)
         self.assertTrue(os.path.exists(os.path.join(self.tempdir, "artifacts", "capability", "evalplus_humaneval", "predictions.jsonl")))
         self.assertIn("capability_run_path", execution.artifacts["evalplus_humaneval"])
-        self.assertNotIn("capability_run_path", execution.artifacts["evalplus_mbpp"])
+        self.assertIn("capability_run_path", execution.artifacts["evalplus_mbpp"])
 
     def test_execute_evalplus_humaneval_emits_valid_reference_capability_run_artifact(self):
         def fake_prepare(spec, benchmark_dir, tier):
@@ -738,6 +738,99 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(coding["state"], "scored")
         self.assertEqual(coding["lane"], "reference")
         self.assertEqual(coding["confidence_label"], "reference_sample")
+
+    def test_execute_evalplus_mbpp_emits_valid_reference_capability_run_artifact(self):
+        def fake_prepare(spec, benchmark_dir, tier):
+            cases = [
+                {"case_id": "Mbpp/1", "task_id": "Mbpp/1", "prompt": "Write helper.", "entry_point": "helper"},
+                {"case_id": "Mbpp/2", "task_id": "Mbpp/2", "prompt": "Write sorter.", "entry_point": "sorter"},
+            ]
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for case in cases:
+                    handle.write(json.dumps(case) + "\n")
+            with open(os.path.join(benchmark_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "benchmark_id": "evalplus_mbpp",
+                        "dataset": "mbpp",
+                        "case_count": 2,
+                        "evalplus_revision": "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e",
+                        "sample_policy": "mbpp_first_2_from_evalplus_revision",
+                    },
+                    handle,
+                )
+
+        def fake_evaluate(spec, benchmark_dir):
+            with open(os.path.join(benchmark_dir, "predictions.jsonl"), "r", encoding="utf-8") as handle:
+                predictions = [json.loads(line) for line in handle if line.strip()]
+            self.assertEqual(len(predictions), 2)
+            return {
+                "benchmark_id": "evalplus_mbpp",
+                "display_name": "EvalPlus MBPP+",
+                "status": "completed",
+                "dataset": "mbpp",
+                "case_count": 2,
+                "evalplus_revision": "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e",
+                "sample_policy": "mbpp_first_2_from_evalplus_revision",
+                "scoring_policy": "evalplus_pass_at_1_base_plus_v1",
+                "primary_metric": {"name": "pass_at_1_plus", "value": 0.5},
+                "metrics": {
+                    "pass_at_1_base": 0.5,
+                    "pass_at_1_plus": 0.5,
+                    "passed_count": 1,
+                    "failed_count": 1,
+                },
+                "case_results": [
+                    {
+                        "task_id": "Mbpp/1",
+                        "base_passed": True,
+                        "plus_passed": True,
+                        "passed": True,
+                        "failure_class": None,
+                    },
+                    {
+                        "task_id": "Mbpp/2",
+                        "base_passed": False,
+                        "plus_passed": False,
+                        "passed": False,
+                        "failure_class": "test_failed",
+                    },
+                ],
+            }
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-Coder-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="agentic_coding",
+            output_dir=self.tempdir,
+            benchmark_check_ids=["evalplus_mbpp"],
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                execution = execute_capability_suite(_FakeAdapter(), request)
+
+        capability_run_path = execution.artifacts["evalplus_mbpp"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["evidence"]["lane"], "reference")
+        self.assertEqual(artifact["evidence"]["surface"], "local_coding_capability")
+        self.assertEqual(artifact["evidence"]["confidence_label"], "reference_sample")
+        self.assertEqual(artifact["protocol"]["dataset"], "mbpp")
+        self.assertEqual(artifact["protocol"]["dataset_revision"], "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e")
+        self.assertEqual(artifact["protocol"]["sample_policy"], "mbpp_first_2_from_evalplus_revision")
+        self.assertEqual(artifact["summary"]["state"], "scored")
+        self.assertEqual(artifact["summary"]["score"], 0.5)
+        tasks = {task["task_id"]: task for task in artifact["tasks"]}
+        self.assertEqual(tasks["Mbpp/1"]["score"], 1.0)
+        self.assertEqual(tasks["Mbpp/2"]["score"], 0.0)
+        self.assertEqual(tasks["Mbpp/2"]["error_class"], "test_failed")
+        self.assertEqual(tasks["Mbpp/2"]["entry_point"], "sorter")
+        self.assertIn("samples.jsonl", artifact["artifacts"]["raw_outputs"])
+        self.assertIn("eval_results.json", artifact["artifacts"]["scoring_outputs"])
+        self.assertIn("mbpp_override.jsonl", artifact["artifacts"]["supporting_files"])
+        self.assertIn("This is not gold evidence.", artifact["claim_boundary"]["unsupported_claims"])
 
     def test_evalplus_artifact_preserves_generation_malformed_and_status_failure_states(self):
         def fake_prepare(spec, benchmark_dir, tier):

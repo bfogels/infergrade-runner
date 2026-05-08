@@ -67,6 +67,25 @@ def _status_failure_class(value):
     return None
 
 
+def _metric_value(results: dict, suite: str, metric: str):
+    value = ((results.get("pass_at_k") or {}).get(suite) or {}).get(metric)
+    if value is None:
+        return None
+    return float(value)
+
+
+def _rounded_metric_or_zero(results: dict, suite: str, metric: str) -> float:
+    value = _metric_value(results, suite, metric)
+    return round(value if value is not None else 0.0, 6)
+
+
+def _primary_plus_metric_value(results: dict) -> float:
+    plus_value = _metric_value(results, "plus", "pass@1")
+    if plus_value is not None:
+        return round(plus_value, 6)
+    return _rounded_metric_or_zero(results, "base", "pass@1")
+
+
 def _evalplus_rows(payload):
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)]
@@ -187,16 +206,11 @@ def evaluate(dataset: str, output_dir: str) -> None:
         "scoring_policy": "evalplus_pass_at_1_base_plus_v1",
         "primary_metric": {
             "name": "pass_at_1_plus",
-            "value": round(
-                float(results.get("pass_at_k", {}).get("plus", {}).get("pass@1")
-                      or results.get("pass_at_k", {}).get("base", {}).get("pass@1")
-                      or 0.0),
-                6,
-            ),
+            "value": _primary_plus_metric_value(results),
         },
         "metrics": {
-            "pass_at_1_base": round(float(results.get("pass_at_k", {}).get("base", {}).get("pass@1") or 0.0), 6),
-            "pass_at_1_plus": round(float(results.get("pass_at_k", {}).get("plus", {}).get("pass@1") or 0.0), 6),
+            "pass_at_1_base": _rounded_metric_or_zero(results, "base", "pass@1"),
+            "pass_at_1_plus": _rounded_metric_or_zero(results, "plus", "pass@1"),
             "passed_count": len([item for item in case_results if item.get("passed")]),
             "failed_count": len([item for item in case_results if not item.get("passed")]),
         },
