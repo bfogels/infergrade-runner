@@ -116,7 +116,10 @@ jobs:
           tool: cargo-audit@0.21
 
       - name: cargo audit
-        run: cargo audit --file Cargo.lock || true
+        # Job-level continue-on-error keeps this advisory step non-blocking;
+        # do not also append `|| true` so a real audit failure surfaces in
+        # the run UI instead of silently passing.
+        run: cargo audit --file Cargo.lock
 
   cargo-deny:
     name: cargo deny (advisories + bans + licenses)
