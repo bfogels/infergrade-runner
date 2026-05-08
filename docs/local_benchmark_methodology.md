@@ -69,6 +69,22 @@ Runner must not automatically promote evidence into a stronger confidence label 
 
 For local decision-lane summaries, `thin_local_sample` remains the default confidence label. Repeating the same local lane may support `repeated_local_run`, but it still does not make the evidence a reference sample, gold evidence, or public leaderboard claim.
 
+## Benchmark Maturity
+
+Evidence lane says what kind of evidence a result belongs to. Benchmark maturity says how legitimate the benchmark implementation currently is.
+
+Runner catalog maturity levels are:
+
+- `planned`
+- `thin_local_sample`
+- `strong_local_candidate`
+- `reference_candidate`
+- `reference_runnable`
+- `gold_candidate`
+- `gold_runnable`
+
+The maturity status is declared in `schemas/capability_catalog.json` and explained in [Benchmark Legitimacy Program](benchmark_legitimacy_program.md). A thin local sample stays thin even if the score is high. A reference or gold claim requires the corresponding fixture, harness, scoring, artifact, sandbox, access, and review gates.
+
 ## Local-First Protocol
 
 Every runnable check should capture:

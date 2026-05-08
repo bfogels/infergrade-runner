@@ -60,10 +60,105 @@ def evidence_lane_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, D
     return {str(item["lane_id"]): dict(item) for item in list(payload.get("evidence_lanes") or [])}
 
 
+def benchmark_maturity_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+    """Return benchmark maturity levels keyed by maturity id."""
+    payload = catalog or load_capability_catalog()
+    return {str(item["maturity"]): dict(item) for item in list(payload.get("benchmark_maturity_levels") or [])}
+
+
+def benchmark_status_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+    """Return benchmark legitimacy status metadata keyed by check id."""
+    payload = catalog or load_capability_catalog()
+    return {str(item["check_id"]): dict(item) for item in list(payload.get("benchmark_status_matrix") or [])}
+
+
 def capability_surface_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
     """Return capability surfaces keyed by surface id."""
     payload = catalog or load_capability_catalog()
     return {str(item["surface_id"]): dict(item) for item in list(payload.get("capability_surfaces") or [])}
+
+
+def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Return catalog legitimacy metadata validation failures.
+
+    This intentionally validates catalog shape without making planned checks runnable.
+    """
+    payload = catalog or load_capability_catalog()
+    failures: List[str] = []
+    lanes = evidence_lane_index(payload)
+    surfaces = capability_surface_index(payload)
+    maturity_levels = benchmark_maturity_index(payload)
+    score_policy_ids = {
+        str(item.get("score_policy_id"))
+        for item in list(payload.get("score_policies") or [])
+        if item.get("score_policy_id")
+    }
+    status_by_check = benchmark_status_index(payload)
+    required_status_fields = {
+        "check_id",
+        "surface_id",
+        "evidence_lane_id",
+        "maturity",
+        "runnable_status",
+        "default_inclusion_status",
+        "fixture_or_dataset_revision_status",
+        "harness_status",
+        "scoring_policy_id",
+        "sample_policy",
+        "expected_duration_token_volume_status",
+        "sandbox_requirement",
+        "claim_boundary",
+        "promotion_blockers",
+    }
+    required_non_empty_fields = required_status_fields - {"promotion_blockers"}
+    declared_check_ids = {str(item.get("check_id")) for item in list(payload.get("checks") or []) if item.get("check_id")}
+    planned_check_ids = {
+        str(item.get("check_id"))
+        for item in list(payload.get("planned_benchmark_candidates") or [])
+        if item.get("check_id")
+    }
+    for check_id in sorted(declared_check_ids | planned_check_ids):
+        status = status_by_check.get(check_id)
+        if not status:
+            failures.append(f"{check_id}: missing benchmark_status_matrix entry")
+            continue
+        missing = sorted(field for field in required_status_fields if field not in status)
+        if missing:
+            failures.append(f"{check_id}: missing status field(s): {', '.join(missing)}")
+        for field in sorted(required_non_empty_fields):
+            if field in status and not str(status.get(field) or "").strip():
+                failures.append(f"{check_id}: status field {field} must be non-empty")
+        if str(status.get("evidence_lane_id") or "") not in lanes:
+            failures.append(f"{check_id}: unknown evidence_lane_id {status.get('evidence_lane_id')!r}")
+        if str(status.get("surface_id") or "") not in surfaces:
+            failures.append(f"{check_id}: unknown surface_id {status.get('surface_id')!r}")
+        if str(status.get("maturity") or "") not in maturity_levels:
+            failures.append(f"{check_id}: unknown maturity {status.get('maturity')!r}")
+        status_policy = str(status.get("scoring_policy_id") or "").strip()
+        declared_check = next((item for item in list(payload.get("checks") or []) if item.get("check_id") == check_id), None)
+        planned_candidate = next(
+            (item for item in list(payload.get("planned_benchmark_candidates") or []) if item.get("check_id") == check_id),
+            None,
+        )
+        if declared_check and status_policy != str(declared_check.get("score_policy_id") or "").strip():
+            failures.append(f"{check_id}: status scoring_policy_id does not match check score_policy_id")
+        if planned_candidate and status_policy != str(planned_candidate.get("planned_score_policy_id") or "").strip():
+            failures.append(f"{check_id}: status scoring_policy_id does not match planned_score_policy_id")
+        if not declared_check and not planned_candidate and status_policy not in score_policy_ids:
+            failures.append(f"{check_id}: scoring_policy_id is not declared")
+        if not isinstance(status.get("promotion_blockers"), list) or not status.get("promotion_blockers"):
+            failures.append(f"{check_id}: promotion_blockers must be a non-empty list")
+    extra_status_ids = sorted(set(status_by_check) - (declared_check_ids | planned_check_ids))
+    for check_id in extra_status_ids:
+        failures.append(f"{check_id}: status matrix entry has no matching check or planned candidate")
+    for check in list(payload.get("checks") or []):
+        check_id = str(check.get("check_id") or "")
+        status = status_by_check.get(check_id, {})
+        if status and check.get("evidence_lane_id") != status.get("evidence_lane_id"):
+            failures.append(f"{check_id}: check lane and status matrix lane disagree")
+        if status and check.get("surface_id") != status.get("surface_id"):
+            failures.append(f"{check_id}: check surface and status matrix surface disagree")
+    return failures
 
 
 def shortcut_selection(shortcut_id: Optional[str], catalog: Optional[Dict[str, Any]] = None) -> Dict[str, List[str]]:
@@ -455,6 +550,7 @@ def _selected_score_policies(check_ids: List[str], catalog: Dict[str, Any]) -> L
 def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dict[str, Any]) -> Dict[str, Any]:
     lane_id = _evidence_lane_id_for_item(catalog, check)
     lane = _evidence_lane_payload(catalog, lane_id)
+    legitimacy_status = benchmark_status_index(catalog).get(check_id, {})
     return {
         "check_id": check_id,
         "display_name": check.get("display_name"),
@@ -481,6 +577,16 @@ def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dic
         "higher_is_better": check.get("higher_is_better"),
         "score_policy_id": check.get("score_policy_id"),
         "score_breakdown_fields": list(check.get("score_breakdown_fields") or []),
+        "benchmark_maturity": legitimacy_status.get("maturity"),
+        "runnable_status": legitimacy_status.get("runnable_status"),
+        "default_inclusion_status": legitimacy_status.get("default_inclusion_status"),
+        "fixture_or_dataset_revision_status": legitimacy_status.get("fixture_or_dataset_revision_status"),
+        "harness_status": legitimacy_status.get("harness_status"),
+        "sample_policy": legitimacy_status.get("sample_policy"),
+        "benchmark_claim_boundary": legitimacy_status.get("claim_boundary"),
+        "expected_duration_token_volume_status": legitimacy_status.get("expected_duration_token_volume_status"),
+        "sandbox_requirement": legitimacy_status.get("sandbox_requirement"),
+        "promotion_blockers": list(legitimacy_status.get("promotion_blockers") or []),
     }
 
 
@@ -540,10 +646,21 @@ def _planned_benchmark_candidate_payload(catalog: Dict[str, Any], item: Dict[str
     candidate = dict(item)
     lane_id = _evidence_lane_id_for_item(catalog, candidate)
     lane = _evidence_lane_payload(catalog, lane_id)
+    legitimacy_status = benchmark_status_index(catalog).get(str(candidate.get("check_id") or ""), {})
     candidate["evidence_lane_id"] = lane_id
     candidate["evidence_lane_label"] = lane.get("display_name")
     candidate["claim_strength"] = lane.get("claim_strength")
     candidate["claim_boundary"] = lane.get("claim_boundary")
+    candidate["benchmark_maturity"] = legitimacy_status.get("maturity")
+    candidate["runnable_status"] = legitimacy_status.get("runnable_status")
+    candidate["default_inclusion_status"] = legitimacy_status.get("default_inclusion_status")
+    candidate["fixture_or_dataset_revision_status"] = legitimacy_status.get("fixture_or_dataset_revision_status")
+    candidate["harness_status"] = legitimacy_status.get("harness_status")
+    candidate["sample_policy"] = legitimacy_status.get("sample_policy")
+    candidate["benchmark_claim_boundary"] = legitimacy_status.get("claim_boundary")
+    candidate["expected_duration_token_volume_status"] = legitimacy_status.get("expected_duration_token_volume_status")
+    candidate["sandbox_requirement"] = legitimacy_status.get("sandbox_requirement")
+    candidate["promotion_blockers"] = list(legitimacy_status.get("promotion_blockers") or [])
     return candidate
 
 
