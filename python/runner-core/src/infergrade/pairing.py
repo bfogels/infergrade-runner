@@ -97,3 +97,19 @@ def resolve_runner_id(runner_id: Optional[str] = None) -> Optional[str]:
     profile = load_runner_profile() or {}
     saved = str(profile.get("runner_id") or "").strip()
     return saved or None
+
+
+def resolve_runner_label(label: Optional[str] = None) -> Optional[str]:
+    """Resolve the saved human runner label."""
+    if label:
+        return str(label).strip()
+    profile = load_runner_profile() or {}
+    return str(profile.get("runner_label") or profile.get("label") or "").strip() or None
+
+
+def resolve_runner_kind(kind: Optional[str] = None) -> Optional[str]:
+    """Resolve the saved runner identity kind."""
+    if kind:
+        return str(kind).strip()
+    profile = load_runner_profile() or {}
+    return str(profile.get("runner_kind") or "").strip() or None

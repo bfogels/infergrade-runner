@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import socket
 import sys
 from typing import Optional
@@ -33,6 +34,7 @@ from infergrade.support import build_support_export, write_support_export
 from infergrade.templates import render_run_config_template, render_run_request_template
 from infergrade.transport import (
     InsecureApiUrlError,
+    RunnerTokenInvalidError,
     fetch_run_config,
     list_run_configs,
     publish_run_config,
@@ -224,8 +226,9 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
 
     pair_parser = subparsers.add_parser("pair", help="Pair this local machine with InferGrade Hub and save a reusable runner profile.")
     pair_parser.add_argument("--api-url", required=True)
-    pair_parser.add_argument("--pair-code", required=True)
-    pair_parser.add_argument("--label")
+    pair_parser.add_argument("--pair-code")
+    pair_parser.add_argument("--pair-code-stdin", action="store_true", help="Read the one-time pair code from stdin.")
+    pair_parser.add_argument("--label", "--runner-label", dest="label", required=True)
     pair_parser.add_argument("--hostname")
 
     unpair_parser = subparsers.add_parser("unpair", help="Remove the saved local runner pairing profile.")
@@ -410,6 +413,25 @@ def _resolve_runner_worker_id(worker_id: Optional[str], execution_mode: Optional
     return None
 
 
+def _resolve_pair_code(args) -> str:
+    """Resolve a pairing code without requiring the secret in shell history."""
+    env_pair_code = (os.environ.get("INFERGRADE_PAIR_CODE") or "").strip()
+    if env_pair_code:
+        return env_pair_code
+    if getattr(args, "pair_code_stdin", False):
+        pair_code = sys.stdin.read().strip()
+        if pair_code:
+            return pair_code
+        raise SystemExit("--pair-code-stdin was set but stdin did not contain a pair code.")
+    if getattr(args, "pair_code", None):
+        print(
+            "Warning: --pair-code <value> may leak into shell history or process listings; prefer INFERGRADE_PAIR_CODE or --pair-code-stdin.",
+            file=sys.stderr,
+        )
+        return str(args.pair_code).strip()
+    raise SystemExit("No pair code provided. Set INFERGRADE_PAIR_CODE or pass --pair-code-stdin.")
+
+
 def main(argv: Optional[list] = None) -> int:
     """Run the InferGrade CLI."""
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
@@ -526,12 +548,13 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.command == "pair":
         api_url = _require_secure_hub_api_url(args.api_url)
+        pair_code = _resolve_pair_code(args)
         execution_mode = preferred_local_execution_mode()
         environment = capture_environment(execution_mode)
         try:
             payload = redeem_runner_pairing(
                 api_url=api_url,
-                pair_code=args.pair_code,
+                pair_code=pair_code,
                 label=args.label,
                 hostname=args.hostname or socket.gethostname(),
                 execution_mode=execution_mode,
@@ -684,20 +707,23 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.command == "run-job":
         execution_mode = _resolve_local_execution_mode(args.execution_mode, allow_cloud=True)
-        result = run_worker_once(
-            api_url=_require_runner_api_url(args.api_url),
-            execution_mode=execution_mode,
-            worker_id=_resolve_runner_worker_id(args.worker_id, execution_mode),
-            run_id=args.run_id,
-            run_config_id=args.run_config_id,
-            provider_id=args.provider_id,
-            instance_type_id=args.instance_type_id,
-            hostname=args.hostname,
-            api_token=resolve_runner_api_token(args.api_token),
-            run_token=args.run_token,
-            simulate=bool(args.simulate),
-            emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
-        )
+        try:
+            result = run_worker_once(
+                api_url=_require_runner_api_url(args.api_url),
+                execution_mode=execution_mode,
+                worker_id=_resolve_runner_worker_id(args.worker_id, execution_mode),
+                run_id=args.run_id,
+                run_config_id=args.run_config_id,
+                provider_id=args.provider_id,
+                instance_type_id=args.instance_type_id,
+                hostname=args.hostname,
+                api_token=resolve_runner_api_token(args.api_token),
+                run_token=args.run_token,
+                simulate=bool(args.simulate),
+                emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
+            )
+        except RunnerTokenInvalidError as exc:
+            raise SystemExit(str(exc))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
@@ -705,29 +731,35 @@ def main(argv: Optional[list] = None) -> int:
         execution_mode = _resolve_local_execution_mode(args.execution_mode)
         worker_id = _resolve_runner_worker_id(args.worker_id, execution_mode)
         if args.once:
-            result = run_worker_once(
-                api_url=_require_runner_api_url(args.api_url),
-                execution_mode=execution_mode,
-                worker_id=worker_id,
-                hostname=args.hostname,
-                api_token=resolve_runner_api_token(args.api_token),
-                run_token=None,
-                simulate=bool(args.simulate),
-                emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
-            )
+            try:
+                result = run_worker_once(
+                    api_url=_require_runner_api_url(args.api_url),
+                    execution_mode=execution_mode,
+                    worker_id=worker_id,
+                    hostname=args.hostname,
+                    api_token=resolve_runner_api_token(args.api_token),
+                    run_token=None,
+                    simulate=bool(args.simulate),
+                    emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
+                )
+            except RunnerTokenInvalidError as exc:
+                raise SystemExit(str(exc))
         else:
-            result = run_worker_loop(
-                api_url=_require_runner_api_url(args.api_url),
-                execution_mode=execution_mode,
-                worker_id=worker_id,
-                hostname=args.hostname,
-                api_token=resolve_runner_api_token(args.api_token),
-                run_token=None,
-                simulate=bool(args.simulate),
-                poll_interval_seconds=args.poll_interval_seconds,
-                max_jobs=args.max_jobs,
-                emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
-            )
+            try:
+                result = run_worker_loop(
+                    api_url=_require_runner_api_url(args.api_url),
+                    execution_mode=execution_mode,
+                    worker_id=worker_id,
+                    hostname=args.hostname,
+                    api_token=resolve_runner_api_token(args.api_token),
+                    run_token=None,
+                    simulate=bool(args.simulate),
+                    poll_interval_seconds=args.poll_interval_seconds,
+                    max_jobs=args.max_jobs,
+                    emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
+                )
+            except RunnerTokenInvalidError as exc:
+                raise SystemExit(str(exc))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
@@ -735,37 +767,43 @@ def main(argv: Optional[list] = None) -> int:
         execution_mode = _resolve_local_execution_mode(args.execution_mode, allow_cloud=True)
         worker_id = _resolve_runner_worker_id(args.worker_id, execution_mode)
         if args.once:
-            result = run_worker_once(
-                api_url=_require_runner_api_url(args.api_url),
-                execution_mode=execution_mode,
-                worker_id=worker_id,
-                run_id=args.run_id,
-                run_config_id=args.run_config_id,
-                provider_id=args.provider_id,
-                instance_type_id=args.instance_type_id,
-                hostname=args.hostname,
-                api_token=resolve_runner_api_token(args.api_token),
-                run_token=None,
-                simulate=bool(args.simulate),
-                emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
-            )
+            try:
+                result = run_worker_once(
+                    api_url=_require_runner_api_url(args.api_url),
+                    execution_mode=execution_mode,
+                    worker_id=worker_id,
+                    run_id=args.run_id,
+                    run_config_id=args.run_config_id,
+                    provider_id=args.provider_id,
+                    instance_type_id=args.instance_type_id,
+                    hostname=args.hostname,
+                    api_token=resolve_runner_api_token(args.api_token),
+                    run_token=None,
+                    simulate=bool(args.simulate),
+                    emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
+                )
+            except RunnerTokenInvalidError as exc:
+                raise SystemExit(str(exc))
         else:
-            result = run_worker_loop(
-                api_url=_require_runner_api_url(args.api_url),
-                execution_mode=execution_mode,
-                worker_id=worker_id,
-                run_id=args.run_id,
-                run_config_id=args.run_config_id,
-                provider_id=args.provider_id,
-                instance_type_id=args.instance_type_id,
-                hostname=args.hostname,
-                api_token=resolve_runner_api_token(args.api_token),
-                run_token=None,
-                simulate=bool(args.simulate),
-                poll_interval_seconds=args.poll_interval_seconds,
-                max_jobs=args.max_jobs,
-                emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
-            )
+            try:
+                result = run_worker_loop(
+                    api_url=_require_runner_api_url(args.api_url),
+                    execution_mode=execution_mode,
+                    worker_id=worker_id,
+                    run_id=args.run_id,
+                    run_config_id=args.run_config_id,
+                    provider_id=args.provider_id,
+                    instance_type_id=args.instance_type_id,
+                    hostname=args.hostname,
+                    api_token=resolve_runner_api_token(args.api_token),
+                    run_token=None,
+                    simulate=bool(args.simulate),
+                    poll_interval_seconds=args.poll_interval_seconds,
+                    max_jobs=args.max_jobs,
+                    emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
+                )
+            except RunnerTokenInvalidError as exc:
+                raise SystemExit(str(exc))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 

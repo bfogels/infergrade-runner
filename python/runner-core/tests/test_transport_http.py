@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.transport import (
+    RunnerTokenInvalidError,
     _resolve_api_token,
     bundle_payload,
     fetch_run_config,
@@ -248,6 +249,22 @@ class TransportHttpTests(unittest.TestCase):
         self.assertIn("pair_code_expired", str(caught.exception))
         self.assertIn("HTTP 410", str(caught.exception))
         self.assertIn("runner pairing code has expired", str(caught.exception))
+
+    def test_runner_token_revoked_raises_non_retryable_error(self):
+        with _HttpHarness() as server:
+            _CaptureHandler.responses = {
+                ("POST", "/v1/runners/runner-revoked/heartbeat"): {"error": "runner_token_revoked", "runner_id": "runner-revoked"}
+            }
+            _CaptureHandler.response_statuses = {
+                ("POST", "/v1/runners/runner-revoked/heartbeat"): 401,
+            }
+
+            from infergrade.transport import heartbeat_runner
+
+            with self.assertRaises(RunnerTokenInvalidError) as caught:
+                heartbeat_runner(server.base_url, "runner-revoked", api_token="qbhr_revoked")
+
+        self.assertIn("re-pair", str(caught.exception))
 
 
 if __name__ == "__main__":

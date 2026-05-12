@@ -350,6 +350,8 @@ class CliTests(unittest.TestCase):
                         "http://hub.example.com",
                         "--pair-code",
                         "igrp_example",
+                        "--label",
+                        "agent-dogfood-test",
                     ]
                 )
 
@@ -376,11 +378,51 @@ class CliTests(unittest.TestCase):
                         "http://localhost:8000",
                         "--pair-code",
                         "igrp_expired",
+                        "--label",
+                        "agent-dogfood-test",
                     ]
                 )
 
         self.assertIn("pair_code_expired", str(caught.exception))
         self.assertIn("runner pairing code has expired", str(caught.exception))
+
+    def test_pair_command_accepts_pair_code_from_env(self):
+        output = io.StringIO()
+        response = {
+            "runner_profile": {
+                "api_url": "http://localhost:8000",
+                "access_token": "qbhr_token",
+                "runner_id": "runner-env",
+                "runner_label": "agent-dogfood-env",
+                "runner_kind": "agent_dogfood",
+            }
+        }
+        with mock.patch.dict("os.environ", {"INFERGRADE_PAIR_CODE": "igrp_env"}, clear=False), mock.patch(
+            "infergrade.cli.redeem_runner_pairing",
+            return_value=response,
+        ) as redeem_mock, mock.patch("infergrade.cli.save_runner_profile", return_value="/tmp/profile.json"), mock.patch(
+            "infergrade.cli.preferred_local_execution_mode",
+            return_value="local_native",
+        ), mock.patch("infergrade.cli.capture_environment", return_value={}):
+            with redirect_stdout(output):
+                exit_code = main(["pair", "--api-url", "http://localhost:8000", "--label", "agent-dogfood-env"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(redeem_mock.call_args.kwargs["pair_code"], "igrp_env")
+
+    def test_pair_command_accepts_pair_code_from_stdin(self):
+        response = {"runner_profile": {"api_url": "http://localhost:8000", "access_token": "qbhr_token", "runner_id": "runner-stdin"}}
+        with mock.patch("sys.stdin", io.StringIO("igrp_stdin\n")), mock.patch(
+            "infergrade.cli.redeem_runner_pairing",
+            return_value=response,
+        ) as redeem_mock, mock.patch("infergrade.cli.save_runner_profile", return_value="/tmp/profile.json"), mock.patch(
+            "infergrade.cli.preferred_local_execution_mode",
+            return_value="local_native",
+        ), mock.patch("infergrade.cli.capture_environment", return_value={}):
+            exit_code = main(["pair", "--api-url", "http://localhost:8000", "--pair-code-stdin", "--label", "agent-dogfood-stdin"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(redeem_mock.call_args.kwargs["pair_code"], "igrp_stdin")
 
     def test_export_support_command_prints_json_when_output_is_omitted(self):
         output = io.StringIO()
