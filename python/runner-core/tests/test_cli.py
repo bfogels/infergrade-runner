@@ -209,6 +209,38 @@ class CliTests(unittest.TestCase):
         self.assertIn("localhost", str(caught.exception))
         run_once_mock.assert_not_called()
 
+    def test_start_command_clears_profile_when_runner_token_is_revoked(self):
+        with mock.patch(
+            "infergrade.cli.run_worker_once",
+            side_effect=__import__("infergrade.transport").transport.RunnerTokenInvalidError(
+                "Runner token revoked or expired. Run 'infergrade pair' to re-pair."
+            ),
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_api_url",
+            return_value="http://localhost:8000",
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_execution_mode",
+            return_value="local_native",
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_id",
+            return_value="runner-saved",
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_api_token",
+            return_value="qbhr_revoked",
+        ), mock.patch(
+            "infergrade.cli.clear_runner_profile",
+            return_value=True,
+        ) as clear_mock, mock.patch(
+            "infergrade.cli.runner_profile_path",
+            return_value="/tmp/infergrade/runner_profile.json",
+        ):
+            with self.assertRaises(SystemExit) as caught:
+                main(["start", "--once"])
+
+        clear_mock.assert_called_once_with()
+        self.assertIn("re-pair", str(caught.exception))
+        self.assertIn("Cleared saved runner profile", str(caught.exception))
+
     def test_run_job_command_invokes_single_job_execution(self):
         output = io.StringIO()
         with mock.patch(

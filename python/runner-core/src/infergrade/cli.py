@@ -432,6 +432,14 @@ def _resolve_pair_code(args) -> str:
     raise SystemExit("No pair code provided. Set INFERGRADE_PAIR_CODE or pass --pair-code-stdin.")
 
 
+def _exit_for_invalid_runner_token(exc: RunnerTokenInvalidError) -> None:
+    """Clear stale pairing state after Hub rejects the saved runner token."""
+    profile_path = runner_profile_path()
+    removed = clear_runner_profile()
+    suffix = " Cleared saved runner profile at %s." % profile_path if removed else ""
+    raise SystemExit("%s%s" % (str(exc), suffix))
+
+
 def main(argv: Optional[list] = None) -> int:
     """Run the InferGrade CLI."""
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
@@ -723,7 +731,7 @@ def main(argv: Optional[list] = None) -> int:
                 emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
             )
         except RunnerTokenInvalidError as exc:
-            raise SystemExit(str(exc))
+            _exit_for_invalid_runner_token(exc)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
@@ -743,7 +751,7 @@ def main(argv: Optional[list] = None) -> int:
                     emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
                 )
             except RunnerTokenInvalidError as exc:
-                raise SystemExit(str(exc))
+                _exit_for_invalid_runner_token(exc)
         else:
             try:
                 result = run_worker_loop(
@@ -759,7 +767,7 @@ def main(argv: Optional[list] = None) -> int:
                     emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
                 )
             except RunnerTokenInvalidError as exc:
-                raise SystemExit(str(exc))
+                _exit_for_invalid_runner_token(exc)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
@@ -783,7 +791,7 @@ def main(argv: Optional[list] = None) -> int:
                     emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
                 )
             except RunnerTokenInvalidError as exc:
-                raise SystemExit(str(exc))
+                _exit_for_invalid_runner_token(exc)
         else:
             try:
                 result = run_worker_loop(
@@ -803,7 +811,7 @@ def main(argv: Optional[list] = None) -> int:
                     emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
                 )
             except RunnerTokenInvalidError as exc:
-                raise SystemExit(str(exc))
+                _exit_for_invalid_runner_token(exc)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
