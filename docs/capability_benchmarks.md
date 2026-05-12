@@ -189,6 +189,12 @@ The first sampled reasoning reference artifact path is `mmlu_pro_reference_v1`: 
 
 The first quant-fidelity reference artifact path is `perplexity_reference_v1`: when intentionally selected, it emits a validated `capability_run.json` beside `fidelity_raw.json` and `summary.json`. It preserves the pinned `infergrade_quantfidelity_v1` corpus revision, `infergrade_perplexity_v1` protocol parameters, perplexity, bits-per-byte where derivable, token/byte counts where available, duration, and same-family comparability key. It remains experimental reference evidence for comparing quants of the same model family/checkpoint/tokenizer/corpus/protocol only; it is not assistant, coding, reasoning, general model-quality, gold, or leaderboard evidence.
 
+## Dogfood Evidence
+
+The current reference-runnable stack is strong enough to dogfood the full product loop before adding new benchmark lanes. Maintainer dogfood should use [Local Evidence Dogfood](local_evidence_dogfood.md) to generate request files for a small Apple Silicon GGUF matrix, run thin local samples plus intentionally selected reference lanes, preserve provenance, and upload bundles to Hub only through token-safe pairing or upload paths.
+
+Dogfood evidence is real local evidence from the named machine. It is not official validation, gold evidence, leaderboard-grade evidence, or a global model-quality proof. It exists to calibrate duration, token volume, memory behavior, failure modes, Hub display, and next-benchmark guidance.
+
 ## Capability Summary Artifact
 
 Runner also emits `artifacts/capability/capability_summary.json` when local capability execution runs. This is a discoverability and import artifact, not a new benchmark lane.
