@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from infergrade.paths import runner_root
+
 EVIDENCE_LANES = ("smoke", "decision", "reference", "gold")
 CAPABILITY_SURFACES = (
     "local_assistant_capability",
@@ -37,7 +39,7 @@ CAPABILITY_ARTIFACT_POINTER_KINDS = ("capability_run", "benchmark_summary", "unr
 
 def repo_root() -> Path:
     """Return the repository root for the Runner workspace."""
-    return Path(__file__).resolve().parents[4]
+    return runner_root()
 
 
 def capability_run_schema_path(root: Optional[Path] = None) -> Path:

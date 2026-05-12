@@ -1,9 +1,12 @@
 import sys
+import tempfile
 import unittest
 from copy import deepcopy
+from pathlib import Path
 
 sys.path.insert(0, "python/runner-core/src")
 
+import infergrade.paths as runner_paths
 from infergrade.benchmark_catalog import (
     benchmark_scope_summary_for_selection,
     benchmark_status_index,
@@ -70,6 +73,20 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.assertIn("primary_score_weight", check)
             self.assertTrue(check["score_policy_id"])
         self.assertTrue(catalog["planned_benchmark_candidates"])
+
+    def test_packaged_resource_root_can_be_resolved_from_runner_core_src(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            resources = Path(tempdir) / "InferGrade Runner.app" / "Contents" / "Resources"
+            (resources / "runner-core" / "src" / "infergrade").mkdir(parents=True)
+            (resources / "schemas").mkdir()
+            previous_file = runner_paths.__file__
+            try:
+                runner_paths.__file__ = str(
+                    resources / "runner-core" / "src" / "infergrade" / "paths.py"
+                )
+                self.assertEqual(runner_paths.runner_root(), resources.resolve())
+            finally:
+                runner_paths.__file__ = previous_file
 
     def test_catalog_legitimacy_metadata_is_complete_and_conservative(self):
         catalog = load_capability_catalog()
