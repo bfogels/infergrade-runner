@@ -419,7 +419,7 @@ async function refreshRunnerCliVersion() {
   }
 
   try {
-    const output = await Command.sidecar(SIDECAR_NAME, ["--version"]).execute();
+    const output = await Command.sidecar(SIDECAR_NAME, "--version").execute();
     if (output.code !== 0) {
       throw new Error(output.stderr || output.stdout || `version command exited with code ${output.code}`);
     }
@@ -442,7 +442,7 @@ async function checkRunnerStartupSelfTest() {
     return;
   }
   try {
-    const output = await Command.sidecar(SIDECAR_NAME, ["desktop-self-test"]).execute();
+    const output = await Command.sidecar(SIDECAR_NAME, "desktop-self-test").execute();
     if (output.code !== 0) {
       throw new Error(output.stderr || output.stdout || `self-test exited with code ${output.code}`);
     }
@@ -466,7 +466,7 @@ async function checkDesktopReadiness() {
     return;
   }
   try {
-    const output = await Command.sidecar(SIDECAR_NAME, ["desktop-readiness"]).execute();
+    const output = await Command.sidecar(SIDECAR_NAME, "desktop-readiness").execute();
     if (output.code !== 0) {
       throw new Error(output.stderr || output.stdout || `readiness command exited with code ${output.code}`);
     }
