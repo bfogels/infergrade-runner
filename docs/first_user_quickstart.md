@@ -49,6 +49,8 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade run-job \
 
 The containerized path below is still appropriate for Linux, cloud workers, and CPU-only validation, but it does not exercise Metal on Apple Silicon.
 
+For the private-beta Apple Silicon install/run/upload loop, use [Apple Silicon Private-Beta Runbook](apple_silicon_private_beta_runbook.md). That runbook covers production Hub pairing, local-native listener startup, upload recovery, Hub Result review, and cautious next-benchmark actions without writing pairing codes or tokens into docs.
+
 The important product shift is that InferGrade is now capability-first. Even this minimal demo config carries an explicit benchmark selection and only uses `canary` as a derived compatibility label.
 
 ## 1. Get The Runtime Image

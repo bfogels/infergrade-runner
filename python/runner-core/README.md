@@ -243,5 +243,6 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade worker \
 For the known-good first-user path, use:
 
 - [docs/first_user_quickstart.md](../../docs/first_user_quickstart.md)
+- [docs/apple_silicon_private_beta_runbook.md](../../docs/apple_silicon_private_beta_runbook.md)
 - [docs/release_process.md](../../docs/release_process.md)
 - [schemas/examples/run_config.tinyllama_preview_demo.json](../../schemas/examples/run_config.tinyllama_preview_demo.json)
