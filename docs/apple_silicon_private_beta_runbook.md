@@ -37,13 +37,16 @@ Never commit, paste, screenshot, or log:
 - signed URLs;
 - local command transcripts containing any of the above.
 
-Use the real pairing code only at execution time:
+Use the real pairing code only at execution time. Prompt for it so it is not written into shell history:
 
 ```bash
+read -rsp 'InferGrade pairing code: ' INFERGRADE_PAIR_CODE
+printf '\n'
 infergrade pair \
   --api-url 'https://api.infergrade.com' \
-  --pair-code '<PAIRING_CODE_PROVIDED_OUT_OF_BAND>' \
+  --pair-code "$INFERGRADE_PAIR_CODE" \
   --label 'Paired Apple Silicon runner'
+unset INFERGRADE_PAIR_CODE
 ```
 
 If the code is expired or already redeemed, request a fresh code out of band. Do not write the failed code into a doc, PR, issue, or artifact.
@@ -67,10 +70,13 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade --help
 Pair once against production Hub:
 
 ```bash
+read -rsp 'InferGrade pairing code: ' INFERGRADE_PAIR_CODE
+printf '\n'
 infergrade pair \
   --api-url 'https://api.infergrade.com' \
-  --pair-code '<PAIRING_CODE_PROVIDED_OUT_OF_BAND>' \
+  --pair-code "$INFERGRADE_PAIR_CODE" \
   --label 'Paired Apple Silicon runner'
+unset INFERGRADE_PAIR_CODE
 ```
 
 Expected success:
@@ -177,9 +183,10 @@ Manual upload fallback:
 
 ```bash
 infergrade upload-bundle '<LOCAL_RUN_DIR>' \
-  --api-url 'https://api.infergrade.com' \
-  --run-id '<RUN_ID_FROM_HUB>'
+  --api-url 'https://api.infergrade.com'
 ```
+
+`upload-bundle` uploads the bundle identity preserved in the local artifact. If Hub rejects the upload because the original run is missing or no longer owned by the paired user, keep the local bundle and support export rather than editing the run id into the command.
 
 If upload still fails, create a secret-free support export:
 
