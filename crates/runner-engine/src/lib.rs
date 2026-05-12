@@ -41,7 +41,7 @@ use std::env;
 use std::fs;
 use std::io::Read;
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command as StdCommand;
 use tar::Archive;
 use url::Url;
@@ -1411,19 +1411,6 @@ fn safe_extract_targz(bytes: &[u8], destination: &Path) -> Result<(), String> {
             .path()
             .map_err(|error| format!("could not read managed runtime archive path: {error}"))?;
         let entry_type = entry.header().entry_type();
-        // Reject every link form (hard link, symlink, fifo, char/block device,
-        // etc.) outright. The managed runtime archives we accept only need
-        // regular files and directories. This closes the soundness gap where a
-        // symlink-then-write sequence could be redirected through an
-        // attacker-controlled link target inside the destination tree.
-        if entry_type.is_symlink() || entry_type.is_hard_link() {
-            return Err("managed runtime archive contains a link entry".to_string());
-        }
-        if !entry_type.is_file() && !entry_type.is_dir() {
-            return Err(
-                "managed runtime archive contains a link or special file entry".to_string(),
-            );
-        }
         if entry_path.components().any(|component| {
             matches!(
                 component,
@@ -1438,6 +1425,22 @@ fn safe_extract_targz(bytes: &[u8], destination: &Path) -> Result<(), String> {
         if !output.starts_with(destination) {
             return Err(
                 "managed runtime archive attempted to write outside the runtime cache".to_string(),
+            );
+        }
+        if entry_type.is_hard_link() {
+            return Err("managed runtime archive contains an unsafe link entry".to_string());
+        }
+        if entry_type.is_symlink() {
+            let target = entry
+                .link_name()
+                .map_err(|error| format!("could not read managed runtime symlink target: {error}"))?
+                .ok_or_else(|| {
+                    "managed runtime archive contains a symlink without a target".to_string()
+                })?;
+            ensure_safe_symlink_target(destination, &output, target.as_ref())?;
+        } else if !entry_type.is_file() && !entry_type.is_dir() {
+            return Err(
+                "managed runtime archive contains a link or special file entry".to_string(),
             );
         }
         if let Some(parent) = output.parent() {
@@ -1466,7 +1469,39 @@ fn cleanup_stale_runtime_dir(path: &Path, label: &str) -> Result<(), String> {
     }
 }
 
-fn assert_no_symlinks_under(root: &Path) -> Result<(), String> {
+fn normalized_join(base: &Path, relative: &Path) -> Option<PathBuf> {
+    let mut output = base.to_path_buf();
+    for component in relative.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(value) => output.push(value),
+            Component::ParentDir => {
+                output.pop();
+            }
+            Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    Some(output)
+}
+
+fn ensure_safe_symlink_target(
+    destination: &Path,
+    link_path: &Path,
+    target: &Path,
+) -> Result<(), String> {
+    if target.is_absolute() {
+        return Err("managed runtime archive contains an unsafe symlink target".to_string());
+    }
+    let parent = link_path.parent().unwrap_or(destination);
+    let resolved = normalized_join(parent, target)
+        .ok_or_else(|| "managed runtime archive contains an unsafe symlink target".to_string())?;
+    if !resolved.starts_with(destination) {
+        return Err("managed runtime archive contains an unsafe symlink target".to_string());
+    }
+    Ok(())
+}
+
+fn assert_symlinks_stay_under(root: &Path) -> Result<(), String> {
     let mut stack = vec![root.to_path_buf()];
     while let Some(path) = stack.pop() {
         let metadata = fs::symlink_metadata(&path).map_err(|error| {
@@ -1477,10 +1512,13 @@ fn assert_no_symlinks_under(root: &Path) -> Result<(), String> {
         })?;
         let file_type = metadata.file_type();
         if file_type.is_symlink() {
-            return Err(format!(
-                "managed runtime extraction produced a symlink at `{}`",
-                path.display()
-            ));
+            let target = fs::read_link(&path).map_err(|error| {
+                format!(
+                    "could not inspect extracted managed runtime symlink `{}`: {error}",
+                    path.display()
+                )
+            })?;
+            ensure_safe_symlink_target(root, &path, &target)?;
         }
         if file_type.is_dir() {
             for entry in fs::read_dir(&path).map_err(|error| {
@@ -1528,9 +1566,7 @@ fn find_runtime_binary(root: &Path, binary_name: &str) -> Result<Option<PathBuf>
                 name == binary_name || (cfg!(windows) && name == format!("{binary_name}.exe"))
             })
             .unwrap_or(false)
-            && fs::symlink_metadata(&path)
-                .map(|metadata| metadata.file_type().is_file())
-                .unwrap_or(false)
+            && metadata.is_file()
         {
             return Ok(Some(path));
         }
@@ -1679,7 +1715,7 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
     cleanup_stale_runtime_dir(&staging_root, "staging")?;
     cleanup_stale_runtime_dir(&previous_root, "rollback")?;
     safe_extract_targz(&bytes, &staging_root)?;
-    assert_no_symlinks_under(&staging_root)?;
+    assert_symlinks_stay_under(&staging_root)?;
 
     let cli_name = entry
         .pointer("/binary_names/cli")
@@ -1967,6 +2003,39 @@ mod tests {
                 "/tmp/outside-llama-cli",
             )
             .expect("append symlink");
+        let encoder = builder.into_inner().expect("finish tar");
+        encoder.finish().expect("finish gzip")
+    }
+
+    fn internal_symlink_runtime_archive() -> Vec<u8> {
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = Builder::new(encoder);
+        append_tar_file(
+            &mut builder,
+            "llama-test/bin/llama-cli-real",
+            b"#!/bin/sh\necho 'llama-cli version managed-test'\n",
+            0o755,
+        );
+        let mut header = Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_size(0);
+        header.set_mode(0o777);
+        header.set_cksum();
+        builder
+            .append_link(&mut header, "llama-test/bin/llama-cli", "llama-cli-real")
+            .expect("append internal symlink");
+        append_tar_file(
+            &mut builder,
+            "llama-test/bin/llama-server",
+            b"#!/bin/sh\necho 'llama-server version managed-test'\n",
+            0o755,
+        );
+        append_tar_file(
+            &mut builder,
+            "llama-test/bin/llama-perplexity",
+            b"#!/bin/sh\necho 'llama-perplexity version managed-test'\n",
+            0o755,
+        );
         let encoder = builder.into_inner().expect("finish tar");
         encoder.finish().expect("finish gzip")
     }
@@ -2301,6 +2370,41 @@ mod tests {
                 || error.contains("unsafe symlink target")
                 || error.contains("link or special file")
         );
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn managed_runtime_install_allows_internal_symlink_entries() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-managed-internal-link-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let archive = internal_symlink_runtime_archive();
+        let entry = test_runtime_manifest_entry(&archive);
+
+        let result = install_managed_llama_cpp_runtime_from_manifest_entry(
+            entry,
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive),
+            },
+        )
+        .expect("internal symlink archive accepted");
+
+        assert_eq!(result["selection"]["archive"]["checksum_verified"], true);
+        assert!(result["selection"]["binaries"]["cli"]
+            .as_str()
+            .unwrap_or("")
+            .ends_with("llama-cli"));
 
         if let Some(previous_cache_dir) = previous_cache_dir {
             env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
