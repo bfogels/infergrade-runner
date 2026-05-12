@@ -20,11 +20,14 @@ RUNNER_CORE_IMAGE = "infergrade-runner-core:local"
 
 def docker_image_exists(image: str) -> bool:
     """Return whether a Docker image is already available locally."""
-    completed = subprocess.run(
-        ["docker", "image", "inspect", image],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            ["docker", "image", "inspect", image],
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return False
     return completed.returncode == 0
 
 

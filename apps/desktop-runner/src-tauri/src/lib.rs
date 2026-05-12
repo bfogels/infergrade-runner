@@ -33,6 +33,8 @@ use tauri_plugin_shell::{
 const KEYRING_SERVICE: &str = "com.infergrade.runner";
 const KEYRING_USER: &str = "hub-runner-token";
 const SIDECAR_BINARY_NAME: &str = "infergrade-sidecar";
+const DESKTOP_SIDECAR_DIAGNOSTIC_COMMANDS: &[&str] =
+    &["--version", "desktop-self-test", "desktop-readiness"];
 
 #[derive(Default)]
 struct ListenerProcess {
@@ -511,6 +513,30 @@ fn stop_runner_listener(state: State<ListenerProcess>) -> Result<Value, String> 
         }
         None => Ok(json!({"status": "not_running"})),
     }
+}
+
+#[tauri::command]
+async fn desktop_sidecar_diagnostic(app: AppHandle, args: Vec<String>) -> Result<Value, String> {
+    if args.is_empty()
+        || args
+            .iter()
+            .any(|arg| !DESKTOP_SIDECAR_DIAGNOSTIC_COMMANDS.contains(&arg.as_str()))
+    {
+        return Err("unsupported desktop sidecar diagnostic command".to_string());
+    }
+    let output = app
+        .shell()
+        .sidecar(SIDECAR_BINARY_NAME)
+        .map_err(|error| format!("could not prepare Runner sidecar: {error}"))?
+        .args(args.iter().map(String::as_str))
+        .output()
+        .await
+        .map_err(|error| format!("could not run Runner sidecar diagnostic: {error}"))?;
+    Ok(json!({
+        "code": output.status.code().unwrap_or(1),
+        "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
+        "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
+    }))
 }
 
 #[tauri::command]
@@ -1043,6 +1069,7 @@ pub fn run() {
             listener_start_plan,
             worker_protocol_preview,
             worker_protocol_ping,
+            desktop_sidecar_diagnostic,
             start_runner_listener,
             stop_runner_listener,
             reset_runner_pairing,

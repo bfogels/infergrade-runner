@@ -4,6 +4,16 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Output, Stdio};
 
+const MACOS_GUI_PATH_DEFAULTS: &[&str] = &[
+    "/usr/local/bin",
+    "/opt/homebrew/bin",
+    "/Applications/Docker.app/Contents/Resources/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+];
+
 fn runner_core_src(repo_root: &Path) -> PathBuf {
     repo_root.join("python").join("runner-core").join("src")
 }
@@ -96,6 +106,24 @@ fn pythonpath_with_runner(
     env::join_paths(paths).map_err(|error| format!("could not build PYTHONPATH: {error}"))
 }
 
+fn path_with_macos_gui_defaults(existing: Option<OsString>) -> Option<OsString> {
+    if !cfg!(target_os = "macos") {
+        return existing;
+    }
+
+    let mut paths = Vec::new();
+    if let Some(existing_value) = existing {
+        paths.extend(env::split_paths(&existing_value));
+    }
+    for path in MACOS_GUI_PATH_DEFAULTS {
+        let path = PathBuf::from(path);
+        if !paths.iter().any(|existing| existing == &path) {
+            paths.push(path);
+        }
+    }
+    env::join_paths(paths).ok()
+}
+
 fn run_command(
     program: &str,
     args: &[OsString],
@@ -109,6 +137,9 @@ fn run_command(
     if let Some(value) = pythonpath {
         command.env("PYTHONPATH", value);
     }
+    if let Some(value) = path_with_macos_gui_defaults(env::var_os("PATH")) {
+        command.env("PATH", value);
+    }
     command.status()
 }
 
@@ -121,6 +152,9 @@ fn run_command_output(
     command.args(args);
     if let Some(value) = pythonpath {
         command.env("PYTHONPATH", value);
+    }
+    if let Some(value) = path_with_macos_gui_defaults(env::var_os("PATH")) {
+        command.env("PATH", value);
     }
     command.output()
 }
@@ -418,6 +452,30 @@ mod tests {
 
         assert_eq!(paths[0], runner_core_src(&root));
         assert_eq!(paths[1], PathBuf::from("existing"));
+    }
+
+    #[test]
+    fn macos_gui_path_defaults_include_homebrew_and_docker_locations() {
+        let existing = env::join_paths([PathBuf::from("/usr/bin")]).expect("existing path");
+        let path = path_with_macos_gui_defaults(Some(existing)).expect("path");
+        let paths = env::split_paths(&path).collect::<Vec<_>>();
+
+        if cfg!(target_os = "macos") {
+            assert!(paths.contains(&PathBuf::from("/usr/local/bin")));
+            assert!(paths.contains(&PathBuf::from("/opt/homebrew/bin")));
+            assert!(paths.contains(&PathBuf::from(
+                "/Applications/Docker.app/Contents/Resources/bin"
+            )));
+            assert_eq!(
+                paths
+                    .iter()
+                    .filter(|path| path.as_path() == Path::new("/usr/bin"))
+                    .count(),
+                1
+            );
+        } else {
+            assert_eq!(paths, vec![PathBuf::from("/usr/bin")]);
+        }
     }
 
     #[test]

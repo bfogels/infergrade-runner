@@ -174,6 +174,34 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(checks["llama_cli_native"]["details"]["requested"], "/custom/llama-cli")
         self.assertEqual(checks["llama_server_native"]["details"]["source"], "custom_path")
 
+    @mock.patch("infergrade.doctor.load_contract_manifest")
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.shutil.which")
+    @mock.patch("infergrade.images.subprocess.run", side_effect=FileNotFoundError("docker"))
+    def test_collect_runner_diagnostics_does_not_crash_when_docker_is_missing_for_native_mode(
+        self,
+        _image_run_mock,
+        which_mock,
+        capture_environment_mock,
+        load_contract_manifest_mock,
+    ):
+        capture_environment_mock.return_value = {
+            "environment_class": "local_workstation",
+            "hardware_class": "apple_silicon",
+            "accelerator_api": "metal",
+            "accelerator_type": "gpu",
+            "accelerator_count": 1,
+            "hardware_id": "hw_test",
+        }
+        load_contract_manifest_mock.return_value = {"publisher": "infergrade-runner", "contract_version": "0.1.0"}
+        which_mock.side_effect = lambda name: "/usr/local/bin/%s" % name if name in ("llama-cli", "llama-server") else None
+
+        diagnostics = collect_runner_diagnostics(["local_native"])
+
+        checks = {item["id"]: item for item in diagnostics["diagnostics"]["checks"]}
+        self.assertEqual(checks["local_image_ifeval"]["status"], "warning")
+        self.assertIn("not present locally", checks["local_image_ifeval"]["message"])
+
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.shutil.which")
     def test_doctor_fails_unsupported_llama_architecture_before_execution(self, which_mock, capture_environment_mock):

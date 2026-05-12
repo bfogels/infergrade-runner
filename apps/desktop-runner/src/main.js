@@ -354,25 +354,20 @@ function renderFirstRunChecklist() {
   setFirstRunStep(
     "ready",
     firstRunReady ? "done" : "blocked",
-    firstRunReady ? "Ready to run a native first-run smoke benchmark." : "Pairing, runtime, and a GGUF model are required before running."
-  );
-  setFirstRunStep(
-    "upload",
-    uploadSucceeded ? "done" : uploadReady ? "current" : uploadFailed ? "blocked" : "blocked",
-    uploadSucceeded
-      ? `Uploaded bundle ${lastFirstRunPayload.upload.bundle_id} to Hub run ${lastFirstRunPayload.upload.run_id}.`
-      : uploadReady
-        ? `Ready to retry upload to Hub run ${currentFirstRunUploadRunId()}.`
-        : uploadFailed
-          ? "Local artifacts are saved; fix pairing or run access, then retry upload."
-          : localRunComplete
-            ? "Local artifacts are saved; enter a Hub run ID to upload."
-            : "Run locally first, then upload with a Hub run handoff or run ID."
+    firstRunReady ? "Ready to run a local smoke benchmark." : "Pairing, runtime, and a GGUF model are required before running."
   );
   setFirstRunStep(
     "result",
-    uploadSucceeded ? "done" : "blocked",
-    uploadSucceeded ? "Hub has the uploaded native_first_run bundle." : "Result availability starts after a successful upload."
+    uploadSucceeded ? "done" : uploadReady || uploadFailed || localRunComplete ? "current" : "blocked",
+    uploadSucceeded
+      ? `Uploaded bundle ${lastFirstRunPayload.upload.bundle_id} to Hub run ${lastFirstRunPayload.upload.run_id}.`
+      : uploadReady
+        ? `Local evidence is ready to upload to Hub run ${currentFirstRunUploadRunId()}.`
+        : uploadFailed
+          ? "Local evidence is saved; retry upload after fixing pairing or run access."
+          : localRunComplete
+            ? "Local evidence is saved. Hub upload can happen from a handoff or support flow."
+            : "Run the first local benchmark to create evidence."
   );
 }
 
@@ -429,14 +424,13 @@ function parseDesktopReadinessOutput(stdout) {
 }
 
 async function refreshRunnerCliVersion() {
-  const Command = await loadTauriShell();
-  if (!Command) {
+  const output = await runDesktopSidecarDiagnostic(["--version"]);
+  if (!output) {
     renderRunnerCliVersion("available inside the desktop app");
     return;
   }
 
   try {
-    const output = await Command.sidecar(SIDECAR_NAME, "--version").execute();
     if (output.code !== 0) {
       throw new Error(output.stderr || output.stdout || `version command exited with code ${output.code}`);
     }
@@ -451,15 +445,14 @@ async function checkRunnerStartupSelfTest() {
   if (runtimeRunnerVersion) {
     runtimeRunnerVersion.textContent = "Checking Runner startup self-test...";
   }
-  const Command = await loadTauriShell();
-  if (!Command) {
+  const output = await runDesktopSidecarDiagnostic(["desktop-self-test"]);
+  if (!output) {
     if (runtimeRunnerVersion) {
       runtimeRunnerVersion.textContent = "Startup self-test runs inside the desktop app.";
     }
     return;
   }
   try {
-    const output = await Command.sidecar(SIDECAR_NAME, "desktop-self-test").execute();
     if (output.code !== 0) {
       throw new Error(output.stderr || output.stdout || `self-test exited with code ${output.code}`);
     }
@@ -477,13 +470,12 @@ async function checkRunnerStartupSelfTest() {
 }
 
 async function checkDesktopReadiness() {
-  const Command = await loadTauriShell();
-  if (!Command) {
+  const output = await runDesktopSidecarDiagnostic(["desktop-readiness"]);
+  if (!output) {
     renderDesktopReadiness({});
     return;
   }
   try {
-    const output = await Command.sidecar(SIDECAR_NAME, "desktop-readiness").execute();
     if (output.code !== 0) {
       throw new Error(output.stderr || output.stdout || `readiness command exited with code ${output.code}`);
     }
@@ -747,15 +739,22 @@ async function loadTauriShell() {
   return shell.Command;
 }
 
+async function runDesktopSidecarDiagnostic(args) {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  return invoke("desktop_sidecar_diagnostic", { args });
+}
+
 async function executeSidecar(args) {
-  const Command = await loadTauriShell();
-  if (!Command) {
+  const output = await runDesktopSidecarDiagnostic(args);
+  if (!output) {
     appendLog(`Development view cannot run: infergrade ${args.join(" ")}`);
     setStatus("Development view", "warning");
     return null;
   }
   appendLog(`Running: infergrade ${args.join(" ")}`);
-  const output = await Command.sidecar(SIDECAR_NAME, args).execute();
   if (output.stdout) {
     appendLog(output.stdout);
   }
