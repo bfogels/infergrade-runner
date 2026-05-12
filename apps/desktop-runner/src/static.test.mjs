@@ -92,7 +92,8 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
 
   assert.ok(html.includes("Diagnostics"));
   assert.ok(html.includes("Setup progress"));
-  assert.ok(html.includes("Download starter GGUF"));
+  assert.ok(html.includes("Download starter model"));
+  assert.ok(html.includes("data-download-starter-gguf"));
   assert.ok(html.includes("data-first-run-step=\"paired\""));
   assert.ok(html.includes("data-first-run-step=\"runtime\""));
   assert.ok(html.includes("data-first-run-step=\"model\""));
@@ -130,6 +131,7 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
   assert.ok(js.includes('invoke("install_managed_llama_cpp_runtime"'));
   assert.ok(js.includes('invoke("remove_selected_llama_cpp_runtime"'));
   assert.ok(js.includes('invoke("select_existing_llama_cpp_runtime"'));
+  assert.ok(js.includes('invoke("download_starter_gguf"'));
   assert.ok(js.includes("SHA-256 verified"));
   assert.ok(js.includes("no independent signature"));
   assert.ok(js.includes("Retry install, remove the selected runtime, or select an existing llama.cpp binary."));
@@ -142,6 +144,8 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
   assert.ok(rust.includes("fn remove_selected_llama_cpp_runtime"));
   assert.ok(rust.includes("engine_remove_selected_llama_cpp_runtime"));
   assert.ok(rust.includes("fn select_existing_llama_cpp_runtime"));
+  assert.ok(rust.includes("async fn download_starter_gguf"));
+  assert.ok(rust.includes("STARTER_GGUF_URL"));
   assert.ok(rust.includes("engine_select_existing_llama_cpp_runtime"));
   assert.ok(engine.includes("fn install_managed_llama_cpp_runtime"));
   assert.ok(engine.includes("fn remove_selected_llama_cpp_runtime"));
@@ -211,7 +215,7 @@ test("desktop first-run UI calls runner-engine through Tauri and keeps upload to
   assert.ok(html.includes("name=\"firstRunUploadWorkerId\""));
   assert.ok(html.includes("data-first-run-handoff-status"));
   assert.ok(html.includes("Run native first benchmark"));
-  assert.ok(html.includes("Pick the downloaded GGUF file"));
+  assert.ok(html.includes("Start from a Hub run handoff when available"));
   assert.ok(html.includes("Tokens are not shown in this browser UI."));
   assert.ok(js.includes('listen("runner-first-run-event"'));
   assert.ok(js.includes('invoke("run_desktop_native_first_run"'));

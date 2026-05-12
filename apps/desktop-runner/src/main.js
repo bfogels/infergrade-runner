@@ -30,6 +30,7 @@ const runtimeInstallManagedButton = document.querySelector("[data-runtime-instal
 const runtimeReinstallManagedButton = document.querySelector("[data-runtime-reinstall-managed]");
 const runtimeRemoveSelectedButton = document.querySelector("[data-runtime-remove-selected]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
+const downloadStarterGgufButton = document.querySelector("[data-download-starter-gguf]");
 const runtimeIdInput = document.querySelector('[name="runtimeId"]');
 const firstRunModelPathInput = document.querySelector('[name="firstRunModelPath"]');
 const firstRunRuntimePathInput = document.querySelector('[name="firstRunRuntimePath"]');
@@ -941,6 +942,31 @@ function readFirstRunRuntimePath() {
   return firstRunRuntimePathInput?.value.trim() || null;
 }
 
+async function downloadStarterGguf() {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    throw new Error("Open the desktop app to download the starter model.");
+  }
+  if (downloadStarterGgufButton) {
+    downloadStarterGgufButton.disabled = true;
+    downloadStarterGgufButton.textContent = "Downloading...";
+  }
+  modelPathReadiness = "Downloading the starter GGUF into InferGrade's local cache...";
+  renderLocalReadinessChecklist();
+  const result = await invoke("download_starter_gguf");
+  const modelPath = String(result?.path || "").trim();
+  if (!modelPath) {
+    throw new Error("Starter model download did not return a local path.");
+  }
+  if (firstRunModelPathInput) {
+    firstRunModelPathInput.value = modelPath;
+  }
+  modelPathReadiness = `Starter model ready: ${modelPath}`;
+  renderLocalReadinessChecklist();
+  appendLog(`Starter GGUF ready: ${JSON.stringify(result)}`);
+  return result;
+}
+
 function firstRunHandoffFromUrl() {
   return firstRunHandoffFromParams(new URLSearchParams(window.location.search || ""), (reason) => {
     appendLog(`Ignored first-run handoff with ${reason}.`);
@@ -1484,6 +1510,30 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
       renderLocalReadinessChecklist();
       setStatus("Runtime selection failed", "error");
       appendLog(`Could not select installed llama.cpp runtime: ${error.message || error}`);
+    });
+});
+
+downloadStarterGgufButton?.addEventListener("click", () => {
+  downloadStarterGguf()
+    .then(() => {
+      setStatus("Starter model ready", "good");
+      if (firstRunStatus) {
+        firstRunStatus.textContent = "Starter model downloaded. Run the native first benchmark when the runtime is ready.";
+      }
+    })
+    .catch((error) => {
+      const message = error.message || String(error);
+      modelPathReadiness = "Starter model download failed. You can still paste a local GGUF path.";
+      renderLocalReadinessChecklist();
+      setStatus("Model download failed", "error");
+      appendLog(`Could not download starter GGUF: ${message}`);
+    })
+    .finally(() => {
+      if (downloadStarterGgufButton) {
+        downloadStarterGgufButton.disabled = false;
+        downloadStarterGgufButton.textContent = "Download starter model";
+      }
+      updateFirstRunSupportActions();
     });
 });
 
