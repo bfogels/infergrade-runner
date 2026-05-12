@@ -32,6 +32,7 @@ use tauri_plugin_shell::{
 
 const KEYRING_SERVICE: &str = "com.infergrade.runner";
 const KEYRING_USER: &str = "hub-runner-token";
+const SIDECAR_BINARY_NAME: &str = "infergrade-sidecar";
 
 #[derive(Default)]
 struct ListenerProcess {
@@ -433,7 +434,7 @@ fn start_runner_listener(
 
     let mut command = app
         .shell()
-        .sidecar("binaries/infergrade-sidecar")
+        .sidecar(SIDECAR_BINARY_NAME)
         .map_err(|error| format!("could not prepare Runner sidecar: {error}"))?
         .args(["start", "--api-url", &normalized_api_url]);
     if let Some(token) = token_for_child {

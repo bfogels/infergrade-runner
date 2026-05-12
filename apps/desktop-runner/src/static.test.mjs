@@ -11,6 +11,7 @@ test("desktop shell permission shapes keep version separate from URL-scoped comm
 
   assert.ok(shapes.includes(JSON.stringify(["--version"])));
   assert.ok(shapes.includes(JSON.stringify(["desktop-self-test"])));
+  assert.ok(capability.permissions.includes("deep-link:default"));
   assert.ok(shapes.some((shape) => shape.includes('"start"') && shape.includes('"--api-url"')));
   assert.equal(shapes.some((shape) => shape.includes('"pair"') && shape.includes('"--api-url"')), false);
   assert.equal(shapes.includes(JSON.stringify(["install-runtime", "--runtime", "llama.cpp"])), false);
@@ -55,6 +56,8 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(rust.includes("fn runner_pairing_status"));
   assert.ok(rust.includes("fn listener_start_plan"));
   assert.ok(rust.includes("fn start_runner_listener"));
+  assert.ok(rust.includes('const SIDECAR_BINARY_NAME: &str = "infergrade-sidecar"'));
+  assert.equal(rust.includes('.sidecar("binaries/infergrade-sidecar")'), false);
   assert.ok(rust.includes("fn stop_runner_listener"));
   assert.ok(rust.includes("fn worker_protocol_preview"));
   assert.ok(rust.includes("fn worker_protocol_ping"));
