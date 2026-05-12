@@ -335,7 +335,7 @@ def canonicalize_hf_artifact_reference(uri: str) -> str:
 def _download_remote_artifact(download_url: str, destination_path: str) -> None:
     """Download a remote artifact, falling back to curl when stdlib transport fails."""
     try:
-        with urllib_request.urlopen(download_url) as response, open(destination_path, "wb") as handle:
+        with urllib_request.urlopen(_request_for_url(download_url)) as response, open(destination_path, "wb") as handle:
             shutil.copyfileobj(response, handle)
         return
     except Exception as exc:
@@ -361,8 +361,9 @@ _CURL_HTTPS_ONLY = ["--proto", "=https", "--proto-redir", "=https"]
 
 def _download_with_curl(download_url: str, destination_path: str) -> None:
     """Use curl as a pragmatic fallback for artifact downloads."""
+    headers = _curl_auth_headers(download_url)
     completed = subprocess.run(
-        ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY + ["-o", destination_path, download_url],
+        ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY + headers + ["-o", destination_path, download_url],
         capture_output=True,
         text=True,
     )
@@ -377,7 +378,7 @@ def _fetch_huggingface_siblings(repo_id: str) -> list:
     """Fetch sibling filenames for a Hugging Face model, using curl when needed."""
     url = "https://huggingface.co/api/models/%s" % urllib_parse.quote(repo_id, safe="/")
     try:
-        with urllib_request.urlopen(url) as response:
+        with urllib_request.urlopen(_request_for_url(url)) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except Exception as exc:
         if not _should_fallback_to_curl(exc):
@@ -388,8 +389,9 @@ def _fetch_huggingface_siblings(repo_id: str) -> list:
 
 def _fetch_json_with_curl(url: str) -> Dict[str, object]:
     """Fetch JSON via curl as a pragmatic fallback on local Python SSL issues."""
+    headers = _curl_auth_headers(url)
     completed = subprocess.run(
-        ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY + ["-H", "Accept: application/json", url],
+        ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY + headers + ["-H", "Accept: application/json", url],
         capture_output=True,
         text=True,
     )
@@ -397,6 +399,38 @@ def _fetch_json_with_curl(url: str) -> Dict[str, object]:
         message = (completed.stderr or completed.stdout or "").strip()
         raise RuntimeError("curl failed while fetching %s: %s" % (url, message or "unknown error"))
     return json.loads(completed.stdout)
+
+
+def _request_for_url(url: str):
+    headers = _auth_headers(url)
+    if not headers:
+        return url
+    return urllib_request.Request(url, headers=headers)
+
+
+def _curl_auth_headers(url: str) -> List[str]:
+    headers = []
+    for key, value in _auth_headers(url).items():
+        headers.extend(["-H", "%s: %s" % (key, value)])
+    return headers
+
+
+def _auth_headers(url: str) -> Dict[str, str]:
+    token = _huggingface_token(url)
+    if not token:
+        return {}
+    return {"Authorization": "Bearer %s" % token}
+
+
+def _huggingface_token(url: str) -> Optional[str]:
+    parsed = urllib_parse.urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname != "huggingface.co":
+        return None
+    for env_name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HUGGINGFACE_TOKEN"):
+        token = (os.environ.get(env_name) or "").strip()
+        if token:
+            return token
+    return None
 
 
 def _cache_path(cache_dir: str, artifact: str, filename: str, expected_sha256: Optional[str]) -> str:

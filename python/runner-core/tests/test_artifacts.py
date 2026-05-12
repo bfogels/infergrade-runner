@@ -102,6 +102,30 @@ class ArtifactResolutionTests(unittest.TestCase):
             os.unlink(response_handle.name)
         self.assertTrue(resolved.resolved_path.startswith(os.path.join(home_dir, ".cache", "infergrade", "artifacts")))
 
+    @mock.patch("infergrade.artifacts.urllib_request.urlopen")
+    def test_remote_artifact_resolution_uses_huggingface_token_env(self, urlopen_mock):
+        payload = b"gated-remote-gguf"
+        response_handle = tempfile.NamedTemporaryFile(delete=False)
+        response_handle.write(payload)
+        response_handle.close()
+        urlopen_mock.return_value = open(response_handle.name, "rb")
+        request = RunRequest(
+            model="google/gemma-3-1b-it",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://google/gemma-3-1b-it-qat-q4_0-gguf/gemma-3-1b-it-q4_0.gguf",
+            quant_artifact_cache_dir=self.cache_dir,
+        )
+        try:
+            with mock.patch.dict(os.environ, {"HF_TOKEN": "hf_test_token"}, clear=False):
+                resolved = resolve_quant_artifact(request)
+        finally:
+            os.unlink(response_handle.name)
+
+        self.assertTrue(os.path.isfile(resolved.resolved_path))
+        request_arg = urlopen_mock.call_args.args[0]
+        self.assertEqual(request_arg.get_header("Authorization"), "Bearer hf_test_token")
+
     def test_hf_artifact_urls_expand_to_huggingface_resolve_urls(self):
         self.assertEqual(
             artifact_to_download_url(

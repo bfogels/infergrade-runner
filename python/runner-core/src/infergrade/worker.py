@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from infergrade import __version__
 from infergrade.doctor import collect_runner_diagnostics, run_doctor
 from infergrade.pairing import load_runner_profile
+from infergrade.paths import resolve_worker_output_dir
 from infergrade.progress import load_progress
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.runner import run_infergrade
@@ -64,7 +65,7 @@ def execute_run_job(
         heartbeat_run_job(api_url, run_id, worker_id, stage="fetch_run_config", message="Fetching run config.", api_token=api_token, run_token=run_token)
         payload = fetch_run_config(api_url, run_job["run_config_id"], api_token=api_token)
         request = request_from_run_config_document(payload, simulate=simulate)
-        request.output_dir = run_job.get("output_dir")
+        request.output_dir = resolve_worker_output_dir(run_job.get("output_dir"), run_id)
         request.resume = True
         if run_job.get("execution_mode"):
             request.execution_mode = run_job["execution_mode"]
