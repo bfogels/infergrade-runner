@@ -159,6 +159,24 @@ fn run_command_output(
     command.output()
 }
 
+#[cfg(unix)]
+fn exec_command(program: &str, args: &[OsString], pythonpath: Option<OsString>) -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+
+    let mut command = Command::new(program);
+    command.args(args);
+    command.stdin(Stdio::inherit());
+    command.stdout(Stdio::inherit());
+    command.stderr(Stdio::inherit());
+    if let Some(value) = pythonpath {
+        command.env("PYTHONPATH", value);
+    }
+    if let Some(value) = path_with_macos_gui_defaults(env::var_os("PATH")) {
+        command.env("PATH", value);
+    }
+    command.exec()
+}
+
 fn repo_python_args(args: &[OsString]) -> Vec<OsString> {
     let mut python_args = vec![OsString::from("-m"), OsString::from("infergrade")];
     python_args.extend(args.iter().cloned());
@@ -274,17 +292,17 @@ fn native_suite_status(
 ) -> (&'static str, &'static str, &'static str, &'static str) {
     if runtime_first_run == "ready" {
         (
-            "executor_missing",
-            "Native llama.cpp runtime is available, but the app-managed first-run benchmark executor is still in progress. Docker remains optional for advanced sandboxed benchmarks.",
-            "not_implemented",
-            "The native first-run benchmark executor is not implemented yet.",
+            "ready",
+            "Native llama.cpp runtime is available. First-run can run locally with a selected GGUF model; Docker remains optional for advanced sandboxed benchmarks.",
+            "ready",
+            "Native first-run is available after selecting a local GGUF model.",
         )
     } else {
         (
             "setup_needed",
-            "Select or install a native llama.cpp runtime first. The app-managed first-run benchmark executor is still in progress.",
+            "Select or install a native llama.cpp runtime first.",
             "blocked",
-            "Select or install a native llama.cpp runtime; first-run executor support is still in progress.",
+            "Select or install a native llama.cpp runtime before starting first-run.",
         )
     }
 }
@@ -364,12 +382,40 @@ fn run_repo_python(repo_root: &Path, args: &[OsString]) -> Result<ExitStatus, St
     ))
 }
 
+#[cfg(unix)]
+fn exec_repo_python(repo_root: &Path, args: &[OsString]) -> Result<(), String> {
+    let pythonpath = pythonpath_with_runner(repo_root, env::var_os("PYTHONPATH"))?;
+    let python_args = repo_python_args(args);
+    let mut last_not_found = None;
+    for program in python_programs() {
+        let error = exec_command(program, &python_args, Some(pythonpath.clone()));
+        if error.kind() == std::io::ErrorKind::NotFound {
+            last_not_found = Some(error);
+            continue;
+        }
+        return Err(format!("could not launch {program}: {error}"));
+    }
+    Err(format!(
+        "could not find a Python interpreter to run the bundled Runner core: {}",
+        last_not_found
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "no interpreter candidates were tried".to_string())
+    ))
+}
+
 fn python_programs() -> &'static [&'static str] {
     if cfg!(windows) {
         &["py", "python", "python3"]
     } else {
         &["python3", "python"]
     }
+}
+
+fn is_listener_start_command(args: &[OsString]) -> bool {
+    args.first()
+        .and_then(|value| value.to_str())
+        .map(|value| value == "start")
+        .unwrap_or(false)
 }
 
 fn main() {
@@ -389,6 +435,26 @@ fn main() {
     if args == [OsString::from("desktop-readiness")] {
         println!("{}", desktop_readiness());
         std::process::exit(0);
+    }
+
+    #[cfg(unix)]
+    if is_listener_start_command(&args) {
+        if let Some(repo_root) = fallback_repo_root() {
+            if let Err(error) = exec_repo_python(&repo_root, &args) {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+
+        let error = exec_command("infergrade", &args, None);
+        if error.kind() == std::io::ErrorKind::NotFound {
+            eprintln!(
+                "infergrade was not found on PATH, no bundled Runner core resource was found, and INFERGRADE_RUNNER_REPO does not point to a Runner checkout."
+            );
+        } else {
+            eprintln!("could not launch infergrade from PATH: {error}");
+        }
+        std::process::exit(1);
     }
 
     if let Some(repo_root) = fallback_repo_root() {
@@ -489,6 +555,13 @@ mod tests {
     }
 
     #[test]
+    fn listener_start_command_is_the_long_running_worker() {
+        assert!(is_listener_start_command(&[OsString::from("start")]));
+        assert!(!is_listener_start_command(&[OsString::from("desktop-readiness")]));
+        assert!(!is_listener_start_command(&[OsString::from("desktop-self-test")]));
+    }
+
+    #[test]
     fn uses_windows_python_launcher_first_on_windows() {
         if cfg!(windows) {
             assert_eq!(python_programs()[0], "py");
@@ -543,8 +616,8 @@ mod tests {
 
         assert!(payload.contains("\"native_benchmark_suite\""));
         assert!(payload.contains("\"first_run\""));
-        assert!(payload.contains("first-run benchmark executor is still in progress"));
-        assert!(!payload.contains("Native first-run benchmark is ready"));
+        assert!(payload.contains("First-run can run locally with a selected GGUF model"));
+        assert!(!payload.contains("first-run benchmark executor is still in progress"));
         assert!(payload.contains("\"docker\""));
         assert!(payload.contains("Docker remains optional"));
         assert!(payload.contains("\"podman\""));
@@ -552,8 +625,8 @@ mod tests {
 
     #[test]
     fn native_suite_status_distinguishes_runtime_from_executor_readiness() {
-        assert_eq!(native_suite_status("ready").0, "executor_missing");
-        assert_eq!(native_suite_status("ready").2, "not_implemented");
+        assert_eq!(native_suite_status("ready").0, "ready");
+        assert_eq!(native_suite_status("ready").2, "ready");
         assert_eq!(native_suite_status("blocked").0, "setup_needed");
         assert_eq!(native_suite_status("blocked").2, "blocked");
     }
