@@ -171,6 +171,8 @@ test("desktop runtime panel keeps native first-run readiness truthful and Docker
   assert.ok(html.includes("data-first-run-status"));
   assert.ok(js.includes("desktop-readiness"));
   assert.ok(js.includes("renderDesktopReadiness"));
+  assert.ok(js.includes("parseDesktopReadinessOutput"));
+  assert.ok(js.includes("Desktop readiness fallback"));
   assert.ok(js.includes('Command.sidecar(SIDECAR_NAME, "desktop-readiness")'));
   assert.equal(js.includes('Command.sidecar(SIDECAR_NAME, ["desktop-readiness"])'), false);
   assert.ok(shapes.includes(JSON.stringify(["desktop-readiness"])));

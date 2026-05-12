@@ -411,6 +411,23 @@ function renderDesktopReadiness(payload = {}) {
   renderLocalReadinessChecklist();
 }
 
+function parseDesktopReadinessOutput(stdout) {
+  const trimmed = (stdout || "").trim();
+  if (!trimmed) {
+    return {};
+  }
+  if (!trimmed.startsWith("{")) {
+    return {
+      status: "fallback",
+      runner_core_message: trimmed,
+      native_benchmark_message: nativeSuiteReadiness,
+      llama_cpp_message: llamaRuntimeReadiness,
+      container_message: containerRuntimeReadiness,
+    };
+  }
+  return JSON.parse(trimmed);
+}
+
 async function refreshRunnerCliVersion() {
   const Command = await loadTauriShell();
   if (!Command) {
@@ -470,9 +487,13 @@ async function checkDesktopReadiness() {
     if (output.code !== 0) {
       throw new Error(output.stderr || output.stdout || `readiness command exited with code ${output.code}`);
     }
-    const payload = JSON.parse(output.stdout || "{}");
+    const payload = parseDesktopReadinessOutput(output.stdout);
     renderDesktopReadiness(payload);
-    appendLog(`Desktop readiness: ${output.stdout.trim()}`);
+    if (payload.status === "fallback") {
+      appendLog(`Desktop readiness fallback: ${payload.runner_core_message}`);
+    } else {
+      appendLog(`Desktop readiness: ${output.stdout.trim()}`);
+    }
   } catch (error) {
     containerRuntimeReadiness = "Could not check optional Docker/Podman support. Native benchmark setup can continue.";
     appendLog(`Desktop readiness check failed: ${error.message || error}`);
