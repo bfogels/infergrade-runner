@@ -174,6 +174,63 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(checks["llama_cli_native"]["details"]["requested"], "/custom/llama-cli")
         self.assertEqual(checks["llama_server_native"]["details"]["source"], "custom_path")
 
+    @mock.patch("infergrade.doctor.windows_cuda_preflight")
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.shutil.which")
+    def test_doctor_runs_cuda_preflight_for_cuda_runtime_selector(
+        self,
+        which_mock,
+        capture_environment_mock,
+        windows_cuda_preflight_mock,
+    ):
+        capture_environment_mock.return_value = {
+            "environment_class": "local_workstation",
+            "hardware_class": "nvidia_gpu",
+            "accelerator_api": "cuda",
+            "accelerator_type": "gpu",
+            "accelerator_count": 1,
+            "hardware_id": "hw_test",
+        }
+        which_mock.side_effect = lambda name: None
+        windows_cuda_preflight_mock.return_value = {
+            "selector": {
+                "compatibility": {
+                    "status": "blocked",
+                    "reason_codes": ["full_loop_not_proven"],
+                    "probes": [],
+                },
+                "fallback": {"allowed": False},
+            },
+            "gpu_count": 1,
+            "hardware_blocked": True,
+            "next_action": "Validate on hardware.",
+        }
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact=os.path.join(self.tempdir.name, "missing.gguf"),
+            execution_mode="local_native",
+            llama_cpp_cli_path="C:\\llama.cpp\\llama-cli.exe",
+            runtime_selector={
+                "accelerator": {"vendor": "nvidia", "api": "cuda"},
+                "driver": {"cuda_major": "12"},
+                "delivery": {"binary_set": "llama_cpp_windows_cuda_x86_64"},
+            },
+            simulate=False,
+        )
+
+        report = run_doctor(request=request)
+
+        checks = {item["id"]: item for item in report["checks"]}
+        self.assertEqual(checks["windows_cuda_preflight"]["status"], "error")
+        self.assertTrue(checks["windows_cuda_preflight"]["details"]["hardware_blocked"])
+        self.assertFalse(checks["windows_cuda_preflight"]["details"]["runtime_selector"]["fallback"]["allowed"])
+        windows_cuda_preflight_mock.assert_called_once_with(
+            runtime_binary_path="C:\\llama.cpp\\llama-cli.exe",
+            cuda_major="12",
+        )
+
     @mock.patch("infergrade.doctor.load_contract_manifest")
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.shutil.which")

@@ -1,0 +1,137 @@
+import sys
+import unittest
+from unittest import mock
+
+sys.path.insert(0, "python/runner-core/src")
+
+from infergrade.cuda import (
+    minimum_driver_for_cuda,
+    parse_nvidia_smi_csv,
+    version_at_least,
+    windows_cuda_preflight,
+)
+
+
+class WindowsCudaPreflightTests(unittest.TestCase):
+    def test_parse_nvidia_smi_csv_captures_gpu_driver_vram_and_compute_capability(self):
+        rows = parse_nvidia_smi_csv("NVIDIA RTX 4090, 555.85, 24564, 8.9\n")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "NVIDIA RTX 4090")
+        self.assertEqual(rows[0]["driver_version"], "555.85")
+        self.assertEqual(rows[0]["vram_bytes"], 24564 * 1024 * 1024)
+        self.assertEqual(rows[0]["compute_capability"], "8.9")
+
+    def test_parse_nvidia_smi_csv_preserves_cuda_version_when_reported(self):
+        rows = parse_nvidia_smi_csv("NVIDIA RTX 4090, 555.85, 24564, 8.9, 12.5\n")
+
+        self.assertEqual(rows[0]["cuda_version"], "12.5")
+
+    def test_version_comparison_pads_segments(self):
+        self.assertTrue(version_at_least("525.0", "525.0.0"))
+        self.assertTrue(version_at_least("555.85", "525.0"))
+        self.assertFalse(version_at_least("449.90", "450.0"))
+
+    def test_minimum_driver_defaults_to_cuda_12_floor(self):
+        self.assertEqual(minimum_driver_for_cuda(None), "525.0")
+        self.assertEqual(minimum_driver_for_cuda("13.0"), "580.0")
+
+    def test_windows_cuda_preflight_blocks_until_full_loop_is_proven(self):
+        result = windows_cuda_preflight(
+            nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9\n",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        selector = result["selector"]
+        self.assertTrue(result["hardware_blocked"])
+        self.assertEqual(selector["platform"]["system"], "windows")
+        self.assertEqual(selector["accelerator"]["vendor"], "nvidia")
+        self.assertEqual(selector["accelerator"]["compute_capability"], "8.9")
+        self.assertEqual(selector["driver"]["minimum_required"], "525.0")
+        self.assertEqual(selector["delivery"]["mode"], "user_selected")
+        self.assertEqual(selector["delivery"]["source"], "run_config")
+        self.assertEqual(selector["delivery"]["selected_by"], "run_config")
+        self.assertEqual(selector["support"]["tier"], "preview")
+        self.assertFalse(selector["fallback"]["allowed"])
+        self.assertIn("fallback_not_allowed", selector["compatibility"]["reason_codes"])
+        self.assertIn("full_loop_not_proven", selector["compatibility"]["reason_codes"])
+        self.assertIn("runtime_binary_missing", selector["compatibility"]["reason_codes"])
+
+    def test_windows_cuda_preflight_reports_old_driver(self):
+        result = windows_cuda_preflight(
+            nvidia_smi_output="NVIDIA GTX 1080, 449.90, 8192, 6.1\n",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "10"},
+            which=lambda _name: None,
+        )
+
+        reason_codes = result["selector"]["compatibility"]["reason_codes"]
+        self.assertIn("driver_too_old", reason_codes)
+        self.assertIn("full_loop_not_proven", reason_codes)
+
+    def test_windows_cuda_preflight_reports_missing_nvidia_smi(self):
+        result = windows_cuda_preflight(
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        reason_codes = result["selector"]["compatibility"]["reason_codes"]
+        self.assertIn("nvidia_smi_missing", reason_codes)
+        self.assertEqual(result["selector"]["accelerator"]["vendor"], "unknown")
+
+    def test_windows_cuda_preflight_reports_no_nvidia_gpu_rows(self):
+        result = windows_cuda_preflight(
+            nvidia_smi_output="",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        self.assertIn("no_nvidia_gpu", result["selector"]["compatibility"]["reason_codes"])
+
+    def test_windows_cuda_preflight_reports_vram_and_artifact_failures(self):
+        result = windows_cuda_preflight(
+            nvidia_smi_output="NVIDIA RTX 3060, 555.85, 8192, 8.6\n",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            required_vram_bytes=16 * 1024 * 1024 * 1024,
+            artifact_download_error="download timed out",
+            which=lambda _name: None,
+        )
+
+        reason_codes = result["selector"]["compatibility"]["reason_codes"]
+        self.assertIn("insufficient_vram", reason_codes)
+        self.assertIn("model_too_large", reason_codes)
+        self.assertIn("artifact_download_failed", reason_codes)
+
+    def test_windows_cuda_preflight_reports_runtime_binary_mismatch(self):
+        result = windows_cuda_preflight(
+            nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9\n",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            selected_binary_set="llama_cpp_windows_cpu_x86_64",
+            which=lambda _name: None,
+        )
+
+        selector = result["selector"]
+        self.assertEqual(selector["delivery"]["binary_set"], "llama_cpp_windows_cpu_x86_64")
+        self.assertIn("runtime_binary_mismatch", selector["compatibility"]["reason_codes"])
+
+    @mock.patch("infergrade.cuda.subprocess.run")
+    def test_windows_cuda_preflight_smokes_selected_runtime_binary(self, run_mock):
+        run_mock.return_value = mock.Mock(returncode=0, stdout="llama.cpp build 1234\n", stderr="")
+
+        result = windows_cuda_preflight(
+            runtime_binary_path="C:\\llama.cpp\\llama-cli.exe",
+            nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9\n",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        selector = result["selector"]
+        self.assertEqual(selector["delivery"]["mode"], "user_selected")
+        self.assertEqual(selector["delivery"]["source"], "explicit_path")
+        self.assertEqual(selector["binary"]["version_output"], "llama.cpp build 1234")
+        self.assertIn("full_loop_not_proven", selector["compatibility"]["reason_codes"])
+        self.assertNotIn("runtime_smoke_failed", selector["compatibility"]["reason_codes"])
+
+
+if __name__ == "__main__":
+    unittest.main()

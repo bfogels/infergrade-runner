@@ -14,10 +14,10 @@
     "compute_capability": "8.9"
   },
   "delivery": {
-    "mode": "managed_download",
+    "mode": "user_selected",
     "binary_set": "llama_cpp_windows_cuda_x86_64",
-    "source": "infergrade_runtime_manifest",
-    "selected_by": "managed_recommendation"
+    "source": "run_config",
+    "selected_by": "run_config"
   },
   "binary": {
     "path": null,
@@ -25,9 +25,14 @@
     "checksum_verified": false,
     "signature_verified": false
   },
+  "driver": {
+    "version": "555.85",
+    "minimum_required": "525.0",
+    "cuda_major": "12"
+  },
   "compatibility": {
     "status": "blocked",
-    "reason_codes": ["full_loop_not_proven"],
+    "reason_codes": ["fallback_not_allowed", "full_loop_not_proven", "runtime_binary_missing"],
     "probes": [
       {
         "id": "nvidia_smi",

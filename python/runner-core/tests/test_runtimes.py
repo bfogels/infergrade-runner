@@ -8,6 +8,7 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.runtimes import (
     install_llama_cpp_runtime,
+    known_llama_cpp_runtimes,
     runtime_manifest,
     select_llama_cpp_runtime,
     selected_llama_cpp_runtime,
@@ -29,6 +30,17 @@ class RuntimeManagementTests(unittest.TestCase):
         self.assertEqual(manifest["runtime_family"], "llama.cpp")
         self.assertTrue(manifest["runtimes"])
         self.assertEqual(manifest["runtimes"][0]["source"], "homebrew")
+
+    def test_runtime_manifest_lists_windows_cuda_preview_without_managed_download(self):
+        runtimes = {item["runtime_id"]: item for item in known_llama_cpp_runtimes()}
+        preview = runtimes["llama-cpp-windows-cuda-cli-preview-2026-05"]
+
+        self.assertEqual(preview["source"], "user_selected")
+        self.assertEqual(preview["binary_set"], "llama_cpp_windows_cuda_x86_64")
+        self.assertEqual(preview["support_tier"], "preview")
+        self.assertEqual(preview["install_command"], [])
+        self.assertIsNone(preview["checksum"])
+        self.assertIn("No CUDA binary is downloaded", " ".join(preview["notes"]))
 
     def test_install_runtime_without_execute_returns_plan_only(self):
         plan = install_llama_cpp_runtime(execute=False)

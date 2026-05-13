@@ -44,7 +44,21 @@ class ContractExportTests(unittest.TestCase):
         )
         self.assertEqual("0.3", selector_schema["properties"]["runtime_selector_version"]["const"])
         self.assertIn("cuda", selector_schema["properties"]["accelerator"]["properties"]["api"]["enum"])
+        self.assertIn("driver", selector_schema["properties"])
+        self.assertIn("minimum_required", selector_schema["properties"]["driver"]["properties"])
         self.assertIn("technical_beta", selector_schema["properties"]["support"]["properties"]["tier"]["enum"])
+
+        cuda_example = json.loads(
+            (repo_root() / "schemas" / "examples" / "runtime_selector.windows_cuda_preview.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual("cuda", cuda_example["accelerator"]["api"])
+        self.assertEqual("preview", cuda_example["support"]["tier"])
+        self.assertFalse(cuda_example["fallback"]["allowed"])
+        self.assertIn("full_loop_not_proven", cuda_example["compatibility"]["reason_codes"])
+
+    def test_contract_bundle_includes_windows_cuda_beta_docs(self):
+        manifest = load_contract_manifest()
+        self.assertIn("docs/windows_nvidia_cuda_beta.md", manifest["supporting_docs"])
 
     def test_repo_root_points_at_runner_repo(self):
         self.assertTrue((repo_root() / "schemas" / "contract_manifest.json").exists())

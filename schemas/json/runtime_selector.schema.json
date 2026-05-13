@@ -77,6 +77,15 @@
       },
       "additionalProperties": false
     },
+    "driver": {
+      "type": "object",
+      "properties": {
+        "version": { "type": ["string", "null"] },
+        "minimum_required": { "type": ["string", "null"] },
+        "cuda_major": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
     "compatibility": {
       "type": "object",
       "required": ["status", "reason_codes", "probes"],
