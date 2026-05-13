@@ -30,6 +30,7 @@ const runtimeInstallManagedButton = document.querySelector("[data-runtime-instal
 const runtimeReinstallManagedButton = document.querySelector("[data-runtime-reinstall-managed]");
 const runtimeRemoveSelectedButton = document.querySelector("[data-runtime-remove-selected]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
+const downloadStarterGgufButton = document.querySelector("[data-download-starter-gguf]");
 const runtimeIdInput = document.querySelector('[name="runtimeId"]');
 const firstRunModelPathInput = document.querySelector('[name="firstRunModelPath"]');
 const firstRunRuntimePathInput = document.querySelector('[name="firstRunRuntimePath"]');
@@ -354,25 +355,20 @@ function renderFirstRunChecklist() {
   setFirstRunStep(
     "ready",
     firstRunReady ? "done" : "blocked",
-    firstRunReady ? "Ready to run a native first-run smoke benchmark." : "Pairing, runtime, and a GGUF model are required before running."
-  );
-  setFirstRunStep(
-    "upload",
-    uploadSucceeded ? "done" : uploadReady ? "current" : uploadFailed ? "blocked" : "blocked",
-    uploadSucceeded
-      ? `Uploaded bundle ${lastFirstRunPayload.upload.bundle_id} to Hub run ${lastFirstRunPayload.upload.run_id}.`
-      : uploadReady
-        ? `Ready to retry upload to Hub run ${currentFirstRunUploadRunId()}.`
-        : uploadFailed
-          ? "Local artifacts are saved; fix pairing or run access, then retry upload."
-          : localRunComplete
-            ? "Local artifacts are saved; enter a Hub run ID to upload."
-            : "Run locally first, then upload with a Hub run handoff or run ID."
+    firstRunReady ? "Ready to run a local smoke benchmark." : "Pairing, runtime, and a GGUF model are required before running."
   );
   setFirstRunStep(
     "result",
-    uploadSucceeded ? "done" : "blocked",
-    uploadSucceeded ? "Hub has the uploaded native_first_run bundle." : "Result availability starts after a successful upload."
+    uploadSucceeded ? "done" : uploadReady || uploadFailed || localRunComplete ? "current" : "blocked",
+    uploadSucceeded
+      ? `Uploaded bundle ${lastFirstRunPayload.upload.bundle_id} to Hub run ${lastFirstRunPayload.upload.run_id}.`
+      : uploadReady
+        ? `Local evidence is ready to upload to Hub run ${currentFirstRunUploadRunId()}.`
+        : uploadFailed
+          ? "Local evidence is saved; retry upload after fixing pairing or run access."
+          : localRunComplete
+            ? "Local evidence is saved. Hub upload can happen from a handoff or support flow."
+            : "Run the first local benchmark to create evidence."
   );
 }
 
@@ -411,15 +407,31 @@ function renderDesktopReadiness(payload = {}) {
   renderLocalReadinessChecklist();
 }
 
+function parseDesktopReadinessOutput(stdout) {
+  const trimmed = (stdout || "").trim();
+  if (!trimmed) {
+    return {};
+  }
+  if (!trimmed.startsWith("{")) {
+    return {
+      status: "fallback",
+      runner_core_message: trimmed,
+      native_benchmark_message: nativeSuiteReadiness,
+      llama_cpp_message: llamaRuntimeReadiness,
+      container_message: containerRuntimeReadiness,
+    };
+  }
+  return JSON.parse(trimmed);
+}
+
 async function refreshRunnerCliVersion() {
-  const Command = await loadTauriShell();
-  if (!Command) {
+  const output = await runDesktopSidecarDiagnostic(["--version"]);
+  if (!output) {
     renderRunnerCliVersion("available inside the desktop app");
     return;
   }
 
   try {
-    const output = await Command.sidecar(SIDECAR_NAME, ["--version"]).execute();
     if (output.code !== 0) {
       throw new Error(output.stderr || output.stdout || `version command exited with code ${output.code}`);
     }
@@ -434,15 +446,14 @@ async function checkRunnerStartupSelfTest() {
   if (runtimeRunnerVersion) {
     runtimeRunnerVersion.textContent = "Checking Runner startup self-test...";
   }
-  const Command = await loadTauriShell();
-  if (!Command) {
+  const output = await runDesktopSidecarDiagnostic(["desktop-self-test"]);
+  if (!output) {
     if (runtimeRunnerVersion) {
       runtimeRunnerVersion.textContent = "Startup self-test runs inside the desktop app.";
     }
     return;
   }
   try {
-    const output = await Command.sidecar(SIDECAR_NAME, ["desktop-self-test"]).execute();
     if (output.code !== 0) {
       throw new Error(output.stderr || output.stdout || `self-test exited with code ${output.code}`);
     }
@@ -460,19 +471,22 @@ async function checkRunnerStartupSelfTest() {
 }
 
 async function checkDesktopReadiness() {
-  const Command = await loadTauriShell();
-  if (!Command) {
+  const output = await runDesktopSidecarDiagnostic(["desktop-readiness"]);
+  if (!output) {
     renderDesktopReadiness({});
     return;
   }
   try {
-    const output = await Command.sidecar(SIDECAR_NAME, ["desktop-readiness"]).execute();
     if (output.code !== 0) {
       throw new Error(output.stderr || output.stdout || `readiness command exited with code ${output.code}`);
     }
-    const payload = JSON.parse(output.stdout || "{}");
+    const payload = parseDesktopReadinessOutput(output.stdout);
     renderDesktopReadiness(payload);
-    appendLog(`Desktop readiness: ${output.stdout.trim()}`);
+    if (payload.status === "fallback") {
+      appendLog(`Desktop readiness fallback: ${payload.runner_core_message}`);
+    } else {
+      appendLog(`Desktop readiness: ${output.stdout.trim()}`);
+    }
   } catch (error) {
     containerRuntimeReadiness = "Could not check optional Docker/Podman support. Native benchmark setup can continue.";
     appendLog(`Desktop readiness check failed: ${error.message || error}`);
@@ -726,15 +740,22 @@ async function loadTauriShell() {
   return shell.Command;
 }
 
+async function runDesktopSidecarDiagnostic(args) {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  return invoke("desktop_sidecar_diagnostic", { args });
+}
+
 async function executeSidecar(args) {
-  const Command = await loadTauriShell();
-  if (!Command) {
+  const output = await runDesktopSidecarDiagnostic(args);
+  if (!output) {
     appendLog(`Development view cannot run: infergrade ${args.join(" ")}`);
     setStatus("Development view", "warning");
     return null;
   }
   appendLog(`Running: infergrade ${args.join(" ")}`);
-  const output = await Command.sidecar(SIDECAR_NAME, args).execute();
   if (output.stdout) {
     appendLog(output.stdout);
   }
@@ -919,6 +940,31 @@ function readFirstRunModelPath() {
 
 function readFirstRunRuntimePath() {
   return firstRunRuntimePathInput?.value.trim() || null;
+}
+
+async function downloadStarterGguf() {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    throw new Error("Open the desktop app to download the starter model.");
+  }
+  if (downloadStarterGgufButton) {
+    downloadStarterGgufButton.disabled = true;
+    downloadStarterGgufButton.textContent = "Downloading...";
+  }
+  modelPathReadiness = "Downloading the starter GGUF into InferGrade's local cache...";
+  renderLocalReadinessChecklist();
+  const result = await invoke("download_starter_gguf");
+  const modelPath = String(result?.path || "").trim();
+  if (!modelPath) {
+    throw new Error("Starter model download did not return a local path.");
+  }
+  if (firstRunModelPathInput) {
+    firstRunModelPathInput.value = modelPath;
+  }
+  modelPathReadiness = `Starter model ready: ${modelPath}`;
+  renderLocalReadinessChecklist();
+  appendLog(`Starter GGUF ready: ${JSON.stringify(result)}`);
+  return result;
 }
 
 function firstRunHandoffFromUrl() {
@@ -1464,6 +1510,30 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
       renderLocalReadinessChecklist();
       setStatus("Runtime selection failed", "error");
       appendLog(`Could not select installed llama.cpp runtime: ${error.message || error}`);
+    });
+});
+
+downloadStarterGgufButton?.addEventListener("click", () => {
+  downloadStarterGguf()
+    .then(() => {
+      setStatus("Starter model ready", "good");
+      if (firstRunStatus) {
+        firstRunStatus.textContent = "Starter model downloaded. Run the native first benchmark when the runtime is ready.";
+      }
+    })
+    .catch((error) => {
+      const message = error.message || String(error);
+      modelPathReadiness = "Starter model download failed. You can still paste a local GGUF path.";
+      renderLocalReadinessChecklist();
+      setStatus("Model download failed", "error");
+      appendLog(`Could not download starter GGUF: ${message}`);
+    })
+    .finally(() => {
+      if (downloadStarterGgufButton) {
+        downloadStarterGgufButton.disabled = false;
+        downloadStarterGgufButton.textContent = "Download starter model";
+      }
+      updateFirstRunSupportActions();
     });
 });
 

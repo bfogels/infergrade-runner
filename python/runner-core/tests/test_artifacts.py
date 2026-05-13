@@ -102,6 +102,30 @@ class ArtifactResolutionTests(unittest.TestCase):
             os.unlink(response_handle.name)
         self.assertTrue(resolved.resolved_path.startswith(os.path.join(home_dir, ".cache", "infergrade", "artifacts")))
 
+    @mock.patch("infergrade.artifacts.urllib_request.urlopen")
+    def test_remote_artifact_resolution_uses_huggingface_token_env(self, urlopen_mock):
+        payload = b"gated-remote-gguf"
+        response_handle = tempfile.NamedTemporaryFile(delete=False)
+        response_handle.write(payload)
+        response_handle.close()
+        urlopen_mock.return_value = open(response_handle.name, "rb")
+        request = RunRequest(
+            model="google/gemma-3-1b-it",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://google/gemma-3-1b-it-qat-q4_0-gguf/gemma-3-1b-it-q4_0.gguf",
+            quant_artifact_cache_dir=self.cache_dir,
+        )
+        try:
+            with mock.patch.dict(os.environ, {"HF_TOKEN": "hf_test_token"}, clear=False):
+                resolved = resolve_quant_artifact(request)
+        finally:
+            os.unlink(response_handle.name)
+
+        self.assertTrue(os.path.isfile(resolved.resolved_path))
+        request_arg = urlopen_mock.call_args.args[0]
+        self.assertEqual(request_arg.get_header("Authorization"), "Bearer hf_test_token")
+
     def test_hf_artifact_urls_expand_to_huggingface_resolve_urls(self):
         self.assertEqual(
             artifact_to_download_url(
@@ -160,12 +184,13 @@ class ArtifactResolutionTests(unittest.TestCase):
     @mock.patch("infergrade.artifacts.shutil.which", return_value="/usr/bin/curl")
     @mock.patch("infergrade.artifacts.urllib_request.urlopen", side_effect=urllib_error.URLError("ssl"))
     def test_remote_artifact_resolution_falls_back_to_curl(self, _urlopen_mock, _which_mock, run_mock):
-        def fake_run(command, capture_output, text):
+        def fake_run(command, capture_output, text, input=None):
             destination_path = command[command.index("-o") + 1]
             # Verify the hardened curl invocation pins protocols to https so
             # a 30x redirect cannot downgrade the transfer to cleartext.
             self.assertEqual(command[command.index("--proto") + 1], "=https")
             self.assertEqual(command[command.index("--proto-redir") + 1], "=https")
+            self.assertIsNone(input)
             with open(destination_path, "wb") as handle:
                 handle.write(b"curl-download")
             return mock.Mock(returncode=0, stdout="", stderr="")
@@ -181,6 +206,35 @@ class ArtifactResolutionTests(unittest.TestCase):
         resolved = resolve_quant_artifact(request)
         self.assertTrue(os.path.isfile(resolved.resolved_path))
         self.assertEqual(resolved.sha256, compute_file_sha256(resolved.resolved_path))
+
+    @mock.patch("infergrade.artifacts.subprocess.run")
+    @mock.patch("infergrade.artifacts.shutil.which", return_value="/usr/bin/curl")
+    @mock.patch("infergrade.artifacts.urllib_request.urlopen", side_effect=urllib_error.URLError("ssl"))
+    def test_remote_artifact_curl_fallback_keeps_hf_token_out_of_argv(self, _urlopen_mock, _which_mock, run_mock):
+        def fake_run(command, capture_output, text, input=None):
+            joined = " ".join(command)
+            self.assertNotIn("hf_secret_token", joined)
+            self.assertIn("-K", command)
+            self.assertEqual(command[command.index("-K") + 1], "-")
+            self.assertIn("Authorization: Bearer hf_secret_token", input or "")
+            destination_path = command[command.index("-o") + 1]
+            with open(destination_path, "wb") as handle:
+                handle.write(b"curl-download")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        run_mock.side_effect = fake_run
+        request = RunRequest(
+            model="google/gemma-3-1b-it",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://google/gemma-3-1b-it-qat-q4_0-gguf/gemma-3-1b-it-q4_0.gguf",
+            quant_artifact_cache_dir=self.cache_dir,
+        )
+
+        with mock.patch.dict(os.environ, {"HF_TOKEN": "hf_secret_token"}, clear=False):
+            resolved = resolve_quant_artifact(request)
+
+        self.assertTrue(os.path.isfile(resolved.resolved_path))
 
     def test_artifact_cache_status_counts_completed_and_partial_files(self):
         os.makedirs(self.cache_dir, exist_ok=True)

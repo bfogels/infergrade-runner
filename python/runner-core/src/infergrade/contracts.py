@@ -6,11 +6,12 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from infergrade import __version__
+from infergrade.paths import runner_root
 
 
 def repo_root() -> Path:
     """Return the repository root for the Runner workspace."""
-    return Path(__file__).resolve().parents[4]
+    return runner_root()
 
 
 def contract_manifest_path(root: Optional[Path] = None) -> Path:

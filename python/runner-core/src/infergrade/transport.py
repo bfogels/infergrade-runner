@@ -17,6 +17,13 @@ class InsecureApiUrlError(ValueError):
     """Raised when a Hub API URL would send credentials over cleartext."""
 
 
+class RunnerTokenInvalidError(RuntimeError):
+    """Raised when Hub explicitly revokes or expires a paired runner token."""
+
+
+RUNNER_TOKEN_INVALID_MESSAGE = "Runner token revoked or expired. Run 'infergrade pair' to re-pair."
+
+
 def _is_local_http_api_host(host: str) -> bool:
     """Return true when cleartext HTTP is limited to the local machine."""
     if host == "localhost":
@@ -105,6 +112,8 @@ def _json_request(
         parsed = json.loads(text) if text else {}
     except ValueError:
         parsed = {"error": text[:200] if text else ""}
+    if status == 401 and _api_error_code(parsed) in {"runner_token_revoked", "runner_token_expired"}:
+        raise RunnerTokenInvalidError(RUNNER_TOKEN_INVALID_MESSAGE)
     return status, parsed
 
 
@@ -375,6 +384,8 @@ def _api_error_code(payload: Dict[str, Any]) -> str:
     error = payload.get("error")
     if isinstance(error, dict):
         return str(error.get("code") or "").strip()
+    if isinstance(error, str):
+        return error.strip()
     return ""
 
 

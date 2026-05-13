@@ -4,10 +4,14 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.images import install_image, install_known_images, local_build_command
+from infergrade.images import docker_image_exists, install_image, install_known_images, local_build_command
 
 
 class ImageInstallTests(unittest.TestCase):
+    @mock.patch("infergrade.images.subprocess.run", side_effect=FileNotFoundError("docker"))
+    def test_docker_image_exists_returns_false_when_docker_cli_is_missing(self, _run_mock):
+        self.assertFalse(docker_image_exists("infergrade-llama-cpp:local"))
+
     @mock.patch("infergrade.images.subprocess.run")
     def test_install_image_reports_present_when_local_image_exists(self, run_mock):
         run_mock.return_value = mock.Mock(returncode=0, stdout="[]", stderr="")

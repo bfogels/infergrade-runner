@@ -10,9 +10,9 @@
       <section class="hero-panel" aria-labelledby="app-title">
         <div>
           <p class="eyebrow">InferGrade Runner</p>
-          <h1 id="app-title">Keep your machine ready for Hub runs.</h1>
+          <h1 id="app-title">Run InferGrade on this Mac.</h1>
           <p class="lede">
-            Pair once, leave the Runner listening, and inspect local logs without opening a terminal.
+            Pair with Hub, install the recommended runtime, choose a GGUF model, and start local runs.
           </p>
         </div>
         <div class="hero-side">
@@ -38,9 +38,10 @@
         </div>
       </section>
 
-      <section class="control-grid" aria-label="Runner controls">
-        <form class="panel" data-runner-form>
-          <h2>Pairing</h2>
+      <section class="control-grid" aria-label="Runner setup">
+        <form class="panel setup-panel" data-runner-form>
+          <p class="eyebrow">Step 1</p>
+          <h2>Pair with Hub</h2>
           <label>
             <span>Hub URL</span>
             <input name="apiUrl" type="url" value="https://api.infergrade.com" autocomplete="url" />
@@ -62,36 +63,36 @@
           <p class="hint" data-token-state>
             Pairing stores the runner token in the OS credential store. Tokens are not shown in this browser UI.
           </p>
-        </form>
-
-        <section class="panel">
-          <h2>Listener</h2>
-          <p>
-            Start the local Runner when you want this machine to claim queued Hub runs.
-          </p>
+          <div class="listener-box">
+            <p class="eyebrow">Step 4</p>
+            <h2>Start listening</h2>
+            <p>Leave the Runner listening when you want this Mac to claim queued Hub runs.</p>
+          </div>
           <div class="button-row">
             <button type="button" data-start-runner>Start listening</button>
             <button type="button" data-stop-runner disabled>Stop</button>
           </div>
-          <p class="hint">The app passes the token through the process environment, not command arguments.</p>
-        </section>
+        </form>
 
-        <section class="panel">
+        <section class="panel primary-workflow">
           <div class="panel-heading compact-heading">
             <div>
-              <h2>Runtime</h2>
-              <p class="hint">Native llama.cpp first-run stays explicit and local.</p>
+              <p class="eyebrow">Steps 2 and 3</p>
+              <h2>Install runtime and choose a model</h2>
+              <p class="hint">Use the recommended llama.cpp runtime and a local GGUF file for the first benchmark.</p>
             </div>
           </div>
           <p>
-            Inspect the managed runtime plan, then choose whether to use the pinned lane or your installed
-            llama.cpp binaries.
+            The Hub owns account and token state. This app keeps the local runtime, model file, and listener on your Mac.
           </p>
+          <div class="button-row primary-actions">
+            <button type="button" data-runtime-install-managed>Install recommended runtime</button>
+            <button type="button" class="button-secondary" data-download-starter-gguf>Download starter model</button>
+          </div>
           <div class="first-run-panel" aria-label="Native first-run benchmark">
-            <h3>First local benchmark</h3>
+            <h3>Run first local benchmark</h3>
             <p class="hint compact-hint">
-              Run a short native llama.cpp smoke benchmark on a local GGUF model and write local result
-              artifacts. Upload is optional and uses the saved pairing token inside the desktop app.
+              Start from a Hub run handoff when available. For a local smoke test, download the starter model and run a short native benchmark.
             </p>
             <label>
               <span>Model path</span>
@@ -145,14 +146,11 @@
               <button type="button" data-first-run-start>Run native first benchmark</button>
               <button type="button" class="button-secondary" data-first-run-again disabled>Run again</button>
               <button type="button" class="button-secondary" data-first-run-another-model disabled>Run another model</button>
-              <button type="button" class="button-secondary" data-retry-first-run-upload disabled>Retry upload</button>
-              <button type="button" class="button-secondary" data-copy-artifact-path disabled>Copy artifact path</button>
-              <button type="button" class="button-secondary" data-copy-support-summary>Copy support summary</button>
             </div>
             <p class="hint" data-first-run-status>Choose a model and selected llama.cpp runtime before running.</p>
           </div>
           <div class="first-run-checklist" aria-label="First-run progress">
-            <h3>First-run path</h3>
+            <h3>Setup progress</h3>
             <div class="flow-list">
               <div data-first-run-step="paired">
                 <strong>Paired with Hub</strong>
@@ -170,13 +168,9 @@
                 <strong>First-run ready</strong>
                 <span>Pairing, runtime, and model are required before running.</span>
               </div>
-              <div data-first-run-step="upload">
-                <strong>Upload ready</strong>
-                <span>Run locally, then use a Hub run handoff or run ID to upload.</span>
-              </div>
               <div data-first-run-step="result">
-                <strong>Result available</strong>
-                <span>Uploaded native first-run evidence will appear in Hub.</span>
+                <strong>Result ready</strong>
+                <span>Local evidence is ready for Hub upload or support review.</span>
               </div>
             </div>
           </div>
@@ -196,15 +190,20 @@
               for a newer compatibility lane.
             </p>
           </details>
-          <div class="button-row">
-            <button type="button" data-runtime-install-managed>Install or retry recommended runtime</button>
+          <details class="advanced-token-panel runtime-advanced-panel">
+            <summary>Advanced runtime actions</summary>
+            <div class="button-row compact-actions">
             <button type="button" data-runtime-reinstall-managed>Replace selection with managed runtime</button>
             <button type="button" data-runtime-remove-selected>Remove selected runtime</button>
             <button type="button" data-runtime-plan>Inspect plan</button>
             <button type="button" data-runtime-select-existing>Select installed</button>
-          </div>
-          <div class="readiness-checklist" aria-label="Local readiness checklist">
-            <h3>Local readiness checklist</h3>
+              <button type="button" class="button-secondary" data-retry-first-run-upload disabled>Retry upload</button>
+              <button type="button" class="button-secondary" data-copy-artifact-path disabled>Copy artifact path</button>
+              <button type="button" class="button-secondary" data-copy-support-summary>Copy support summary</button>
+            </div>
+          </details>
+          <details class="readiness-checklist" aria-label="Local diagnostics">
+            <summary>Diagnostics</summary>
             <div class="status-list">
               <div>
                 <strong>Native benchmark suite</strong>
@@ -238,7 +237,7 @@
                 <span data-model-path-status>Select a local GGUF model for the first benchmark.</span>
               </div>
             </div>
-          </div>
+          </details>
           <details class="advanced-token-panel">
             <summary>Update and platform status</summary>
             <div class="status-list">

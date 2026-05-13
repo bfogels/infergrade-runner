@@ -22,6 +22,7 @@ use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -32,6 +33,11 @@ use tauri_plugin_shell::{
 
 const KEYRING_SERVICE: &str = "com.infergrade.runner";
 const KEYRING_USER: &str = "hub-runner-token";
+const SIDECAR_BINARY_NAME: &str = "infergrade-sidecar";
+const DESKTOP_SIDECAR_DIAGNOSTIC_COMMANDS: &[&str] =
+    &["--version", "desktop-self-test", "desktop-readiness"];
+const STARTER_GGUF_URL: &str = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
+const STARTER_GGUF_FILENAME: &str = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
 
 #[derive(Default)]
 struct ListenerProcess {
@@ -145,6 +151,23 @@ fn desktop_first_run_artifact_dir() -> Result<PathBuf, String> {
     Ok(runner_config_dir()?
         .join("first-run-artifacts")
         .join("native-first-run"))
+}
+
+fn desktop_artifact_cache_dir() -> Result<PathBuf, String> {
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .map_err(|_| "Could not resolve a home directory for the artifact cache.".to_string())?;
+    let path = PathBuf::from(home)
+        .join(".cache")
+        .join("infergrade")
+        .join("artifacts");
+    fs::create_dir_all(&path).map_err(|error| {
+        format!(
+            "could not create InferGrade artifact cache at {}: {error}",
+            path.display()
+        )
+    })?;
+    Ok(path)
 }
 
 fn selected_llama_cpp_runtime() -> Value {
@@ -433,7 +456,7 @@ fn start_runner_listener(
 
     let mut command = app
         .shell()
-        .sidecar("binaries/infergrade-sidecar")
+        .sidecar(SIDECAR_BINARY_NAME)
         .map_err(|error| format!("could not prepare Runner sidecar: {error}"))?
         .args(["start", "--api-url", &normalized_api_url]);
     if let Some(token) = token_for_child {
@@ -513,6 +536,30 @@ fn stop_runner_listener(state: State<ListenerProcess>) -> Result<Value, String> 
 }
 
 #[tauri::command]
+async fn desktop_sidecar_diagnostic(app: AppHandle, args: Vec<String>) -> Result<Value, String> {
+    if args.is_empty()
+        || args
+            .iter()
+            .any(|arg| !DESKTOP_SIDECAR_DIAGNOSTIC_COMMANDS.contains(&arg.as_str()))
+    {
+        return Err("unsupported desktop sidecar diagnostic command".to_string());
+    }
+    let output = app
+        .shell()
+        .sidecar(SIDECAR_BINARY_NAME)
+        .map_err(|error| format!("could not prepare Runner sidecar: {error}"))?
+        .args(args.iter().map(String::as_str))
+        .output()
+        .await
+        .map_err(|error| format!("could not run Runner sidecar diagnostic: {error}"))?;
+    Ok(json!({
+        "code": output.status.code().unwrap_or(1),
+        "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
+        "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
+    }))
+}
+
+#[tauri::command]
 fn reset_runner_pairing() -> Result<Value, String> {
     let profile_path = runner_profile_path()?;
     reset_pairing_state(
@@ -554,6 +601,59 @@ async fn install_managed_llama_cpp_runtime(runtime_id: Option<String>) -> Result
 #[tauri::command]
 fn remove_selected_llama_cpp_runtime(remove_managed_files: Option<bool>) -> Result<Value, String> {
     engine_remove_selected_llama_cpp_runtime(remove_managed_files.unwrap_or(true))
+}
+
+#[tauri::command]
+async fn download_starter_gguf() -> Result<Value, String> {
+    let path = desktop_artifact_cache_dir()?.join(STARTER_GGUF_FILENAME);
+    if path.is_file() {
+        return Ok(json!({
+            "status": "already_present",
+            "path": path.display().to_string(),
+            "url": STARTER_GGUF_URL,
+        }));
+    }
+
+    let partial_path = path.with_extension("gguf.download");
+    let mut response = reqwest::get(STARTER_GGUF_URL)
+        .await
+        .map_err(|error| format!("could not download starter GGUF: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "starter GGUF download failed: HTTP {}",
+            response.status().as_u16()
+        ));
+    }
+    let mut file = fs::File::create(&partial_path).map_err(|error| {
+        format!(
+            "could not create starter GGUF at {}: {error}",
+            partial_path.display()
+        )
+    })?;
+    let mut size_bytes: u64 = 0;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| format!("could not read starter GGUF download: {error}"))?
+    {
+        file.write_all(&chunk)
+            .map_err(|error| format!("could not write starter GGUF: {error}"))?;
+        size_bytes += chunk.len() as u64;
+    }
+    file.flush()
+        .map_err(|error| format!("could not flush starter GGUF: {error}"))?;
+    fs::rename(&partial_path, &path).map_err(|error| {
+        format!(
+            "could not finalize starter GGUF at {}: {error}",
+            path.display()
+        )
+    })?;
+    Ok(json!({
+        "status": "downloaded",
+        "path": path.display().to_string(),
+        "url": STARTER_GGUF_URL,
+        "size_bytes": size_bytes,
+    }))
 }
 
 fn native_first_run_input(model_path: &str) -> NativeFirstRunInput {
@@ -1042,6 +1142,7 @@ pub fn run() {
             listener_start_plan,
             worker_protocol_preview,
             worker_protocol_ping,
+            desktop_sidecar_diagnostic,
             start_runner_listener,
             stop_runner_listener,
             reset_runner_pairing,
@@ -1049,6 +1150,7 @@ pub fn run() {
             install_managed_llama_cpp_runtime,
             remove_selected_llama_cpp_runtime,
             select_existing_llama_cpp_runtime,
+            download_starter_gguf,
             run_desktop_native_first_run,
             retry_desktop_native_first_run_upload,
             desktop_support_summary,

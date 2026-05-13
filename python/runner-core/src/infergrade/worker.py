@@ -7,10 +7,13 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from infergrade import __version__
 from infergrade.doctor import collect_runner_diagnostics, run_doctor
+from infergrade.pairing import load_runner_profile
+from infergrade.paths import resolve_worker_output_dir
 from infergrade.progress import load_progress
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.runner import run_infergrade
 from infergrade.transport import (
+    RunnerTokenInvalidError,
     claim_run_job,
     complete_run_job,
     fail_run_job,
@@ -62,7 +65,7 @@ def execute_run_job(
         heartbeat_run_job(api_url, run_id, worker_id, stage="fetch_run_config", message="Fetching run config.", api_token=api_token, run_token=run_token)
         payload = fetch_run_config(api_url, run_job["run_config_id"], api_token=api_token)
         request = request_from_run_config_document(payload, simulate=simulate)
-        request.output_dir = run_job.get("output_dir")
+        request.output_dir = resolve_worker_output_dir(run_job.get("output_dir"), run_id)
         request.resume = True
         if run_job.get("execution_mode"):
             request.execution_mode = run_job["execution_mode"]
@@ -231,14 +234,15 @@ def run_worker_loop(
     """Continuously poll for run jobs and execute them."""
     resolved_worker_id = worker_id or _default_worker_id()
     runner_snapshot = collect_runner_diagnostics([execution_mode])
+    profile = load_runner_profile() or {}
     register_runner(
         api_url=api_url,
         runner_id=resolved_worker_id,
         execution_modes=[execution_mode],
         api_token=api_token,
         status="starting",
-        label=resolved_worker_id,
-        runner_kind="cloud_worker" if execution_mode == "cloud_container" else "local_listener",
+        label=profile.get("runner_label") or profile.get("label") or resolved_worker_id,
+        runner_kind=profile.get("runner_kind") or ("cloud_worker" if execution_mode == "cloud_container" else "local_listener"),
         hostname=hostname or socket.gethostname(),
         provider_id=provider_id,
         instance_type_id=instance_type_id,
@@ -283,6 +287,8 @@ def run_worker_loop(
                 emit_progress=emit_progress,
                 runner_snapshot=runner_snapshot,
             )
+        except RunnerTokenInvalidError:
+            raise
         except Exception as exc:
             if emit_progress:
                 emit_progress("Claim failed: %s Retrying." % exc)

@@ -133,6 +133,7 @@
       "required": ["source_bundle_origin", "normalized_at", "normalizer_version"],
       "properties": {
         "source_bundle_origin": { "type": "string" },
+        "evidence_source": { "type": "string", "enum": ["founder_dogfood", "agent_dogfood", "external_user"] },
         "normalized_at": { "type": "string" },
         "normalizer_version": { "type": "string" }
       },

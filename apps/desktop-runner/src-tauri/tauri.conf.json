@@ -37,7 +37,8 @@
     ],
     "externalBin": ["binaries/infergrade-sidecar"],
     "resources": {
-      "../../../python/runner-core/src": "runner-core/src"
+      "../../../python/runner-core/src": "runner-core/src",
+      "../../../schemas": "schemas"
     },
     "category": "DeveloperTool",
     "shortDescription": "Local companion app for InferGrade Hub runs",

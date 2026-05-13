@@ -11,6 +11,7 @@ test("desktop shell permission shapes keep version separate from URL-scoped comm
 
   assert.ok(shapes.includes(JSON.stringify(["--version"])));
   assert.ok(shapes.includes(JSON.stringify(["desktop-self-test"])));
+  assert.ok(capability.permissions.includes("deep-link:default"));
   assert.ok(shapes.some((shape) => shape.includes('"start"') && shape.includes('"--api-url"')));
   assert.equal(shapes.some((shape) => shape.includes('"pair"') && shape.includes('"--api-url"')), false);
   assert.equal(shapes.includes(JSON.stringify(["install-runtime", "--runtime", "llama.cpp"])), false);
@@ -20,8 +21,8 @@ test("desktop shell permission shapes keep version separate from URL-scoped comm
 test("desktop onboarding exposes paste-code pairing, reset, and bundled runner self-test", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
-  const helpers = readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8");
   const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const helpers = readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8");
 
   assert.ok(html.includes('value="https://api.infergrade.com"'));
   assert.ok(html.includes("Paste the one-time code from Hub"));
@@ -55,6 +56,8 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(rust.includes("fn runner_pairing_status"));
   assert.ok(rust.includes("fn listener_start_plan"));
   assert.ok(rust.includes("fn start_runner_listener"));
+  assert.ok(rust.includes('const SIDECAR_BINARY_NAME: &str = "infergrade-sidecar"'));
+  assert.equal(rust.includes('.sidecar("binaries/infergrade-sidecar")'), false);
   assert.ok(rust.includes("fn stop_runner_listener"));
   assert.ok(rust.includes("fn worker_protocol_preview"));
   assert.ok(rust.includes("fn worker_protocol_ping"));
@@ -87,13 +90,14 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
   const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
   const engine = readFileSync(new URL("../../../crates/runner-engine/src/lib.rs", import.meta.url), "utf8");
 
-  assert.ok(html.includes("Local readiness checklist"));
-  assert.ok(html.includes("First-run path"));
+  assert.ok(html.includes("Diagnostics"));
+  assert.ok(html.includes("Setup progress"));
+  assert.ok(html.includes("Download starter model"));
+  assert.ok(html.includes("data-download-starter-gguf"));
   assert.ok(html.includes("data-first-run-step=\"paired\""));
   assert.ok(html.includes("data-first-run-step=\"runtime\""));
   assert.ok(html.includes("data-first-run-step=\"model\""));
   assert.ok(html.includes("data-first-run-step=\"ready\""));
-  assert.ok(html.includes("data-first-run-step=\"upload\""));
   assert.ok(html.includes("data-first-run-step=\"result\""));
   assert.ok(html.includes("data-first-run-again"));
   assert.ok(html.includes("Run again"));
@@ -116,8 +120,8 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
   assert.equal(js.includes("form.elements.firstRunUploadRunId"), false);
   assert.equal(js.includes("form.elements.runtimeId"), false);
   assert.ok(js.includes("Paired through the OS credential store. Tokens stay out of this browser UI."));
-  assert.ok(js.includes("Ready to run a native first-run smoke benchmark."));
-  assert.ok(js.includes("Result availability starts after a successful upload."));
+  assert.ok(js.includes("Ready to run a local smoke benchmark."));
+  assert.ok(js.includes("Run the first local benchmark to create evidence."));
   assert.ok(js.includes("clearFirstRunLocalState"));
   assert.ok(js.includes("Ready to run this local GGUF model again."));
   assert.ok(js.includes("choose another GGUF model"));
@@ -127,6 +131,7 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
   assert.ok(js.includes('invoke("install_managed_llama_cpp_runtime"'));
   assert.ok(js.includes('invoke("remove_selected_llama_cpp_runtime"'));
   assert.ok(js.includes('invoke("select_existing_llama_cpp_runtime"'));
+  assert.ok(js.includes('invoke("download_starter_gguf"'));
   assert.ok(js.includes("SHA-256 verified"));
   assert.ok(js.includes("no independent signature"));
   assert.ok(js.includes("Retry install, remove the selected runtime, or select an existing llama.cpp binary."));
@@ -139,6 +144,8 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
   assert.ok(rust.includes("fn remove_selected_llama_cpp_runtime"));
   assert.ok(rust.includes("engine_remove_selected_llama_cpp_runtime"));
   assert.ok(rust.includes("fn select_existing_llama_cpp_runtime"));
+  assert.ok(rust.includes("async fn download_starter_gguf"));
+  assert.ok(rust.includes("STARTER_GGUF_URL"));
   assert.ok(rust.includes("engine_select_existing_llama_cpp_runtime"));
   assert.ok(engine.includes("fn install_managed_llama_cpp_runtime"));
   assert.ok(engine.includes("fn remove_selected_llama_cpp_runtime"));
@@ -156,6 +163,7 @@ test("desktop runtime panel shows local readiness and explicit first-run model s
 test("desktop runtime panel keeps native first-run readiness truthful and Docker optional", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
   const capability = JSON.parse(
     readFileSync(new URL("../src-tauri/capabilities/default.json", import.meta.url), "utf8")
   );
@@ -171,6 +179,14 @@ test("desktop runtime panel keeps native first-run readiness truthful and Docker
   assert.ok(html.includes("data-first-run-status"));
   assert.ok(js.includes("desktop-readiness"));
   assert.ok(js.includes("renderDesktopReadiness"));
+  assert.ok(js.includes("parseDesktopReadinessOutput"));
+  assert.ok(js.includes("Desktop readiness fallback"));
+  assert.ok(js.includes('invoke("desktop_sidecar_diagnostic", { args })'));
+  assert.ok(js.includes('runDesktopSidecarDiagnostic(["desktop-readiness"])'));
+  assert.ok(js.includes('runDesktopSidecarDiagnostic(["desktop-self-test"])'));
+  assert.ok(js.includes('runDesktopSidecarDiagnostic(["--version"])'));
+  assert.ok(rust.includes("desktop_sidecar_diagnostic"));
+  assert.ok(rust.includes('["--version", "desktop-self-test", "desktop-readiness"]'));
   assert.ok(shapes.includes(JSON.stringify(["desktop-readiness"])));
 });
 
@@ -192,14 +208,14 @@ test("desktop first-run UI calls runner-engine through Tauri and keeps upload to
   const tauriCargo = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
   const packageJson = readFileSync(new URL("../package.json", import.meta.url), "utf8");
 
-  assert.ok(html.includes("First local benchmark"));
+  assert.ok(html.includes("Run first local benchmark"));
   assert.ok(html.includes("name=\"firstRunModelPath\""));
   assert.ok(html.includes("name=\"firstRunRuntimePath\""));
   assert.ok(html.includes("name=\"firstRunUploadRunId\""));
   assert.ok(html.includes("name=\"firstRunUploadWorkerId\""));
   assert.ok(html.includes("data-first-run-handoff-status"));
   assert.ok(html.includes("Run native first benchmark"));
-  assert.ok(html.includes("write local result"));
+  assert.ok(html.includes("Start from a Hub run handoff when available"));
   assert.ok(html.includes("Tokens are not shown in this browser UI."));
   assert.ok(js.includes('listen("runner-first-run-event"'));
   assert.ok(js.includes('invoke("run_desktop_native_first_run"'));
