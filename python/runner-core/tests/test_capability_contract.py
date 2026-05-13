@@ -6,6 +6,7 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.capability_contract import (
     CAPABILITY_STATES,
+    CONFIDENCE_LABELS,
     EVIDENCE_LANES,
     capability_run_schema_path,
     capability_summary_schema_path,
@@ -98,6 +99,8 @@ class CapabilityContractTests(unittest.TestCase):
         schema = load_capability_run_schema()
         self.assertEqual(schema["properties"]["artifact_kind"]["const"], "capability_run")
         self.assertEqual(schema["properties"]["evidence"]["properties"]["lane"]["enum"], list(EVIDENCE_LANES))
+        self.assertIn("repeated_local_sample", schema["properties"]["evidence"]["properties"]["confidence_label"]["enum"])
+        self.assertIn("sampled_reference", schema["properties"]["evidence"]["properties"]["confidence_label"]["enum"])
         self.assertIn("scorer_type", schema["properties"]["protocol"]["required"])
         self.assertTrue(schema["properties"]["summary"]["allOf"])
         self.assertTrue(schema["properties"]["tasks"]["items"]["allOf"])
@@ -108,12 +111,25 @@ class CapabilityContractTests(unittest.TestCase):
     def test_capability_summary_schema_is_declared_in_contract_manifest(self):
         schema = load_capability_summary_schema()
         self.assertEqual(schema["properties"]["artifact_kind"]["const"], "capability_summary")
+        labels = schema["$defs"]["confidence_label"]["enum"]
+        self.assertIn("repeated_local_sample", labels)
+        self.assertIn("sampled_reference", labels)
+        self.assertIn("reference_sample", labels)
         self.assertTrue(capability_summary_schema_path().exists())
         manifest = load_contract_manifest()
         self.assertIn("schemas/json/capability_summary.schema.json", manifest["schema_files"])
 
     def test_valid_capability_run_artifact_passes_semantic_validation(self):
         self.assertEqual(validate_capability_run_artifact(_artifact()), [])
+
+    def test_confidence_labels_use_v0_3_2_canonical_names_with_legacy_aliases_accepted(self):
+        self.assertIn("repeated_local_sample", CONFIDENCE_LABELS)
+        self.assertIn("sampled_reference", CONFIDENCE_LABELS)
+        artifact = _artifact()
+        artifact["evidence"]["lane"] = "reference"
+        artifact["evidence"]["confidence_label"] = "reference_sample"
+
+        self.assertEqual(validate_capability_run_artifact(artifact), [])
 
     def test_failed_partial_skipped_and_not_comparable_states_stay_distinct(self):
         states = set(CAPABILITY_STATES)
@@ -259,7 +275,7 @@ class CapabilityContractTests(unittest.TestCase):
                     "state": "scored",
                     "score": 1.0,
                     "lane": "decision",
-                    "confidence_label": "reference_sample",
+                    "confidence_label": "sampled_reference",
                     "repetition_count": 1,
                     "task_count": 3,
                     "failure_count": 0,
@@ -275,7 +291,7 @@ class CapabilityContractTests(unittest.TestCase):
                     "surface": "local_coding_capability",
                     "state": "scored",
                     "lane": "decision",
-                    "confidence_label": "reference_sample",
+                    "confidence_label": "sampled_reference",
                     "path": "artifacts/capability/coding_static_repair_v1/capability_run.json",
                 }
             ],

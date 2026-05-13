@@ -1,6 +1,7 @@
 """Local capability summary artifact helpers."""
 
 import json
+import math
 import os
 from typing import Any, Dict, List, Optional
 
@@ -42,10 +43,17 @@ CONFIDENCE_ORDER = {
     None: -1,
     "single_smoke": 0,
     "thin_local_sample": 1,
+    "repeated_local_sample": 2,
     "repeated_local_run": 2,
-    "stronger_local_sample": 3,
-    "reference_sample": 4,
+    "sampled_reference": 3,
+    "reference_sample": 3,
+    "stronger_local_sample": 4,
     "gold": 5,
+}
+
+LEGACY_CONFIDENCE_ALIASES = {
+    "repeated_local_run": "repeated_local_sample",
+    "reference_sample": "sampled_reference",
 }
 
 STATE_ORDER = {
@@ -148,21 +156,37 @@ def _discover_capability_run_artifacts(execution: CapabilityExecution, output_di
         protocol = dict(artifact.get("protocol") or {})
         tasks = list(artifact.get("tasks") or [])
         state = str(summary.get("state") or "not_comparable")
+        lane = evidence.get("lane") or "decision"
+        repetition_count = int(protocol.get("repetitions") or 1)
         artifact_benchmark_ids.add(benchmark_id)
+        confidence_label = _confidence_from_artifact(
+            lane=lane,
+            label=evidence.get("confidence_label"),
+            repetition_count=repetition_count,
+            state=state,
+        )
         pointers.append(
             {
                 "artifact_kind": "capability_run",
                 "benchmark_id": benchmark_id,
                 "surface": evidence.get("surface") or "local_assistant_capability",
                 "state": state,
-                "lane": evidence.get("lane") or "decision",
-                "confidence_label": evidence.get("confidence_label") or "thin_local_sample",
+                "lane": lane,
+                "confidence_label": confidence_label,
+                "confidence_explanation": _confidence_explanation(confidence_label),
                 "path": _relative_path(capability_run_path, output_dir),
                 "score": summary.get("score") if state in ("scored", "partial") else None,
                 "task_count": len(tasks),
                 "failure_count": len([task for task in tasks if task.get("state") == "failed"]),
                 "partial_count": summary.get("partial_count") or 0,
-                "repetition_count": protocol.get("repetitions") or 1,
+                "repetition_count": repetition_count,
+                "repeatability": _repeatability_summary(
+                    summary=summary,
+                    tasks=tasks,
+                    repetition_count=repetition_count,
+                    failure_count=len([task for task in tasks if task.get("state") == "failed"]),
+                    partial_count=int(summary.get("partial_count") or 0),
+                ),
                 "experimental": evidence.get("experimental"),
                 "unsupported_claims": list((artifact.get("claim_boundary") or {}).get("unsupported_claims") or []),
                 "subject": dict(artifact.get("subject") or {}),
@@ -198,12 +222,22 @@ def _fallback_benchmark_summary_pointers(
                 "state": state,
                 "lane": metadata.get("evidence_lane_id") or "decision",
                 "confidence_label": _confidence_for_lane(metadata.get("evidence_lane_id") or "decision"),
+                "confidence_explanation": _confidence_explanation(
+                    _confidence_for_lane(metadata.get("evidence_lane_id") or "decision")
+                ),
                 "path": _relative_path(summary_path, output_dir),
                 "score": _primary_metric_value(result) if state in ("scored", "partial") else None,
                 "task_count": int(result.get("total_cases") or 0),
                 "failure_count": int(result.get("generation_failure_count") or 0),
                 "partial_count": 1 if state == "partial" else 0,
                 "repetition_count": 1,
+                "repeatability": _repeatability_summary(
+                    summary=result,
+                    tasks=[],
+                    repetition_count=1,
+                    failure_count=int(result.get("generation_failure_count") or 0),
+                    partial_count=1 if state == "partial" else 0,
+                ),
                 "experimental": True,
                 "unsupported_claims": [
                     "This benchmark summary is not a global capability score.",
@@ -235,17 +269,20 @@ def _surface_summary(surface: str, artifact_pointers: List[Dict[str, Any]]) -> D
     state = _aggregate_state(states)
     scores = [float(item["score"]) for item in surface_artifacts if isinstance(item.get("score"), (int, float))]
     score = round(sum(scores) / float(len(scores)), 6) if scores and state in ("scored", "partial") else None
+    confidence_label = _conservative_confidence_label(surface_artifacts)
     return {
         "surface": surface,
         "state": state,
         "score": score,
         "lane": _strongest_lane([item.get("lane") for item in surface_artifacts]),
-        "confidence_label": _conservative_confidence_label(surface_artifacts),
+        "confidence_label": confidence_label,
+        "confidence_explanation": _confidence_explanation(confidence_label),
         "experimental": any(bool(item.get("experimental")) for item in surface_artifacts),
         "repetition_count": sum(int(item.get("repetition_count") or 0) for item in surface_artifacts),
         "task_count": sum(int(item.get("task_count") or 0) for item in surface_artifacts),
         "failure_count": sum(int(item.get("failure_count") or 0) for item in surface_artifacts),
         "partial_count": sum(int(item.get("partial_count") or 0) for item in surface_artifacts),
+        "repeatability": _surface_repeatability_summary(surface_artifacts),
         "capability_artifacts": surface_artifacts,
         "unsupported_claims": _dedupe_claims(
             claim
@@ -312,21 +349,219 @@ def _conservative_confidence_label(artifacts: List[Dict[str, Any]]) -> Optional[
         return None
     strongest = sorted(labels, key=lambda item: CONFIDENCE_ORDER[item], reverse=True)[0]
     lane = _strongest_lane([item.get("lane") for item in artifacts])
-    if lane == "decision" and CONFIDENCE_ORDER[strongest] > CONFIDENCE_ORDER["repeated_local_run"]:
-        return "repeated_local_run"
+    if lane == "decision" and CONFIDENCE_ORDER[strongest] > CONFIDENCE_ORDER["repeated_local_sample"]:
+        return "repeated_local_sample"
     if lane == "smoke" and strongest != "single_smoke":
         return "single_smoke"
-    return strongest
+    return _canonical_confidence_label(strongest)
 
 
 def _confidence_for_lane(lane: str) -> str:
     if lane == "smoke":
         return "single_smoke"
     if lane == "reference":
-        return "reference_sample"
+        return "sampled_reference"
     if lane == "gold":
         return "gold"
     return "thin_local_sample"
+
+
+def _canonical_confidence_label(label: Optional[str]) -> Optional[str]:
+    if label is None:
+        return None
+    return LEGACY_CONFIDENCE_ALIASES.get(label, label)
+
+
+def _confidence_from_artifact(
+    lane: str,
+    label: Optional[str],
+    repetition_count: int,
+    state: str,
+) -> str:
+    canonical = _canonical_confidence_label(label) or _confidence_for_lane(lane)
+    if lane == "decision" and canonical == "thin_local_sample" and repetition_count >= 2 and state in ("scored", "partial"):
+        return "repeated_local_sample"
+    return canonical
+
+
+def _confidence_explanation(label: Optional[str]) -> str:
+    return {
+        None: "No evidence is present for this surface yet.",
+        "single_smoke": "Single smoke evidence checks that the setup can run; it is not enough for a decision-grade claim.",
+        "thin_local_sample": "Thin local evidence can guide setup choice, but needs repeats or broader samples before stronger claims.",
+        "repeated_local_sample": "Repeated local evidence reports repeatability and instability metrics for this setup.",
+        "sampled_reference": "Sampled reference evidence uses a broader benchmark protocol, but remains scoped to its sample and protocol.",
+        "stronger_local_sample": "Stronger local evidence combines broader local sampling with repeatability controls.",
+        "gold": "Gold evidence has the strongest protocol controls in this contract.",
+    }.get(label, "This evidence label is accepted for backward compatibility; use canonical v0.3.2 labels for new artifacts.")
+
+
+def _repeatability_summary(
+    summary: Dict[str, Any],
+    tasks: List[Dict[str, Any]],
+    repetition_count: int,
+    failure_count: int,
+    partial_count: int,
+) -> Dict[str, Any]:
+    latency_values = _metric_values(tasks, "latency_ms")
+    ttft_values = _metric_values(tasks, "time_to_first_token_ms")
+    tokens_per_second_values = _metric_values(tasks, "tokens_per_second")
+    task_scores = _metric_values(tasks, "score")
+    pass_values = [1.0 if task.get("state") == "scored" and task.get("score") == 1.0 else 0.0 for task in tasks if task.get("state") in ("scored", "failed")]
+
+    if not latency_values:
+        latency_values = _summary_metric_values(summary, ("latency_median_ms", "latency_p50_ms", "latency_p95_ms", "duration_seconds"))
+    if not ttft_values:
+        ttft_values = _summary_metric_values(summary, ("time_to_first_token_ms", "ttft_median_ms", "ttft_p50_ms", "ttft_p95_ms"))
+    if not tokens_per_second_values:
+        tokens_per_second_values = _summary_metric_values(summary, ("tokens_per_second", "tokens_per_second_median"))
+    if not task_scores and isinstance(summary.get("score"), (int, float)):
+        task_scores = [float(summary["score"])]
+
+    sample_count = max(repetition_count, len(tasks), 1)
+    total_attempts = max(len(tasks), sample_count)
+    failure_rate = round(float(failure_count + partial_count) / float(total_attempts), 6) if total_attempts else 0.0
+    stats = {
+        "sample_count": sample_count,
+        "repetition_count": repetition_count,
+        "failure_rate": failure_rate,
+        "latency_median_ms": _percentile(latency_values, 0.50),
+        "latency_p95_ms": _percentile(latency_values, 0.95),
+        "latency_variance": _variance(latency_values),
+        "ttft_median_ms": _percentile(ttft_values, 0.50),
+        "ttft_p95_ms": _percentile(ttft_values, 0.95),
+        "ttft_variance": _variance(ttft_values),
+        "tokens_per_second_median": _percentile(tokens_per_second_values, 0.50),
+        "tokens_per_second_p95": _percentile(tokens_per_second_values, 0.95),
+        "tokens_per_second_variance": _variance(tokens_per_second_values),
+        "capability_pass_rate_median": _percentile(pass_values, 0.50),
+        "capability_pass_rate_variance": _variance(pass_values),
+        "score_variance": _variance(task_scores),
+    }
+    reasons = _instability_reasons(stats, latency_values, ttft_values, tokens_per_second_values)
+    stats["unstable"] = bool(reasons)
+    stats["instability_reasons"] = reasons
+    return stats
+
+
+def _surface_repeatability_summary(artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    summaries = [dict(item.get("repeatability") or {}) for item in artifacts]
+    sample_count = sum(int(item.get("sample_count") or 0) for item in summaries)
+    repetition_count = sum(int(item.get("repetition_count") or 0) for item in summaries)
+    reasons = sorted({reason for item in summaries for reason in list(item.get("instability_reasons") or [])})
+    return {
+        "sample_count": sample_count,
+        "repetition_count": repetition_count,
+        "failure_rate": _weighted_average(summaries, "failure_rate", "sample_count"),
+        "latency_median_ms": _median_of_summaries(summaries, "latency_median_ms"),
+        "latency_p95_ms": _max_summary_value(summaries, "latency_p95_ms"),
+        "latency_variance": _max_summary_value(summaries, "latency_variance"),
+        "ttft_median_ms": _median_of_summaries(summaries, "ttft_median_ms"),
+        "ttft_p95_ms": _max_summary_value(summaries, "ttft_p95_ms"),
+        "ttft_variance": _max_summary_value(summaries, "ttft_variance"),
+        "tokens_per_second_median": _median_of_summaries(summaries, "tokens_per_second_median"),
+        "tokens_per_second_p95": _max_summary_value(summaries, "tokens_per_second_p95"),
+        "tokens_per_second_variance": _max_summary_value(summaries, "tokens_per_second_variance"),
+        "capability_pass_rate_median": _median_of_summaries(summaries, "capability_pass_rate_median"),
+        "capability_pass_rate_variance": _max_summary_value(summaries, "capability_pass_rate_variance"),
+        "score_variance": _max_summary_value(summaries, "score_variance"),
+        "unstable": any(bool(item.get("unstable")) for item in summaries),
+        "instability_reasons": reasons,
+    }
+
+
+def _metric_values(items: List[Dict[str, Any]], key: str) -> List[float]:
+    values = []
+    for item in items:
+        value = item.get(key)
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            values.append(float(value))
+    return values
+
+
+def _summary_metric_values(summary: Dict[str, Any], keys) -> List[float]:
+    values = []
+    for key in keys:
+        value = summary.get(key)
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            values.append(float(value) * 1000.0 if key == "duration_seconds" else float(value))
+    return values
+
+
+def _percentile(values: List[float], percentile: float) -> Optional[float]:
+    values = sorted(value for value in values if math.isfinite(value))
+    if not values:
+        return None
+    if len(values) == 1:
+        return round(values[0], 6)
+    index = (len(values) - 1) * percentile
+    lower = int(math.floor(index))
+    upper = int(math.ceil(index))
+    if lower == upper:
+        return round(values[lower], 6)
+    weight = index - lower
+    return round(values[lower] * (1.0 - weight) + values[upper] * weight, 6)
+
+
+def _variance(values: List[float]) -> Optional[float]:
+    values = [value for value in values if math.isfinite(value)]
+    if len(values) < 2:
+        return None
+    mean = sum(values) / float(len(values))
+    return round(sum((value - mean) ** 2 for value in values) / float(len(values)), 6)
+
+
+def _coefficient_of_variation(values: List[float]) -> Optional[float]:
+    if len(values) < 2:
+        return None
+    mean = sum(values) / float(len(values))
+    if mean == 0:
+        return None
+    variance = _variance(values)
+    return None if variance is None else math.sqrt(variance) / abs(mean)
+
+
+def _instability_reasons(
+    stats: Dict[str, Any],
+    latency_values: List[float],
+    ttft_values: List[float],
+    tokens_per_second_values: List[float],
+) -> List[str]:
+    reasons = []
+    if stats["failure_rate"] >= 0.2:
+        reasons.append("failure_rate_high")
+    for key, values, threshold in (
+        ("latency", latency_values, 0.35),
+        ("ttft", ttft_values, 0.50),
+        ("tokens_per_second", tokens_per_second_values, 0.35),
+    ):
+        coefficient = _coefficient_of_variation(values)
+        if coefficient is not None and coefficient > threshold:
+            reasons.append("%s_variance_high" % key)
+    if stats.get("capability_pass_rate_variance") is not None and stats["capability_pass_rate_variance"] > 0.20:
+        reasons.append("capability_pass_rate_variance_high")
+    return reasons
+
+
+def _weighted_average(summaries: List[Dict[str, Any]], value_key: str, weight_key: str) -> Optional[float]:
+    total = 0.0
+    weight_total = 0.0
+    for item in summaries:
+        value = item.get(value_key)
+        weight = item.get(weight_key)
+        if isinstance(value, (int, float)) and isinstance(weight, int) and weight > 0:
+            total += float(value) * float(weight)
+            weight_total += float(weight)
+    return None if weight_total == 0 else round(total / weight_total, 6)
+
+
+def _median_of_summaries(summaries: List[Dict[str, Any]], key: str) -> Optional[float]:
+    return _percentile([float(item[key]) for item in summaries if isinstance(item.get(key), (int, float))], 0.50)
+
+
+def _max_summary_value(summaries: List[Dict[str, Any]], key: str) -> Optional[float]:
+    values = [float(item[key]) for item in summaries if isinstance(item.get(key), (int, float))]
+    return None if not values else round(max(values), 6)
 
 
 def _check_metadata_from_execution(execution: CapabilityExecution, benchmark_id: str) -> Dict[str, Any]:

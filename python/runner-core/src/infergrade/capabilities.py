@@ -787,9 +787,9 @@ def _write_quant_fidelity_capability_run_artifact(
         "evidence": {
             "lane": "reference",
             "surface": "quant_fidelity",
-            "grade": "reference_sample",
+            "grade": "sampled_reference",
             "experimental": True,
-            "confidence_label": "reference_sample",
+            "confidence_label": "sampled_reference",
         },
         "subject": {
             "model": {
@@ -1177,9 +1177,9 @@ def _write_mmlu_pro_capability_run_artifact(
         "evidence": {
             "lane": "reference",
             "surface": check_metadata.get("surface_id") or "local_reasoning_capability",
-            "grade": "reference_sample",
+            "grade": "sampled_reference",
             "experimental": True,
-            "confidence_label": "reference_sample",
+            "confidence_label": "sampled_reference",
         },
         "subject": {
             "model": {
@@ -1340,9 +1340,9 @@ def _write_evalplus_capability_run_artifact(
         "evidence": {
             "lane": check_metadata.get("evidence_lane_id") or "reference",
             "surface": check_metadata.get("surface_id") or "local_coding_capability",
-            "grade": "reference_sample",
+            "grade": "sampled_reference",
             "experimental": True,
-            "confidence_label": "reference_sample",
+            "confidence_label": "sampled_reference",
         },
         "subject": {
             "model": {

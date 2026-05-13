@@ -332,7 +332,7 @@ class RunnerTests(unittest.TestCase):
             artifact = json.load(handle)
         self.assertEqual(artifact["evidence"]["surface"], "quant_fidelity")
         self.assertEqual(artifact["evidence"]["lane"], "reference")
-        self.assertEqual(artifact["evidence"]["confidence_label"], "reference_sample")
+        self.assertEqual(artifact["evidence"]["confidence_label"], "sampled_reference")
         self.assertTrue(artifact["evidence"]["experimental"])
         self.assertEqual(artifact["summary"]["score"], 3.25)
         self.assertEqual(artifact["summary"]["metrics"]["bits_per_byte"], 1.44)
@@ -357,7 +357,7 @@ class RunnerTests(unittest.TestCase):
         quant = by_surface["quant_fidelity"]
         self.assertEqual(quant["state"], "scored")
         self.assertEqual(quant["lane"], "reference")
-        self.assertEqual(quant["confidence_label"], "reference_sample")
+        self.assertEqual(quant["confidence_label"], "sampled_reference")
         self.assertEqual(quant["capability_artifacts"][0]["benchmark_id"], "perplexity_reference_v1")
         with open(os.path.join(output_dir, "results", "interactive_chat_v1.json"), "r", encoding="utf-8") as handle:
             result_record = json.load(handle)

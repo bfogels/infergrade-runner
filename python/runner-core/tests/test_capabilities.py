@@ -718,7 +718,7 @@ class CapabilityTests(unittest.TestCase):
             artifact = json.load(handle)
         self.assertEqual(artifact["evidence"]["lane"], "reference")
         self.assertEqual(artifact["evidence"]["surface"], "local_coding_capability")
-        self.assertEqual(artifact["evidence"]["confidence_label"], "reference_sample")
+        self.assertEqual(artifact["evidence"]["confidence_label"], "sampled_reference")
         self.assertEqual(artifact["protocol"]["dataset_revision"], "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e")
         self.assertEqual(artifact["protocol"]["sample_policy"], "humaneval_first_2_from_evalplus_revision")
         self.assertEqual(artifact["protocol"]["scorer_type"], "unit_test")
@@ -737,7 +737,7 @@ class CapabilityTests(unittest.TestCase):
         coding = next(item for item in summary["surfaces"] if item["surface"] == "local_coding_capability")
         self.assertEqual(coding["state"], "scored")
         self.assertEqual(coding["lane"], "reference")
-        self.assertEqual(coding["confidence_label"], "reference_sample")
+        self.assertEqual(coding["confidence_label"], "sampled_reference")
 
     def test_execute_evalplus_mbpp_emits_valid_reference_capability_run_artifact(self):
         def fake_prepare(spec, benchmark_dir, tier):
@@ -816,7 +816,7 @@ class CapabilityTests(unittest.TestCase):
             artifact = json.load(handle)
         self.assertEqual(artifact["evidence"]["lane"], "reference")
         self.assertEqual(artifact["evidence"]["surface"], "local_coding_capability")
-        self.assertEqual(artifact["evidence"]["confidence_label"], "reference_sample")
+        self.assertEqual(artifact["evidence"]["confidence_label"], "sampled_reference")
         self.assertEqual(artifact["protocol"]["dataset"], "mbpp")
         self.assertEqual(artifact["protocol"]["dataset_revision"], "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e")
         self.assertEqual(artifact["protocol"]["sample_policy"], "mbpp_first_2_from_evalplus_revision")
@@ -994,7 +994,7 @@ class CapabilityTests(unittest.TestCase):
         with open(capability_run_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)
         self.assertEqual(artifact["evidence"]["lane"], "reference")
-        self.assertEqual(artifact["evidence"]["confidence_label"], "reference_sample")
+        self.assertEqual(artifact["evidence"]["confidence_label"], "sampled_reference")
         self.assertEqual(artifact["evidence"]["surface"], "local_reasoning_capability")
         self.assertEqual(artifact["protocol"]["dataset_revision"], "54611cde22c74cca43dd78732198de6abe971398")
         self.assertEqual(artifact["protocol"]["scorer_type"], "multiple_choice")
@@ -1010,7 +1010,7 @@ class CapabilityTests(unittest.TestCase):
         reasoning = next(item for item in summary["surfaces"] if item["surface"] == "local_reasoning_capability")
         self.assertEqual(reasoning["state"], "scored")
         self.assertEqual(reasoning["lane"], "reference")
-        self.assertEqual(reasoning["confidence_label"], "reference_sample")
+        self.assertEqual(reasoning["confidence_label"], "sampled_reference")
 
     def test_mmlu_pro_artifact_distinguishes_wrong_malformed_and_generation_failed_tasks(self):
         def fake_prepare(spec, benchmark_dir, tier):

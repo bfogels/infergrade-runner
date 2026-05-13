@@ -60,14 +60,14 @@ Confidence labels describe evidence weight, not prestige:
 
 - `single_smoke`
 - `thin_local_sample`
-- `repeated_local_run`
+- `repeated_local_sample`
+- `sampled_reference`
 - `stronger_local_sample`
-- `reference_sample`
 - `gold`
 
 Runner must not automatically promote evidence into a stronger confidence label just because a score is high. Promotion requires the corresponding protocol controls, sample size, repetition, and validation gates.
 
-For local decision-lane summaries, `thin_local_sample` remains the default confidence label. Repeating the same local lane may support `repeated_local_run`, but it still does not make the evidence a reference sample, gold evidence, or public leaderboard claim.
+For local decision-lane summaries, `thin_local_sample` remains the default confidence label. Repeating the same local lane may support `repeated_local_sample`, but it still does not make the evidence a reference sample, gold evidence, or public leaderboard claim.
 
 ## Benchmark Maturity
 

@@ -39,7 +39,7 @@
       }
     },
     "runtime": {
-      "backend_image": "infergrade-llama-cpp:0.3.0",
+      "backend_image": "infergrade-llama-cpp:0.3.2",
       "artifact_cache_dir": "~/.cache/infergrade/artifacts"
     },
     "ontology_hints": {
