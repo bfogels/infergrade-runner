@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infergrade.dev/schemas/capability_run.schema.json",
+  "title": "InferGrade Capability Run Artifact",
+  "type": "object",
+  "required": [
+    "artifact_spec_version",
+    "artifact_kind",
+    "capability_run_id",
+    "created_at",
+    "runner",
+    "evidence",
+    "subject",
+    "protocol",
+    "summary",
+    "tasks",
+    "artifacts",
+    "claim_boundary"
+  ],
+  "properties": {
+    "artifact_spec_version": { "type": "string", "minLength": 1 },
+    "artifact_kind": { "const": "capability_run" },
+    "capability_run_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "runner": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "contract_version": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["lane", "surface", "grade", "experimental", "confidence_label"],
+      "properties": {
+        "lane": { "enum": ["smoke", "decision", "reference", "gold"] },
+        "surface": {
+          "enum": [
+            "local_assistant_capability",
+            "local_coding_capability",
+            "local_reasoning_capability",
+            "quant_fidelity",
+            "deployment_fitness"
+          ]
+        },
+        "grade": { "type": "string", "minLength": 1 },
+        "experimental": { "type": "boolean" },
+        "confidence_label": {
+          "enum": [
+            "single_smoke",
+            "thin_local_sample",
+            "repeated_local_sample",
+            "sampled_reference",
+            "stronger_local_sample",
+            "gold",
+            "repeated_local_run",
+            "reference_sample"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "subject": {
+      "type": "object",
+      "required": ["model", "runtime", "hardware"],
+      "properties": {
+        "model": { "type": "object", "additionalProperties": true },
+        "runtime": {
+          "type": "object",
+          "properties": {
+            "runtime_selector": { "$ref": "runtime_selector.schema.json" }
+          },
+          "additionalProperties": true
+        },
+        "hardware": { "type": "object", "additionalProperties": true },
+        "generation_preset": { "type": ["object", "null"], "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "protocol": {
+      "type": "object",
+      "required": ["task_family", "fixture_revision", "scorer_type", "scoring_policy", "repetitions"],
+      "properties": {
+        "task_family": { "type": "string", "minLength": 1 },
+        "prompt_version": { "type": ["string", "null"] },
+        "task_version": { "type": ["string", "null"] },
+        "fixture_revision": { "type": "string", "minLength": 1 },
+        "dataset_revision": { "type": ["string", "null"] },
+        "scorer_type": {
+          "enum": ["exact_match", "regex", "json_schema", "unit_test", "static_check", "multiple_choice", "perplexity", "metric_only", "manual_review"]
+        },
+        "scoring_policy": { "type": "string", "minLength": 1 },
+        "repetitions": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "summary": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["scored", "partial", "failed", "skipped", "not_yet_benchmarked", "not_comparable"] },
+        "score": { "type": ["number", "null"] },
+        "score_dimension": { "type": ["string", "null"] },
+        "passed_count": { "type": ["integer", "null"], "minimum": 0 },
+        "failed_count": { "type": ["integer", "null"], "minimum": 0 },
+        "partial_count": { "type": ["integer", "null"], "minimum": 0 },
+        "skipped_count": { "type": ["integer", "null"], "minimum": 0 },
+        "not_comparable_count": { "type": ["integer", "null"], "minimum": 0 },
+        "duration_seconds": { "type": ["number", "null"], "minimum": 0 },
+        "time_to_first_token_ms": { "type": ["number", "null"], "minimum": 0 },
+        "tokens_per_second": { "type": ["number", "null"], "minimum": 0 },
+        "repeatability": { "$ref": "#/$defs/repeatability_summary" },
+        "input_tokens": { "type": ["integer", "null"], "minimum": 0 },
+        "output_tokens": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "const": "scored" } }, "required": ["state"] },
+          "then": { "required": ["score"], "properties": { "score": { "type": "number" } } }
+        },
+        {
+          "if": { "properties": { "state": { "enum": ["failed", "skipped", "not_yet_benchmarked", "not_comparable"] } }, "required": ["state"] },
+          "then": { "properties": { "score": { "const": null } } }
+        }
+      ]
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["task_id", "task_family", "state", "output_artifact"],
+        "properties": {
+          "task_id": { "type": "string", "minLength": 1 },
+          "task_family": { "type": "string", "minLength": 1 },
+          "state": { "enum": ["scored", "partial", "failed", "skipped", "not_yet_benchmarked", "not_comparable"] },
+          "score": { "type": ["number", "null"] },
+          "score_dimension": { "type": ["string", "null"] },
+          "scorer_type": { "type": ["string", "null"] },
+          "scoring_policy": { "type": ["string", "null"] },
+          "output_artifact": { "type": ["string", "null"] },
+          "error_class": { "type": ["string", "null"] },
+          "latency_ms": { "type": ["number", "null"], "minimum": 0 },
+          "time_to_first_token_ms": { "type": ["number", "null"], "minimum": 0 },
+          "tokens_per_second": { "type": ["number", "null"], "minimum": 0 },
+          "input_tokens": { "type": ["integer", "null"], "minimum": 0 },
+          "output_tokens": { "type": ["integer", "null"], "minimum": 0 }
+        },
+        "additionalProperties": true,
+        "allOf": [
+          {
+            "if": { "properties": { "state": { "const": "scored" } }, "required": ["state"] },
+            "then": {
+              "required": ["score", "scorer_type", "scoring_policy"],
+              "properties": {
+                "score": { "type": "number" },
+                "scorer_type": { "type": "string", "minLength": 1 },
+                "scoring_policy": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "state": { "const": "failed" } }, "required": ["state"] },
+            "then": {
+              "required": ["error_class"],
+              "properties": {
+                "score": { "const": null },
+                "error_class": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "state": { "enum": ["skipped", "not_yet_benchmarked", "not_comparable"] } }, "required": ["state"] },
+            "then": { "properties": { "score": { "const": null } } }
+          }
+        ]
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "required": ["manifest", "raw_outputs", "scoring_outputs"],
+      "properties": {
+        "manifest": { "type": "string", "minLength": 1 },
+        "raw_outputs": { "type": "array", "items": { "type": "string" } },
+        "scoring_outputs": { "type": "array", "items": { "type": "string" } },
+        "supporting_files": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "claim_boundary": {
+      "type": "object",
+      "required": ["supported_claims", "unsupported_claims"],
+      "properties": {
+        "supported_claims": { "type": "array", "items": { "type": "string" } },
+        "unsupported_claims": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "repeatability_summary": {
+      "type": "object",
+      "properties": {
+        "sample_count": { "type": "integer", "minimum": 1 },
+        "repetition_count": { "type": "integer", "minimum": 1 },
+        "failure_rate": { "type": ["number", "null"], "minimum": 0 },
+        "latency_median_ms": { "type": ["number", "null"], "minimum": 0 },
+        "latency_p95_ms": { "type": ["number", "null"], "minimum": 0 },
+        "latency_variance": { "type": ["number", "null"], "minimum": 0 },
+        "ttft_median_ms": { "type": ["number", "null"], "minimum": 0 },
+        "ttft_p95_ms": { "type": ["number", "null"], "minimum": 0 },
+        "ttft_variance": { "type": ["number", "null"], "minimum": 0 },
+        "tokens_per_second_median": { "type": ["number", "null"], "minimum": 0 },
+        "tokens_per_second_p95": { "type": ["number", "null"], "minimum": 0 },
+        "tokens_per_second_variance": { "type": ["number", "null"], "minimum": 0 },
+        "capability_pass_rate_median": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "capability_pass_rate_variance": { "type": ["number", "null"], "minimum": 0 },
+        "score_variance": { "type": ["number", "null"], "minimum": 0 },
+        "unstable": { "type": "boolean" },
+        "instability_reasons": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

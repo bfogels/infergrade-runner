@@ -1,0 +1,220 @@
+{
+  "artifacts": [
+    {
+      "kind": "contract_file",
+      "path": "contract/contract_manifest.json",
+      "sha256": "40057d1e462465a2100bb6fa38ff6617284d87ed2d2b0334424cf714859734e7",
+      "size_bytes": 1386
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/docs/contract_ownership.md",
+      "sha256": "905101ef768c547c5aa9ef3ba2df47f1d184c231f9c6b4cd604352d5634d5e31",
+      "size_bytes": 2847
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/docs/coverage_expansion_v0_3_5.md",
+      "sha256": "f7279f1a0fb6a993a66b2dfe06842ff9f481fa627fb8c3d974bae1cf8eca1c70",
+      "size_bytes": 2192
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/docs/input_output_spec.md",
+      "sha256": "17d5564235c1e7a1c88ab49127bcbc180180f4f993f4eee7a6bef75786a2138d",
+      "size_bytes": 14717
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/docs/local_benchmark_methodology.md",
+      "sha256": "4abf76cd6fbf3be83c10d8e859cb26733a4124f92c0bfb74c580a1117420db48",
+      "size_bytes": 6957
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/docs/schema_draft.md",
+      "sha256": "913d392a421de8c21c805ed83799bba913d6ab813167571d59df425446ba5a39",
+      "size_bytes": 7314
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/docs/windows_nvidia_cuda_beta.md",
+      "sha256": "e7e9a21566d8631ff5ead7c1c04b478eb3f8bd642a50b52dc223798f982e807f",
+      "size_bytes": 3268
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/capability_catalog.json",
+      "sha256": "58f1e137c8a35b28d7f7af63334e6b5c1f134f654aa3502ddff31c400a932362",
+      "size_bytes": 61677
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/examples/model_ontology.qwen2.5-7b-instruct.gguf.json",
+      "sha256": "94c365914bb040d2db48d3bdd6d4b33102cba6e26425c4bf578e2c13bc5e349c",
+      "size_bytes": 1858
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/examples/run_config.llama_cpp.qwen2.5-7b.json",
+      "sha256": "1ced76cae87dd1f447f796e59611a6c4f49a9696ff28aeb191e95b1259b145de",
+      "size_bytes": 2178
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/examples/run_config.tinyllama_preview_demo.json",
+      "sha256": "66278f76ca519f4c70cfeec1a0f7fe0e89ce706836f8cc30703cb03b3c7058d0",
+      "size_bytes": 1741
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/examples/run_request.canary.yaml",
+      "sha256": "7a4858ad6bb1a667449bec139e601736e819a0131dbd5163be013a9550eb4ba1",
+      "size_bytes": 316
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/examples/run_request.standard.yaml",
+      "sha256": "b0a7d5705ff0ad445ecb664ffc34c5406469d9fd229ece0df27be4df31741d8e",
+      "size_bytes": 737
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/examples/runtime_selector.macos_metal_managed.json",
+      "sha256": "f01d541cb3407b726a3cb8738b398f5c436558bc3b0415f80a634f6baf583f12",
+      "size_bytes": 1175
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/examples/runtime_selector.windows_cuda_preview.json",
+      "sha256": "811df5b7990d50bee38ae8296324b680eb3a7e36f422842e9efa526b6558aa09",
+      "size_bytes": 1495
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/json/capability_run.schema.json",
+      "sha256": "3979e6a203530cca49484f04a53546640fa267411d1a03a8e2a4adf34e8e7d87",
+      "size_bytes": 9628
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/json/capability_summary.schema.json",
+      "sha256": "63b9b134137521f4cb95894181980a0af293f4808ed62d37b446b59c13c58a65",
+      "size_bytes": 6919
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/json/manifest.schema.json",
+      "sha256": "8508265400205ae2c1345860747a577bf266116ce5bd381b6af6a7348c396694",
+      "size_bytes": 1637
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/json/model_ontology.schema.json",
+      "sha256": "506075f1ee99b986ec56fc6dd7354fad5deaf14dc5cea46bf2fc24a075827af1",
+      "size_bytes": 4356
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/json/result_record.schema.json",
+      "sha256": "0d8d3112b08ebebf57af9ebb3741ec3855a80632b7ca081eda32bcbdd5181471",
+      "size_bytes": 5615
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/json/run_config.schema.json",
+      "sha256": "29d0c5d27e2687e0e2c36fe34d30667d6506e289e4426bc1a3878cdebd770604",
+      "size_bytes": 776
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/json/run_request.schema.json",
+      "sha256": "a0e720916b5c3425b2ad4fa9e8ebfaf1c3ffb8f4a113bd28c32cc646494f7887",
+      "size_bytes": 4827
+    },
+    {
+      "kind": "contract_file",
+      "path": "contract/schemas/json/runtime_selector.schema.json",
+      "sha256": "a7590f4d6df0702daad7b04de0fbf2de2281fe4bd4fc2d2987cefba57551024b",
+      "size_bytes": 4376
+    }
+  ],
+  "capability_images": [
+    {
+      "archive_path": null,
+      "archive_sha256": null,
+      "benchmark_id": "ifeval",
+      "image_name": "infergrade-ifeval",
+      "image_ref": "infergrade-ifeval:0.3.5",
+      "role": "capability_runtime"
+    },
+    {
+      "archive_path": null,
+      "archive_sha256": null,
+      "benchmark_id": "evalplus",
+      "image_name": "infergrade-evalplus",
+      "image_ref": "infergrade-evalplus:0.3.5",
+      "role": "capability_runtime"
+    },
+    {
+      "archive_path": null,
+      "archive_sha256": null,
+      "benchmark_id": "mmlu_pro",
+      "image_name": "infergrade-mmlu-pro",
+      "image_ref": "infergrade-mmlu-pro:0.3.5",
+      "role": "capability_runtime"
+    }
+  ],
+  "contract_bundle": {
+    "manifest_path": "contract/contract_manifest.json",
+    "manifest_sha256": "40057d1e462465a2100bb6fa38ff6617284d87ed2d2b0334424cf714859734e7",
+    "path": "contract"
+  },
+  "contract_version": "0.3.5",
+  "development_defaults": {
+    "local_backend_images": {
+      "llama.cpp": "infergrade-llama-cpp:local"
+    },
+    "local_runner_image": "infergrade-runner-core:local",
+    "mode_label": "development_snapshot"
+  },
+  "golden_paths": {
+    "apple_silicon_local_native": {
+      "execution_mode": "local_native",
+      "notes": "Explicit native deviation for Metal-backed Apple Silicon benchmarking.",
+      "requires_repo_checkout": false,
+      "runner_package_version": "0.3.5",
+      "supported": true
+    },
+    "local_listener_container": {
+      "execution_mode": "local_container",
+      "image_archive_path": null,
+      "notes": "Recommended setup path for paired local execution.",
+      "requires_repo_checkout": false,
+      "runner_image": "infergrade-runner-core:0.3.5",
+      "supported": true
+    }
+  },
+  "publisher": "infergrade-runner",
+  "release_channel": "stable",
+  "release_manifest_version": "0.1",
+  "release_version": "0.3.5",
+  "runner_version": "0.3.5",
+  "runtime_images": [
+    {
+      "archive_path": null,
+      "archive_sha256": null,
+      "image_name": "infergrade-runner-core",
+      "image_ref": "infergrade-runner-core:0.3.5",
+      "role": "runner_listener"
+    },
+    {
+      "archive_path": null,
+      "archive_sha256": null,
+      "backend": "llama.cpp",
+      "image_name": "infergrade-llama-cpp",
+      "image_ref": "infergrade-llama-cpp:0.3.5",
+      "role": "deployment_runtime"
+    }
+  ]
+}

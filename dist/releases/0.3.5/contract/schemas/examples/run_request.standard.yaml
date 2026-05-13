@@ -1,0 +1,33 @@
+spec_version: "0.1-draft"
+
+run:
+  model: Qwen/Qwen2.5-7B-Instruct
+  backend: llama.cpp
+  tier: standard
+  use_case: general_assistant
+  deployment_profiles:
+    - interactive_chat_v1
+    - batch_generation_v1
+  execution_mode: local_container
+
+artifacts:
+  quantized_weights:
+    uri: hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
+    filename: Qwen2.5-7B-Instruct-Q4_K_M.gguf
+
+runtime:
+  backend_image: infergrade-llama-cpp:0.3.5
+
+overrides:
+  generation_preset: deterministic_v1
+
+cost:
+  source: estimated
+
+ontology_hints:
+  family_name: Qwen2.5
+  checkpoint_name: Qwen2.5-7B-Instruct
+  training_stage: instruction_tuned
+  quantization_family: k_quant
+  quantization_scheme: q4_k_m
+  weight_precision_bits: 4
