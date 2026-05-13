@@ -13,7 +13,7 @@ from infergrade.utils import read_json, utcnow_iso, write_json
 def build_support_export(run_dir: Optional[str] = None, execution_mode: Optional[str] = None) -> Dict[str, Any]:
     """Return a compact, secret-free support payload for a local runner session."""
     resolved_run_dir = os.path.abspath(os.path.expanduser(run_dir)) if run_dir else None
-    progress = load_progress(resolved_run_dir) if resolved_run_dir else None
+    progress = _redact_support_payload(load_progress(resolved_run_dir)) if resolved_run_dir else None
     detected_mode = (
         execution_mode
         or (progress or {}).get("request_context", {}).get("execution_mode")
@@ -26,7 +26,7 @@ def build_support_export(run_dir: Optional[str] = None, execution_mode: Optional
         "secrets_excluded": True,
         "runner_profile_path": runner_profile_path(),
         "runner_profile": _sanitized_runner_profile(load_runner_profile()),
-        "environment": capture_environment(detected_mode),
+        "environment": _redact_support_payload(capture_environment(detected_mode)),
         "run_dir": resolved_run_dir,
         "progress": progress,
         "manifest": _read_json_if_present(resolved_run_dir, "manifest.json"),
@@ -52,9 +52,8 @@ def _sanitized_runner_profile(profile: Optional[Dict[str, Any]]) -> Optional[Dic
     sanitized = dict(profile)
     if sanitized.get("access_token"):
         sanitized["access_token_present"] = True
-        sanitized["access_token_prefix"] = str(sanitized["access_token"])[:6]
         sanitized.pop("access_token", None)
-    return sanitized
+    return _redact_support_payload(sanitized)
 
 
 def _read_json_if_present(base_path: Optional[str], *parts: str) -> Optional[Dict[str, Any]]:
@@ -64,7 +63,7 @@ def _read_json_if_present(base_path: Optional[str], *parts: str) -> Optional[Dic
     if not os.path.exists(path):
         return None
     try:
-        return read_json(path)
+        return _redact_support_payload(read_json(path))
     except Exception as exc:
         return {"error": str(exc), "path": path}
 
@@ -84,3 +83,41 @@ def _support_file_presence(run_dir: Optional[str]) -> Dict[str, bool]:
         key: os.path.exists(os.path.join(run_dir, *relative_parts))
         for key, relative_parts in expected.items()
     }
+
+
+_SENSITIVE_KEY_MARKERS = (
+    "access_token",
+    "api_token",
+    "authorization",
+    "bearer",
+    "credential",
+    "hf_token",
+    "huggingface_token",
+    "pair_code",
+    "pairing_code",
+    "password",
+    "secret",
+    "signed_url",
+    "token",
+)
+
+
+def _redact_support_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted: Dict[str, Any] = {}
+        for key, item in value.items():
+            if _support_key_is_sensitive(str(key)):
+                redacted[key] = "[redacted]"
+            else:
+                redacted[key] = _redact_support_payload(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_support_payload(item) for item in value]
+    return value
+
+
+def _support_key_is_sensitive(key: str) -> bool:
+    normalized = key.lower().replace("-", "_")
+    if normalized.endswith("_present"):
+        return False
+    return any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS)
