@@ -1,0 +1,38 @@
+{
+  "bundle_root": ".",
+  "catalog_files": [
+    "schemas/capability_catalog.json"
+  ],
+  "contract_version": "0.3.5",
+  "example_files": [
+    "schemas/examples/model_ontology.qwen2.5-7b-instruct.gguf.json",
+    "schemas/examples/runtime_selector.macos_metal_managed.json",
+    "schemas/examples/runtime_selector.windows_cuda_preview.json",
+    "schemas/examples/run_config.tinyllama_preview_demo.json",
+    "schemas/examples/run_config.llama_cpp.qwen2.5-7b.json",
+    "schemas/examples/run_request.canary.yaml",
+    "schemas/examples/run_request.standard.yaml"
+  ],
+  "export_format": "contract_bundle_v1",
+  "exported_by": "infergrade-runner",
+  "ontology_source": "schemas/json/model_ontology.schema.json",
+  "publisher": "infergrade-runner",
+  "schema_files": [
+    "schemas/json/capability_run.schema.json",
+    "schemas/json/capability_summary.schema.json",
+    "schemas/json/manifest.schema.json",
+    "schemas/json/model_ontology.schema.json",
+    "schemas/json/result_record.schema.json",
+    "schemas/json/run_config.schema.json",
+    "schemas/json/run_request.schema.json",
+    "schemas/json/runtime_selector.schema.json"
+  ],
+  "supporting_docs": [
+    "docs/contract_ownership.md",
+    "docs/input_output_spec.md",
+    "docs/local_benchmark_methodology.md",
+    "docs/schema_draft.md",
+    "docs/windows_nvidia_cuda_beta.md",
+    "docs/coverage_expansion_v0_3_5.md"
+  ]
+}

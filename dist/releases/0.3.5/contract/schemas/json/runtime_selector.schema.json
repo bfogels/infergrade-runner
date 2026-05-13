@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infergrade.dev/schemas/runtime_selector.schema.json",
+  "title": "InferGrade Runtime Selector",
+  "type": "object",
+  "required": [
+    "runtime_selector_version",
+    "runtime_family",
+    "platform",
+    "accelerator",
+    "delivery",
+    "compatibility",
+    "support",
+    "fallback"
+  ],
+  "properties": {
+    "runtime_selector_version": { "const": "0.3" },
+    "runtime_family": { "type": "string", "minLength": 1 },
+    "platform": {
+      "type": "object",
+      "required": ["system", "arch"],
+      "properties": {
+        "system": { "enum": ["macos", "windows", "linux", "unknown"] },
+        "arch": { "type": "string", "minLength": 1 },
+        "version": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "accelerator": {
+      "type": "object",
+      "required": ["vendor", "api"],
+      "properties": {
+        "vendor": { "enum": ["apple", "nvidia", "amd", "intel", "cpu", "unknown"] },
+        "api": { "enum": ["metal", "cuda", "rocm", "vulkan", "cpu", "unknown"] },
+        "model": { "type": ["string", "null"] },
+        "vram_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "compute_capability": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "delivery": {
+      "type": "object",
+      "required": ["mode", "binary_set", "source", "selected_by"],
+      "properties": {
+        "mode": { "enum": ["managed_download", "user_selected", "system_path", "container", "bundled"] },
+        "binary_set": { "type": "string", "minLength": 1 },
+        "source": {
+          "enum": [
+            "infergrade_runtime_manifest",
+            "explicit_path",
+            "path_lookup",
+            "container_image",
+            "desktop_bundle",
+            "run_config",
+            "environment"
+          ]
+        },
+        "selected_by": {
+          "enum": [
+            "managed_recommendation",
+            "user_choice",
+            "run_config",
+            "environment",
+            "container_runtime"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "binary": {
+      "type": "object",
+      "properties": {
+        "path": { "type": ["string", "null"] },
+        "version_output": { "type": ["string", "null"] },
+        "checksum_verified": { "type": "boolean" },
+        "signature_verified": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "driver": {
+      "type": "object",
+      "properties": {
+        "version": { "type": ["string", "null"] },
+        "minimum_required": { "type": ["string", "null"] },
+        "cuda_major": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "compatibility": {
+      "type": "object",
+      "required": ["status", "reason_codes", "probes"],
+      "properties": {
+        "status": { "enum": ["ready", "warning", "blocked", "unsupported", "unknown"] },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "probes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "status"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "status": { "enum": ["passed", "warning", "failed", "skipped", "unknown"] },
+              "observed": { "type": ["string", "number", "boolean", "null"] },
+              "detail": { "type": ["string", "null"] }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "support": {
+      "type": "object",
+      "required": ["tier", "claim_boundary"],
+      "properties": {
+        "tier": { "enum": ["reference", "technical_beta", "best_effort", "preview", "unsupported"] },
+        "claim_boundary": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "fallback": {
+      "type": "object",
+      "required": ["allowed"],
+      "properties": {
+        "allowed": { "type": "boolean" },
+        "mode": { "type": ["string", "null"] },
+        "reason": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

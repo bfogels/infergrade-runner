@@ -1,0 +1,58 @@
+{
+  "runtime_selector_version": "0.3",
+  "runtime_family": "llama.cpp",
+  "platform": {
+    "system": "windows",
+    "arch": "x86_64",
+    "version": "11"
+  },
+  "accelerator": {
+    "vendor": "nvidia",
+    "api": "cuda",
+    "model": "NVIDIA RTX 4090",
+    "vram_bytes": 25757220864,
+    "compute_capability": "8.9"
+  },
+  "delivery": {
+    "mode": "user_selected",
+    "binary_set": "llama_cpp_windows_cuda_x86_64",
+    "source": "run_config",
+    "selected_by": "run_config"
+  },
+  "binary": {
+    "path": null,
+    "version_output": null,
+    "checksum_verified": false,
+    "signature_verified": false
+  },
+  "driver": {
+    "version": "555.85",
+    "minimum_required": "525.0",
+    "cuda_major": "12"
+  },
+  "compatibility": {
+    "status": "blocked",
+    "reason_codes": ["fallback_not_allowed", "full_loop_not_proven", "runtime_binary_missing"],
+    "probes": [
+      {
+        "id": "nvidia_smi",
+        "status": "passed",
+        "observed": "driver 555.85"
+      },
+      {
+        "id": "full_loop_beta_gate",
+        "status": "failed",
+        "detail": "Windows/NVIDIA remains blocked until hardware proves one full Hub to Runner to upload loop."
+      }
+    ]
+  },
+  "support": {
+    "tier": "preview",
+    "claim_boundary": "Windows/NVIDIA CUDA path detected for preflight only; evidence-producing technical beta requires full-loop proof."
+  },
+  "fallback": {
+    "allowed": false,
+    "mode": null,
+    "reason": "CUDA requests must not silently upload CPU evidence."
+  }
+}

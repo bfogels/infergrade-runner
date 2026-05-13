@@ -1,0 +1,74 @@
+{
+  "run_config_spec_version": "0.1-draft",
+  "run_config_id": "rcfg_qwen25_llamacpp_canary_example",
+  "name": "Qwen2.5 7B llama.cpp canary",
+  "description": "Self-contained example run config with pinned artifact location and runtime image.",
+  "created_at": "2026-03-24T00:00:00Z",
+  "created_by": "infergrade",
+  "tags": [
+    "example",
+    "llama.cpp",
+    "canary"
+  ],
+  "request": {
+    "spec_version": "0.1-draft",
+    "run": {
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "backend": "llama.cpp",
+      "tier": "canary"
+    },
+    "artifacts": {
+      "quantized_weights": {
+        "uri": "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+        "filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
+      }
+    },
+    "runtime": {
+      "backend_image": "infergrade-llama-cpp:0.3.5",
+      "runtime_selector": {
+        "runtime_selector_version": "0.3",
+        "runtime_family": "llama.cpp",
+        "platform": {
+          "system": "macos",
+          "arch": "aarch64",
+          "version": null
+        },
+        "accelerator": {
+          "vendor": "apple",
+          "api": "metal",
+          "model": null,
+          "vram_bytes": null,
+          "compute_capability": null
+        },
+        "delivery": {
+          "mode": "container",
+          "binary_set": "infergrade_llama_cpp_container",
+          "source": "container_image",
+          "selected_by": "run_config"
+        },
+        "compatibility": {
+          "status": "unknown",
+          "reason_codes": [],
+          "probes": []
+        },
+        "support": {
+          "tier": "best_effort",
+          "claim_boundary": "Container runtime path records image provenance but does not prove host accelerator behavior."
+        },
+        "fallback": {
+          "allowed": false,
+          "mode": null,
+          "reason": "Run config selected a concrete runtime path."
+        }
+      }
+    },
+    "ontology_hints": {
+      "family_name": "Qwen2.5",
+      "checkpoint_name": "Qwen2.5-7B-Instruct",
+      "training_stage": "instruction_tuned",
+      "quantization_family": "k_quant",
+      "quantization_scheme": "q4_k_m",
+      "weight_precision_bits": 4
+    }
+  }
+}
