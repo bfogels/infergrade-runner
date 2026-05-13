@@ -21,6 +21,7 @@ class RunRequest:
     llama_cpp_cli_path: Optional[str] = None
     llama_cpp_server_path: Optional[str] = None
     llama_cpp_perplexity_path: Optional[str] = None
+    runtime_selector: Dict[str, Any] = field(default_factory=dict)
     ontology_hints: Dict[str, Any] = field(default_factory=dict)
     use_case: Optional[str] = None
     deployment_profiles: List[str] = field(default_factory=list)

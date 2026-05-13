@@ -33,6 +33,19 @@ class ContractExportTests(unittest.TestCase):
             for relative_path in exported_manifest["supporting_docs"]:
                 self.assertTrue((bundle_dir / relative_path).exists(), relative_path)
 
+    def test_contract_bundle_declares_runtime_selector_schema_and_examples(self):
+        manifest = load_contract_manifest()
+        self.assertIn("schemas/json/runtime_selector.schema.json", manifest["schema_files"])
+        self.assertIn("schemas/examples/runtime_selector.macos_metal_managed.json", manifest["example_files"])
+        self.assertIn("schemas/examples/runtime_selector.windows_cuda_preview.json", manifest["example_files"])
+
+        selector_schema = json.loads(
+            (repo_root() / "schemas" / "json" / "runtime_selector.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual("0.3", selector_schema["properties"]["runtime_selector_version"]["const"])
+        self.assertIn("cuda", selector_schema["properties"]["accelerator"]["properties"]["api"]["enum"])
+        self.assertIn("technical_beta", selector_schema["properties"]["support"]["properties"]["tier"]["enum"])
+
     def test_repo_root_points_at_runner_repo(self):
         self.assertTrue((repo_root() / "schemas" / "contract_manifest.json").exists())
 

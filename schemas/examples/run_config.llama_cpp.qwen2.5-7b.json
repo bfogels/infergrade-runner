@@ -24,7 +24,43 @@
       }
     },
     "runtime": {
-      "backend_image": "infergrade-llama-cpp:0.1.6-preview"
+      "backend_image": "infergrade-llama-cpp:0.2.21-preview",
+      "runtime_selector": {
+        "runtime_selector_version": "0.3",
+        "runtime_family": "llama.cpp",
+        "platform": {
+          "system": "macos",
+          "arch": "aarch64",
+          "version": null
+        },
+        "accelerator": {
+          "vendor": "apple",
+          "api": "metal",
+          "model": null,
+          "vram_bytes": null,
+          "compute_capability": null
+        },
+        "delivery": {
+          "mode": "container",
+          "binary_set": "infergrade_llama_cpp_container",
+          "source": "container_image",
+          "selected_by": "run_config"
+        },
+        "compatibility": {
+          "status": "unknown",
+          "reason_codes": [],
+          "probes": []
+        },
+        "support": {
+          "tier": "best_effort",
+          "claim_boundary": "Container runtime path records image provenance but does not prove host accelerator behavior."
+        },
+        "fallback": {
+          "allowed": false,
+          "mode": null,
+          "reason": "Run config selected a concrete runtime path."
+        }
+      }
     },
     "ontology_hints": {
       "family_name": "Qwen2.5",

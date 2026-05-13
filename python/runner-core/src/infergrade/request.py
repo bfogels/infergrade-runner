@@ -63,6 +63,14 @@ def sanitize_hub_supplied_payload(data: Any) -> Any:
                 raise ValueError(
                     "Hub-supplied backend_image %r is not a valid image reference." % image
                 )
+        selector = runtime.get("runtime_selector")
+        if isinstance(selector, dict):
+            binary = selector.get("binary")
+            if isinstance(binary, dict) and binary.get("path"):
+                raise ValueError(
+                    "Hub-supplied run config must not set runtime.runtime_selector.binary.path; "
+                    "native binary paths are operator-owned."
+                )
     return sanitized
 
 
@@ -94,6 +102,7 @@ def request_from_cli(args: argparse.Namespace) -> RunRequest:
         llama_cpp_cli_path=getattr(args, "llama_cpp_cli_path", None),
         llama_cpp_server_path=getattr(args, "llama_cpp_server_path", None),
         llama_cpp_perplexity_path=getattr(args, "llama_cpp_perplexity_path", None),
+        runtime_selector={},
         ontology_hints={},
         use_case=args.use_case,
         deployment_profiles=list(args.deployment_profiles or []),
@@ -174,6 +183,7 @@ def request_from_dict(data: Dict[str, Any], simulate: bool = True, run_config_so
         llama_cpp_cli_path=runtime.get("llama_cpp_cli_path") or runtime.get("llama_cpp_cli"),
         llama_cpp_server_path=runtime.get("llama_cpp_server_path") or runtime.get("llama_cpp_server"),
         llama_cpp_perplexity_path=runtime.get("llama_cpp_perplexity_path") or runtime.get("llama_cpp_perplexity"),
+        runtime_selector=dict(runtime.get("runtime_selector") or {}),
         ontology_hints=dict(ontology_hints or {}),
         use_case=run.get("use_case"),
         deployment_profiles=list(run.get("deployment_profiles", [])),
@@ -216,6 +226,7 @@ def request_to_dict(request: RunRequest) -> Dict[str, Any]:
         "llama_cpp_cli_path": request.llama_cpp_cli_path,
         "llama_cpp_server_path": request.llama_cpp_server_path,
         "llama_cpp_perplexity_path": request.llama_cpp_perplexity_path,
+        "runtime_selector": request.runtime_selector,
         "quant_artifact_cache_dir": request.quant_artifact_cache_dir,
         "ontology_hints": request.ontology_hints,
         "use_case": request.use_case,
