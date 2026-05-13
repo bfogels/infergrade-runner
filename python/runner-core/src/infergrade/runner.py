@@ -1,5 +1,6 @@
 """Bundle orchestration for InferGrade runner executions."""
 
+from copy import deepcopy
 import os
 from typing import Any, Callable, Dict, List, Optional
 
@@ -7,6 +8,7 @@ from infergrade import __version__
 from infergrade.adapters import get_adapter
 from infergrade.artifacts import resolve_quant_artifact
 from infergrade.benchmark_catalog import normalize_request_selection, selection_metadata_for_request
+from infergrade.cuda import WINDOWS_CUDA_BINARY_SET, windows_cuda_preflight
 from infergrade.environment import capture_environment
 from infergrade.capabilities import attach_quant_fidelity_capability_artifact, summarize_capability_execution
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
@@ -126,6 +128,7 @@ def _build_result_record(
     benchmark_job_cost_usd = None
     if request.hourly_rate_usd:
         benchmark_job_cost_usd = round(request.hourly_rate_usd * (execution_runtime / 3600.0), 4)
+    runtime_selector = deepcopy(request.runtime_selector or {})
     record = {
         "spec_version": "0.1-draft",
         "bundle_id": bundle_id,
@@ -216,6 +219,8 @@ def _build_result_record(
             "run_config_source": request.run_config_source,
         },
     }
+    if runtime_selector:
+        record["execution"]["runtime_selector"] = runtime_selector
     record["capability"] = summarize_capability_execution(request, capability, completed_at=completed_at)
     record["fidelity"] = {
         "fidelity_state": fidelity.state,
@@ -257,6 +262,42 @@ def _build_result_record(
         record["derived"]["is_pareto_frontier_member"] = True
         record["derived"]["recommendation_labels"] = ["candidate_frontier_member"]
     return record
+
+
+def _request_selects_cuda_runtime(request: RunRequest) -> bool:
+    selector = request.runtime_selector or {}
+    accelerator = selector.get("accelerator") if isinstance(selector, dict) else {}
+    delivery = selector.get("delivery") if isinstance(selector, dict) else {}
+    return (
+        isinstance(accelerator, dict)
+        and accelerator.get("api") == "cuda"
+        and accelerator.get("vendor") in (None, "nvidia", "unknown")
+    ) or (
+        isinstance(delivery, dict)
+        and str(delivery.get("binary_set") or "").startswith("llama_cpp_windows_cuda")
+    )
+
+
+def _enforce_runtime_selector_before_execution(request: RunRequest) -> None:
+    """Reject blocked CUDA selectors before any backend can run or upload evidence."""
+    if not _request_selects_cuda_runtime(request):
+        return
+    selector = request.runtime_selector or {}
+    driver = selector.get("driver") if isinstance(selector, dict) else {}
+    delivery = selector.get("delivery") if isinstance(selector, dict) else {}
+    preflight = windows_cuda_preflight(
+        runtime_binary_path=request.llama_cpp_cli_path,
+        cuda_major=str((driver or {}).get("cuda_major") or "12"),
+        selected_binary_set=(delivery or {}).get("binary_set") or WINDOWS_CUDA_BINARY_SET,
+    )
+    request.runtime_selector = preflight["selector"]
+    compatibility = request.runtime_selector["compatibility"]
+    if compatibility.get("status") != "ready":
+        reason_codes = ", ".join(compatibility.get("reason_codes") or ["unknown"])
+        raise ValueError(
+            "CUDA runtime selector is not ready for evidence-producing execution; "
+            "refusing silent fallback. reason_codes=%s" % reason_codes
+        )
 
 
 def _missing_requirements(request: RunRequest, artifact_sha256: Any) -> List[str]:
@@ -361,6 +402,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
     normalize_request_selection(request)
     request.deployment_profiles = resolve_deployment_profiles(request.use_case, request.deployment_profiles)
     request.capability = resolve_capability_behavior(request.tier, request.use_case, request.capability)
+    _enforce_runtime_selector_before_execution(request)
     adapter = get_adapter(request.backend)
     if not request.backend_flags:
         request.backend_flags = adapter.default_backend_flags()

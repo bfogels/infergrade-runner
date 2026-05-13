@@ -46,7 +46,30 @@ def known_llama_cpp_runtimes() -> List[Dict[str, Any]]:
                 "Recommended managed path for Apple Silicon native benchmarking.",
                 "No command is run unless the operator passes --execute.",
             ],
-        }
+        },
+        {
+            "runtime_id": "llama-cpp-windows-cuda-cli-preview-2026-05",
+            "backend": "llama.cpp",
+            "version_label": "Windows CUDA CLI preview",
+            "source": "user_selected",
+            "provenance": "Windows/NVIDIA CUDA remains CLI-only until a pinned, checksummed upstream llama.cpp CUDA artifact is selected and validated.",
+            "platforms": [{"system": "Windows", "machine": "AMD64"}, {"system": "Windows", "machine": "x86_64"}],
+            "install_command": [],
+            "binary_names": {
+                "cli": "llama-cli.exe",
+                "server": "llama-server.exe",
+                "perplexity": "llama-perplexity.exe",
+            },
+            "binary_set": "llama_cpp_windows_cuda_x86_64",
+            "checksum": None,
+            "support_tier": "preview",
+            "notes": [
+                "Technical-beta prep only; not a supported public path.",
+                "No CUDA binary is downloaded by InferGrade until a pinned checksum exists.",
+                "Users must explicitly select an existing CUDA-capable llama.cpp binary for preflight.",
+                "CUDA requests must not silently fall back to CPU evidence.",
+            ],
+        },
     ]
 
 
