@@ -273,13 +273,17 @@ h2 {
   gap: 14px;
 }
 
+.listener-panel {
+  display: grid;
+  gap: 14px;
+}
+
 .setup-panel {
   display: grid;
   gap: 12px;
 }
 
 .listener-box {
-  margin-top: 10px;
   border-top: 1px solid var(--border);
   padding-top: 18px;
 }
