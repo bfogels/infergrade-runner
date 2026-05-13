@@ -18,11 +18,16 @@ CAPABILITY_STATES = ("scored", "partial", "failed", "skipped", "not_yet_benchmar
 CONFIDENCE_LABELS = (
     "single_smoke",
     "thin_local_sample",
-    "repeated_local_run",
+    "repeated_local_sample",
+    "sampled_reference",
     "stronger_local_sample",
-    "reference_sample",
     "gold",
 )
+LEGACY_CONFIDENCE_LABELS = (
+    "repeated_local_run",
+    "reference_sample",
+)
+ACCEPTED_CONFIDENCE_LABELS = CONFIDENCE_LABELS + LEGACY_CONFIDENCE_LABELS
 SCORER_TYPES = (
     "exact_match",
     "regex",
@@ -79,7 +84,7 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
     else:
         _enum(evidence, "lane", EVIDENCE_LANES, errors, prefix="evidence.")
         _enum(evidence, "surface", CAPABILITY_SURFACES, errors, prefix="evidence.")
-        _enum(evidence, "confidence_label", CONFIDENCE_LABELS, errors, prefix="evidence.")
+        _enum(evidence, "confidence_label", ACCEPTED_CONFIDENCE_LABELS, errors, prefix="evidence.")
         if "experimental" not in evidence or not isinstance(evidence.get("experimental"), bool):
             errors.append("evidence.experimental must be a boolean")
         _require(evidence, "grade", errors, prefix="evidence.")
@@ -177,7 +182,7 @@ def validate_capability_summary_artifact(artifact: Dict[str, Any]) -> List[str]:
             _enum(surface, "surface", CAPABILITY_SURFACES, errors, prefix=prefix)
             _enum(surface, "state", CAPABILITY_STATES, errors, prefix=prefix)
             _optional_enum(surface, "lane", EVIDENCE_LANES, errors, prefix=prefix)
-            _optional_enum(surface, "confidence_label", CONFIDENCE_LABELS, errors, prefix=prefix)
+            _optional_enum(surface, "confidence_label", ACCEPTED_CONFIDENCE_LABELS, errors, prefix=prefix)
             if surface.get("surface") in seen_surfaces:
                 errors.append(prefix + "surface must be unique")
             seen_surfaces.add(surface.get("surface"))
@@ -203,7 +208,7 @@ def validate_capability_summary_artifact(artifact: Dict[str, Any]) -> List[str]:
             _enum(item, "surface", CAPABILITY_SURFACES, errors, prefix=prefix)
             _enum(item, "state", CAPABILITY_STATES, errors, prefix=prefix)
             _enum(item, "lane", EVIDENCE_LANES, errors, prefix=prefix)
-            _enum(item, "confidence_label", CONFIDENCE_LABELS, errors, prefix=prefix)
+            _enum(item, "confidence_label", ACCEPTED_CONFIDENCE_LABELS, errors, prefix=prefix)
             _require(item, "path", errors, prefix=prefix)
             if not _confidence_allowed_for_lane(item.get("lane"), item.get("confidence_label")):
                 errors.append(prefix + "confidence_label cannot exceed evidence lane controls")
@@ -245,8 +250,16 @@ def _confidence_allowed_for_lane(lane: Optional[str], confidence_label: Optional
         return confidence_label in ("single_smoke", "thin_local_sample")
     allowed = {
         "smoke": ("single_smoke",),
-        "decision": ("single_smoke", "thin_local_sample", "repeated_local_run"),
-        "reference": ("single_smoke", "thin_local_sample", "repeated_local_run", "stronger_local_sample", "reference_sample"),
-        "gold": CONFIDENCE_LABELS,
+        "decision": ("single_smoke", "thin_local_sample", "repeated_local_sample", "repeated_local_run"),
+        "reference": (
+            "single_smoke",
+            "thin_local_sample",
+            "repeated_local_sample",
+            "repeated_local_run",
+            "sampled_reference",
+            "reference_sample",
+            "stronger_local_sample",
+        ),
+        "gold": ACCEPTED_CONFIDENCE_LABELS,
     }
     return confidence_label in allowed.get(lane, ())

@@ -84,10 +84,12 @@
       "enum": [
         "single_smoke",
         "thin_local_sample",
-        "repeated_local_run",
+        "repeated_local_sample",
+        "sampled_reference",
         "stronger_local_sample",
-        "reference_sample",
-        "gold"
+        "gold",
+        "repeated_local_run",
+        "reference_sample"
       ]
     },
     "surface_id": {
@@ -120,11 +122,13 @@
         "score": { "type": ["number", "null"] },
         "lane": { "anyOf": [{ "$ref": "#/$defs/lane" }, { "type": "null" }] },
         "confidence_label": { "anyOf": [{ "$ref": "#/$defs/confidence_label" }, { "type": "null" }] },
+        "confidence_explanation": { "type": ["string", "null"] },
         "experimental": { "type": ["boolean", "null"] },
         "repetition_count": { "type": "integer", "minimum": 0 },
         "task_count": { "type": "integer", "minimum": 0 },
         "failure_count": { "type": "integer", "minimum": 0 },
         "partial_count": { "type": "integer", "minimum": 0 },
+        "repeatability": { "$ref": "#/$defs/repeatability_summary" },
         "capability_artifacts": {
           "type": "array",
           "items": { "$ref": "#/$defs/artifact_pointer" }
@@ -146,10 +150,38 @@
         "state": { "$ref": "#/$defs/state" },
         "lane": { "$ref": "#/$defs/lane" },
         "confidence_label": { "$ref": "#/$defs/confidence_label" },
+        "confidence_explanation": { "type": ["string", "null"] },
         "path": { "type": "string", "minLength": 1 },
         "score": { "type": ["number", "null"] },
         "task_count": { "type": "integer", "minimum": 0 },
-        "failure_count": { "type": "integer", "minimum": 0 }
+        "failure_count": { "type": "integer", "minimum": 0 },
+        "repeatability": { "$ref": "#/$defs/repeatability_summary" }
+      },
+      "additionalProperties": true
+    },
+    "repeatability_summary": {
+      "type": "object",
+      "properties": {
+        "sample_count": { "type": "integer", "minimum": 0 },
+        "repetition_count": { "type": "integer", "minimum": 0 },
+        "failure_rate": { "type": ["number", "null"], "minimum": 0 },
+        "latency_median_ms": { "type": ["number", "null"], "minimum": 0 },
+        "latency_p95_ms": { "type": ["number", "null"], "minimum": 0 },
+        "latency_variance": { "type": ["number", "null"], "minimum": 0 },
+        "ttft_median_ms": { "type": ["number", "null"], "minimum": 0 },
+        "ttft_p95_ms": { "type": ["number", "null"], "minimum": 0 },
+        "ttft_variance": { "type": ["number", "null"], "minimum": 0 },
+        "tokens_per_second_median": { "type": ["number", "null"], "minimum": 0 },
+        "tokens_per_second_p95": { "type": ["number", "null"], "minimum": 0 },
+        "tokens_per_second_variance": { "type": ["number", "null"], "minimum": 0 },
+        "capability_pass_rate_median": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "capability_pass_rate_variance": { "type": ["number", "null"], "minimum": 0 },
+        "score_variance": { "type": ["number", "null"], "minimum": 0 },
+        "unstable": { "type": "boolean" },
+        "instability_reasons": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
       },
       "additionalProperties": true
     }
