@@ -89,6 +89,7 @@
       "properties": {
         "execution_profile_id": { "type": "string" },
         "execution_mode": { "type": "string", "enum": ["local_container", "local_native", "cloud_container", "manual_external"] },
+        "runtime_selector": { "$ref": "runtime_selector.schema.json" },
         "benchmark_job_runtime_seconds": { "type": "integer", "minimum": 0 },
         "execution_cost_source": { "type": "string" }
       },

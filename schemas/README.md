@@ -43,6 +43,7 @@ That lets a server-issued run config carry enough information for the runner to 
 - `json/manifest.schema.json`
 - `json/model_ontology.schema.json`
 - `json/result_record.schema.json`
+- `json/runtime_selector.schema.json`
 - `examples/`
 
 ## Published Contract Bundle

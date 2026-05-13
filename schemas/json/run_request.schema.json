@@ -97,7 +97,8 @@
       "type": "object",
       "properties": {
         "backend_image": { "type": "string" },
-        "artifact_cache_dir": { "type": "string" }
+        "artifact_cache_dir": { "type": "string" },
+        "runtime_selector": { "$ref": "runtime_selector.schema.json" }
       },
       "additionalProperties": false
     },
