@@ -361,11 +361,16 @@ _CURL_HTTPS_ONLY = ["--proto", "=https", "--proto-redir", "=https"]
 
 def _download_with_curl(download_url: str, destination_path: str) -> None:
     """Use curl as a pragmatic fallback for artifact downloads."""
-    headers = _curl_auth_headers(download_url)
+    header_config = _curl_header_config(_auth_headers(download_url))
+    command = ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY
+    run_kwargs = {"capture_output": True, "text": True}
+    if header_config:
+        command.extend(["-K", "-"])
+        run_kwargs["input"] = header_config
+    command.extend(["-o", destination_path, download_url])
     completed = subprocess.run(
-        ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY + headers + ["-o", destination_path, download_url],
-        capture_output=True,
-        text=True,
+        command,
+        **run_kwargs,
     )
     if completed.returncode != 0:
         message = (completed.stderr or completed.stdout or "").strip()
@@ -389,11 +394,16 @@ def _fetch_huggingface_siblings(repo_id: str) -> list:
 
 def _fetch_json_with_curl(url: str) -> Dict[str, object]:
     """Fetch JSON via curl as a pragmatic fallback on local Python SSL issues."""
-    headers = _curl_auth_headers(url)
+    header_config = _curl_header_config(_auth_headers(url))
+    command = ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY
+    run_kwargs = {"capture_output": True, "text": True}
+    if header_config:
+        command.extend(["-K", "-"])
+        run_kwargs["input"] = header_config
+    command.extend(["-H", "Accept: application/json", url])
     completed = subprocess.run(
-        ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY + headers + ["-H", "Accept: application/json", url],
-        capture_output=True,
-        text=True,
+        command,
+        **run_kwargs,
     )
     if completed.returncode != 0:
         message = (completed.stderr or completed.stdout or "").strip()
@@ -408,11 +418,12 @@ def _request_for_url(url: str):
     return urllib_request.Request(url, headers=headers)
 
 
-def _curl_auth_headers(url: str) -> List[str]:
-    headers = []
-    for key, value in _auth_headers(url).items():
-        headers.extend(["-H", "%s: %s" % (key, value)])
-    return headers
+def _curl_header_config(headers: Dict[str, str]) -> str:
+    return "".join('header = "%s: %s"\n' % (_curl_config_escape(key), _curl_config_escape(value)) for key, value in headers.items())
+
+
+def _curl_config_escape(value: str) -> str:
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _auth_headers(url: str) -> Dict[str, str]:
