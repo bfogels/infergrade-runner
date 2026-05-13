@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-04-29",
+  "catalog_version": "2026-05-13-v0.3.5",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -31,6 +31,56 @@
     "failure_rate": "unknown",
     "calibration_status": "estimated_static_catalog_v1"
   },
+  "coverage_expansion_priorities": [
+    {
+      "priority_id": "apple_silicon_assistant_quant_ladder",
+      "rank": 10,
+      "hardware_class": "apple_silicon",
+      "model_family": "Qwen2.5",
+      "target_quants": ["q4_k_m", "q5_k_m", "q6_k"],
+      "use_case": "general_assistant",
+      "benchmark_check_ids": ["interactive_chat_v1", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
+      "why": "This is the highest-leverage answer loop for fast assistant recommendations under common Mac memory budgets.",
+      "what_it_would_change": "Replace static duration and quant-fidelity caveats with observed speed, memory, and same-family quality-retention evidence.",
+      "status": "needs_real_repeats"
+    },
+    {
+      "priority_id": "apple_silicon_coding_reference_ladder",
+      "rank": 20,
+      "hardware_class": "apple_silicon",
+      "model_family": "Qwen2.5-Coder",
+      "target_quants": ["q4_k_m", "q5_k_m"],
+      "use_case": "agentic_coding",
+      "benchmark_check_ids": ["interactive_chat_v1", "evalplus_humaneval", "evalplus_mbpp"],
+      "why": "Coding recommendations need executable reference evidence before they can distinguish fast setup fit from useful coding behavior.",
+      "what_it_would_change": "Promote coding answers from thin local/static evidence toward sampled reference evidence while keeping repo-edit and gold claims out of scope.",
+      "status": "needs_real_repeats"
+    },
+    {
+      "priority_id": "apple_silicon_reasoning_sample",
+      "rank": 30,
+      "hardware_class": "apple_silicon",
+      "model_family": "Qwen2.5",
+      "target_quants": ["q4_k_m"],
+      "use_case": "reasoning",
+      "benchmark_check_ids": ["reasoning_exact_answer_v1", "mmlu_pro_reference_v1"],
+      "why": "Reasoning answers should show when the evidence is only a thin exact-answer sample versus sampled MMLU-Pro reference evidence.",
+      "what_it_would_change": "Give Recommend a direct next benchmark when reasoning evidence is missing, thin, or unstable.",
+      "status": "needs_sampled_reference"
+    },
+    {
+      "priority_id": "windows_nvidia_cuda_beta_gate",
+      "rank": 40,
+      "hardware_class": "nvidia_gpu",
+      "model_family": "Qwen2.5",
+      "target_quants": ["q4_k_m"],
+      "use_case": "general_assistant",
+      "benchmark_check_ids": ["interactive_chat_v1", "multiturn_chat_memory_v1"],
+      "why": "Windows/NVIDIA is the core second tier, but it cannot influence recommendations until one full loop is proven on hardware.",
+      "what_it_would_change": "Move Windows/NVIDIA from preflight-only preview toward a bounded technical beta for one known-good GGUF path.",
+      "status": "hardware_blocked"
+    }
+  ],
   "benchmark_maturity_levels": [
     {
       "maturity": "planned",

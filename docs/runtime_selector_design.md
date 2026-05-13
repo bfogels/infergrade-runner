@@ -113,7 +113,7 @@ The v0.3 runtime selector should be a Runner-owned object attached to run config
 `support.tier` must separate product support from technical possibility:
 
 - `reference`: Apple Silicon/Metal private-beta path with managed runtime proof.
-- `technical_beta`: Windows/NVIDIA CUDA only after v0.3.4 proves one full loop.
+- `technical_beta`: Windows/NVIDIA CUDA only after a hardware host proves one full loop.
 - `best_effort`: Linux CUDA and explicit user-selected native binaries where Runner can run but support is limited.
 - `preview`: CPU, Vulkan, ROCm, and other paths useful for detection or development but not a launch promise.
 - `unsupported`: detected combination should not be offered for evidence-producing runs.

@@ -13,6 +13,7 @@ from infergrade.benchmark_catalog import (
     capability_coverage_guidance_for_selection,
     capability_benchmark_ids_for_request,
     capability_surface_index,
+    coverage_expansion_priorities,
     evidence_lane_index,
     fidelity_enabled_for_request,
     load_capability_catalog,
@@ -31,6 +32,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(len(catalog["benchmark_groups"]), 5)
         self.assertGreaterEqual(len(catalog["checks"]), 6)
         self.assertIn("metadata_ordering", catalog)
+        self.assertIn("coverage_expansion_priorities", catalog)
         self.assertTrue(catalog["score_policies"])
         self.assertIn("evidence_lanes", catalog)
         self.assertIn("benchmark_maturity_levels", catalog)
@@ -73,6 +75,19 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.assertIn("primary_score_weight", check)
             self.assertTrue(check["score_policy_id"])
         self.assertTrue(catalog["planned_benchmark_candidates"])
+
+    def test_coverage_expansion_priorities_are_ordered_and_answer_loop_scoped(self):
+        priorities = coverage_expansion_priorities()
+
+        self.assertGreaterEqual(len(priorities), 4)
+        self.assertEqual([item["rank"] for item in priorities], sorted(item["rank"] for item in priorities))
+        first = priorities[0]
+        self.assertEqual(first["priority_id"], "apple_silicon_assistant_quant_ladder")
+        self.assertEqual(first["use_case"], "general_assistant")
+        self.assertIn("perplexity_reference_v1", first["benchmark_check_ids"])
+        cuda = next(item for item in priorities if item["priority_id"] == "windows_nvidia_cuda_beta_gate")
+        self.assertEqual(cuda["status"], "hardware_blocked")
+        self.assertIn("full loop", cuda["why"])
 
     def test_packaged_resource_root_can_be_resolved_from_runner_core_src(self):
         with tempfile.TemporaryDirectory() as tempdir:

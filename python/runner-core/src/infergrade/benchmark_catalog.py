@@ -79,6 +79,13 @@ def capability_surface_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[s
     return {str(item["surface_id"]): dict(item) for item in list(payload.get("capability_surfaces") or [])}
 
 
+def coverage_expansion_priorities(catalog: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Return ordered coverage priorities that directly improve the answer loop."""
+    payload = catalog or load_capability_catalog()
+    priorities = [dict(item) for item in list(payload.get("coverage_expansion_priorities") or [])]
+    return sorted(priorities, key=lambda item: int(item.get("rank") or 0))
+
+
 def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = None) -> List[str]:
     """Return catalog legitimacy metadata validation failures.
 
@@ -159,6 +166,22 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
             failures.append(f"{check_id}: check lane and status matrix lane disagree")
         if status and check.get("surface_id") != status.get("surface_id"):
             failures.append(f"{check_id}: check surface and status matrix surface disagree")
+    for item in coverage_expansion_priorities(payload):
+        priority_id = str(item.get("priority_id") or "").strip()
+        if not priority_id:
+            failures.append("coverage_expansion_priorities: priority_id must be non-empty")
+        for field in ("hardware_class", "model_family", "use_case", "why", "what_it_would_change", "status"):
+            if not str(item.get(field) or "").strip():
+                failures.append(f"{priority_id or '<missing>'}: coverage priority field {field} must be non-empty")
+        if not isinstance(item.get("target_quants"), list) or not item.get("target_quants"):
+            failures.append(f"{priority_id or '<missing>'}: target_quants must be a non-empty list")
+        check_ids = item.get("benchmark_check_ids")
+        if not isinstance(check_ids, list) or not check_ids:
+            failures.append(f"{priority_id or '<missing>'}: benchmark_check_ids must be a non-empty list")
+            continue
+        for check_id in check_ids:
+            if str(check_id) not in declared_check_ids:
+                failures.append(f"{priority_id or '<missing>'}: unknown coverage benchmark_check_id {check_id!r}")
     return failures
 
 

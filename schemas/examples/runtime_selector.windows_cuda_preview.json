@@ -42,7 +42,7 @@
       {
         "id": "full_loop_beta_gate",
         "status": "failed",
-        "detail": "Windows/NVIDIA remains blocked until v0.3.4 proves one full Hub to Runner to upload loop."
+        "detail": "Windows/NVIDIA remains blocked until hardware proves one full Hub to Runner to upload loop."
       }
     ]
   },

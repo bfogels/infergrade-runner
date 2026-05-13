@@ -1,6 +1,6 @@
 # Windows/NVIDIA CUDA Beta Prep
 
-Status: v0.3.4 hardware-independent prep. This is not a public support promise.
+Status: hardware-independent preview prep. This is not a public support promise.
 
 InferGrade may proceed toward a Windows/NVIDIA technical beta only after one real Windows host completes install or selection, Hub pairing, a known-good GGUF run, upload, Result review, and support export. Until that happens, Runner reports CUDA as `preview` and keeps compatibility `blocked` with `full_loop_not_proven`.
 
