@@ -16,21 +16,31 @@ class SupportExportTests(unittest.TestCase):
             artifacts_dir = os.path.join(tempdir, "artifacts", "receipts")
             os.makedirs(artifacts_dir, exist_ok=True)
             with open(os.path.join(tempdir, "progress.json"), "w", encoding="utf-8") as handle:
-                json.dump({"current_stage": "deployment"}, handle)
+                json.dump(
+                    {
+                        "current_stage": "deployment",
+                        "request_context": {
+                            "pair_code": "igrp_secret_pair",
+                            "safe_detail": "interactive_chat_v1",
+                        },
+                    },
+                    handle,
+                )
             with open(os.path.join(tempdir, "summary.json"), "w", encoding="utf-8") as handle:
-                json.dump({"bundle_id": "qb_bundle"}, handle)
+                json.dump({"bundle_id": "qb_bundle", "signed_url": "https://example.test/private?token=secret"}, handle)
             with open(os.path.join(tempdir, "artifacts", "environment.json"), "w", encoding="utf-8") as handle:
                 json.dump({"hardware_class": "apple_silicon"}, handle)
             with open(os.path.join(artifacts_dir, "quant_artifact_resolution.json"), "w", encoding="utf-8") as handle:
                 json.dump({"uri": "hf://example/model.gguf"}, handle)
 
             with mock.patch(
-                "infergrade.support.load_runner_profile",
-                return_value={
-                    "api_url": "http://localhost:8000",
-                    "access_token": "qbhr_secret_token",
-                    "label": "Brian MacBook Pro",
-                },
+                    "infergrade.support.load_runner_profile",
+                    return_value={
+                        "api_url": "http://localhost:8000",
+                        "access_token": "qbhr_secret_token",
+                        "token_expires_at": "2026-05-20T00:00:00Z",
+                        "label": "Brian MacBook Pro",
+                    },
             ), mock.patch(
                 "infergrade.support.capture_environment",
                 return_value={"hardware_class": "apple_silicon", "execution_mode": "local_native"},
@@ -40,12 +50,20 @@ class SupportExportTests(unittest.TestCase):
         self.assertEqual(payload["export_kind"], "infergrade_runner_support_v1")
         self.assertTrue(payload["secrets_excluded"])
         self.assertEqual(payload["runner_profile"]["access_token_present"], True)
-        self.assertEqual(payload["runner_profile"]["access_token_prefix"], "qbhr_s")
         self.assertNotIn("access_token", payload["runner_profile"])
+        self.assertNotIn("access_token_prefix", payload["runner_profile"])
+        self.assertEqual(payload["runner_profile"]["token_expires_at"], "[redacted]")
         self.assertEqual(payload["environment"]["execution_mode"], "local_native")
         self.assertEqual(payload["summary"]["bundle_id"], "qb_bundle")
+        self.assertEqual(payload["summary"]["signed_url"], "[redacted]")
+        self.assertEqual(payload["progress"]["request_context"]["pair_code"], "[redacted]")
+        self.assertEqual(payload["progress"]["request_context"]["safe_detail"], "interactive_chat_v1")
         self.assertTrue(payload["files_present"]["progress_json"])
         self.assertTrue(payload["files_present"]["artifact_receipt"])
+        encoded = json.dumps(payload)
+        self.assertNotIn("qbhr_secret_token", encoded)
+        self.assertNotIn("igrp_secret_pair", encoded)
+        self.assertNotIn("https://example.test/private", encoded)
 
     def test_write_support_export_writes_json_payload(self):
         with tempfile.TemporaryDirectory(prefix="infergrade-support-output-") as tempdir:
