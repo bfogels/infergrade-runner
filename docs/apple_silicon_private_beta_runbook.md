@@ -42,10 +42,10 @@ Use the real pairing code only at execution time. Prompt for it so it is not wri
 ```bash
 read -rsp 'InferGrade pairing code: ' INFERGRADE_PAIR_CODE
 printf '\n'
-infergrade pair \
+printf '%s\n' "$INFERGRADE_PAIR_CODE" | infergrade pair \
   --api-url 'https://api.infergrade.com' \
-  --pair-code "$INFERGRADE_PAIR_CODE" \
-  --label 'Paired Apple Silicon runner'
+  --pair-code-stdin \
+  --label 'founder-primary'
 unset INFERGRADE_PAIR_CODE
 ```
 
@@ -72,10 +72,10 @@ Pair once against production Hub:
 ```bash
 read -rsp 'InferGrade pairing code: ' INFERGRADE_PAIR_CODE
 printf '\n'
-infergrade pair \
+printf '%s\n' "$INFERGRADE_PAIR_CODE" | infergrade pair \
   --api-url 'https://api.infergrade.com' \
-  --pair-code "$INFERGRADE_PAIR_CODE" \
-  --label 'Paired Apple Silicon runner'
+  --pair-code-stdin \
+  --label 'founder-primary'
 unset INFERGRADE_PAIR_CODE
 ```
 
