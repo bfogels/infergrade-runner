@@ -90,15 +90,30 @@ _SENSITIVE_KEY_MARKERS = (
     "api_token",
     "authorization",
     "bearer",
+    "completion_text",
     "credential",
     "hf_token",
     "huggingface_token",
+    "model_output",
+    "output_text",
     "pair_code",
     "pairing_code",
     "password",
+    "prompt",
+    "raw_output",
+    "raw_outputs",
     "secret",
     "signed_url",
     "token",
+)
+
+_SENSITIVE_URL_MARKERS = (
+    "x-amz-signature=",
+    "x-amz-credential=",
+    "x-goog-signature=",
+    "signature=",
+    "signed=",
+    "token=",
 )
 
 
@@ -113,6 +128,8 @@ def _redact_support_payload(value: Any) -> Any:
         return redacted
     if isinstance(value, list):
         return [_redact_support_payload(item) for item in value]
+    if isinstance(value, str) and _support_value_is_sensitive(value):
+        return "[redacted]"
     return value
 
 
@@ -121,3 +138,10 @@ def _support_key_is_sensitive(key: str) -> bool:
     if normalized.endswith("_present"):
         return False
     return any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS)
+
+
+def _support_value_is_sensitive(value: str) -> bool:
+    normalized = value.lower()
+    if not (normalized.startswith("http://") or normalized.startswith("https://")):
+        return False
+    return any(marker in normalized for marker in _SENSITIVE_URL_MARKERS)

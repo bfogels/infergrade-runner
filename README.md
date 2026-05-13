@@ -258,6 +258,8 @@ Without `--output`, the same command prints the JSON payload to stdout. Support 
 
 This is designed to pair with the Hub-side support export so operator debugging does not depend on screenshots or ad hoc terminal copy/paste.
 
+For pairing, runtime, artifact-path, upload-retry, and support-export recovery details, see [Runner Recovery](docs/recovery.md).
+
 Run the runner test suite:
 
 ```bash
