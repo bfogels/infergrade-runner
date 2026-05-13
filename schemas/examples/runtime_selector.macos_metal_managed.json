@@ -21,7 +21,7 @@
   },
   "binary": {
     "path": null,
-    "version_output": "llama.cpp build 0.3.0-preview",
+    "version_output": "llama.cpp build 0.3.0",
     "checksum_verified": true,
     "signature_verified": false
   },
@@ -32,7 +32,7 @@
       {
         "id": "binary_version_smoke",
         "status": "passed",
-        "observed": "llama.cpp build 0.3.0-preview"
+        "observed": "llama.cpp build 0.3.0"
       }
     ]
   },

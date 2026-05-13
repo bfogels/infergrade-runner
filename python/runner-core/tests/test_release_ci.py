@@ -27,18 +27,18 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("actions/upload-artifact@v4", workflow)
         self.assertIn("infergrade-runner-release-${{ steps.release_bundle.outputs.release_version }}", workflow)
 
-    def test_release_bundle_script_defaults_to_version_preview(self):
+    def test_release_bundle_script_defaults_to_version(self):
         script = (ROOT / "scripts" / "build_release_bundle.sh").read_text(encoding="utf-8")
 
-        self.assertIn('VERSION_TAG="${INFERGRADE_RELEASE_VERSION:-$(<"${ROOT_DIR}/VERSION")-preview}"', script)
+        self.assertIn('VERSION_TAG="${INFERGRADE_RELEASE_VERSION:-$(<"${ROOT_DIR}/VERSION")}"', script)
         self.assertIn("python3 ./scripts/check_versions.py", script)
         self.assertIn('python3 ./scripts/export_release_bundle.py --release-version "${VERSION_TAG}"', script)
         self.assertNotIn("0.1.0-preview", script)
 
-    def test_release_image_scripts_default_to_version_preview(self):
+    def test_release_image_scripts_default_to_version(self):
         for relative_path in ("scripts/build_release_images.sh", "scripts/export_release_images.sh"):
             script = (ROOT / relative_path).read_text(encoding="utf-8")
-            self.assertIn('VERSION_TAG="${INFERGRADE_IMAGE_TAG:-$(<"${ROOT_DIR}/VERSION")-preview}"', script)
+            self.assertIn('VERSION_TAG="${INFERGRADE_IMAGE_TAG:-$(<"${ROOT_DIR}/VERSION")}"', script)
             self.assertNotIn("0.1.0-preview", script)
 
     def test_ci_checks_version_sync_before_running_tests(self):
@@ -51,7 +51,7 @@ class ReleaseCiTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "publish-containers.yml").read_text(encoding="utf-8")
 
         self.assertIn('default: ""', workflow)
-        self.assertIn('image_tag="$(cat VERSION)-preview"', workflow)
+        self.assertIn('image_tag="$(cat VERSION)"', workflow)
         self.assertNotIn("0.1.31-preview", workflow)
 
     def test_desktop_app_uses_package_metadata_for_browser_version_fallback(self):

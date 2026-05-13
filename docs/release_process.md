@@ -14,8 +14,8 @@ Every push to `main` runs `.github/workflows/release-bundle.yml`. That workflow:
 
 1. installs the Runner package
 2. checks all version declarations against `VERSION`
-3. exports the Runner release bundle for `$(cat VERSION)-preview`
-4. uploads `dist/releases/$(cat VERSION)-preview/` as a GitHub Actions artifact
+3. exports the Runner release bundle for `$(cat VERSION)`
+4. uploads `dist/releases/$(cat VERSION)/` as a GitHub Actions artifact
 
 The default main-branch artifact includes the contract bundle and release manifest with image references. It does not build or upload Docker image archives on every commit, which keeps main CI fast and avoids very large per-commit artifacts. Maintainers can run the same workflow manually with `include_image_archives=true` when they need a fully portable archive bundle.
 
@@ -119,12 +119,12 @@ Export the resulting OCI archives:
 bash ./scripts/export_release_images.sh
 ```
 
-By default this uses `$(cat VERSION)-preview`; set `INFERGRADE_IMAGE_TAG` to override it.
+By default this uses `$(cat VERSION)`; set `INFERGRADE_IMAGE_TAG` to override it.
 
 This writes archives under:
 
 ```text
-dist/images/$(cat VERSION)-preview/
+dist/images/$(cat VERSION)/
 ```
 
 ## Export The Release Bundle
@@ -138,7 +138,7 @@ Generate the local release bundle:
 This writes the pinned bundle under:
 
 ```text
-dist/releases/$(cat VERSION)-preview/
+dist/releases/$(cat VERSION)/
 ```
 
 The release bundle includes:
@@ -156,7 +156,7 @@ From the Hub repo, import that exact release:
 ```bash
 cd /Users/brianfogelson/Desktop/Code/infergrade/infergrade-hub
 PYTHONPATH=services/api/src python3 ./scripts/import_runner_release.py \
-  --release-dir /Users/brianfogelson/Desktop/Code/infergrade/infergrade-runner/dist/releases/$(cat /Users/brianfogelson/Desktop/Code/infergrade/infergrade-runner/VERSION)-preview
+  --release-dir /Users/brianfogelson/Desktop/Code/infergrade/infergrade-runner/dist/releases/$(cat /Users/brianfogelson/Desktop/Code/infergrade/infergrade-runner/VERSION)
 ```
 
 That updates the Hub snapshot to include:
