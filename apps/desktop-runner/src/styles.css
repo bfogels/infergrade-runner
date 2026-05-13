@@ -53,7 +53,11 @@ input {
   font: inherit;
 }
 
-button {
+button,
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 44px;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
@@ -62,6 +66,7 @@ button {
   color: var(--button-text);
   font-weight: 800;
   cursor: pointer;
+  text-decoration: none;
 }
 
 button:disabled {
@@ -168,8 +173,8 @@ p {
 h1 {
   max-width: 720px;
   margin-bottom: 12px;
-  font-size: 4.5rem;
-  line-height: 0.98;
+  font-size: 3.6rem;
+  line-height: 1.02;
 }
 
 h2 {
@@ -253,13 +258,30 @@ h2 {
 
 .control-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.15fr);
   gap: 18px;
   margin: 18px 0;
+  align-items: start;
 }
 
 .panel {
   padding: 22px;
+}
+
+.primary-workflow {
+  display: grid;
+  gap: 14px;
+}
+
+.setup-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.listener-box {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
 }
 
 label {
@@ -274,6 +296,10 @@ label {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.primary-actions {
+  align-items: stretch;
 }
 
 .compact-actions {
@@ -338,6 +364,12 @@ label {
   border-radius: 8px;
   padding: 14px;
   background: var(--surface);
+}
+
+.readiness-checklist summary {
+  color: var(--text-soft);
+  font-weight: 900;
+  cursor: pointer;
 }
 
 .readiness-checklist h3 {

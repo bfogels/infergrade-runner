@@ -4,6 +4,16 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Output, Stdio};
 
+const MACOS_GUI_PATH_DEFAULTS: &[&str] = &[
+    "/usr/local/bin",
+    "/opt/homebrew/bin",
+    "/Applications/Docker.app/Contents/Resources/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+];
+
 fn runner_core_src(repo_root: &Path) -> PathBuf {
     repo_root.join("python").join("runner-core").join("src")
 }
@@ -96,6 +106,24 @@ fn pythonpath_with_runner(
     env::join_paths(paths).map_err(|error| format!("could not build PYTHONPATH: {error}"))
 }
 
+fn path_with_macos_gui_defaults(existing: Option<OsString>) -> Option<OsString> {
+    if !cfg!(target_os = "macos") {
+        return existing;
+    }
+
+    let mut paths = Vec::new();
+    if let Some(existing_value) = existing {
+        paths.extend(env::split_paths(&existing_value));
+    }
+    for path in MACOS_GUI_PATH_DEFAULTS {
+        let path = PathBuf::from(path);
+        if !paths.iter().any(|existing| existing == &path) {
+            paths.push(path);
+        }
+    }
+    env::join_paths(paths).ok()
+}
+
 fn run_command(
     program: &str,
     args: &[OsString],
@@ -108,6 +136,9 @@ fn run_command(
     command.stderr(Stdio::inherit());
     if let Some(value) = pythonpath {
         command.env("PYTHONPATH", value);
+    }
+    if let Some(value) = path_with_macos_gui_defaults(env::var_os("PATH")) {
+        command.env("PATH", value);
     }
     command.status()
 }
@@ -122,7 +153,28 @@ fn run_command_output(
     if let Some(value) = pythonpath {
         command.env("PYTHONPATH", value);
     }
+    if let Some(value) = path_with_macos_gui_defaults(env::var_os("PATH")) {
+        command.env("PATH", value);
+    }
     command.output()
+}
+
+#[cfg(unix)]
+fn exec_command(program: &str, args: &[OsString], pythonpath: Option<OsString>) -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+
+    let mut command = Command::new(program);
+    command.args(args);
+    command.stdin(Stdio::inherit());
+    command.stdout(Stdio::inherit());
+    command.stderr(Stdio::inherit());
+    if let Some(value) = pythonpath {
+        command.env("PYTHONPATH", value);
+    }
+    if let Some(value) = path_with_macos_gui_defaults(env::var_os("PATH")) {
+        command.env("PATH", value);
+    }
+    command.exec()
 }
 
 fn repo_python_args(args: &[OsString]) -> Vec<OsString> {
@@ -240,17 +292,17 @@ fn native_suite_status(
 ) -> (&'static str, &'static str, &'static str, &'static str) {
     if runtime_first_run == "ready" {
         (
-            "executor_missing",
-            "Native llama.cpp runtime is available, but the app-managed first-run benchmark executor is still in progress. Docker remains optional for advanced sandboxed benchmarks.",
-            "not_implemented",
-            "The native first-run benchmark executor is not implemented yet.",
+            "ready",
+            "Native llama.cpp runtime is available. First-run can run locally with a selected GGUF model; Docker remains optional for advanced sandboxed benchmarks.",
+            "ready",
+            "Native first-run is available after selecting a local GGUF model.",
         )
     } else {
         (
             "setup_needed",
-            "Select or install a native llama.cpp runtime first. The app-managed first-run benchmark executor is still in progress.",
+            "Select or install a native llama.cpp runtime first.",
             "blocked",
-            "Select or install a native llama.cpp runtime; first-run executor support is still in progress.",
+            "Select or install a native llama.cpp runtime before starting first-run.",
         )
     }
 }
@@ -330,12 +382,40 @@ fn run_repo_python(repo_root: &Path, args: &[OsString]) -> Result<ExitStatus, St
     ))
 }
 
+#[cfg(unix)]
+fn exec_repo_python(repo_root: &Path, args: &[OsString]) -> Result<(), String> {
+    let pythonpath = pythonpath_with_runner(repo_root, env::var_os("PYTHONPATH"))?;
+    let python_args = repo_python_args(args);
+    let mut last_not_found = None;
+    for program in python_programs() {
+        let error = exec_command(program, &python_args, Some(pythonpath.clone()));
+        if error.kind() == std::io::ErrorKind::NotFound {
+            last_not_found = Some(error);
+            continue;
+        }
+        return Err(format!("could not launch {program}: {error}"));
+    }
+    Err(format!(
+        "could not find a Python interpreter to run the bundled Runner core: {}",
+        last_not_found
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "no interpreter candidates were tried".to_string())
+    ))
+}
+
 fn python_programs() -> &'static [&'static str] {
     if cfg!(windows) {
         &["py", "python", "python3"]
     } else {
         &["python3", "python"]
     }
+}
+
+fn is_listener_start_command(args: &[OsString]) -> bool {
+    args.first()
+        .and_then(|value| value.to_str())
+        .map(|value| value == "start")
+        .unwrap_or(false)
 }
 
 fn main() {
@@ -355,6 +435,26 @@ fn main() {
     if args == [OsString::from("desktop-readiness")] {
         println!("{}", desktop_readiness());
         std::process::exit(0);
+    }
+
+    #[cfg(unix)]
+    if is_listener_start_command(&args) {
+        if let Some(repo_root) = fallback_repo_root() {
+            if let Err(error) = exec_repo_python(&repo_root, &args) {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+
+        let error = exec_command("infergrade", &args, None);
+        if error.kind() == std::io::ErrorKind::NotFound {
+            eprintln!(
+                "infergrade was not found on PATH, no bundled Runner core resource was found, and INFERGRADE_RUNNER_REPO does not point to a Runner checkout."
+            );
+        } else {
+            eprintln!("could not launch infergrade from PATH: {error}");
+        }
+        std::process::exit(1);
     }
 
     if let Some(repo_root) = fallback_repo_root() {
@@ -421,6 +521,30 @@ mod tests {
     }
 
     #[test]
+    fn macos_gui_path_defaults_include_homebrew_and_docker_locations() {
+        let existing = env::join_paths([PathBuf::from("/usr/bin")]).expect("existing path");
+        let path = path_with_macos_gui_defaults(Some(existing)).expect("path");
+        let paths = env::split_paths(&path).collect::<Vec<_>>();
+
+        if cfg!(target_os = "macos") {
+            assert!(paths.contains(&PathBuf::from("/usr/local/bin")));
+            assert!(paths.contains(&PathBuf::from("/opt/homebrew/bin")));
+            assert!(paths.contains(&PathBuf::from(
+                "/Applications/Docker.app/Contents/Resources/bin"
+            )));
+            assert_eq!(
+                paths
+                    .iter()
+                    .filter(|path| path.as_path() == Path::new("/usr/bin"))
+                    .count(),
+                1
+            );
+        } else {
+            assert_eq!(paths, vec![PathBuf::from("/usr/bin")]);
+        }
+    }
+
+    #[test]
     fn repo_python_invocation_runs_infergrade_module() {
         let args = vec![OsString::from("--version")];
         let python_args = repo_python_args(&args);
@@ -428,6 +552,13 @@ mod tests {
         assert_eq!(python_args[0], OsString::from("-m"));
         assert_eq!(python_args[1], OsString::from("infergrade"));
         assert_eq!(python_args[2], OsString::from("--version"));
+    }
+
+    #[test]
+    fn listener_start_command_is_the_long_running_worker() {
+        assert!(is_listener_start_command(&[OsString::from("start")]));
+        assert!(!is_listener_start_command(&[OsString::from("desktop-readiness")]));
+        assert!(!is_listener_start_command(&[OsString::from("desktop-self-test")]));
     }
 
     #[test]
@@ -485,8 +616,8 @@ mod tests {
 
         assert!(payload.contains("\"native_benchmark_suite\""));
         assert!(payload.contains("\"first_run\""));
-        assert!(payload.contains("first-run benchmark executor is still in progress"));
-        assert!(!payload.contains("Native first-run benchmark is ready"));
+        assert!(payload.contains("First-run can run locally with a selected GGUF model"));
+        assert!(!payload.contains("first-run benchmark executor is still in progress"));
         assert!(payload.contains("\"docker\""));
         assert!(payload.contains("Docker remains optional"));
         assert!(payload.contains("\"podman\""));
@@ -494,8 +625,8 @@ mod tests {
 
     #[test]
     fn native_suite_status_distinguishes_runtime_from_executor_readiness() {
-        assert_eq!(native_suite_status("ready").0, "executor_missing");
-        assert_eq!(native_suite_status("ready").2, "not_implemented");
+        assert_eq!(native_suite_status("ready").0, "ready");
+        assert_eq!(native_suite_status("ready").2, "ready");
         assert_eq!(native_suite_status("blocked").0, "setup_needed");
         assert_eq!(native_suite_status("blocked").2, "blocked");
     }
