@@ -11,7 +11,7 @@ from infergrade.releases import export_release_bundle, load_release_manifest
 class ContractExportTests(unittest.TestCase):
     def test_manifest_version_matches_runner_version(self):
         manifest = load_contract_manifest()
-        self.assertEqual("0.1.0", manifest["contract_version"])
+        self.assertEqual("0.3.0", manifest["contract_version"])
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_export_contract_bundle_copies_declared_files(self):
