@@ -29,6 +29,8 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(html.includes("data-reset-pairing"));
   assert.ok(html.includes("data-runner-self-test"));
   assert.ok(html.includes("Tokens are not shown in this browser UI."));
+  assert.ok(html.indexOf("Step 1") < html.indexOf("Steps 2 and 3"));
+  assert.ok(html.indexOf("Steps 2 and 3") < html.indexOf("Step 4"));
   assert.equal(html.includes("Advanced token fallback"), false);
   assert.equal(html.includes('name="hubToken"'), false);
   assert.equal(html.includes("data-save-token"), false);
