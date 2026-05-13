@@ -65,6 +65,45 @@ class SupportExportTests(unittest.TestCase):
         self.assertNotIn("igrp_secret_pair", encoded)
         self.assertNotIn("https://example.test/private", encoded)
 
+    def test_build_support_export_redacts_nested_raw_outputs_and_signed_urls(self):
+        with tempfile.TemporaryDirectory(prefix="infergrade-support-adversarial-") as tempdir:
+            os.makedirs(os.path.join(tempdir, "artifacts"), exist_ok=True)
+            with open(os.path.join(tempdir, "manifest.json"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "safe_id": "manifest-1",
+                        "artifacts": [
+                            {
+                                "raw_outputs": ["PRIVATE MODEL OUTPUT"],
+                                "nested": {
+                                    "prompt": "PRIVATE PROMPT",
+                                    "completion_text": "PRIVATE COMPLETION",
+                                    "download_url": "https://storage.example/object?X-Amz-Signature=secret&X-Amz-Credential=secret",
+                                },
+                            }
+                        ],
+                    },
+                    handle,
+                )
+
+            with mock.patch("infergrade.support.load_runner_profile", return_value=None), mock.patch(
+                "infergrade.support.capture_environment",
+                return_value={"hardware_class": "apple_silicon", "execution_mode": "local_native"},
+            ):
+                payload = build_support_export(run_dir=tempdir, execution_mode="local_native")
+
+        artifact = payload["manifest"]["artifacts"][0]
+        self.assertEqual(payload["manifest"]["safe_id"], "manifest-1")
+        self.assertEqual(artifact["raw_outputs"], "[redacted]")
+        self.assertEqual(artifact["nested"]["prompt"], "[redacted]")
+        self.assertEqual(artifact["nested"]["completion_text"], "[redacted]")
+        self.assertEqual(artifact["nested"]["download_url"], "[redacted]")
+        encoded = json.dumps(payload)
+        self.assertNotIn("PRIVATE MODEL OUTPUT", encoded)
+        self.assertNotIn("PRIVATE PROMPT", encoded)
+        self.assertNotIn("PRIVATE COMPLETION", encoded)
+        self.assertNotIn("X-Amz-Signature", encoded)
+
     def test_write_support_export_writes_json_payload(self):
         with tempfile.TemporaryDirectory(prefix="infergrade-support-output-") as tempdir:
             output_path = os.path.join(tempdir, "support.json")
