@@ -24,7 +24,7 @@
       }
     },
     "runtime": {
-      "backend_image": "infergrade-llama-cpp:0.3.0-preview",
+      "backend_image": "infergrade-llama-cpp:0.3.0",
       "runtime_selector": {
         "runtime_selector_version": "0.3",
         "runtime_family": "llama.cpp",
