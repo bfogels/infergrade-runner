@@ -30,7 +30,14 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(html.includes("data-reset-pairing"));
   assert.ok(html.includes("data-runner-self-test"));
   assert.ok(html.includes("data-readiness-check"));
-  assert.ok(html.includes("Connected to Hub. Backend verified. Waiting for assigned work."));
+  assert.ok(html.includes('data-paired="false" data-listening="false"'));
+  assert.ok(html.includes("<h2 data-primary-state-title>Connect this machine</h2>"));
+  assert.ok(html.includes("Pair with Hub before this Runner accepts assigned work."));
+  assert.ok(html.includes("<h3 id=\"backend-title\">Checking local backend</h3>"));
+  assert.ok(html.includes("<strong>Local platform</strong>"));
+  assert.equal(html.includes("<h2 data-primary-state-title>Ready</h2>"), false);
+  assert.equal(html.includes("Connected to Hub. Backend verified. Waiting for assigned work."), false);
+  assert.equal(html.includes("<h3 id=\"backend-title\">Verified on this Mac</h3>"), false);
   assert.ok(html.includes("data-listener-surface"));
   assert.ok(html.includes("Hub listener"));
   assert.ok(html.includes("Listening paused"));
@@ -57,6 +64,9 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.equal(html.includes('name="hubToken"'), false);
   assert.equal(html.includes("data-save-token"), false);
   assert.equal(html.includes("data-clear-token"), false);
+  assert.ok(html.includes('data-hub-target="home"'));
+  assert.ok(html.includes('data-hub-target="setup"'));
+  assert.ok(html.includes('data-hub-target="assignment"'));
   assert.ok(js.includes("normalizeDesktopApiUrl"));
   assert.ok(js.includes("desktop-self-test"));
   assert.ok(js.includes('invoke("redeem_runner_pairing"'));
@@ -68,6 +78,10 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(js.includes('document.querySelectorAll("[data-start-runner]")'));
   assert.ok(js.includes('document.querySelectorAll("[data-reset-pairing]")'));
   assert.ok(js.includes("setRunnerButtonsDisabled"));
+  assert.ok(js.includes('hubUrl.searchParams.set("tab", "setup")'));
+  assert.ok(js.includes('hubUrl.searchParams.set("tab", "runs")'));
+  assert.ok(js.includes('hubUrl.searchParams.set("run_id", currentAssignmentRunId)'));
+  assert.ok(js.includes('openHub(button.dataset.hubTarget || "home")'));
   assert.ok(js.includes('document.documentElement.dataset.listening = listening ? "true" : "false";'));
   assert.ok(js.includes('setStatus(childProcess ? "Listening" : pairedForUi() ? "Paused" : "Pairing needed"'));
   assert.ok(js.includes("childProcess = { preview: true };"));
@@ -398,6 +412,9 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("window.setInterval(() => {"));
   assert.ok(js.includes("renderAssignmentTime();"));
   assert.ok(js.includes("stopAssignmentClock();"));
+  assert.ok(js.includes("IGRP-[redacted]"));
+  assert.ok(js.includes("Bearer [redacted]"));
+  assert.ok(js.includes("description: redactSecrets(payload.description"));
   assert.ok(js.includes("payload.check_name || payload.checkName || payload.stage"));
   assert.ok(js.includes("Capability benchmark (.+?)"));
   assert.ok(js.includes("Runner is executing Hub-assigned benchmark checks."));

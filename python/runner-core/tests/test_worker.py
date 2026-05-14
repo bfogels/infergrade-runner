@@ -8,7 +8,7 @@ from urllib import error as urllib_error
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.worker import _claim_error_message, _classify_worker_failure, _progress_detail, _progress_percent, _runtime_progress_update, run_worker_loop, run_worker_once
+from infergrade.worker import _claim_error_message, _classify_worker_failure, _emit_desktop_event, _progress_detail, _progress_percent, _runtime_progress_update, run_worker_loop, run_worker_once
 
 DESKTOP_EVENT_PREFIX = "INFERGRADE_DESKTOP_EVENT "
 
@@ -45,6 +45,30 @@ class WorkerTests(unittest.TestCase):
             if message.startswith(DESKTOP_EVENT_PREFIX)
         ]
         self.assertEqual(structured, [{"type": "assignment_idle"}])
+
+    def test_desktop_structured_events_redact_token_shaped_values(self):
+        messages = []
+        with mock.patch.dict("os.environ", {"INFERGRADE_DESKTOP_EVENTS": "1"}, clear=False):
+            _emit_desktop_event(
+                messages.append,
+                "assignment_update",
+                phase="Needs attention",
+                description="Bearer qbhr_secret failed for igrt_run_token and pairing code IGRP-8421",
+                check_name="signed https://example.test/private?token=secret",
+                nested={"api_token": "qbhr_nested_secret", "safe": ["keep", "igrp_pair_secret"]},
+            )
+
+        self.assertEqual(len(messages), 1)
+        event = json.loads(messages[0][len(DESKTOP_EVENT_PREFIX) :])
+        encoded = json.dumps(event)
+        self.assertNotIn("qbhr_secret", encoded)
+        self.assertNotIn("igrt_run_token", encoded)
+        self.assertNotIn("IGRP-8421", encoded)
+        self.assertNotIn("qbhr_nested_secret", encoded)
+        self.assertNotIn("igrp_pair_secret", encoded)
+        self.assertIn("Bearer [redacted]", event["description"])
+        self.assertEqual(event["nested"]["api_token"], "[redacted]")
+        self.assertEqual(event["nested"]["safe"][1], "igrp_[redacted]")
 
     def test_worker_once_passes_run_id_filter_when_provided(self):
         with mock.patch("infergrade.worker.claim_run_job", return_value={"run": None}) as claim_mock:

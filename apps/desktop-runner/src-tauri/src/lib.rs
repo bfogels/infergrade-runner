@@ -472,9 +472,29 @@ fn emit_listener_event(app: &AppHandle, payload: Value) {
     let _ = app.emit("runner-listener-event", payload);
 }
 
-fn desktop_assignment_event_from_line(line: &str) -> Option<Value> {
+fn redact_listener_event_value(value: Value, sensitive_values: &[String]) -> Value {
+    match value {
+        Value::String(text) => Value::String(redact_listener_text(&text, sensitive_values)),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| redact_listener_event_value(item, sensitive_values))
+                .collect(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, item)| (key, redact_listener_event_value(item, sensitive_values)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn desktop_assignment_event_from_line(line: &str, sensitive_values: &[String]) -> Option<Value> {
     let payload = line.strip_prefix(DESKTOP_EVENT_PREFIX)?;
-    serde_json::from_str::<Value>(payload).ok()
+    serde_json::from_str::<Value>(payload)
+        .ok()
+        .map(|value| redact_listener_event_value(value, sensitive_values))
 }
 
 fn listener_events_from_output(
@@ -488,7 +508,7 @@ fn listener_events_from_output(
             if trimmed.is_empty() {
                 return None;
             }
-            Some(desktop_assignment_event_from_line(trimmed).unwrap_or_else(|| {
+            Some(desktop_assignment_event_from_line(trimmed, sensitive_values).unwrap_or_else(|| {
                 json!({"type": stream_type, "line": redact_listener_text(trimmed, sensitive_values)})
             }))
         })
@@ -1349,6 +1369,7 @@ mod tests {
     fn parses_structured_desktop_assignment_events_from_sidecar_output() {
         let event = desktop_assignment_event_from_line(
             r#"INFERGRADE_DESKTOP_EVENT {"type":"assignment_update","phase":"Running","run_id":"run_123","progress":42}"#,
+            &[],
         )
         .expect("desktop event");
 
@@ -1356,9 +1377,12 @@ mod tests {
         assert_eq!(event["phase"], "Running");
         assert_eq!(event["run_id"], "run_123");
         assert_eq!(event["progress"], 42);
-        assert_eq!(desktop_assignment_event_from_line("regular stdout"), None);
         assert_eq!(
-            desktop_assignment_event_from_line("INFERGRADE_DESKTOP_EVENT not-json"),
+            desktop_assignment_event_from_line("regular stdout", &[]),
+            None
+        );
+        assert_eq!(
+            desktop_assignment_event_from_line("INFERGRADE_DESKTOP_EVENT not-json", &[]),
             None
         );
     }
@@ -1367,17 +1391,19 @@ mod tests {
     fn splits_listener_chunks_into_structured_and_redacted_events() {
         let events = listener_events_from_output(
             "stderr",
-            "INFERGRADE_DESKTOP_EVENT {\"type\":\"assignment_update\",\"phase\":\"Preparing\",\"run_id\":\"run_123\"}\nClaimed run run_123 with qbhr_secret.\nINFERGRADE_DESKTOP_EVENT {\"type\":\"assignment_update\",\"phase\":\"Running\",\"run_id\":\"run_123\",\"progress\":60}\n",
+            "INFERGRADE_DESKTOP_EVENT {\"type\":\"assignment_update\",\"phase\":\"Preparing\",\"run_id\":\"run_123\",\"description\":\"using qbhr_secret\"}\nClaimed run run_123 with qbhr_secret.\nINFERGRADE_DESKTOP_EVENT {\"type\":\"assignment_update\",\"phase\":\"Running\",\"run_id\":\"run_123\",\"progress\":60,\"nested\":[\"qbhr_secret\"]}\n",
             &["qbhr_secret".to_string()],
         );
 
         assert_eq!(events.len(), 3);
         assert_eq!(events[0]["type"], "assignment_update");
         assert_eq!(events[0]["phase"], "Preparing");
+        assert_eq!(events[0]["description"], "using [redacted]");
         assert_eq!(events[1]["type"], "stderr");
         assert_eq!(events[1]["line"], "Claimed run run_123 with [redacted].");
         assert_eq!(events[2]["phase"], "Running");
         assert_eq!(events[2]["progress"], 60);
+        assert_eq!(events[2]["nested"][0], "[redacted]");
     }
 
     #[test]

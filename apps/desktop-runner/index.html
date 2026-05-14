@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-paired="false" data-listening="false">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -48,16 +48,16 @@
                 <path d="m29 50 13 13 27-31" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="7" />
               </svg>
             </div>
-            <h2 data-primary-state-title>Ready</h2>
-            <p class="state-sentence" data-primary-state-message>Connected to Hub. Backend verified. Waiting for assigned work.</p>
+            <h2 data-primary-state-title>Connect this machine</h2>
+            <p class="state-sentence" data-primary-state-message>Pair with Hub before this Runner accepts assigned work.</p>
             <div class="fact-row" aria-label="Readiness facts">
-              <span data-readiness-fact="hub">Hub paired</span>
-              <span data-readiness-fact="runtime">Metal ready</span>
-              <span data-readiness-fact="token">Token secure</span>
+              <span data-readiness-fact="hub">Pair with Hub</span>
+              <span data-readiness-fact="runtime">Runtime check needed</span>
+              <span data-readiness-fact="token">Token missing</span>
             </div>
             <div class="primary-actions">
               <button type="button" data-readiness-check>Run readiness check</button>
-              <button type="button" class="button-secondary" data-open-hub>Open Hub</button>
+              <button type="button" class="button-secondary" data-open-hub data-hub-target="home">Open Hub</button>
             </div>
           </div>
 
@@ -65,7 +65,7 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Backend detail</p>
-                <h3 id="backend-title">Verified on this Mac</h3>
+                <h3 id="backend-title">Checking local backend</h3>
               </div>
             </div>
             <div class="backend-list">
@@ -76,8 +76,8 @@
                     <path d="M4 9h3M4 15h3M17 9h3M17 15h3M9 4v3M15 4v3M9 17v3M15 17v3"></path>
                   </svg>
                 </span>
-                <strong>Apple Silicon</strong>
-                <span class="row-state">ready</span>
+                <strong>Local platform</strong>
+                <span class="row-state">checking</span>
               </div>
               <div data-backend-row="runtime">
                 <span class="row-icon" aria-hidden="true">
@@ -132,7 +132,7 @@
             <h2>Connect this machine</h2>
             <p>Paste the one-time code from Hub. Pairing token is stored in Keychain.</p>
             <div class="button-row pairing-actions">
-              <button type="button" data-open-hub>Open Hub pairing</button>
+              <button type="button" data-open-hub data-hub-target="setup">Open Hub pairing</button>
               <button type="button" class="button-secondary" data-pair-runner>Pair with Hub</button>
             </div>
           </div>
@@ -197,7 +197,7 @@
             </div>
           </div>
           <div class="assignment-actions">
-            <button type="button" class="button-secondary" data-open-hub>Open in Hub</button>
+            <button type="button" class="button-secondary" data-open-hub data-hub-target="assignment">Open in Hub</button>
             <button type="button" class="button-secondary" data-view-logs>View logs</button>
           </div>
         </section>

@@ -186,14 +186,29 @@ function displayHubUrl() {
   }
 }
 
-function hubWebUrl() {
+function hubWebUrl(target = "home") {
   try {
     const url = new URL(lastNormalizedApiUrl);
-    if (url.hostname === "api.infergrade.com") {
-      return "https://infergrade.com/";
+    const base = url.hostname === "api.infergrade.com" ? "https://infergrade.com/" : `${url.origin}/`;
+    const hubUrl = new URL(base);
+    if (target === "setup") {
+      hubUrl.searchParams.set("tab", "setup");
+    } else if (target === "assignment") {
+      hubUrl.searchParams.set("tab", "runs");
+      if (currentAssignmentRunId) {
+        hubUrl.searchParams.set("run_id", currentAssignmentRunId);
+      }
     }
-    return url.origin;
+    return hubUrl.toString();
   } catch (_error) {
+    if (target === "setup") {
+      return "https://infergrade.com/?tab=setup";
+    }
+    if (target === "assignment") {
+      return currentAssignmentRunId
+        ? `https://infergrade.com/?tab=runs&run_id=${encodeURIComponent(currentAssignmentRunId)}`
+        : "https://infergrade.com/?tab=runs";
+    }
     return "https://infergrade.com/";
   }
 }
@@ -953,8 +968,8 @@ async function openExternalUrl(url) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-async function openHub() {
-  const url = hubWebUrl();
+async function openHub(target = "home") {
+  const url = hubWebUrl(target);
   appendLog(`Opening Hub: ${url}`);
   await openExternalUrl(url);
 }
@@ -1188,9 +1203,12 @@ function setStatus(status, tone = "idle") {
 
 function redactSecrets(message) {
   return String(message || "")
-    .replace(/igrp_[^\s"']+/g, "igrp_[redacted]")
-    .replace(/igrt_[^\s"']+/g, "igrt_[redacted]")
-    .replace(/qbhr_[^\s"']+/g, "qbhr_[redacted]")
+    .replace(/\bigrp_[^\s"']+/gi, "igrp_[redacted]")
+    .replace(/\bigrt_[^\s"']+/gi, "igrt_[redacted]")
+    .replace(/\bqbhr_[^\s"']+/gi, "qbhr_[redacted]")
+    .replace(/\bIGRP-[A-Za-z0-9-]+/g, "IGRP-[redacted]")
+    .replace(/\bBearer\s+[^\s"']+/gi, "Bearer [redacted]")
+    .replace(/([?&](?:token|signature|signed|x-amz-signature|x-goog-signature)=)[^&\s"']+/gi, "$1[redacted]")
     .replace(/("access_token"\s*:\s*")[^"]+(")/g, "$1[redacted]$2")
     .replace(/("runner_token"\s*:\s*")[^"]+(")/g, "$1[redacted]$2");
 }
@@ -1282,12 +1300,12 @@ function renderAssignmentFromListenerEvent(payload = {}) {
   const phase = payload.phase || "Running";
   const runId = payload.run_id || payload.runId || "";
   renderAssignmentActive({
-    title: payload.title || (runId ? `Hub run ${runId}` : "Hub assignment"),
+    title: redactSecrets(payload.title || (runId ? `Hub run ${runId}` : "Hub assignment")),
     phase,
-    description: payload.description || "Runner is processing Hub-assigned work.",
+    description: redactSecrets(payload.description || "Runner is processing Hub-assigned work."),
     progress: Number.isFinite(payload.progress) ? payload.progress : phase === "Complete" ? 100 : 32,
-    checkName: payload.check_name || payload.checkName || payload.stage || "",
-    remaining: payload.remaining || "",
+    checkName: redactSecrets(payload.check_name || payload.checkName || payload.stage || ""),
+    remaining: redactSecrets(payload.remaining || ""),
     runId,
   });
   if (phase === "Needs attention") {
@@ -2379,7 +2397,7 @@ readinessCheckButton?.addEventListener("click", () => {
 
 openHubButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    openHub().catch((error) => appendLog(`Could not open Hub: ${error.message || error}`));
+    openHub(button.dataset.hubTarget || "home").catch((error) => appendLog(`Could not open Hub: ${error.message || error}`));
   });
 });
 
