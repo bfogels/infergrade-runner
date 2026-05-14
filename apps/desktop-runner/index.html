@@ -258,6 +258,15 @@
                   <strong>Docker / Podman</strong>
                   <span data-container-runtime-status>Checking optional sandboxed benchmark support...</span>
                 </div>
+                <div>
+                  <strong>Cached models</strong>
+                  <span data-model-cache-status>Checking local model cache...</span>
+                  <ul class="cache-list" data-model-cache-list aria-label="Cached model artifacts"></ul>
+                  <div class="button-row compact-actions">
+                    <button type="button" class="button-secondary" data-refresh-model-cache>Refresh cache</button>
+                    <button type="button" class="button-secondary" data-clear-model-cache>Clear cached models</button>
+                  </div>
+                </div>
               </div>
               <details class="inline-tools" data-runtime-tools>
                 <summary class="inline-disclosure">

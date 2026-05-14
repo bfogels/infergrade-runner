@@ -118,6 +118,7 @@ test("desktop pairing keeps successful pairing when automatic start fails", () =
 test("desktop details drawer keeps runtime, logs, and support progressive", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
   const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
   const engine = readFileSync(new URL("../../../crates/runner-engine/src/lib.rs", import.meta.url), "utf8");
 
@@ -150,7 +151,17 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(html.includes("data-runtime-install-managed"));
   assert.ok(html.includes("data-runtime-reinstall-managed"));
   assert.ok(html.includes("data-runtime-remove-selected"));
+  assert.ok(html.includes("Cached models"));
+  assert.ok(html.includes("data-model-cache-status"));
+  assert.ok(html.includes("data-model-cache-list"));
+  assert.ok(html.includes("data-refresh-model-cache"));
+  assert.ok(html.includes("data-clear-model-cache"));
+  assert.ok(css.includes(".drawer-body {\n  overflow: visible;"));
+  assert.equal(css.includes("max-height: min(620px, calc(100vh - 230px));"), false);
   assert.ok(js.includes("renderLocalReadinessChecklist"));
+  assert.ok(js.includes("refreshModelCache"));
+  assert.ok(js.includes('invoke("desktop_model_cache_status"'));
+  assert.ok(js.includes('invoke("clear_desktop_model_cache"'));
   assert.ok(js.includes("renderPrimaryReadiness"));
   assert.ok(js.includes("renderAssignmentActive"));
   assert.ok(js.includes("@tauri-apps/plugin-shell"));
@@ -176,6 +187,8 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(rust.includes("fn remove_selected_llama_cpp_runtime"));
   assert.ok(rust.includes("engine_remove_selected_llama_cpp_runtime"));
   assert.ok(rust.includes("fn select_existing_llama_cpp_runtime"));
+  assert.ok(rust.includes("fn desktop_model_cache_status"));
+  assert.ok(rust.includes("fn clear_desktop_model_cache"));
   assert.ok(rust.includes("engine_select_existing_llama_cpp_runtime"));
   assert.ok(engine.includes("fn install_managed_llama_cpp_runtime"));
   assert.ok(engine.includes("fn remove_selected_llama_cpp_runtime"));

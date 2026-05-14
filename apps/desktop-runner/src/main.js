@@ -30,6 +30,8 @@ const runtimeInstallManagedButton = document.querySelector("[data-runtime-instal
 const runtimeReinstallManagedButton = document.querySelector("[data-runtime-reinstall-managed]");
 const runtimeRemoveSelectedButton = document.querySelector("[data-runtime-remove-selected]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
+const refreshModelCacheButton = document.querySelector("[data-refresh-model-cache]");
+const clearModelCacheButton = document.querySelector("[data-clear-model-cache]");
 const downloadStarterGgufButton = document.querySelector("[data-download-starter-gguf]");
 const runtimeIdInput = document.querySelector('[name="runtimeId"]');
 const firstRunModelPathInput = document.querySelector('[name="firstRunModelPath"]');
@@ -64,6 +66,8 @@ const hubConnectionStatus = document.querySelector("[data-hub-connection-status]
 const pairingReadinessStatus = document.querySelector("[data-pairing-readiness-status]");
 const runtimeLlamaStatus = document.querySelector("[data-runtime-llama-status]");
 const containerRuntimeStatus = document.querySelector("[data-container-runtime-status]");
+const modelCacheStatus = document.querySelector("[data-model-cache-status]");
+const modelCacheList = document.querySelector("[data-model-cache-list]");
 const modelPathStatus = document.querySelector("[data-model-path-status]");
 const firstRunStepNodes = new Map(
   [...document.querySelectorAll("[data-first-run-step]")].map((node) => [node.dataset.firstRunStep, node])
@@ -287,6 +291,20 @@ function formatElapsed(startedAt = assignmentStartedAt) {
   const minutes = Math.floor(elapsedSeconds / 60);
   const seconds = String(elapsedSeconds % 60).padStart(2, "0");
   return `Elapsed ${minutes}:${seconds}`;
+}
+
+function formatBytes(value = 0) {
+  const bytes = Number(value) || 0;
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 1024)} KB`;
+  }
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${Math.round(bytes / 1024 / 1024)} MB`;
+  }
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
 function renderAssignmentIdle() {
@@ -598,6 +616,80 @@ function renderLocalReadinessChecklist() {
   }
   renderFirstRunChecklist();
   renderPrimaryReadiness();
+}
+
+function renderModelCache(payload = null) {
+  const artifacts = Array.isArray(payload?.artifacts) ? payload.artifacts : [];
+  const count = Number(payload?.artifact_count ?? artifacts.length) || 0;
+  const bytes = Number(payload?.artifact_bytes) || 0;
+  if (modelCacheStatus) {
+    modelCacheStatus.textContent = count
+      ? `${count} cached model${count === 1 ? "" : "s"} using ${formatBytes(bytes)}.`
+      : "No cached model artifacts.";
+  }
+  if (!modelCacheList) {
+    return;
+  }
+  modelCacheList.replaceChildren();
+  artifacts.slice(0, 5).forEach((artifact) => {
+    const item = document.createElement("li");
+    const name = document.createElement("strong");
+    name.textContent = artifact.name || "Cached model";
+    const size = document.createElement("em");
+    size.textContent = formatBytes(artifact.size_bytes);
+    item.append(name, size);
+    modelCacheList.append(item);
+  });
+  if (artifacts.length > 5) {
+    const item = document.createElement("li");
+    const name = document.createElement("strong");
+    name.textContent = `${artifacts.length - 5} more cached model${artifacts.length - 5 === 1 ? "" : "s"}`;
+    item.append(name);
+    modelCacheList.append(item);
+  }
+}
+
+async function refreshModelCache() {
+  if (modelCacheStatus) {
+    modelCacheStatus.textContent = "Checking local model cache...";
+  }
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    renderModelCache({ artifact_count: 0, artifact_bytes: 0, artifacts: [] });
+    if (modelCacheStatus) {
+      modelCacheStatus.textContent = "Open the desktop app to inspect cached models.";
+    }
+    return null;
+  }
+  const payload = await invoke("desktop_model_cache_status");
+  renderModelCache(payload);
+  return payload;
+}
+
+async function clearModelCache() {
+  if (!window.confirm("Clear cached model artifacts downloaded by InferGrade? Active downloads are left alone.")) {
+    return null;
+  }
+  if (clearModelCacheButton) {
+    clearModelCacheButton.disabled = true;
+  }
+  try {
+    const invoke = await loadTauriInvoke();
+    if (!invoke) {
+      if (modelCacheStatus) {
+        modelCacheStatus.textContent = "Open the desktop app to clear cached models.";
+      }
+      return null;
+    }
+    const payload = await invoke("clear_desktop_model_cache");
+    renderModelCache(payload.status);
+    appendLog(`Cleared ${payload.removed_count || 0} cached model artifact(s), ${formatBytes(payload.removed_bytes)}.`);
+    return payload;
+  } finally {
+    if (clearModelCacheButton) {
+      clearModelCacheButton.disabled = false;
+    }
+  }
 }
 
 function setFirstRunStep(name, state, message) {
@@ -2080,7 +2172,7 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
       if (!selection) {
         return;
       }
-    llamaRuntimeReadiness = "Installed llama.cpp runtime selected. No install command was run.";
+      llamaRuntimeReadiness = "Installed llama.cpp runtime selected. No install command was run.";
       llamaRuntimeAvailable = true;
       renderLocalReadinessChecklist();
       appendLog(`Selected llama.cpp runtime: ${JSON.stringify(selection)}`);
@@ -2091,6 +2183,24 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
       setStatus("Runtime selection failed", "error");
       appendLog(`Could not select installed llama.cpp runtime: ${error.message || error}`);
     });
+});
+
+refreshModelCacheButton?.addEventListener("click", () => {
+  refreshModelCache().catch((error) => {
+    if (modelCacheStatus) {
+      modelCacheStatus.textContent = "Could not inspect cached models.";
+    }
+    appendLog(`Could not inspect model cache: ${error.message || error}`);
+  });
+});
+
+clearModelCacheButton?.addEventListener("click", () => {
+  clearModelCache().catch((error) => {
+    if (modelCacheStatus) {
+      modelCacheStatus.textContent = "Could not clear cached models.";
+    }
+    appendLog(`Could not clear model cache: ${error.message || error}`);
+  });
 });
 
 downloadStarterGgufButton?.addEventListener("click", () => {
@@ -2223,6 +2333,7 @@ renderReleaseStatus().catch((error) => appendLog(`Could not render release statu
 refreshRunnerCliVersion().catch((error) => appendLog(`Could not check Runner CLI version: ${error.message || error}`));
 checkRunnerStartupSelfTest().catch((error) => appendLog(`Could not run startup self-test: ${error.message || error}`));
 checkDesktopReadiness().catch((error) => appendLog(`Could not check desktop readiness: ${error.message || error}`));
+refreshModelCache().catch((error) => appendLog(`Could not inspect model cache: ${error.message || error}`));
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");
 renderLocalReadinessChecklist();

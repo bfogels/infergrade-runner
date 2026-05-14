@@ -25,6 +25,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::UNIX_EPOCH;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
@@ -39,6 +40,8 @@ const DESKTOP_SIDECAR_DIAGNOSTIC_COMMANDS: &[&str] =
     &["--version", "desktop-self-test", "desktop-readiness"];
 const STARTER_GGUF_URL: &str = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
 const STARTER_GGUF_FILENAME: &str = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
+const PARTIAL_ARTIFACT_PREFIX: &str = "infergrade-artifact-";
+const PARTIAL_ARTIFACT_SUFFIX: &str = ".tmp";
 
 #[derive(Default)]
 struct ListenerProcess {
@@ -169,6 +172,70 @@ fn desktop_artifact_cache_dir() -> Result<PathBuf, String> {
         )
     })?;
     Ok(path)
+}
+
+fn is_partial_artifact_name(name: &str) -> bool {
+    name.starts_with(PARTIAL_ARTIFACT_PREFIX) && name.ends_with(PARTIAL_ARTIFACT_SUFFIX)
+}
+
+fn cached_model_artifacts(cache_dir: &Path) -> Result<Vec<Value>, String> {
+    if !cache_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut artifacts = Vec::new();
+    for entry in fs::read_dir(cache_dir).map_err(|error| {
+        format!(
+            "could not read model cache at {}: {error}",
+            cache_dir.display()
+        )
+    })? {
+        let entry =
+            entry.map_err(|error| format!("could not inspect model cache entry: {error}"))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if is_partial_artifact_name(&name) {
+            continue;
+        }
+        let metadata = entry
+            .metadata()
+            .map_err(|error| format!("could not read cached model metadata for {name}: {error}"))?;
+        let modified_unix_seconds = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs());
+        artifacts.push(json!({
+            "name": name,
+            "path": path.display().to_string(),
+            "size_bytes": metadata.len(),
+            "modified_unix_seconds": modified_unix_seconds,
+        }));
+    }
+    artifacts.sort_by(|left, right| {
+        left["name"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(right["name"].as_str().unwrap_or(""))
+    });
+    Ok(artifacts)
+}
+
+fn desktop_model_cache_status_payload() -> Result<Value, String> {
+    let cache_dir = desktop_artifact_cache_dir()?;
+    let artifacts = cached_model_artifacts(&cache_dir)?;
+    let artifact_bytes = artifacts
+        .iter()
+        .map(|artifact| artifact["size_bytes"].as_u64().unwrap_or(0))
+        .sum::<u64>();
+    Ok(json!({
+        "cache_dir": cache_dir.display().to_string(),
+        "artifact_count": artifacts.len(),
+        "artifact_bytes": artifact_bytes,
+        "artifacts": artifacts,
+    }))
 }
 
 fn selected_llama_cpp_runtime() -> Value {
@@ -624,6 +691,46 @@ async fn install_managed_llama_cpp_runtime(runtime_id: Option<String>) -> Result
 #[tauri::command]
 fn remove_selected_llama_cpp_runtime(remove_managed_files: Option<bool>) -> Result<Value, String> {
     engine_remove_selected_llama_cpp_runtime(remove_managed_files.unwrap_or(true))
+}
+
+#[tauri::command]
+fn desktop_model_cache_status() -> Result<Value, String> {
+    desktop_model_cache_status_payload()
+}
+
+#[tauri::command]
+fn clear_desktop_model_cache() -> Result<Value, String> {
+    let cache_dir = desktop_artifact_cache_dir()?;
+    let artifacts = cached_model_artifacts(&cache_dir)?;
+    let mut removed = Vec::new();
+    for artifact in artifacts {
+        let path = artifact["path"].as_str().unwrap_or("").to_string();
+        if path.is_empty() {
+            continue;
+        }
+        let artifact_path = PathBuf::from(&path);
+        if artifact_path.parent() != Some(cache_dir.as_path()) || !artifact_path.is_file() {
+            continue;
+        }
+        fs::remove_file(&artifact_path).map_err(|error| {
+            format!(
+                "could not remove cached model {}: {error}",
+                artifact_path.display()
+            )
+        })?;
+        removed.push(artifact);
+    }
+    let removed_bytes = removed
+        .iter()
+        .map(|artifact| artifact["size_bytes"].as_u64().unwrap_or(0))
+        .sum::<u64>();
+    Ok(json!({
+        "cache_dir": cache_dir.display().to_string(),
+        "removed_count": removed.len(),
+        "removed_bytes": removed_bytes,
+        "removed": removed,
+        "status": desktop_model_cache_status_payload()?,
+    }))
 }
 
 #[tauri::command]
@@ -1173,6 +1280,8 @@ pub fn run() {
             install_managed_llama_cpp_runtime,
             remove_selected_llama_cpp_runtime,
             select_existing_llama_cpp_runtime,
+            desktop_model_cache_status,
+            clear_desktop_model_cache,
             download_starter_gguf,
             run_desktop_native_first_run,
             retry_desktop_native_first_run_upload,
@@ -1566,6 +1675,39 @@ mod tests {
         let _ = fs::remove_file(outside_path);
 
         let _ = fs::remove_dir_all(artifact_dir);
+    }
+
+    #[test]
+    fn desktop_model_cache_lists_and_clears_top_level_artifacts_only() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let home_dir = env::temp_dir().join(format!(
+            "infergrade-desktop-model-cache-home-{}",
+            std::process::id()
+        ));
+        let previous_home = env::var("HOME").ok();
+        env::set_var("HOME", &home_dir);
+        let cache_dir = home_dir.join(".cache").join("infergrade").join("artifacts");
+        fs::create_dir_all(&cache_dir).expect("cache dir");
+        fs::write(cache_dir.join("qwen3.5-9b-q4.gguf"), b"model-bytes").expect("model");
+        fs::write(cache_dir.join("infergrade-artifact-active.tmp"), b"partial").expect("partial");
+
+        let status = desktop_model_cache_status().expect("cache status");
+        assert_eq!(status["artifact_count"], 1);
+        assert_eq!(status["artifacts"][0]["name"], "qwen3.5-9b-q4.gguf");
+        assert!(status["artifact_bytes"].as_u64().unwrap_or(0) > 0);
+
+        let cleared = clear_desktop_model_cache().expect("cache clear");
+        assert_eq!(cleared["removed_count"], 1);
+        assert!(!cache_dir.join("qwen3.5-9b-q4.gguf").exists());
+        assert!(cache_dir.join("infergrade-artifact-active.tmp").exists());
+        assert_eq!(cleared["status"]["artifact_count"], 0);
+
+        if let Some(previous_home) = previous_home {
+            env::set_var("HOME", previous_home);
+        } else {
+            env::remove_var("HOME");
+        }
+        let _ = fs::remove_dir_all(home_dir);
     }
 
     #[test]
