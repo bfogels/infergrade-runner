@@ -132,8 +132,8 @@
             <h2>Connect this machine</h2>
             <p>Paste the one-time code from Hub. Pairing token is stored in Keychain.</p>
             <div class="button-row pairing-actions">
-              <button type="button" data-pair-runner>Pair with Hub</button>
-              <button type="button" class="button-secondary" data-open-hub>Open Hub pairing</button>
+              <button type="button" data-open-hub>Open Hub pairing</button>
+              <button type="button" class="button-secondary" data-pair-runner>Pair with Hub</button>
             </div>
           </div>
           <div class="pairing-fields">
@@ -208,7 +208,7 @@
               <span class="drawer-chevron" aria-hidden="true"></span>
               <span>
                 <strong data-drawer-label>Details and support</strong>
-                <small>Runtime, pairing, logs, and recovery</small>
+                <small>Pairing, runtime, logs, and support</small>
               </span>
             </span>
             <span class="drawer-summary-meta">
@@ -236,11 +236,6 @@
                   <span data-pairing-readiness-status>Paste a Hub pairing code to save this machine.</span>
                 </div>
               </div>
-              <div class="button-row compact-actions">
-                <button type="button" data-start-runner>Start listening</button>
-                <button type="button" class="button-secondary" data-stop-runner disabled>Stop</button>
-                <button type="button" class="button-secondary" data-reset-pairing>Unpair from Hub</button>
-              </div>
             </section>
 
             <section class="drawer-panel" aria-labelledby="runtime-title">
@@ -264,93 +259,30 @@
                   <span data-container-runtime-status>Checking optional sandboxed benchmark support...</span>
                 </div>
               </div>
-              <label>
-                <span>Managed runtime ID</span>
-                <input name="runtimeId" type="text" autocomplete="off" placeholder="Use Runner-pinned default" />
-              </label>
-              <div class="button-row compact-actions">
-                <button type="button" data-runtime-install-managed>Use managed runtime</button>
-                <button type="button" class="button-secondary" data-runtime-select-existing>Select existing llama.cpp</button>
-                <button type="button" class="button-secondary" data-runtime-plan>Inspect plan</button>
-                <button type="button" class="button-secondary" data-runtime-reinstall-managed>Replace with managed</button>
-                <button type="button" class="button-secondary" data-runtime-remove-selected>Remove selected runtime</button>
-                <button type="button" class="button-secondary" data-runner-self-test>Run startup self-test</button>
-              </div>
+              <details class="inline-tools" data-runtime-tools>
+                <summary class="inline-disclosure">
+                  <span>
+                    <strong>Runtime options</strong>
+                    <small>Managed runtime, custom binary, and startup self-test</small>
+                  </span>
+                  <span class="mini-chevron" aria-hidden="true"></span>
+                </summary>
+                <div class="inline-tools-body">
+                  <label>
+                    <span>Managed runtime ID</span>
+                    <input name="runtimeId" type="text" autocomplete="off" placeholder="Use Runner-pinned default" />
+                  </label>
+                  <div class="button-row compact-actions">
+                    <button type="button" data-runtime-install-managed>Use managed runtime</button>
+                    <button type="button" class="button-secondary" data-runtime-select-existing>Select existing llama.cpp</button>
+                    <button type="button" class="button-secondary" data-runtime-plan>Inspect plan</button>
+                    <button type="button" class="button-secondary" data-runtime-reinstall-managed>Replace with managed</button>
+                    <button type="button" class="button-secondary" data-runtime-remove-selected>Remove selected runtime</button>
+                    <button type="button" class="button-secondary" data-runner-self-test>Run startup self-test</button>
+                  </div>
+                </div>
+              </details>
             </section>
-
-            <details class="drawer-panel recovery-panel" data-recovery-details>
-              <summary class="inline-disclosure">
-                <span>
-                  <span class="eyebrow">Hub handoff recovery</span>
-                  <strong id="handoff-title">Assigned-run artifacts</strong>
-                  <small>Advanced local artifact and upload recovery</small>
-                </span>
-                <span class="mini-chevron" aria-hidden="true"></span>
-              </summary>
-              <div class="recovery-body">
-              <p class="hint" data-first-run-handoff-status>If Hub opened Desktop with a run handoff, this fills automatically.</p>
-              <p class="hint">The app reads the saved runner token from secure storage. Tokens are not shown in this browser UI.</p>
-              <div class="field-grid">
-                <label>
-                  <span>Model path</span>
-                  <input name="firstRunModelPath" type="text" autocomplete="off" placeholder="/path/to/model.gguf" />
-                </label>
-                <label>
-                  <span>llama-cli path</span>
-                  <input name="firstRunRuntimePath" type="text" autocomplete="off" placeholder="Leave blank to use the selected llama.cpp runtime" />
-                </label>
-                <label>
-                  <span>Run ID</span>
-                  <input name="firstRunUploadRunId" type="text" autocomplete="off" placeholder="Run ID from Hub" />
-                </label>
-                <label>
-                  <span>Worker ID</span>
-                  <input name="firstRunUploadWorkerId" type="text" autocomplete="off" placeholder="Leave blank to use this paired runner" />
-                </label>
-              </div>
-              <div class="status-list">
-                <div>
-                  <strong>Native runtime suite</strong>
-                  <span data-native-suite-status>Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.</span>
-                </div>
-                <div>
-                  <strong>Model path</strong>
-                  <span data-model-path-status>Select a local GGUF model for Hub-assigned work recovery.</span>
-                </div>
-              </div>
-              <div class="flow-list" aria-label="Local handoff recovery progress">
-                <div data-first-run-step="paired">
-                  <strong>Paired with Hub</strong>
-                  <span>Paste a Hub pairing code to save this machine.</span>
-                </div>
-                <div data-first-run-step="runtime">
-                  <strong>Runtime selected</strong>
-                  <span>Select or install a local llama.cpp runtime.</span>
-                </div>
-                <div data-first-run-step="model">
-                  <strong>Model selected</strong>
-                  <span>Select the Hub-assigned local model artifact.</span>
-                </div>
-                <div data-first-run-step="ready">
-                  <strong>Execution ready</strong>
-                  <span>Pairing, runtime, and model are required before running.</span>
-                </div>
-                <div data-first-run-step="result">
-                  <strong>Result ready</strong>
-                  <span>Local evidence is ready for Hub upload or support review.</span>
-                </div>
-              </div>
-              <div class="button-row compact-actions">
-                <button type="button" class="button-secondary" data-download-starter-gguf>Download starter model</button>
-                <button type="button" data-first-run-start>Run assigned local smoke</button>
-                <button type="button" class="button-secondary" data-first-run-again disabled>Run again</button>
-                <button type="button" class="button-secondary" data-first-run-another-model disabled>Use another model</button>
-                <button type="button" class="button-secondary" data-retry-first-run-upload disabled>Retry upload</button>
-                <button type="button" class="button-secondary" data-copy-artifact-path disabled>Copy artifact path</button>
-              </div>
-              <p class="hint" data-first-run-status>Choose a Hub-assigned model and selected llama.cpp runtime before running.</p>
-              </div>
-            </details>
 
             <section class="drawer-panel" aria-labelledby="support-title">
               <div class="panel-heading">
@@ -388,12 +320,22 @@
               </div>
               <div class="button-row compact-actions">
                 <button type="button" class="button-secondary" data-check-update>Check for updates</button>
-                <button type="button" class="button-secondary" data-clear-logs>Clear logs</button>
               </div>
-              <div class="log-panel" aria-labelledby="log-title">
-                <h4 id="log-title">Logs</h4>
-                <pre data-log-output>Waiting for Runner output...</pre>
-              </div>
+              <details class="inline-tools log-disclosure">
+                <summary class="inline-disclosure">
+                  <span>
+                    <strong id="log-title">Logs</strong>
+                    <small>Listener output and support detail</small>
+                  </span>
+                  <span class="mini-chevron" aria-hidden="true"></span>
+                </summary>
+                <div class="inline-tools-body log-panel">
+                  <pre data-log-output>Waiting for Runner output...</pre>
+                  <div class="button-row compact-actions">
+                    <button type="button" class="button-secondary" data-clear-logs>Clear logs</button>
+                  </div>
+                </div>
+              </details>
             </section>
           </div>
           </div>

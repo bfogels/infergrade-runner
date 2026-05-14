@@ -34,6 +34,7 @@ use tauri_plugin_shell::{
 const KEYRING_SERVICE: &str = "com.infergrade.runner";
 const KEYRING_USER: &str = "hub-runner-token";
 const SIDECAR_BINARY_NAME: &str = "infergrade-sidecar";
+const DESKTOP_EVENT_PREFIX: &str = "INFERGRADE_DESKTOP_EVENT ";
 const DESKTOP_SIDECAR_DIAGNOSTIC_COMMANDS: &[&str] =
     &["--version", "desktop-self-test", "desktop-readiness"];
 const STARTER_GGUF_URL: &str = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
@@ -404,6 +405,11 @@ fn emit_listener_event(app: &AppHandle, payload: Value) {
     let _ = app.emit("runner-listener-event", payload);
 }
 
+fn desktop_assignment_event_from_line(line: &str) -> Option<Value> {
+    let payload = line.strip_prefix(DESKTOP_EVENT_PREFIX)?;
+    serde_json::from_str::<Value>(payload).ok()
+}
+
 fn emit_first_run_event(app: &AppHandle, event: RunnerEvent) {
     if let Ok(payload) = serde_json::to_value(event) {
         let _ = app.emit("runner-first-run-event", payload);
@@ -458,7 +464,8 @@ fn start_runner_listener(
         .shell()
         .sidecar(SIDECAR_BINARY_NAME)
         .map_err(|error| format!("could not prepare Runner sidecar: {error}"))?
-        .args(["start", "--api-url", &normalized_api_url]);
+        .args(["start", "--api-url", &normalized_api_url])
+        .env("INFERGRADE_DESKTOP_EVENTS", "1");
     if let Some(token) = token_for_child {
         command = command.env("INFERGRADE_HUB_TOKEN", token);
     }
@@ -477,16 +484,26 @@ fn start_runner_listener(
             match event {
                 CommandEvent::Stdout(bytes) => {
                     let line = String::from_utf8_lossy(&bytes);
+                    let trimmed = line.trim_end();
+                    if let Some(payload) = desktop_assignment_event_from_line(trimmed) {
+                        emit_listener_event(&event_app, payload);
+                        continue;
+                    }
                     emit_listener_event(
                         &event_app,
-                        json!({"type": "stdout", "line": redact_listener_text(line.trim_end(), &sensitive_values)}),
+                        json!({"type": "stdout", "line": redact_listener_text(trimmed, &sensitive_values)}),
                     );
                 }
                 CommandEvent::Stderr(bytes) => {
                     let line = String::from_utf8_lossy(&bytes);
+                    let trimmed = line.trim_end();
+                    if let Some(payload) = desktop_assignment_event_from_line(trimmed) {
+                        emit_listener_event(&event_app, payload);
+                        continue;
+                    }
                     emit_listener_event(
                         &event_app,
-                        json!({"type": "stderr", "line": redact_listener_text(line.trim_end(), &sensitive_values)}),
+                        json!({"type": "stderr", "line": redact_listener_text(trimmed, &sensitive_values)}),
                     );
                 }
                 CommandEvent::Error(error) => emit_listener_event(
@@ -1210,6 +1227,24 @@ mod tests {
         assert_eq!(
             normalize_api_url("127.0.0.1:8000").expect("loopback shorthand"),
             "http://127.0.0.1:8000/"
+        );
+    }
+
+    #[test]
+    fn parses_structured_desktop_assignment_events_from_sidecar_output() {
+        let event = desktop_assignment_event_from_line(
+            r#"INFERGRADE_DESKTOP_EVENT {"type":"assignment_update","phase":"Running","run_id":"run_123","progress":42}"#,
+        )
+        .expect("desktop event");
+
+        assert_eq!(event["type"], "assignment_update");
+        assert_eq!(event["phase"], "Running");
+        assert_eq!(event["run_id"], "run_123");
+        assert_eq!(event["progress"], 42);
+        assert_eq!(desktop_assignment_event_from_line("regular stdout"), None);
+        assert_eq!(
+            desktop_assignment_event_from_line("INFERGRADE_DESKTOP_EVENT not-json"),
+            None
         );
     }
 

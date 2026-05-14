@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -9,18 +10,41 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.worker import _claim_error_message, _classify_worker_failure, _progress_percent, run_worker_loop, run_worker_once
 
+DESKTOP_EVENT_PREFIX = "INFERGRADE_DESKTOP_EVENT "
+
 
 class WorkerTests(unittest.TestCase):
     def test_worker_once_returns_unclaimed_when_no_job_available(self):
+        messages = []
         with mock.patch("infergrade.worker.claim_run_job", return_value={"run": None}):
             result = run_worker_once(
                 api_url="http://localhost:8000",
                 execution_mode="local_container",
                 worker_id="worker-1",
-                emit_progress=lambda _message: None,
+                emit_progress=messages.append,
             )
         self.assertFalse(result["claimed"])
         self.assertEqual(result["worker_id"], "worker-1")
+        self.assertEqual([message for message in messages if message.startswith(DESKTOP_EVENT_PREFIX)], [])
+
+    def test_worker_once_emits_desktop_idle_event_when_enabled(self):
+        messages = []
+        with mock.patch.dict("os.environ", {"INFERGRADE_DESKTOP_EVENTS": "1"}, clear=False):
+            with mock.patch("infergrade.worker.claim_run_job", return_value={"run": None}):
+                result = run_worker_once(
+                    api_url="http://localhost:8000",
+                    execution_mode="local_container",
+                    worker_id="worker-1",
+                    emit_progress=messages.append,
+                )
+
+        self.assertFalse(result["claimed"])
+        structured = [
+            json.loads(message[len(DESKTOP_EVENT_PREFIX) :])
+            for message in messages
+            if message.startswith(DESKTOP_EVENT_PREFIX)
+        ]
+        self.assertEqual(structured, [{"type": "assignment_idle"}])
 
     def test_worker_once_passes_run_id_filter_when_provided(self):
         with mock.patch("infergrade.worker.claim_run_job", return_value={"run": None}) as claim_mock:
@@ -98,9 +122,11 @@ class WorkerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as output_root:
             expected_output_dir = os.path.join(os.path.realpath(output_root), "run_example")
+            messages = []
             env = {
                 "INFERGRADE_HOST_ARTIFACT_CACHE_DIR": "/host/cache",
                 "INFERGRADE_RUNNER_OUTPUT_ROOT": output_root,
+                "INFERGRADE_DESKTOP_EVENTS": "1",
             }
             with mock.patch.dict("os.environ", env, clear=False):
                 with mock.patch("infergrade.worker.claim_run_job", return_value={"run": claimed_run}) as claim_mock:
@@ -130,6 +156,7 @@ class WorkerTests(unittest.TestCase):
                                                         api_url="http://localhost:8000",
                                                         execution_mode="local_container",
                                                         worker_id="worker-1",
+                                                        emit_progress=messages.append,
                                                     )
 
         self.assertTrue(result["claimed"])
@@ -157,6 +184,16 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(fake_request.output_dir, expected_output_dir)
         self.assertEqual(fake_request.quant_artifact_cache_dir, "/host/cache")
         self.assertTrue(fake_request.resume)
+        structured = [
+            json.loads(message[len(DESKTOP_EVENT_PREFIX) :])
+            for message in messages
+            if message.startswith(DESKTOP_EVENT_PREFIX)
+        ]
+        self.assertEqual(
+            [event["phase"] for event in structured if event["type"] == "assignment_update"],
+            ["Preparing", "Preparing", "Preparing", "Running", "Uploading", "Complete"],
+        )
+        self.assertTrue(all(event["run_id"] == "run_example" for event in structured if event["type"] == "assignment_update"))
 
     def test_worker_rehomes_absolute_claim_output_dir_by_default(self):
         with tempfile.TemporaryDirectory() as output_root:

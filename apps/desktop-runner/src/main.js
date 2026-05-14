@@ -84,6 +84,7 @@ const backendTokenStatus = document.querySelector("[data-backend-token-status]")
 const backendReconnectStatus = document.querySelector("[data-backend-reconnect-status]");
 const backendContainerStatus = document.querySelector("[data-backend-container-status]");
 const supportDetails = document.querySelector("[data-support-details]");
+const logDisclosure = document.querySelector(".log-disclosure");
 const lastCheckLabel = document.querySelector("[data-last-check-label]");
 const listenerTitle = document.querySelector("[data-listener-title]");
 const listenerMessage = document.querySelector("[data-listener-message]");
@@ -109,9 +110,9 @@ let runnerStartupWaiters = [];
 let pendingUpdate = null;
 let lastNormalizedApiUrl = "https://api.infergrade.com/";
 let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp jobs.";
-let nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
+let nativeSuiteReadiness = "Run a readiness check to verify local execution for Hub-assigned work.";
 let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxed benchmarks.";
-let modelPathReadiness = "Select a local GGUF model only when recovering a Hub handoff.";
+let modelPathReadiness = "Hub assigns model artifacts when work is queued.";
 let llamaRuntimeAvailable = false;
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
@@ -228,6 +229,7 @@ function renderLastCheckLabel() {
 function renderPrimaryReadiness() {
   const paired = pairedForUi();
   const listening = Boolean(childProcess);
+  const verified = paired && listening && llamaRuntimeAvailable;
   document.documentElement.dataset.paired = paired ? "true" : "false";
   document.documentElement.dataset.listening = listening ? "true" : "false";
   renderHubDisplay();
@@ -235,11 +237,13 @@ function renderPrimaryReadiness() {
   setReadinessFact("runtime", llamaRuntimeAvailable ? "Metal ready" : "Runtime check needed", llamaRuntimeAvailable ? "ready" : "warning");
   setReadinessFact("token", savedTokenAvailable ? "Token secure" : "Token missing", savedTokenAvailable ? "ready" : "blocked");
   if (primaryStateTitle) {
-    primaryStateTitle.textContent = paired ? listening ? "Ready" : "Listening paused" : "Connect this machine";
+    primaryStateTitle.textContent = verified ? "Ready" : paired ? listening ? "Listening" : "Listening paused" : "Connect this machine";
   }
   if (primaryStateMessage) {
-    primaryStateMessage.textContent = paired && listening
+    primaryStateMessage.textContent = verified
       ? "Connected to Hub. Backend verified. Waiting for assigned work."
+      : paired && listening
+        ? "Connected to Hub. Run a readiness check to verify the local backend before assigned work starts."
       : paired
         ? "Paired with Hub. Start listening when this machine should accept assigned work."
       : "Pair with Hub using a one-time code before this Runner accepts assigned work.";
@@ -382,7 +386,7 @@ function applyPreviewStateFromUrl() {
     llamaRuntimeAvailable = true;
     llamaRuntimeReadiness = "Managed Metal runtime verified.";
     nativeSuiteReadiness = "Backend readiness check passed for local native execution.";
-    containerRuntimeReadiness = "Docker not found. Native runtime checks can continue; advanced sandboxed benchmarks are disabled.";
+    containerRuntimeReadiness = "Docker not found. Native runtime checks can continue; optional sandboxed support is disabled.";
     setStatus("Listening", "good");
   } else if (mockState === "unpaired") {
     savedTokenAvailable = false;
@@ -399,9 +403,9 @@ function applyPreviewStateFromUrl() {
     renderAssignmentActive({
       title: "Hub run run_preview_assignment",
       phase: "Running",
-      description: "Hub assigned a local benchmark to this Runner.",
+      description: "Runner is processing Hub-assigned work.",
       progress: 48,
-      checkName: "llama.cpp throughput check",
+      checkName: "llama.cpp readiness check",
       remaining: "about 6 min",
     });
   } else {
@@ -651,17 +655,17 @@ function renderFirstRunChecklist() {
 }
 
 function renderDesktopReadiness(payload = {}) {
-  lastReadinessCheckAt = new Date();
   if (!payload.status) {
     llamaRuntimeAvailable = false;
-    nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
+    nativeSuiteReadiness = "Open the desktop app to verify local execution readiness.";
     containerRuntimeReadiness = "Open the desktop app to check Docker/Podman. Docker is optional advanced support.";
     renderLocalReadinessChecklist();
     return;
   }
+  lastReadinessCheckAt = new Date();
   nativeSuiteReadiness =
     payload.native_benchmark_message ||
-    "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
+    "Local execution readiness is available for Hub-assigned work.";
   const runtime = payload.llama_cpp_runtime || "";
   const runtimeMessage = payload.llama_cpp_message || "";
   if (runtime === "available") {
@@ -817,6 +821,9 @@ function showLogs() {
     supportDetails.open = true;
     supportDetails.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
+  if (logDisclosure) {
+    logDisclosure.open = true;
+  }
   window.setTimeout(() => {
     logOutput?.scrollIntoView?.({ block: "center", behavior: "smooth" });
     logOutput?.focus?.();
@@ -895,6 +902,15 @@ async function ensureRunnerListenerEvents() {
   runnerListenerEventsReady = true;
   await listen("runner-listener-event", (event) => {
     const payload = event?.payload || {};
+    if (payload.type === "assignment_update" || payload.type === "assignment_idle") {
+      renderAssignmentFromListenerEvent(payload);
+      appendLog(
+        payload.type === "assignment_idle"
+          ? "No Hub assignment is currently queued for this Runner."
+          : `Hub assignment ${payload.phase || "update"}: ${payload.description || payload.run_id || "work updated"}.`
+      );
+      return;
+    }
     if (payload.type === "stdout" || payload.type === "stderr") {
       const line = String(payload.line || "");
       if (line.trim()) {
@@ -1106,6 +1122,33 @@ function renderAssignmentFromFirstRunEvent(payload = {}) {
       progress: 100,
       checkName: "See logs for recovery detail",
     });
+  }
+}
+
+function renderAssignmentFromListenerEvent(payload = {}) {
+  if (payload.type === "assignment_idle") {
+    renderAssignmentIdle();
+    return;
+  }
+  if (payload.type !== "assignment_update") {
+    return;
+  }
+  const phase = payload.phase || "Running";
+  const runId = payload.run_id || payload.runId || "";
+  renderAssignmentActive({
+    title: payload.title || (runId ? `Hub run ${runId}` : "Hub assignment"),
+    phase,
+    description: payload.description || "Runner is processing Hub-assigned work.",
+    progress: Number.isFinite(payload.progress) ? payload.progress : phase === "Complete" ? 100 : 32,
+    checkName: payload.check_name || payload.checkName || payload.stage || "",
+    remaining: payload.remaining || "",
+  });
+  if (phase === "Needs attention") {
+    setStatus("Needs attention", "error");
+  } else if (phase === "Complete") {
+    setStatus("Complete", "good");
+  } else {
+    setStatus("Running assignment", "warning");
   }
 }
 
@@ -1498,7 +1541,7 @@ function clearFirstRunLocalState({ clearModel = false } = {}) {
   modelPathReadiness = currentFirstRunModelPath()
     ? `First-run model selected: ${currentFirstRunModelPath()}`
     : "Select a local GGUF model only when recovering a Hub handoff.";
-  nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
+  nativeSuiteReadiness = "Run a readiness check to verify local execution for Hub-assigned work.";
   if (firstRunStatus) {
     firstRunStatus.textContent = clearModel
       ? "Choose another local GGUF model before running."
