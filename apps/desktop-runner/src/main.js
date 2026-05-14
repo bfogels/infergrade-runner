@@ -119,6 +119,10 @@ let runnerProfileAvailable = false;
 let lastFirstRunPayload = null;
 let lastReadinessCheckAt = null;
 let assignmentStartedAt = null;
+let currentAssignmentRunId = "";
+let currentAssignmentPhase = "idle";
+let currentHandoffRunId = "";
+let currentHandoffWorkerId = "";
 let previewStateApplied = false;
 
 function systemTheme() {
@@ -291,6 +295,8 @@ function renderAssignmentIdle() {
   }
   assignmentPanel.dataset.state = "idle";
   assignmentStartedAt = null;
+  currentAssignmentRunId = "";
+  currentAssignmentPhase = "idle";
   if (assignmentKicker) {
     assignmentKicker.textContent = "Assigned by Hub";
   }
@@ -313,12 +319,15 @@ function renderAssignmentActive({
   checkName = "",
   startedAt = null,
   remaining = "",
+  runId = "",
 } = {}) {
   if (!assignmentPanel) {
     return;
   }
   assignmentPanel.dataset.state = "active";
   assignmentStartedAt = startedAt || assignmentStartedAt || new Date();
+  currentAssignmentRunId = runId || currentAssignmentRunId;
+  currentAssignmentPhase = phase;
   if (assignmentKicker) {
     assignmentKicker.textContent = "Active assignment";
   }
@@ -353,12 +362,16 @@ function renderAssignmentFromHandoff() {
     renderAssignmentIdle();
     return;
   }
+  if (currentAssignmentRunId === runId && currentAssignmentPhase !== "idle" && currentAssignmentPhase !== "Handoff received") {
+    return;
+  }
   renderAssignmentActive({
     title: `Hub run ${runId}`,
-    phase: "Preparing",
-    description: "Hub opened this Runner with an assigned run handoff.",
-    progress: 10,
-    checkName: "Waiting for local runtime and model readiness",
+    phase: "Handoff received",
+    description: "Hub opened this Runner for an assigned run. The listener will update this when it claims work.",
+    progress: 6,
+    checkName: "Waiting for listener claim",
+    runId,
   });
 }
 
@@ -407,6 +420,7 @@ function applyPreviewStateFromUrl() {
       progress: 48,
       checkName: "llama.cpp readiness check",
       remaining: "about 6 min",
+      runId: "run_preview_assignment",
     });
   } else {
     renderAssignmentFromHandoff();
@@ -603,7 +617,7 @@ function currentFirstRunModelPath() {
 }
 
 function currentFirstRunUploadRunId() {
-  return firstRunUploadRunIdInput?.value.trim() || "";
+  return firstRunUploadRunIdInput?.value.trim() || currentHandoffRunId || "";
 }
 
 function hasSelectedModelPath() {
@@ -914,6 +928,7 @@ async function ensureRunnerListenerEvents() {
     if (payload.type === "stdout" || payload.type === "stderr") {
       const line = String(payload.line || "");
       if (line.trim()) {
+        renderAssignmentFromListenerLine(line);
         runnerStartupLines.push(line.trim());
         if (runnerStartupLines.length > 8) {
           runnerStartupLines.shift();
@@ -1127,7 +1142,9 @@ function renderAssignmentFromFirstRunEvent(payload = {}) {
 
 function renderAssignmentFromListenerEvent(payload = {}) {
   if (payload.type === "assignment_idle") {
-    renderAssignmentIdle();
+    if (currentAssignmentPhase !== "Handoff received") {
+      renderAssignmentIdle();
+    }
     return;
   }
   if (payload.type !== "assignment_update") {
@@ -1142,6 +1159,7 @@ function renderAssignmentFromListenerEvent(payload = {}) {
     progress: Number.isFinite(payload.progress) ? payload.progress : phase === "Complete" ? 100 : 32,
     checkName: payload.check_name || payload.checkName || payload.stage || "",
     remaining: payload.remaining || "",
+    runId,
   });
   if (phase === "Needs attention") {
     setStatus("Needs attention", "error");
@@ -1150,6 +1168,96 @@ function renderAssignmentFromListenerEvent(payload = {}) {
   } else {
     setStatus("Running assignment", "warning");
   }
+}
+
+function renderAssignmentFromListenerLine(line = "") {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) {
+    return false;
+  }
+  const claimed = trimmed.match(/^Claimed run ([^\.\s]+)\.?/);
+  if (claimed) {
+    const runId = claimed[1];
+    renderAssignmentActive({
+      title: `Hub run ${runId}`,
+      phase: "Preparing",
+      description: "Runner claimed Hub-assigned work and is preparing local execution.",
+      progress: 12,
+      checkName: "Claim accepted",
+      runId,
+    });
+    setStatus("Running assignment", "warning");
+    return true;
+  }
+  const failed = trimmed.match(/^Run ([^\.\s]+) failed: (.+)$/);
+  if (failed) {
+    const runId = failed[1];
+    renderAssignmentActive({
+      title: `Hub run ${runId}`,
+      phase: "Needs attention",
+      description: failed[2],
+      progress: 100,
+      checkName: "See logs for recovery detail",
+      runId,
+    });
+    setStatus("Needs attention", "error");
+    return true;
+  }
+  if (trimmed.startsWith("Resolving model artifact")) {
+    renderAssignmentActive({
+      title: currentAssignmentRunId ? `Hub run ${currentAssignmentRunId}` : "Hub assignment",
+      phase: "Downloading",
+      description: "Runner is resolving the Hub-assigned model artifact.",
+      progress: 24,
+      checkName: "Model artifact",
+      runId: currentAssignmentRunId,
+    });
+    setStatus("Running assignment", "warning");
+    return true;
+  }
+  if (trimmed.startsWith("Running capability suite")) {
+    renderAssignmentActive({
+      title: currentAssignmentRunId ? `Hub run ${currentAssignmentRunId}` : "Hub assignment",
+      phase: "Running",
+      description: "Runner is executing Hub-assigned checks.",
+      progress: 48,
+      checkName: "Capability suite",
+      runId: currentAssignmentRunId,
+    });
+    setStatus("Running assignment", "warning");
+    return true;
+  }
+  const deploymentProfile = trimmed.match(/^Running deployment profile (.+)\.\.\.$/);
+  if (deploymentProfile) {
+    renderAssignmentActive({
+      title: currentAssignmentRunId ? `Hub run ${currentAssignmentRunId}` : "Hub assignment",
+      phase: "Running",
+      description: "Runner is executing Hub-assigned deployment checks.",
+      progress: 62,
+      checkName: deploymentProfile[1],
+      runId: currentAssignmentRunId,
+    });
+    setStatus("Running assignment", "warning");
+    return true;
+  }
+  const completed = trimmed.match(/^Completed bundle (.+)$/);
+  if (completed) {
+    renderAssignmentActive({
+      title: currentAssignmentRunId ? `Hub run ${currentAssignmentRunId}` : "Hub assignment",
+      phase: "Uploading",
+      description: "Execution completed locally. Uploading results to Hub.",
+      progress: 94,
+      checkName: completed[1],
+      runId: currentAssignmentRunId,
+    });
+    setStatus("Uploading", "warning");
+    return true;
+  }
+  if (trimmed === "No matching run jobs are awaiting execution." && currentAssignmentPhase !== "Handoff received") {
+    renderAssignmentIdle();
+    return true;
+  }
+  return false;
 }
 
 function pairingSummary(stdout) {
@@ -1425,6 +1533,8 @@ function applyFirstRunHandoff(incomingHandoff = null) {
   const storedWorkerId = window.localStorage.getItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY) || "";
   const runId = urlHandoff.runId || storedRunId;
   const workerId = urlHandoff.runId ? urlHandoff.workerId : storedWorkerId;
+  currentHandoffRunId = runId;
+  currentHandoffWorkerId = workerId;
   if (runId && firstRunUploadRunIdInput && !firstRunUploadRunIdInput.value.trim()) {
     firstRunUploadRunIdInput.value = runId;
   }
@@ -1486,7 +1596,7 @@ function readFirstRunUploadRunId() {
 }
 
 function readFirstRunUploadWorkerId() {
-  const workerId = firstRunUploadWorkerIdInput?.value.trim() || "";
+  const workerId = firstRunUploadWorkerIdInput?.value.trim() || currentHandoffWorkerId || "";
   if (workerId) {
     window.localStorage.setItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY, workerId);
   }
@@ -1496,6 +1606,8 @@ function readFirstRunUploadWorkerId() {
 function clearFirstRunHandoff() {
   window.localStorage.removeItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY);
   window.localStorage.removeItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY);
+  currentHandoffRunId = "";
+  currentHandoffWorkerId = "";
   if (firstRunUploadRunIdInput) {
     firstRunUploadRunIdInput.value = "";
   }

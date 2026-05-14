@@ -369,6 +369,13 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.equal(html.includes("Leave blank to use the selected llama.cpp runtime"), false);
   assert.ok(html.includes("data-assignment-progress-bar"));
   assert.ok(js.includes("renderAssignmentFromListenerEvent"));
+  assert.ok(js.includes("renderAssignmentFromListenerLine"));
+  assert.ok(js.includes("Claimed run"));
+  assert.ok(js.includes("Runner claimed Hub-assigned work and is preparing local execution."));
+  assert.ok(js.includes("Handoff received"));
+  assert.ok(js.includes("Waiting for listener claim"));
+  assert.ok(js.includes("currentHandoffRunId"));
+  assert.equal(js.includes("Waiting for local runtime and model readiness"), false);
   assert.ok(js.includes('payload.type === "assignment_update" || payload.type === "assignment_idle"'));
   assert.ok(js.includes("Hub assignment ${payload.phase || \"update\"}"));
   assert.ok(js.includes("renderAssignmentActive({"));
@@ -377,6 +384,7 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("No Hub assignment is currently queued for this Runner."));
   assert.ok(rust.includes('const DESKTOP_EVENT_PREFIX: &str = "INFERGRADE_DESKTOP_EVENT "'));
   assert.ok(rust.includes("fn desktop_assignment_event_from_line"));
+  assert.ok(rust.includes("fn listener_events_from_output"));
   assert.ok(rust.includes('.env("INFERGRADE_DESKTOP_EVENTS", "1")'));
   assert.ok(rust.includes('emit_listener_event(&event_app, payload);'));
   assert.ok(js.includes("Installed llama.cpp runtime selected. No install command was run."));

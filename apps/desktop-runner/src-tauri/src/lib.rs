@@ -410,6 +410,24 @@ fn desktop_assignment_event_from_line(line: &str) -> Option<Value> {
     serde_json::from_str::<Value>(payload).ok()
 }
 
+fn listener_events_from_output(
+    stream_type: &str,
+    text: &str,
+    sensitive_values: &[String],
+) -> Vec<Value> {
+    text.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim_end();
+            if trimmed.is_empty() {
+                return None;
+            }
+            Some(desktop_assignment_event_from_line(trimmed).unwrap_or_else(|| {
+                json!({"type": stream_type, "line": redact_listener_text(trimmed, sensitive_values)})
+            }))
+        })
+        .collect()
+}
+
 fn emit_first_run_event(app: &AppHandle, event: RunnerEvent) {
     if let Ok(payload) = serde_json::to_value(event) {
         let _ = app.emit("runner-first-run-event", payload);
@@ -484,27 +502,15 @@ fn start_runner_listener(
             match event {
                 CommandEvent::Stdout(bytes) => {
                     let line = String::from_utf8_lossy(&bytes);
-                    let trimmed = line.trim_end();
-                    if let Some(payload) = desktop_assignment_event_from_line(trimmed) {
+                    for payload in listener_events_from_output("stdout", &line, &sensitive_values) {
                         emit_listener_event(&event_app, payload);
-                        continue;
                     }
-                    emit_listener_event(
-                        &event_app,
-                        json!({"type": "stdout", "line": redact_listener_text(trimmed, &sensitive_values)}),
-                    );
                 }
                 CommandEvent::Stderr(bytes) => {
                     let line = String::from_utf8_lossy(&bytes);
-                    let trimmed = line.trim_end();
-                    if let Some(payload) = desktop_assignment_event_from_line(trimmed) {
+                    for payload in listener_events_from_output("stderr", &line, &sensitive_values) {
                         emit_listener_event(&event_app, payload);
-                        continue;
                     }
-                    emit_listener_event(
-                        &event_app,
-                        json!({"type": "stderr", "line": redact_listener_text(trimmed, &sensitive_values)}),
-                    );
                 }
                 CommandEvent::Error(error) => emit_listener_event(
                     &event_app,
@@ -1246,6 +1252,23 @@ mod tests {
             desktop_assignment_event_from_line("INFERGRADE_DESKTOP_EVENT not-json"),
             None
         );
+    }
+
+    #[test]
+    fn splits_listener_chunks_into_structured_and_redacted_events() {
+        let events = listener_events_from_output(
+            "stderr",
+            "INFERGRADE_DESKTOP_EVENT {\"type\":\"assignment_update\",\"phase\":\"Preparing\",\"run_id\":\"run_123\"}\nClaimed run run_123 with qbhr_secret.\nINFERGRADE_DESKTOP_EVENT {\"type\":\"assignment_update\",\"phase\":\"Running\",\"run_id\":\"run_123\",\"progress\":60}\n",
+            &["qbhr_secret".to_string()],
+        );
+
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0]["type"], "assignment_update");
+        assert_eq!(events[0]["phase"], "Preparing");
+        assert_eq!(events[1]["type"], "stderr");
+        assert_eq!(events[1]["line"], "Claimed run run_123 with [redacted].");
+        assert_eq!(events[2]["phase"], "Running");
+        assert_eq!(events[2]["progress"], 60);
     }
 
     #[test]
