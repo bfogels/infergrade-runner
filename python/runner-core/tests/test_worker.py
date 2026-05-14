@@ -8,7 +8,7 @@ from urllib import error as urllib_error
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.worker import _claim_error_message, _classify_worker_failure, _progress_percent, run_worker_loop, run_worker_once
+from infergrade.worker import _claim_error_message, _classify_worker_failure, _progress_detail, _progress_percent, run_worker_loop, run_worker_once
 
 DESKTOP_EVENT_PREFIX = "INFERGRADE_DESKTOP_EVENT "
 
@@ -450,16 +450,20 @@ class WorkerTests(unittest.TestCase):
     def test_progress_percent_uses_capability_case_progress(self):
         payload = {
             "current_stage": "capability",
+            "current_detail": "multi_turn_chat_memory_v1",
             "capability_benchmarks": {
-                "evalplus_humaneval": {
+                "multi_turn_chat_memory_v1": {
                     "status": "running",
-                    "completed_cases": 82,
-                    "total_cases": 164,
+                    "display_name": "Multi-turn chat memory",
+                    "completed_cases": 5,
+                    "total_cases": 5,
+                    "progress_detail": "5/5",
                 }
             },
         }
         self.assertGreater(_progress_percent(payload), 52.0)
         self.assertLess(_progress_percent(payload), 60.1)
+        self.assertEqual(_progress_detail(payload), "Multi-turn chat memory 5/5")
 
     def test_progress_percent_uses_deployment_iteration_progress(self):
         payload = {

@@ -613,7 +613,38 @@ def _runtime_progress_update(output_dir: Optional[str]) -> Tuple[Optional[str], 
     payload = load_progress(output_dir)
     if not payload:
         return None, None, None
-    return payload.get("current_stage"), payload.get("current_detail"), _progress_percent(payload)
+    return payload.get("current_stage"), _progress_detail(payload), _progress_percent(payload)
+
+
+def _progress_detail(payload: Dict[str, Any]) -> Optional[str]:
+    """Return a human-readable current benchmark or deployment detail."""
+    stage = payload.get("current_stage")
+    detail = payload.get("current_detail")
+    if not detail:
+        return None
+
+    if stage == "capability":
+        benchmark = (payload.get("capability_benchmarks") or {}).get(detail) or {}
+        label = benchmark.get("display_name") or detail
+        progress_detail = benchmark.get("progress_detail")
+        if progress_detail == "completed":
+            return "%s complete" % label
+        if progress_detail == "failed":
+            return "%s failed" % label
+        if progress_detail:
+            return "%s %s" % (label, progress_detail)
+        return label
+
+    if stage == "deployment":
+        profile = (payload.get("deployment_profiles") or {}).get(detail) or {}
+        progress_detail = profile.get("progress_detail")
+        if progress_detail == "completed":
+            return "%s complete" % detail
+        if progress_detail:
+            return "%s %s" % (detail, progress_detail)
+        return detail
+
+    return detail
 
 
 def _progress_percent(payload: Dict[str, Any]) -> Optional[float]:

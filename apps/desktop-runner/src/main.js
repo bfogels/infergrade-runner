@@ -123,6 +123,8 @@ let runnerProfileAvailable = false;
 let lastFirstRunPayload = null;
 let lastReadinessCheckAt = null;
 let assignmentStartedAt = null;
+let assignmentClockTimer = null;
+let currentAssignmentRemaining = "";
 let currentAssignmentRunId = "";
 let currentAssignmentPhase = "idle";
 let currentHandoffRunId = "";
@@ -293,6 +295,35 @@ function formatElapsed(startedAt = assignmentStartedAt) {
   return `Elapsed ${minutes}:${seconds}`;
 }
 
+function renderAssignmentTime() {
+  if (!assignmentTime) {
+    return;
+  }
+  assignmentTime.textContent = currentAssignmentRemaining
+    ? `${formatElapsed()} · ${currentAssignmentRemaining} remaining`
+    : formatElapsed();
+}
+
+function stopAssignmentClock() {
+  if (assignmentClockTimer) {
+    window.clearInterval(assignmentClockTimer);
+    assignmentClockTimer = null;
+  }
+}
+
+function startAssignmentClock() {
+  if (assignmentClockTimer || !assignmentStartedAt || !assignmentTime) {
+    return;
+  }
+  assignmentClockTimer = window.setInterval(() => {
+    if (assignmentPanel?.dataset.state !== "active" || currentAssignmentPhase === "Complete") {
+      stopAssignmentClock();
+      return;
+    }
+    renderAssignmentTime();
+  }, 1000);
+}
+
 function formatBytes(value = 0) {
   const bytes = Number(value) || 0;
   if (bytes < 1024) {
@@ -313,8 +344,10 @@ function renderAssignmentIdle() {
   }
   assignmentPanel.dataset.state = "idle";
   assignmentStartedAt = null;
+  currentAssignmentRemaining = "";
   currentAssignmentRunId = "";
   currentAssignmentPhase = "idle";
+  stopAssignmentClock();
   if (assignmentKicker) {
     assignmentKicker.textContent = "Assigned by Hub";
   }
@@ -344,6 +377,7 @@ function renderAssignmentActive({
   }
   assignmentPanel.dataset.state = "active";
   assignmentStartedAt = startedAt || assignmentStartedAt || new Date();
+  currentAssignmentRemaining = remaining;
   currentAssignmentRunId = runId || currentAssignmentRunId;
   currentAssignmentPhase = phase;
   if (assignmentKicker) {
@@ -361,8 +395,11 @@ function renderAssignmentActive({
   if (assignmentPhase) {
     assignmentPhase.textContent = phase;
   }
-  if (assignmentTime) {
-    assignmentTime.textContent = remaining ? `${formatElapsed()} · ${remaining} remaining` : formatElapsed();
+  renderAssignmentTime();
+  if (phase === "Complete") {
+    stopAssignmentClock();
+  } else {
+    startAssignmentClock();
   }
   if (assignmentProgressBar) {
     const boundedProgress = Math.max(0, Math.min(100, Number(progress) || 0));
@@ -1314,6 +1351,27 @@ function renderAssignmentFromListenerLine(line = "") {
       description: "Runner is executing Hub-assigned checks.",
       progress: 48,
       checkName: "Capability suite",
+      runId: currentAssignmentRunId,
+    });
+    setStatus("Running assignment", "warning");
+    return true;
+  }
+  const capabilityProgress = trimmed.match(/^Capability benchmark (.+?) (?:(started) \((\d+) cases\)|(\d+)\/(\d+) cases|completed(?: with degraded generation quality)?|failed(?: before evaluation produced a trustworthy score)?)\.$/);
+  if (capabilityProgress) {
+    const benchmarkName = capabilityProgress[1];
+    const progressDetail = capabilityProgress[2]
+      ? `0/${capabilityProgress[3]}`
+      : capabilityProgress[4] && capabilityProgress[5]
+        ? `${capabilityProgress[4]}/${capabilityProgress[5]}`
+        : capabilityProgress[0].includes("failed")
+          ? "failed"
+          : "complete";
+    renderAssignmentActive({
+      title: currentAssignmentRunId ? `Hub run ${currentAssignmentRunId}` : "Hub assignment",
+      phase: "Running",
+      description: "Runner is executing Hub-assigned benchmark checks.",
+      progress: assignmentProgressBar ? Number.parseFloat(assignmentProgressBar.style.width) || 52 : 52,
+      checkName: `${benchmarkName} ${progressDetail}`,
       runId: currentAssignmentRunId,
     });
     setStatus("Running assignment", "warning");

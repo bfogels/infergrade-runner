@@ -393,7 +393,14 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("Hub assignment ${payload.phase || \"update\"}"));
   assert.ok(js.includes("renderAssignmentActive({"));
   assert.ok(js.includes("phase === \"Complete\" ? 100 : 32"));
+  assert.ok(js.includes("function renderAssignmentTime()"));
+  assert.ok(js.includes("function startAssignmentClock()"));
+  assert.ok(js.includes("window.setInterval(() => {"));
+  assert.ok(js.includes("renderAssignmentTime();"));
+  assert.ok(js.includes("stopAssignmentClock();"));
   assert.ok(js.includes("payload.check_name || payload.checkName || payload.stage"));
+  assert.ok(js.includes("Capability benchmark (.+?)"));
+  assert.ok(js.includes("Runner is executing Hub-assigned benchmark checks."));
   assert.ok(js.includes("No Hub assignment is currently queued for this Runner."));
   assert.ok(rust.includes('const DESKTOP_EVENT_PREFIX: &str = "INFERGRADE_DESKTOP_EVENT "'));
   assert.ok(rust.includes("fn desktop_assignment_event_from_line"));
