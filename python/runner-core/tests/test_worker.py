@@ -8,7 +8,7 @@ from urllib import error as urllib_error
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.worker import _claim_error_message, _classify_worker_failure, _progress_detail, _progress_percent, run_worker_loop, run_worker_once
+from infergrade.worker import _claim_error_message, _classify_worker_failure, _progress_detail, _progress_percent, _runtime_progress_update, run_worker_loop, run_worker_once
 
 DESKTOP_EVENT_PREFIX = "INFERGRADE_DESKTOP_EVENT "
 
@@ -194,6 +194,13 @@ class WorkerTests(unittest.TestCase):
             ["Preparing", "Preparing", "Preparing", "Running", "Uploading", "Complete"],
         )
         self.assertTrue(all(event["run_id"] == "run_example" for event in structured if event["type"] == "assignment_update"))
+        self.assertTrue(
+            any(
+                event.get("check_name") == "interactive_chat_v1"
+                for event in structured
+                if event["type"] == "assignment_update" and event["phase"] == "Running"
+            )
+        )
 
     def test_worker_rehomes_absolute_claim_output_dir_by_default(self):
         with tempfile.TemporaryDirectory() as output_root:
@@ -464,6 +471,12 @@ class WorkerTests(unittest.TestCase):
         self.assertGreater(_progress_percent(payload), 52.0)
         self.assertLess(_progress_percent(payload), 60.1)
         self.assertEqual(_progress_detail(payload), "Multi-turn chat memory 5/5")
+        with mock.patch("infergrade.worker.load_progress", return_value=payload):
+            stage, hub_detail, desktop_detail, progress_percent = _runtime_progress_update("runs/run_example")
+        self.assertEqual(stage, "capability")
+        self.assertEqual(hub_detail, "multi_turn_chat_memory_v1")
+        self.assertEqual(desktop_detail, "Multi-turn chat memory 5/5")
+        self.assertGreater(progress_percent, 52.0)
 
     def test_progress_percent_uses_deployment_iteration_progress(self):
         payload = {

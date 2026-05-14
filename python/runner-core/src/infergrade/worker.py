@@ -127,7 +127,7 @@ def execute_run_job(
             if emit_progress:
                 emit_progress(message)
             _runner_heartbeat("busy", current_run_id=run_id, message=message)
-            stage, detail, progress_percent = _runtime_progress_update(request.output_dir)
+            stage, detail, desktop_detail, progress_percent = _runtime_progress_update(request.output_dir)
             _emit_desktop_event(
                 emit_progress,
                 "assignment_update",
@@ -135,7 +135,7 @@ def execute_run_job(
                 run_id=run_id,
                 description="Runner is executing Hub-assigned work.",
                 progress=progress_percent,
-                check_name=detail or stage or message,
+                check_name=desktop_detail or detail or stage or message,
             )
             heartbeat_run_job(
                 api_url,
@@ -606,14 +606,15 @@ def _classify_doctor_failure(report: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _runtime_progress_update(output_dir: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[float]]:
+def _runtime_progress_update(output_dir: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[float]]:
     """Project the local runner progress file into Hub-facing stage and percent updates."""
     if not output_dir:
-        return None, None, None
+        return None, None, None, None
     payload = load_progress(output_dir)
     if not payload:
-        return None, None, None
-    return payload.get("current_stage"), _progress_detail(payload), _progress_percent(payload)
+        return None, None, None, None
+    detail = payload.get("current_detail")
+    return payload.get("current_stage"), detail, _progress_detail(payload), _progress_percent(payload)
 
 
 def _progress_detail(payload: Dict[str, Any]) -> Optional[str]:
