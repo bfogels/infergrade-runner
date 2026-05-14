@@ -19,10 +19,10 @@ const UPDATE_CHANNEL = "release";
 const UPDATE_STATUS = "Open the signed desktop app to check for verified updates.";
 
 const form = document.querySelector("[data-runner-form]");
-const startButton = document.querySelector("[data-start-runner]");
-const stopButton = document.querySelector("[data-stop-runner]");
+const startButtons = [...document.querySelectorAll("[data-start-runner]")];
+const stopButtons = [...document.querySelectorAll("[data-stop-runner]")];
 const pairButton = document.querySelector("[data-pair-runner]");
-const resetPairingButton = document.querySelector("[data-reset-pairing]");
+const resetPairingButtons = [...document.querySelectorAll("[data-reset-pairing]")];
 const clearLogsButton = document.querySelector("[data-clear-logs]");
 const themeChoiceButtons = [...document.querySelectorAll("[data-theme-choice]")];
 const runtimePlanButton = document.querySelector("[data-runtime-plan]");
@@ -48,6 +48,9 @@ const runnerSelfTestButton = document.querySelector("[data-runner-self-test]");
 const checkUpdateButton = document.querySelector("[data-check-update]");
 const installUpdateButton = document.querySelector("[data-install-update]");
 const relaunchUpdateButton = document.querySelector("[data-relaunch-update]");
+const readinessCheckButton = document.querySelector("[data-readiness-check]");
+const openHubButtons = [...document.querySelectorAll("[data-open-hub]")];
+const viewLogsButton = document.querySelector("[data-view-logs]");
 const appVersion = document.querySelector("[data-app-version]");
 const updateChannel = document.querySelector("[data-update-channel]");
 const updateStatus = document.querySelector("[data-update-status]");
@@ -70,6 +73,30 @@ const statusDot = document.querySelector("[data-status-dot]");
 const pairState = document.querySelector("[data-pair-state]");
 const tokenState = document.querySelector("[data-token-state]");
 const logOutput = document.querySelector("[data-log-output]");
+const primaryStateTitle = document.querySelector("[data-primary-state-title]");
+const primaryStateMessage = document.querySelector("[data-primary-state-message]");
+const hubUrlDisplay = document.querySelector("[data-hub-url-display]");
+const readinessFacts = new Map(
+  [...document.querySelectorAll("[data-readiness-fact]")].map((node) => [node.dataset.readinessFact, node])
+);
+const backendRuntimeStatus = document.querySelector("[data-backend-runtime-status]");
+const backendTokenStatus = document.querySelector("[data-backend-token-status]");
+const backendReconnectStatus = document.querySelector("[data-backend-reconnect-status]");
+const backendContainerStatus = document.querySelector("[data-backend-container-status]");
+const supportDetails = document.querySelector("[data-support-details]");
+const lastCheckLabel = document.querySelector("[data-last-check-label]");
+const listenerTitle = document.querySelector("[data-listener-title]");
+const listenerMessage = document.querySelector("[data-listener-message]");
+const listenerStatusMark = document.querySelector("[data-listener-status-mark]");
+const assignmentPanel = document.querySelector("[data-assignment-panel]");
+const assignmentKicker = document.querySelector("[data-assignment-kicker]");
+const assignmentTitle = document.querySelector("[data-assignment-title]");
+const assignmentDescription = document.querySelector("[data-assignment-description]");
+const assignmentProgressWrap = document.querySelector("[data-assignment-progress-wrap]");
+const assignmentPhase = document.querySelector("[data-assignment-phase]");
+const assignmentTime = document.querySelector("[data-assignment-time]");
+const assignmentProgressBar = document.querySelector("[data-assignment-progress-bar]");
+const assignmentCheck = document.querySelector("[data-assignment-check]");
 
 let childProcess = null;
 let logLines = [];
@@ -84,11 +111,14 @@ let lastNormalizedApiUrl = "https://api.infergrade.com/";
 let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp jobs.";
 let nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
 let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxed benchmarks.";
-let modelPathReadiness = "Select a local GGUF model for the first benchmark.";
+let modelPathReadiness = "Select a local GGUF model only when recovering a Hub handoff.";
 let llamaRuntimeAvailable = false;
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
 let lastFirstRunPayload = null;
+let lastReadinessCheckAt = null;
+let assignmentStartedAt = null;
+let previewStateApplied = false;
 
 function systemTheme() {
   if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
@@ -131,6 +161,253 @@ function initTheme() {
   } else if (typeof media.addListener === "function") {
     media.addListener(refreshSystemTheme);
   }
+}
+
+function displayHubUrl() {
+  try {
+    const url = new URL(lastNormalizedApiUrl);
+    if (url.hostname === "api.infergrade.com") {
+      return "infergrade.com";
+    }
+    return url.host || lastNormalizedApiUrl;
+  } catch (_error) {
+    return lastNormalizedApiUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  }
+}
+
+function hubWebUrl() {
+  try {
+    const url = new URL(lastNormalizedApiUrl);
+    if (url.hostname === "api.infergrade.com") {
+      return "https://infergrade.com/";
+    }
+    return url.origin;
+  } catch (_error) {
+    return "https://infergrade.com/";
+  }
+}
+
+function setReadinessFact(name, label, state = "ready") {
+  const node = readinessFacts.get(name);
+  if (!node) {
+    return;
+  }
+  node.textContent = label;
+  node.dataset.state = state;
+}
+
+function setRunnerButtonsDisabled(kind, disabled) {
+  const buttons = kind === "start" ? startButtons : stopButtons;
+  buttons.forEach((button) => {
+    button.disabled = disabled;
+  });
+}
+
+function pairedForUi() {
+  return savedTokenAvailable && runnerProfileAvailable;
+}
+
+function renderHubDisplay() {
+  if (hubUrlDisplay) {
+    hubUrlDisplay.textContent = displayHubUrl();
+  }
+}
+
+function renderLastCheckLabel() {
+  if (!lastCheckLabel) {
+    return;
+  }
+  if (!lastReadinessCheckAt) {
+    lastCheckLabel.textContent = "Last check pending";
+    return;
+  }
+  const seconds = Math.max(0, Math.round((Date.now() - lastReadinessCheckAt.getTime()) / 1000));
+  lastCheckLabel.textContent = seconds < 90 ? `Last check ${seconds}s ago` : `Last check ${lastReadinessCheckAt.toLocaleTimeString()}`;
+}
+
+function renderPrimaryReadiness() {
+  const paired = pairedForUi();
+  const listening = Boolean(childProcess);
+  document.documentElement.dataset.paired = paired ? "true" : "false";
+  document.documentElement.dataset.listening = listening ? "true" : "false";
+  renderHubDisplay();
+  setReadinessFact("hub", paired ? "Hub paired" : "Pair with Hub", paired ? "ready" : "blocked");
+  setReadinessFact("runtime", llamaRuntimeAvailable ? "Metal ready" : "Runtime check needed", llamaRuntimeAvailable ? "ready" : "warning");
+  setReadinessFact("token", savedTokenAvailable ? "Token secure" : "Token missing", savedTokenAvailable ? "ready" : "blocked");
+  if (primaryStateTitle) {
+    primaryStateTitle.textContent = paired ? listening ? "Ready" : "Listening paused" : "Connect this machine";
+  }
+  if (primaryStateMessage) {
+    primaryStateMessage.textContent = paired && listening
+      ? "Connected to Hub. Backend verified. Waiting for assigned work."
+      : paired
+        ? "Paired with Hub. Start listening when this machine should accept assigned work."
+      : "Pair with Hub using a one-time code before this Runner accepts assigned work.";
+  }
+  if (listenerTitle) {
+    listenerTitle.textContent = listening ? "Listening for Hub" : "Listening paused";
+  }
+  if (listenerMessage) {
+    listenerMessage.textContent = listening
+      ? "This machine can receive Hub-assigned runs. Keep the app open while work is active."
+      : "Pairing is saved. Start listening when this machine should accept Hub-assigned work.";
+  }
+  if (listenerStatusMark) {
+    listenerStatusMark.dataset.state = listening ? "listening" : "paused";
+  }
+  if (backendRuntimeStatus) {
+    backendRuntimeStatus.textContent = llamaRuntimeAvailable ? "ready" : "check";
+  }
+  if (backendTokenStatus) {
+    backendTokenStatus.textContent = savedTokenAvailable ? "secure" : "missing";
+  }
+  if (backendReconnectStatus) {
+    backendReconnectStatus.textContent = paired ? "ready" : "after pair";
+  }
+  if (backendContainerStatus) {
+    const lowered = containerRuntimeReadiness.toLowerCase();
+    backendContainerStatus.textContent = lowered.includes("detected") || lowered.includes("found") ? "ready" : "optional";
+  }
+  renderLastCheckLabel();
+}
+
+function formatElapsed(startedAt = assignmentStartedAt) {
+  if (!startedAt) {
+    return "Elapsed 0:00";
+  }
+  const elapsedSeconds = Math.max(0, Math.round((Date.now() - startedAt.getTime()) / 1000));
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = String(elapsedSeconds % 60).padStart(2, "0");
+  return `Elapsed ${minutes}:${seconds}`;
+}
+
+function renderAssignmentIdle() {
+  if (!assignmentPanel) {
+    return;
+  }
+  assignmentPanel.dataset.state = "idle";
+  assignmentStartedAt = null;
+  if (assignmentKicker) {
+    assignmentKicker.textContent = "Assigned by Hub";
+  }
+  if (assignmentTitle) {
+    assignmentTitle.textContent = "No Hub assignment";
+  }
+  if (assignmentDescription) {
+    assignmentDescription.textContent = "Hub will send work here when a run is queued for this machine.";
+  }
+  if (assignmentProgressWrap) {
+    assignmentProgressWrap.hidden = true;
+  }
+}
+
+function renderAssignmentActive({
+  title = "Hub-assigned run",
+  phase = "Preparing",
+  description = "Assigned by Hub. Runner is preparing local execution.",
+  progress = 12,
+  checkName = "",
+  startedAt = null,
+  remaining = "",
+} = {}) {
+  if (!assignmentPanel) {
+    return;
+  }
+  assignmentPanel.dataset.state = "active";
+  assignmentStartedAt = startedAt || assignmentStartedAt || new Date();
+  if (assignmentKicker) {
+    assignmentKicker.textContent = "Active assignment";
+  }
+  if (assignmentTitle) {
+    assignmentTitle.textContent = title;
+  }
+  if (assignmentDescription) {
+    assignmentDescription.textContent = description;
+  }
+  if (assignmentProgressWrap) {
+    assignmentProgressWrap.hidden = false;
+  }
+  if (assignmentPhase) {
+    assignmentPhase.textContent = phase;
+  }
+  if (assignmentTime) {
+    assignmentTime.textContent = remaining ? `${formatElapsed()} · ${remaining} remaining` : formatElapsed();
+  }
+  if (assignmentProgressBar) {
+    const boundedProgress = Math.max(0, Math.min(100, Number(progress) || 0));
+    assignmentProgressBar.style.width = `${boundedProgress}%`;
+  }
+  if (assignmentCheck) {
+    assignmentCheck.hidden = !checkName;
+    assignmentCheck.textContent = checkName ? `Current check: ${checkName}` : "";
+  }
+}
+
+function renderAssignmentFromHandoff() {
+  const runId = currentFirstRunUploadRunId();
+  if (!runId) {
+    renderAssignmentIdle();
+    return;
+  }
+  renderAssignmentActive({
+    title: `Hub run ${runId}`,
+    phase: "Preparing",
+    description: "Hub opened this Runner with an assigned run handoff.",
+    progress: 10,
+    checkName: "Waiting for local runtime and model readiness",
+  });
+}
+
+function applyPreviewStateFromUrl() {
+  if (isTauriRuntime() || previewStateApplied) {
+    return;
+  }
+  const params = new URLSearchParams(window.location.search || "");
+  const mockState = params.get("mock_state");
+  const mockAssignment = params.get("mock_assignment");
+  const openDetails = params.get("open_details") === "1";
+  if (openDetails && supportDetails) {
+    supportDetails.open = true;
+  }
+  if (!mockState && !mockAssignment) {
+    return;
+  }
+  previewStateApplied = true;
+  if (mockState === "ready" || mockAssignment === "active") {
+    savedTokenAvailable = true;
+    runnerProfileAvailable = true;
+    childProcess = { preview: true };
+    setRunnerButtonsDisabled("start", true);
+    setRunnerButtonsDisabled("stop", false);
+    llamaRuntimeAvailable = true;
+    llamaRuntimeReadiness = "Managed Metal runtime verified.";
+    nativeSuiteReadiness = "Backend readiness check passed for local native execution.";
+    containerRuntimeReadiness = "Docker not found. Native runtime checks can continue; advanced sandboxed benchmarks are disabled.";
+    setStatus("Listening", "good");
+  } else if (mockState === "unpaired") {
+    savedTokenAvailable = false;
+    runnerProfileAvailable = false;
+    childProcess = null;
+    setRunnerButtonsDisabled("start", false);
+    setRunnerButtonsDisabled("stop", true);
+    setStatus("Pairing needed", "warning");
+  }
+  if (mockAssignment === "active") {
+    if (firstRunUploadRunIdInput && !firstRunUploadRunIdInput.value.trim()) {
+      firstRunUploadRunIdInput.value = "run_preview_assignment";
+    }
+    renderAssignmentActive({
+      title: "Hub run run_preview_assignment",
+      phase: "Running",
+      description: "Hub assigned a local benchmark to this Runner.",
+      progress: 48,
+      checkName: "llama.cpp throughput check",
+      remaining: "about 6 min",
+    });
+  } else {
+    renderAssignmentFromHandoff();
+  }
+  renderLocalReadinessChecklist();
 }
 
 async function resolveAppVersion() {
@@ -302,6 +579,7 @@ function renderLocalReadinessChecklist() {
     modelPathStatus.textContent = modelPathReadiness;
   }
   renderFirstRunChecklist();
+  renderPrimaryReadiness();
 }
 
 function setFirstRunStep(name, state, message) {
@@ -368,11 +646,12 @@ function renderFirstRunChecklist() {
           ? "Local evidence is saved; retry upload after fixing pairing or run access."
           : localRunComplete
             ? "Local evidence is saved. Hub upload can happen from a handoff or support flow."
-            : "Run the first local benchmark to create evidence."
+            : "Run the assigned local smoke to create evidence."
   );
 }
 
 function renderDesktopReadiness(payload = {}) {
+  lastReadinessCheckAt = new Date();
   if (!payload.status) {
     llamaRuntimeAvailable = false;
     nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
@@ -390,7 +669,7 @@ function renderDesktopReadiness(payload = {}) {
     llamaRuntimeReadiness = runtimeMessage || "Native llama.cpp runtime is available.";
   } else if (runtime === "missing") {
     llamaRuntimeAvailable = false;
-    llamaRuntimeReadiness = runtimeMessage || "Select or install a native llama.cpp runtime before the first local benchmark.";
+    llamaRuntimeReadiness = runtimeMessage || "Select or install a native llama.cpp runtime before assigned local work.";
   }
   const docker = payload.docker || {};
   const podman = payload.podman || {};
@@ -402,7 +681,7 @@ function renderDesktopReadiness(payload = {}) {
     containerRuntimeReadiness =
       runtime === "available"
         ? "Docker not found. Native runtime checks can continue; advanced sandboxed benchmarks are disabled."
-        : "Docker not found. Select a native runtime before first-run benchmark support; advanced sandboxed benchmarks are disabled.";
+        : "Docker not found. Select a native runtime before assigned local work; advanced sandboxed benchmarks are disabled.";
   }
   renderLocalReadinessChecklist();
 }
@@ -474,6 +753,7 @@ async function checkDesktopReadiness() {
   const output = await runDesktopSidecarDiagnostic(["desktop-readiness"]);
   if (!output) {
     renderDesktopReadiness({});
+    setStatus("Development view", "warning");
     return;
   }
   try {
@@ -492,6 +772,55 @@ async function checkDesktopReadiness() {
     appendLog(`Desktop readiness check failed: ${error.message || error}`);
     renderLocalReadinessChecklist();
   }
+}
+
+async function runReadinessCheck() {
+  if (readinessCheckButton) {
+    readinessCheckButton.disabled = true;
+  }
+  setStatus("Checking readiness", "warning");
+  try {
+    await checkRunnerStartupSelfTest();
+    await checkDesktopReadiness();
+    await inspectRuntimePlan();
+    setStatus(childProcess ? "Listening" : pairedForUi() ? "Paused" : "Pairing needed", childProcess ? "good" : "warning");
+    appendLog("Readiness check finished.");
+  } catch (error) {
+    setStatus("Needs attention", "error");
+    appendLog(`Readiness check failed: ${error.message || error}`);
+    throw error;
+  } finally {
+    if (readinessCheckButton) {
+      readinessCheckButton.disabled = false;
+    }
+    renderLocalReadinessChecklist();
+  }
+}
+
+async function openExternalUrl(url) {
+  if (isTauriRuntime()) {
+    const shell = await import("@tauri-apps/plugin-shell");
+    await shell.open(url);
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+async function openHub() {
+  const url = hubWebUrl();
+  appendLog(`Opening Hub: ${url}`);
+  await openExternalUrl(url);
+}
+
+function showLogs() {
+  if (supportDetails) {
+    supportDetails.open = true;
+    supportDetails.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+  window.setTimeout(() => {
+    logOutput?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    logOutput?.focus?.();
+  }, 80);
 }
 
 function chooseThemeMode(mode) {
@@ -514,6 +843,7 @@ async function restoreFormState() {
 
   await updateTokenState();
   renderLocalReadinessChecklist();
+  setStatus(childProcess ? "Listening" : pairedForUi() ? "Paused" : "Pairing needed", childProcess ? "good" : "warning");
 }
 
 async function loadTauriInvoke() {
@@ -580,8 +910,8 @@ async function ensureRunnerListenerEvents() {
       const detail = payload.detail || "Runner process error.";
       appendLog(`Runner process error: ${detail}`);
       childProcess = null;
-      startButton.disabled = false;
-      stopButton.disabled = true;
+      setRunnerButtonsDisabled("start", false);
+      setRunnerButtonsDisabled("stop", true);
       setStatus("Failed", "error");
       renderLocalReadinessChecklist();
       resolveRunnerStartupWaiters(new Error(String(detail)));
@@ -591,8 +921,8 @@ async function ensureRunnerListenerEvents() {
       const code = payload.code ?? "unknown";
       appendLog(`Runner exited with code ${code}.`);
       childProcess = null;
-      startButton.disabled = false;
-      stopButton.disabled = true;
+      setRunnerButtonsDisabled("start", false);
+      setRunnerButtonsDisabled("stop", true);
       setStatus("Stopped", code === 0 ? "idle" : "error");
       renderLocalReadinessChecklist();
       const detail = runnerStartupLines.filter(Boolean).join("\n");
@@ -616,6 +946,7 @@ async function ensureFirstRunEvents() {
     if (!message) {
       return;
     }
+    renderAssignmentFromFirstRunEvent(payload);
     if (firstRunStatus) {
       firstRunStatus.textContent = message;
     }
@@ -640,14 +971,16 @@ async function updateTokenState() {
       savedTokenAvailable = hasToken;
       runnerProfileAvailable = status?.profile?.status === "present";
       const profile = status?.profile?.profile || {};
-      if (runnerProfileAvailable && hasToken) {
-        tokenState.textContent = `Runner profile and OS token saved${profile.label ? ` for ${profile.label}` : ""}.`;
-      } else if (runnerProfileAvailable) {
-        tokenState.textContent = `Runner profile saved${profile.label ? ` for ${profile.label}` : ""}, but the OS token is unavailable.`;
-      } else if (hasToken) {
-        tokenState.textContent = "Runner token is saved in the OS credential store, but no runner profile is saved.";
-      } else {
-        tokenState.textContent = "No runner profile saved. Paste a Hub pairing code before listening for Hub runs.";
+      if (tokenState) {
+        if (runnerProfileAvailable && hasToken) {
+          tokenState.textContent = `Runner profile and OS token saved${profile.label ? ` for ${profile.label}` : ""}.`;
+        } else if (runnerProfileAvailable) {
+          tokenState.textContent = `Runner profile saved${profile.label ? ` for ${profile.label}` : ""}, but the OS token is unavailable.`;
+        } else if (hasToken) {
+          tokenState.textContent = "Runner token is saved in the OS credential store, but no runner profile is saved.";
+        } else {
+          tokenState.textContent = "No runner profile saved. Paste a Hub pairing code before listening for Hub runs.";
+        }
       }
       renderLocalReadinessChecklist();
       return;
@@ -656,30 +989,41 @@ async function updateTokenState() {
   } catch (error) {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
-    tokenState.textContent = userSafeTokenFailure(error.message || error);
+    if (tokenState) {
+      tokenState.textContent = userSafeTokenFailure(error.message || error);
+    }
     appendLog(`Could not read saved token: ${error.message || error}`);
     return;
   }
   savedTokenAvailable = hasToken;
   runnerProfileAvailable = false;
   if (isTauriRuntime()) {
-    tokenState.textContent = hasToken
-      ? "Runner token saved in the OS credential store."
-      : "No token saved. Pair with a Hub one-time code before listening for Hub runs.";
+    if (tokenState) {
+      tokenState.textContent = hasToken
+        ? "Runner token saved in the OS credential store."
+        : "No token saved. Pair with a Hub one-time code before listening for Hub runs.";
+    }
     if (hasToken && pairingReadinessStatus) {
       pairingReadinessStatus.textContent = "Pairing token is saved. Start listening when ready.";
     }
     return;
   }
 
-  tokenState.textContent = hasToken
-    ? "Runner token is available."
-    : "Development view does not persist tokens; the app uses the OS credential store.";
+  if (tokenState) {
+    tokenState.textContent = hasToken
+      ? "Runner token is available."
+      : "Development view does not persist tokens; the app uses the OS credential store.";
+  }
 }
 
 function setStatus(status, tone = "idle") {
-  statusText.textContent = status;
-  statusDot.dataset.tone = tone;
+  if (statusText) {
+    statusText.textContent = status;
+  }
+  if (statusDot) {
+    statusDot.dataset.tone = tone;
+  }
+  renderPrimaryReadiness();
 }
 
 function redactSecrets(message) {
@@ -699,8 +1043,10 @@ function appendLog(message) {
 
   const timestamp = new Date().toLocaleTimeString();
   logLines = [...logLines, `[${timestamp}] ${normalized}`].slice(-400);
-  logOutput.textContent = logLines.join("\n");
-  logOutput.scrollTop = logOutput.scrollHeight;
+  if (logOutput) {
+    logOutput.textContent = logLines.join("\n");
+    logOutput.scrollTop = logOutput.scrollHeight;
+  }
 }
 
 function firstRunMessageFromEvent(payload = {}) {
@@ -718,6 +1064,49 @@ function firstRunMessageFromEvent(payload = {}) {
     return payload.message || "Native first-run failed.";
   }
   return "";
+}
+
+function renderAssignmentFromFirstRunEvent(payload = {}) {
+  if (payload.type === "benchmark_started") {
+    renderAssignmentActive({
+      title: currentFirstRunUploadRunId() ? `Hub run ${currentFirstRunUploadRunId()}` : "Local readiness smoke",
+      phase: "Running",
+      description: "Runner is executing local work assigned through Hub handoff.",
+      progress: 18,
+      checkName: "Starting native runtime",
+    });
+    return;
+  }
+  if (payload.type === "benchmark_progress") {
+    const progress = Number.isFinite(payload.progress_percent) ? payload.progress_percent : 45;
+    renderAssignmentActive({
+      title: currentFirstRunUploadRunId() ? `Hub run ${currentFirstRunUploadRunId()}` : "Local readiness smoke",
+      phase: "Running",
+      description: "Runner is executing local work assigned through Hub handoff.",
+      progress,
+      checkName: payload.message || "Native runtime check",
+    });
+    return;
+  }
+  if (payload.type === "benchmark_completed") {
+    renderAssignmentActive({
+      title: currentFirstRunUploadRunId() ? `Hub run ${currentFirstRunUploadRunId()}` : "Local readiness smoke",
+      phase: "Uploading",
+      description: "Local execution is complete. Runner is preparing Hub upload or support artifacts.",
+      progress: 86,
+      checkName: "Bundle artifact",
+    });
+    return;
+  }
+  if (payload.type === "error") {
+    renderAssignmentActive({
+      title: currentFirstRunUploadRunId() ? `Hub run ${currentFirstRunUploadRunId()}` : "Local readiness smoke",
+      phase: "Needs attention",
+      description: payload.message || "Runner needs attention before this assignment can continue.",
+      progress: 100,
+      checkName: "See logs for recovery detail",
+    });
+  }
 }
 
 function pairingSummary(stdout) {
@@ -793,6 +1182,7 @@ function readApiUrl() {
   const normalized = normalizeDesktopApiUrl(form.elements.apiUrl.value);
   form.elements.apiUrl.value = normalized;
   lastNormalizedApiUrl = normalized;
+  renderHubDisplay();
   renderLocalReadinessChecklist();
   return normalized;
 }
@@ -928,10 +1318,10 @@ async function removeSelectedRuntime() {
 function readFirstRunModelPath() {
   const modelPath = currentFirstRunModelPath();
   if (!modelPath) {
-    throw new Error("Select a local GGUF model file before running the first benchmark.");
+    throw new Error("Select a local GGUF model file before running assigned local work.");
   }
   if (!modelPath.toLowerCase().endsWith(".gguf")) {
-    throw new Error("Use a local GGUF model file for the native first-run benchmark.");
+    throw new Error("Use a local GGUF model file for assigned local work.");
   }
   modelPathReadiness = `First-run model selected: ${modelPath}`;
   renderLocalReadinessChecklist();
@@ -1014,6 +1404,7 @@ function applyFirstRunHandoff(incomingHandoff = null) {
       ? `Ready to upload this first-run result to Hub run ${runId}.`
       : "If Hub opened Desktop with a run handoff, this fills automatically.";
   }
+  renderAssignmentFromHandoff();
   renderLocalReadinessChecklist();
 }
 
@@ -1071,6 +1462,7 @@ function clearFirstRunHandoff() {
   if (firstRunHandoffStatus) {
     firstRunHandoffStatus.textContent = "Hub upload complete. Start another run from Hub when you want to add more evidence.";
   }
+  renderAssignmentIdle();
 }
 
 function firstRunArtifactText(payload = lastFirstRunPayload) {
@@ -1105,12 +1497,12 @@ function clearFirstRunLocalState({ clearModel = false } = {}) {
   }
   modelPathReadiness = currentFirstRunModelPath()
     ? `First-run model selected: ${currentFirstRunModelPath()}`
-    : "Select a local GGUF model for the first benchmark.";
+    : "Select a local GGUF model only when recovering a Hub handoff.";
   nativeSuiteReadiness = "Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.";
   if (firstRunStatus) {
     firstRunStatus.textContent = clearModel
       ? "Choose another local GGUF model before running."
-      : "Ready to run this local GGUF model again.";
+      : "Ready to run this assigned local smoke again.";
   }
   updateFirstRunSupportActions();
   renderLocalReadinessChecklist();
@@ -1146,7 +1538,7 @@ async function copySupportSummary() {
 
 async function retryFirstRunUpload() {
   if (!lastFirstRunPayload) {
-    throw new Error("Retry upload requires a completed native first benchmark.");
+    throw new Error("Retry upload requires completed local assigned work.");
   }
   const uploadRunId = readFirstRunUploadRunId() || lastFirstRunPayload?.upload?.run_id;
   if (!uploadRunId) {
@@ -1193,14 +1585,14 @@ async function startRunner({ confirmStarted = false } = {}) {
     return;
   }
 
-  startButton.disabled = true;
+  setRunnerButtonsDisabled("start", true);
   setStatus("Starting", "warning");
 
   const invoke = await loadTauriInvoke();
   if (!invoke) {
     setStatus("Development view", "warning");
     appendLog("Open the desktop app to start the local Runner.");
-    startButton.disabled = false;
+    setRunnerButtonsDisabled("start", false);
     return;
   }
 
@@ -1216,7 +1608,7 @@ async function startRunner({ confirmStarted = false } = {}) {
     `Runner start plan: ${plan.execution_mode || "default mode"} using ${credentialSourceLabel(plan.credential_source)}${runner}.`
   );
   childProcess = { rustManaged: true, pid: output?.pid || null };
-  stopButton.disabled = false;
+  setRunnerButtonsDisabled("stop", false);
   setStatus("Listening", "good");
   renderLocalReadinessChecklist();
   appendLog(`Started infergrade listener for ${apiUrl}.`);
@@ -1246,7 +1638,7 @@ async function pairRunner() {
   }
 
   pairButton.disabled = true;
-  startButton.disabled = true;
+  setRunnerButtonsDisabled("start", true);
   pairState.textContent = "Redeeming pairing code...";
   try {
     const output = await invoke("redeem_runner_pairing", {
@@ -1275,7 +1667,7 @@ async function pairRunner() {
   } finally {
     pairButton.disabled = false;
     if (!childProcess) {
-      startButton.disabled = false;
+      setRunnerButtonsDisabled("start", false);
     }
   }
 }
@@ -1285,8 +1677,8 @@ async function resetPairing() {
   if (wasListening) {
     await stopRunner();
     childProcess = null;
-    startButton.disabled = false;
-    stopButton.disabled = true;
+    setRunnerButtonsDisabled("start", false);
+    setRunnerButtonsDisabled("stop", true);
   }
   form.elements.pairCode.value = "";
   const invoke = await loadTauriInvoke();
@@ -1320,15 +1712,15 @@ async function runNativeFirstRun() {
   const uploadWorkerId = readFirstRunUploadWorkerId();
   const invoke = await loadTauriInvoke();
   if (!invoke) {
-    firstRunStatus.textContent = "Open the desktop app to run the native first benchmark.";
-    appendLog("Development view cannot run the native first benchmark.");
+    firstRunStatus.textContent = "Open the desktop app to run assigned local work.";
+    appendLog("Development view cannot run assigned local work.");
     return;
   }
 
   await ensureFirstRunEvents();
   firstRunStartButton.disabled = true;
   setStatus("First benchmark running", "warning");
-  firstRunStatus.textContent = "Starting native first-run benchmark...";
+  firstRunStatus.textContent = "Starting assigned local work...";
   try {
     const payload = await invoke("run_desktop_native_first_run", {
       modelPath,
@@ -1366,8 +1758,24 @@ async function runNativeFirstRun() {
         : "Native first-run completed locally with native_first_run evidence and a Hub-compatible bundle preview.";
     if (payload?.upload?.uploaded) {
       clearFirstRunHandoff();
+      renderAssignmentActive({
+        title: `Hub run ${payload.upload.run_id}`,
+        phase: "Complete",
+        description: `Uploaded bundle ${payload.upload.bundle_id} to Hub.`,
+        progress: 100,
+        checkName: "Upload complete",
+      });
     } else {
       applyFirstRunHandoff();
+      renderAssignmentActive({
+        title: currentFirstRunUploadRunId() ? `Hub run ${currentFirstRunUploadRunId()}` : "Local readiness smoke",
+        phase: payload?.upload?.error ? "Needs attention" : "Complete",
+        description: payload?.upload?.error
+          ? "Local execution completed, but Hub upload needs recovery."
+          : "Local execution completed. Open Hub or support details for next steps.",
+        progress: 100,
+        checkName: payload?.upload?.error ? "Upload recovery" : "Local artifact ready",
+      });
     }
     setStatus("First benchmark complete", "good");
     renderLocalReadinessChecklist();
@@ -1376,6 +1784,13 @@ async function runNativeFirstRun() {
     const message = error.message || error;
     firstRunStatus.textContent = `Native first-run failed: ${message}`;
     setStatus("First benchmark failed", "error");
+    renderAssignmentActive({
+      title: currentFirstRunUploadRunId() ? `Hub run ${currentFirstRunUploadRunId()}` : "Local readiness smoke",
+      phase: "Needs attention",
+      description: "Local execution failed. Logs are available in Details and support.",
+      progress: 100,
+      checkName: "Failure recovery",
+    });
     appendLog(`Native first-run failed: ${message}`);
   } finally {
     firstRunStartButton.disabled = false;
@@ -1385,6 +1800,16 @@ async function runNativeFirstRun() {
 
 async function stopRunner() {
   if (!childProcess) {
+    return;
+  }
+
+  if (childProcess.preview) {
+    childProcess = null;
+    setRunnerButtonsDisabled("start", false);
+    setRunnerButtonsDisabled("stop", true);
+    setStatus("Paused", "warning");
+    renderLocalReadinessChecklist();
+    appendLog("Preview listener stopped.");
     return;
   }
 
@@ -1405,25 +1830,25 @@ pairButton.addEventListener("click", () => {
   });
 });
 
-resetPairingButton?.addEventListener("click", () => {
+resetPairingButtons.forEach((button) => button.addEventListener("click", () => {
   resetPairing().catch((error) => {
     pairState.textContent = "Reset pairing could not finish. You can still paste a fresh code and try again.";
     appendLog(`Could not reset pairing: ${error.message || error}`);
   });
-});
+}));
 
-startButton.addEventListener("click", () => {
+startButtons.forEach((button) => button.addEventListener("click", () => {
   startRunner().catch((error) => {
     setStatus("Failed", "error");
-    startButton.disabled = false;
-    stopButton.disabled = true;
+    setRunnerButtonsDisabled("start", false);
+    setRunnerButtonsDisabled("stop", true);
     appendLog(`Could not start Runner: ${error.message || error}`);
   });
-});
+}));
 
-stopButton.addEventListener("click", () => {
+stopButtons.forEach((button) => button.addEventListener("click", () => {
   stopRunner().catch((error) => appendLog(`Could not stop Runner: ${error.message || error}`));
-});
+}));
 
 clearLogsButton.addEventListener("click", () => {
   logLines = [];
@@ -1518,7 +1943,7 @@ downloadStarterGgufButton?.addEventListener("click", () => {
     .then(() => {
       setStatus("Starter model ready", "good");
       if (firstRunStatus) {
-        firstRunStatus.textContent = "Starter model downloaded. Run the native first benchmark when the runtime is ready.";
+        firstRunStatus.textContent = "Starter model downloaded. Run assigned local smoke when the runtime is ready.";
       }
     })
     .catch((error) => {
@@ -1543,12 +1968,13 @@ firstRunModelPathInput?.addEventListener("input", () => {
     ? modelPath.toLowerCase().endsWith(".gguf")
       ? `First-run model selected: ${modelPath}`
       : "Use a local GGUF model file for native first-run."
-    : "Select a local GGUF model for the first benchmark.";
+    : "Select a local GGUF model only when recovering a Hub handoff.";
   updateFirstRunSupportActions();
   renderLocalReadinessChecklist();
 });
 
 firstRunUploadRunIdInput?.addEventListener("input", () => {
+  renderAssignmentFromHandoff();
   renderLocalReadinessChecklist();
 });
 
@@ -1620,6 +2046,22 @@ relaunchUpdateButton?.addEventListener("click", () => {
   relaunchAfterUpdate().catch((error) => appendLog(`Could not relaunch: ${error.message || error}`));
 });
 
+readinessCheckButton?.addEventListener("click", () => {
+  runReadinessCheck().catch(() => {
+    if (supportDetails) {
+      supportDetails.open = true;
+    }
+  });
+});
+
+openHubButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    openHub().catch((error) => appendLog(`Could not open Hub: ${error.message || error}`));
+  });
+});
+
+viewLogsButton?.addEventListener("click", showLogs);
+
 initTheme();
 initFirstRunDeepLinkHandoff().catch((error) => appendLog(`Could not initialize first-run handoff: ${error.message || error}`));
 renderReleaseStatus().catch((error) => appendLog(`Could not render release status: ${error.message || error}`));
@@ -1629,3 +2071,4 @@ checkDesktopReadiness().catch((error) => appendLog(`Could not check desktop read
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");
 renderLocalReadinessChecklist();
+window.setTimeout(applyPreviewStateFromUrl, 50);
