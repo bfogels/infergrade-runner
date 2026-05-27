@@ -25,6 +25,10 @@ WINDOWS_CUDA_CLAIM_BOUNDARY = (
 )
 
 
+class NvidiaSmiError(RuntimeError):
+    """Raised when nvidia-smi exists but cannot return bounded GPU rows."""
+
+
 def parse_version(value: Optional[str]) -> Tuple[int, ...]:
     parts = re.findall(r"\d+", str(value or ""))
     return tuple(int(part) for part in parts)
@@ -129,7 +133,7 @@ def _run_nvidia_smi(nvidia_smi_path: str) -> Tuple[List[Dict[str, Any]], str]:
         completed = _run_nvidia_smi_query(nvidia_smi_path, legacy_query)
         raw = (completed.stdout or completed.stderr or "").strip()
     if completed.returncode != 0:
-        return [], raw
+        raise NvidiaSmiError(raw or "nvidia-smi query failed")
     return _attach_global_cuda_version(parse_nvidia_smi_csv(raw), global_cuda_version), raw
 
 

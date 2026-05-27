@@ -29,6 +29,8 @@ Runner CUDA preflight captures bounded, support-safe fields:
 
 `nvidia_smi_missing`: `nvidia-smi` is not available on `PATH`. Install or repair the NVIDIA driver package before attempting CUDA evidence.
 
+`nvidia_smi_failed`: `nvidia-smi` was found but failed to return GPU rows. Repair the NVIDIA driver/runtime installation before attempting CUDA evidence.
+
 `driver_too_old`: The NVIDIA driver is below the selected CUDA major floor. Upgrade the driver or select a runtime that targets an older CUDA major.
 
 `runtime_binary_missing`: No pinned managed CUDA artifact or explicit binary was selected. Provide an existing CUDA-capable `llama.cpp` binary path for preflight.
