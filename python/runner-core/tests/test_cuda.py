@@ -171,6 +171,30 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertIn("model_too_large", reason_codes)
         self.assertIn("artifact_download_failed", reason_codes)
 
+    def test_windows_cuda_preflight_selects_gpu_that_satisfies_vram_requirement(self):
+        result = windows_cuda_preflight(
+            nvidia_smi_output=(
+                "NVIDIA RTX 3060, 555.85, 8192, 8.6\n"
+                "NVIDIA RTX 4090, 555.85, 24564, 8.9\n"
+            ),
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            required_vram_bytes=16 * 1024 * 1024 * 1024,
+            which=lambda _name: None,
+        )
+
+        selector = result["selector"]
+        self.assertEqual(selector["accelerator"]["model"], "NVIDIA RTX 4090")
+        self.assertEqual(selector["accelerator"]["vram_bytes"], 24564 * 1024 * 1024)
+        self.assertNotIn("insufficient_vram", selector["compatibility"]["reason_codes"])
+        self.assertIn(
+            {"id": "selected_gpu", "status": "passed", "observed": "NVIDIA RTX 4090 (2 of 2)"},
+            selector["compatibility"]["probes"],
+        )
+        self.assertIn(
+            {"id": "vram_capacity", "status": "passed", "observed": 24564 * 1024 * 1024},
+            selector["compatibility"]["probes"],
+        )
+
     def test_windows_cuda_preflight_reports_runtime_binary_mismatch(self):
         result = windows_cuda_preflight(
             nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9\n",

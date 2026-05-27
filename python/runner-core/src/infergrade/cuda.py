@@ -141,6 +141,22 @@ def _attach_global_cuda_version(rows: List[Dict[str, Any]], cuda_version: Option
     return rows
 
 
+def _select_gpu_row(gpu_rows: List[Dict[str, Any]], required_vram_bytes: Optional[int] = None) -> Tuple[Dict[str, Any], int]:
+    """Select the GPU row that best matches the requested CUDA run."""
+    if not gpu_rows:
+        return {}, -1
+
+    def score(index_and_row: Tuple[int, Dict[str, Any]]) -> Tuple[int, int, int]:
+        index, row = index_and_row
+        vram_bytes = row.get("vram_bytes")
+        comparable_vram = int(vram_bytes) if isinstance(vram_bytes, int) else -1
+        meets_requirement = int(required_vram_bytes is not None and comparable_vram >= required_vram_bytes)
+        return (meets_requirement, comparable_vram, -index)
+
+    selected_index, selected_row = max(enumerate(gpu_rows), key=score)
+    return selected_row, selected_index
+
+
 def _run_nvidia_smi(nvidia_smi_path: str) -> Tuple[List[Dict[str, Any]], str]:
     query = "name,driver_version,memory.total,compute_cap,cuda_version"
     completed = _run_nvidia_smi_query(nvidia_smi_path, query)
@@ -218,7 +234,15 @@ def windows_cuda_preflight(
             probes.append({"id": "nvidia_smi", "status": "failed", "detail": "No NVIDIA GPU rows were reported."})
             reason_codes.append("no_nvidia_gpu")
 
-    selected_gpu = gpu_rows[0] if gpu_rows else {}
+    selected_gpu, selected_gpu_index = _select_gpu_row(gpu_rows, required_vram_bytes)
+    if len(gpu_rows) > 1 and selected_gpu:
+        probes.append(
+            {
+                "id": "selected_gpu",
+                "status": "passed",
+                "observed": "%s (%d of %d)" % (selected_gpu.get("name") or "NVIDIA GPU", selected_gpu_index + 1, len(gpu_rows)),
+            }
+        )
     minimum_driver = minimum_driver_for_cuda(cuda_major)
     driver_version = selected_gpu.get("driver_version")
     cuda_version = selected_gpu.get("cuda_version")
