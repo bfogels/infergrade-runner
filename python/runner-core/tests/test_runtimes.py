@@ -7,6 +7,7 @@ from unittest import mock
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.runtimes import (
+    WINDOWS_CUDA_RUNTIME_ID,
     install_llama_cpp_runtime,
     known_llama_cpp_runtimes,
     runtime_manifest,
@@ -55,6 +56,69 @@ class RuntimeManagementTests(unittest.TestCase):
         self.assertEqual(selection["source"], "homebrew")
         self.assertEqual(selection["binaries"]["cli"], "/custom/llama-cli")
         self.assertEqual(selected_llama_cpp_runtime()["binaries"]["server"], "/custom/llama-server")
+
+    @mock.patch("infergrade.runtimes.shutil.which")
+    def test_select_existing_runtime_keeps_path_fallback_for_non_cuda_server(self, which_mock):
+        which_mock.side_effect = lambda name: {
+            "/custom/llama-cli": "/custom/llama-cli",
+            "llama-server": "/usr/local/bin/llama-server",
+            "llama-perplexity": "/usr/local/bin/llama-perplexity",
+        }.get(name)
+
+        selection = select_llama_cpp_runtime(cli_path="/custom/llama-cli")
+
+        self.assertEqual(selection["source"], "homebrew")
+        self.assertEqual(selection["binaries"]["server"], "/usr/local/bin/llama-server")
+        self.assertEqual(selection["binaries"]["perplexity"], "/usr/local/bin/llama-perplexity")
+
+    @mock.patch("infergrade.runtimes.shutil.which")
+    def test_select_existing_runtime_rejects_bad_explicit_server_without_path_fallback(self, which_mock):
+        which_mock.side_effect = lambda name: {
+            "/custom/llama-cli": "/custom/llama-cli",
+            "llama-server": "/usr/local/bin/llama-server",
+        }.get(name)
+
+        with self.assertRaisesRegex(RuntimeError, "server"):
+            select_llama_cpp_runtime(
+                cli_path="/custom/llama-cli",
+                server_path="/missing/llama-server",
+            )
+
+    @mock.patch("infergrade.runtimes.shutil.which")
+    def test_select_windows_cuda_preview_records_support_boundary(self, which_mock):
+        known_paths = {
+            "/cuda/llama-cli.exe",
+            "/cuda/llama-server.exe",
+            "/cuda/llama-perplexity.exe",
+        }
+        which_mock.side_effect = lambda name: name if name in known_paths else None
+
+        selection = select_llama_cpp_runtime(
+            runtime_id=WINDOWS_CUDA_RUNTIME_ID,
+            cli_path="/cuda/llama-cli.exe",
+        )
+
+        self.assertEqual(selection["binary_set"], "llama_cpp_windows_cuda_x86_64")
+        self.assertEqual(selection["support_tier"], "preview")
+        self.assertFalse(selection["checksum_verified"])
+        self.assertIn("full Hub loop", selection["claim_boundary"])
+        self.assertIn("preview-only", selection["selection_warning"])
+        self.assertEqual(selection["binaries"]["server"], "/cuda/llama-server.exe")
+        self.assertEqual(selected_llama_cpp_runtime()["binaries"]["perplexity"], "/cuda/llama-perplexity.exe")
+
+    @mock.patch("infergrade.runtimes.shutil.which")
+    def test_select_windows_cuda_preview_requires_perplexity_sibling(self, which_mock):
+        known_paths = {
+            "/cuda/llama-cli.exe",
+            "/cuda/llama-server.exe",
+        }
+        which_mock.side_effect = lambda name: name if name in known_paths else None
+
+        with self.assertRaisesRegex(RuntimeError, "perplexity"):
+            select_llama_cpp_runtime(
+                runtime_id=WINDOWS_CUDA_RUNTIME_ID,
+                cli_path="/cuda/llama-cli.exe",
+            )
 
 
 if __name__ == "__main__":

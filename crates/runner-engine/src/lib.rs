@@ -49,6 +49,10 @@ use url::Url;
 pub const LLAMA_CPP_RUNTIME_ID: &str = "llama-cpp-homebrew-stable-2026-04";
 pub const RUNTIME_MANIFEST_VERSION: &str = "2026-04-22";
 pub const MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID: &str = "llama-cpp-b9050-macos-arm64-metal";
+pub const WINDOWS_CUDA_PREVIEW_RUNTIME_ID: &str = "llama-cpp-windows-cuda-cli-preview-2026-05";
+pub const WINDOWS_CUDA_BINARY_SET: &str = "llama_cpp_windows_cuda_x86_64";
+pub const WINDOWS_CUDA_CLAIM_BOUNDARY: &str =
+    "Windows/NVIDIA CUDA is preview-only until a pinned, checksummed runtime and full Hub loop are proven.";
 const MANAGED_LLAMA_CPP_MACOS_METAL_TAG: &str = "b9050";
 const MANAGED_LLAMA_CPP_MACOS_METAL_ARCHIVE_URL: &str =
     "https://github.com/ggml-org/llama.cpp/releases/download/b9050/llama-b9050-bin-macos-arm64.tar.gz";
@@ -620,6 +624,10 @@ fn safe_runtime_id(value: Option<&str>) -> Result<String, String> {
     Ok(runtime_id.to_string())
 }
 
+fn is_windows_cuda_preview_runtime(runtime_id: &str) -> bool {
+    runtime_id == WINDOWS_CUDA_PREVIEW_RUNTIME_ID
+}
+
 fn find_program_path(program: &str) -> Option<PathBuf> {
     let path = env::var_os("PATH")?;
     for dir in env::split_paths(&path) {
@@ -755,6 +763,7 @@ fn resolve_optional_sibling_runtime_binary(
     explicit_path: Option<PathBuf>,
     program: &str,
     kind: &str,
+    required: bool,
 ) -> Result<Option<String>, String> {
     if let Some(path) = explicit_path {
         return validate_existing_runtime_path(&path, kind, program).map(Some);
@@ -772,6 +781,12 @@ fn resolve_optional_sibling_runtime_binary(
             return validate_existing_runtime_path(&candidate, kind, program).map(Some);
         }
     }
+    if required {
+        return Err(format!(
+            "Cannot select existing llama.cpp runtime; missing required {kind} binary beside `{}`. Provide an explicit path or select a complete runtime directory.",
+            cli.display()
+        ));
+    }
     Ok(None)
 }
 
@@ -782,36 +797,59 @@ pub fn select_existing_llama_cpp_runtime(
     perplexity_path: Option<PathBuf>,
 ) -> Result<Value, String> {
     let runtime_id = safe_runtime_id(runtime_id)?;
+    let windows_cuda_preview = is_windows_cuda_preview_runtime(&runtime_id);
+    let cli_program = if windows_cuda_preview {
+        "llama-cli.exe"
+    } else {
+        "llama-cli"
+    };
+    let server_program = if windows_cuda_preview {
+        "llama-server.exe"
+    } else {
+        "llama-server"
+    };
+    let perplexity_program = if windows_cuda_preview {
+        "llama-perplexity.exe"
+    } else {
+        "llama-perplexity"
+    };
     let cli_was_explicit = cli_path.is_some();
-    let cli = resolve_existing_runtime_binary(cli_path, "llama-cli", "llama-cli", true)?
+    let cli = resolve_existing_runtime_binary(cli_path, cli_program, "llama-cli", true)?
         .ok_or_else(|| "llama-cli selection failed.".to_string())?;
     let cli_path = PathBuf::from(&cli);
     let server = if cli_was_explicit {
         resolve_optional_sibling_runtime_binary(
             &cli_path,
             server_path,
+            server_program,
             "llama-server",
-            "llama-server",
+            windows_cuda_preview,
         )?
     } else {
-        resolve_existing_runtime_binary(server_path, "llama-server", "llama-server", false)?
+        resolve_existing_runtime_binary(
+            server_path,
+            server_program,
+            "llama-server",
+            windows_cuda_preview,
+        )?
     };
     let perplexity = if cli_was_explicit {
         resolve_optional_sibling_runtime_binary(
             &cli_path,
             perplexity_path,
+            perplexity_program,
             "llama-perplexity",
-            "llama-perplexity",
+            windows_cuda_preview,
         )?
     } else {
         resolve_existing_runtime_binary(
             perplexity_path,
+            perplexity_program,
             "llama-perplexity",
-            "llama-perplexity",
-            false,
+            windows_cuda_preview,
         )?
     };
-    let selection = json!({
+    let mut selection = json!({
         "runtime_id": runtime_id,
         "backend": "llama.cpp",
         "version_label": "existing local binary",
@@ -829,6 +867,17 @@ pub fn select_existing_llama_cpp_runtime(
             "machine": env::consts::ARCH,
         },
     });
+    if windows_cuda_preview {
+        selection["version_label"] = Value::String("Windows CUDA CLI preview".to_string());
+        selection["binary_set"] = Value::String(WINDOWS_CUDA_BINARY_SET.to_string());
+        selection["support_tier"] = Value::String("preview".to_string());
+        selection["checksum"] = Value::Null;
+        selection["checksum_verified"] = Value::Bool(false);
+        selection["expected_binaries"] =
+            json!(["llama-cli.exe", "llama-server.exe", "llama-perplexity.exe"]);
+        selection["claim_boundary"] = Value::String(WINDOWS_CUDA_CLAIM_BOUNDARY.to_string());
+        selection["selection_warning"] = Value::String(WINDOWS_CUDA_CLAIM_BOUNDARY.to_string());
+    }
     let path = selected_llama_cpp_runtime_path()?;
     let parent = path.parent().ok_or_else(|| {
         format!(
@@ -2732,6 +2781,114 @@ mod tests {
             env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
         }
         let _ = fs::remove_file(runtime_path);
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn selects_windows_cuda_preview_runtime_with_complete_binary_set() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-cuda-cache-{}",
+            std::process::id()
+        ));
+        let runtime_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-cuda-runtime-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&runtime_dir);
+        fs::create_dir_all(&runtime_dir).expect("runtime dir");
+        let cli_path = runtime_dir.join("llama-cli.exe");
+        let server_path = runtime_dir.join("llama-server.exe");
+        let perplexity_path = runtime_dir.join("llama-perplexity.exe");
+        write_test_llama_binary(&cli_path, "llama-cli");
+        write_test_llama_binary(&server_path, "llama-server");
+        write_test_llama_binary(&perplexity_path, "llama-perplexity");
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let selection = select_existing_llama_cpp_runtime(
+            Some(WINDOWS_CUDA_PREVIEW_RUNTIME_ID),
+            Some(cli_path.clone()),
+            None,
+            None,
+        )
+        .expect("windows cuda preview runtime selected");
+
+        assert_eq!(
+            selection["selection"]["runtime_id"],
+            WINDOWS_CUDA_PREVIEW_RUNTIME_ID
+        );
+        assert_eq!(
+            selection["selection"]["binary_set"],
+            WINDOWS_CUDA_BINARY_SET
+        );
+        assert_eq!(selection["selection"]["support_tier"], "preview");
+        assert_eq!(selection["selection"]["checksum_verified"], false);
+        assert!(selection["selection"]["claim_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("full Hub loop"));
+        assert_eq!(
+            selection["selection"]["binaries"]["server"],
+            fs::canonicalize(&server_path)
+                .expect("canonical server path")
+                .display()
+                .to_string()
+        );
+        assert_eq!(
+            load_selected_llama_cpp_runtime()["selection"]["binaries"]["perplexity"],
+            fs::canonicalize(&perplexity_path)
+                .expect("canonical perplexity path")
+                .display()
+                .to_string()
+        );
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_dir);
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn windows_cuda_preview_runtime_rejects_partial_binary_set() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-cuda-partial-cache-{}",
+            std::process::id()
+        ));
+        let runtime_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-cuda-partial-runtime-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&runtime_dir);
+        fs::create_dir_all(&runtime_dir).expect("runtime dir");
+        let cli_path = runtime_dir.join("llama-cli.exe");
+        let server_path = runtime_dir.join("llama-server.exe");
+        write_test_llama_binary(&cli_path, "llama-cli");
+        write_test_llama_binary(&server_path, "llama-server");
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let error = select_existing_llama_cpp_runtime(
+            Some(WINDOWS_CUDA_PREVIEW_RUNTIME_ID),
+            Some(cli_path),
+            None,
+            None,
+        )
+        .expect_err("partial windows cuda runtime rejected");
+
+        assert!(error.contains("perplexity"));
+        assert_eq!(load_selected_llama_cpp_runtime()["status"], "not_selected");
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_dir);
         let _ = fs::remove_dir_all(runtime_cache_dir);
     }
 

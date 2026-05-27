@@ -9,6 +9,12 @@ InferGrade may proceed toward a Windows/NVIDIA technical beta only after one rea
 - Target runtime family: `llama.cpp`.
 - Target binary set: `llama_cpp_windows_cuda_x86_64`.
 - Current delivery mode: explicit user selection of an existing CUDA-capable `llama.cpp` binary.
+- A selected Windows CUDA preview runtime must record `binary_set`,
+  `support_tier: preview`, checksum status, and the preview claim boundary in
+  `selected_runtime.json`.
+- The preview selector requires the complete sibling binary set
+  (`llama-cli.exe`, `llama-server.exe`, and `llama-perplexity.exe`) so a partial
+  CUDA install cannot be recorded as a viable runtime.
 - Managed download is not enabled until a pinned, checksummed upstream artifact is selected and validated.
 - CUDA requests must not silently fall back to CPU. If a user chooses CPU as a recovery path, the resulting run gets a separate CPU runtime selector.
 
