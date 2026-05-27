@@ -18,7 +18,7 @@ Runner CUDA preflight captures bounded, support-safe fields:
 
 - Windows system, architecture, and version.
 - `nvidia-smi` availability.
-- GPU name, VRAM, compute capability, and driver version.
+- GPU name, VRAM, compute capability, driver version, and CUDA version when `nvidia-smi` reports it.
 - CUDA major version selected for driver-floor checks.
 - Selected `llama.cpp` binary path and bounded `--version` smoke output.
 - Runtime selector compatibility status, reason codes, probe summaries, support tier, and fallback boundary.

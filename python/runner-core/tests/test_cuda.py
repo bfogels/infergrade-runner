@@ -6,6 +6,7 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.cuda import (
     minimum_driver_for_cuda,
+    parse_nvidia_smi_cuda_version,
     parse_nvidia_smi_csv,
     version_at_least,
     windows_cuda_preflight,
@@ -27,6 +28,11 @@ class WindowsCudaPreflightTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["cuda_version"], "12.5")
 
+    def test_parse_nvidia_smi_cuda_version_reads_plain_output(self):
+        version = parse_nvidia_smi_cuda_version("| NVIDIA-SMI 555.85       Driver Version: 555.85       CUDA Version: 12.5 |")
+
+        self.assertEqual(version, "12.5")
+
     def test_version_comparison_pads_segments(self):
         self.assertTrue(version_at_least("525.0", "525.0.0"))
         self.assertTrue(version_at_least("555.85", "525.0"))
@@ -38,7 +44,7 @@ class WindowsCudaPreflightTests(unittest.TestCase):
 
     def test_windows_cuda_preflight_blocks_until_full_loop_is_proven(self):
         result = windows_cuda_preflight(
-            nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9\n",
+            nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9, 12.5\n",
             platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
             which=lambda _name: None,
         )
@@ -54,6 +60,10 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertEqual(selector["delivery"]["selected_by"], "run_config")
         self.assertEqual(selector["support"]["tier"], "preview")
         self.assertFalse(selector["fallback"]["allowed"])
+        self.assertIn(
+            {"id": "cuda_version", "status": "passed", "observed": "12.5"},
+            selector["compatibility"]["probes"],
+        )
         self.assertIn("fallback_not_allowed", selector["compatibility"]["reason_codes"])
         self.assertIn("full_loop_not_proven", selector["compatibility"]["reason_codes"])
         self.assertIn("runtime_binary_missing", selector["compatibility"]["reason_codes"])
@@ -130,7 +140,58 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertEqual(selector["delivery"]["source"], "explicit_path")
         self.assertEqual(selector["binary"]["version_output"], "llama.cpp build 1234")
         self.assertIn("full_loop_not_proven", selector["compatibility"]["reason_codes"])
+        self.assertIn("fallback_not_allowed", selector["compatibility"]["reason_codes"])
         self.assertNotIn("runtime_smoke_failed", selector["compatibility"]["reason_codes"])
+
+    @mock.patch("infergrade.cuda.subprocess.run")
+    def test_windows_cuda_preflight_queries_cuda_version_when_available(self, run_mock):
+        run_mock.return_value = mock.Mock(returncode=0, stdout="NVIDIA RTX 4090, 555.85, 24564, 8.9, 12.5\n", stderr="")
+
+        result = windows_cuda_preflight(
+            nvidia_smi_path="nvidia-smi",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        selector = result["selector"]
+        self.assertIn(
+            {"id": "cuda_version", "status": "passed", "observed": "12.5"},
+            selector["compatibility"]["probes"],
+        )
+        self.assertIn(
+            mock.call(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,driver_version,memory.total,compute_cap,cuda_version",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=8,
+            ),
+            run_mock.mock_calls,
+        )
+
+    @mock.patch("infergrade.cuda.subprocess.run")
+    def test_windows_cuda_preflight_falls_back_when_cuda_version_query_is_unsupported(self, run_mock):
+        run_mock.side_effect = [
+            mock.Mock(returncode=1, stdout="", stderr="Field \"cuda_version\" is not a valid field"),
+            mock.Mock(returncode=0, stdout="| NVIDIA-SMI 555.85       Driver Version: 555.85       CUDA Version: 12.5 |\n", stderr=""),
+            mock.Mock(returncode=0, stdout="NVIDIA RTX 4090, 555.85, 24564, 8.9\n", stderr=""),
+        ]
+
+        result = windows_cuda_preflight(
+            nvidia_smi_path="nvidia-smi",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        selector = result["selector"]
+        self.assertIn(
+            {"id": "cuda_version", "status": "passed", "observed": "12.5"},
+            selector["compatibility"]["probes"],
+        )
+        self.assertEqual(run_mock.call_count, 3)
 
 
 if __name__ == "__main__":

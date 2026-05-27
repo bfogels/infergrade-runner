@@ -74,6 +74,11 @@ def parse_nvidia_smi_csv(output: str) -> List[Dict[str, Any]]:
     return rows
 
 
+def parse_nvidia_smi_cuda_version(output: str) -> Optional[str]:
+    match = re.search(r"CUDA Version:\s*([0-9.]+)", str(output or ""))
+    return match.group(1) if match else None
+
+
 def detect_windows_version() -> Dict[str, Optional[str]]:
     return {
         "system": "windows" if platform.system().lower().startswith("win") else platform.system().lower() or "unknown",
@@ -82,21 +87,50 @@ def detect_windows_version() -> Dict[str, Optional[str]]:
     }
 
 
-def _run_nvidia_smi(nvidia_smi_path: str) -> Tuple[List[Dict[str, Any]], str]:
-    completed = subprocess.run(
+def _run_nvidia_smi_query(nvidia_smi_path: str, fields: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
         [
             nvidia_smi_path,
-            "--query-gpu=name,driver_version,memory.total,compute_cap",
+            "--query-gpu=%s" % fields,
             "--format=csv,noheader,nounits",
         ],
         capture_output=True,
         text=True,
         timeout=8,
     )
+
+
+def _run_nvidia_smi_plain(nvidia_smi_path: str) -> Optional[str]:
+    try:
+        completed = subprocess.run([nvidia_smi_path], capture_output=True, text=True, timeout=8)
+    except Exception:
+        return None
+    output = (completed.stdout or completed.stderr or "").strip()
+    return output or None
+
+
+def _attach_global_cuda_version(rows: List[Dict[str, Any]], cuda_version: Optional[str]) -> List[Dict[str, Any]]:
+    if not cuda_version:
+        return rows
+    for row in rows:
+        if not row.get("cuda_version"):
+            row["cuda_version"] = cuda_version
+    return rows
+
+
+def _run_nvidia_smi(nvidia_smi_path: str) -> Tuple[List[Dict[str, Any]], str]:
+    query = "name,driver_version,memory.total,compute_cap,cuda_version"
+    completed = _run_nvidia_smi_query(nvidia_smi_path, query)
     raw = (completed.stdout or completed.stderr or "").strip()
+    global_cuda_version = None
+    if completed.returncode != 0:
+        global_cuda_version = parse_nvidia_smi_cuda_version(_run_nvidia_smi_plain(nvidia_smi_path) or raw)
+        legacy_query = "name,driver_version,memory.total,compute_cap"
+        completed = _run_nvidia_smi_query(nvidia_smi_path, legacy_query)
+        raw = (completed.stdout or completed.stderr or "").strip()
     if completed.returncode != 0:
         return [], raw
-    return parse_nvidia_smi_csv(raw), raw
+    return _attach_global_cuda_version(parse_nvidia_smi_csv(raw), global_cuda_version), raw
 
 
 def _binary_version(path: Optional[str]) -> Optional[str]:
@@ -151,6 +185,7 @@ def windows_cuda_preflight(
     selected_gpu = gpu_rows[0] if gpu_rows else {}
     minimum_driver = minimum_driver_for_cuda(cuda_major)
     driver_version = selected_gpu.get("driver_version")
+    cuda_version = selected_gpu.get("cuda_version")
     if driver_version and minimum_driver:
         if version_at_least(driver_version, minimum_driver):
             probes.append({"id": "cuda_driver_floor", "status": "passed", "observed": "driver %s >= %s" % (driver_version, minimum_driver)})
@@ -160,6 +195,8 @@ def windows_cuda_preflight(
     elif gpu_rows:
         probes.append({"id": "cuda_driver_floor", "status": "unknown", "detail": "Driver version or CUDA floor was not available."})
         reason_codes.append("driver_version_unknown")
+    if cuda_version:
+        probes.append({"id": "cuda_version", "status": "passed", "observed": cuda_version})
 
     if gpu_rows and required_vram_bytes is not None:
         observed_vram = selected_gpu.get("vram_bytes")
@@ -207,8 +244,7 @@ def windows_cuda_preflight(
     else:
         probes.append({"id": "windows_platform", "status": "passed", "observed": platform_info.get("version")})
 
-    if reason_codes:
-        reason_codes.append("fallback_not_allowed")
+    reason_codes.append("fallback_not_allowed")
     reason_codes.append("full_loop_not_proven")
     status = "blocked" if reason_codes else "ready"
     selector = {
