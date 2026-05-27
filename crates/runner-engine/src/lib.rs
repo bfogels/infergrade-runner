@@ -346,6 +346,13 @@ pub fn profile_token_available(profile: Option<&Value>) -> bool {
     profile_string(profile, "access_token").is_some()
 }
 
+fn profile_api_url_matches(profile: Option<&Value>, normalized_api_url: &str) -> bool {
+    profile_string(profile, "api_url")
+        .and_then(|value| normalize_api_url(&value).ok())
+        .map(|profile_api_url| profile_api_url == normalized_api_url)
+        .unwrap_or(false)
+}
+
 pub fn build_listener_start_plan(
     api_url: &str,
     typed_token_present: bool,
@@ -355,10 +362,13 @@ pub fn build_listener_start_plan(
     let normalized_api_url = normalize_api_url(api_url)?;
     let profile_available = profile.is_some();
     let profile_has_token = profile_token_available(profile);
+    let profile_api_url_matches = profile_api_url_matches(profile, &normalized_api_url);
     let credential_source = if typed_token_present {
         "typed_input"
-    } else if profile_available && os_token_available {
+    } else if profile_available && os_token_available && profile_api_url_matches {
         "saved_pairing"
+    } else if profile_available && os_token_available {
+        "api_mismatch"
     } else {
         "missing"
     };
@@ -367,8 +377,9 @@ pub fn build_listener_start_plan(
         "runner_id": profile_string(profile, "runner_id").unwrap_or_default(),
         "execution_mode": profile_string(profile, "preferred_execution_mode").unwrap_or_else(|| preferred_execution_mode().to_string()),
         "credential_source": credential_source,
-        "can_start": credential_source != "missing",
+        "can_start": credential_source == "typed_input" || credential_source == "saved_pairing",
         "profile_status": if profile_available { "present" } else { "missing" },
+        "profile_api_url_status": if profile_available && profile_api_url_matches { "match" } else if profile_available { "mismatch" } else { "missing" },
         "profile_token_status": if profile_has_token { "present" } else { "missing" },
         "token_status": if os_token_available { "present" } else { "missing" },
     }))
@@ -3093,6 +3104,25 @@ mod tests {
         assert_eq!(plan["profile_token_status"], "missing");
         assert_eq!(plan["token_status"], "present");
         assert_eq!(plan["can_start"], true);
+    }
+
+    #[test]
+    fn listener_start_plan_will_not_send_saved_token_to_different_api_origin() {
+        let profile = json!({
+            "api_url": "https://api.infergrade.com/",
+            "runner_id": "runner_123",
+        });
+        let plan = build_listener_start_plan("http://127.0.0.1:8000", false, Some(&profile), true)
+            .expect("listener plan");
+        assert_eq!(plan["api_url"], "http://127.0.0.1:8000/");
+        assert_eq!(plan["credential_source"], "api_mismatch");
+        assert_eq!(plan["profile_api_url_status"], "mismatch");
+        assert_eq!(plan["can_start"], false);
+
+        let typed = build_listener_start_plan("http://127.0.0.1:8000", true, Some(&profile), true)
+            .expect("typed token plan");
+        assert_eq!(typed["credential_source"], "typed_input");
+        assert_eq!(typed["can_start"], true);
     }
 
     #[test]
