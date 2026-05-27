@@ -110,11 +110,16 @@ class SupportExportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="infergrade-support-cuda-") as tempdir:
             cuda_preflight = {
                 "selector": {
+                    "platform": {"system": "windows", "arch": "amd64", "version": "windows-10"},
                     "accelerator": {"api": "cuda", "vendor": "nvidia"},
-                    "compatibility": {"status": "blocked", "reason_codes": ["full_loop_not_proven"]},
+                    "driver": {"version": "555.85", "minimum_required": "525.0", "cuda_major": "12"},
+                    "delivery": {"source": "explicit_path", "binary_set": "llama_cpp_windows_cuda_x86_64"},
+                    "binary": {"path": "C:\\llama.cpp\\llama-cli.exe", "version_output": "llama.cpp build 1234"},
+                    "compatibility": {"status": "blocked", "reason_codes": ["full_loop_not_proven", "fallback_not_allowed"]},
                 },
                 "gpu_count": 1,
                 "hardware_blocked": True,
+                "next_action": "Validate on a Windows/NVIDIA machine before enabling evidence-producing technical beta.",
             }
             environment = {
                 "hardware_class": "nvidia_gpu",
@@ -140,6 +145,14 @@ class SupportExportTests(unittest.TestCase):
         self.assertTrue(payload["cuda"]["included"])
         self.assertEqual(payload["cuda"]["reason"], "nvidia_cuda_environment")
         self.assertEqual(payload["cuda"]["preflight"], cuda_preflight)
+        self.assertEqual(payload["cuda"]["summary"]["status"], "blocked")
+        self.assertEqual(payload["cuda"]["summary"]["gpu_count"], 1)
+        self.assertEqual(payload["cuda"]["summary"]["platform"]["system"], "windows")
+        self.assertEqual(payload["cuda"]["summary"]["runtime"]["source"], "explicit_path")
+        self.assertEqual(payload["cuda"]["summary"]["runtime"]["binary_path_present"], True)
+        self.assertEqual(payload["cuda"]["summary"]["runtime"]["version_output"], "llama.cpp build 1234")
+        self.assertIn("full_loop_not_proven", payload["cuda"]["summary"]["reason_codes"])
+        self.assertIn("Windows/NVIDIA machine", payload["cuda"]["summary"]["next_action"])
         preflight_mock.assert_called_once_with(
             runtime_binary_path="C:\\llama.cpp\\llama-cli.exe",
             cuda_major="12",
