@@ -7,6 +7,7 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.cuda import (
     minimum_driver_for_cuda,
+    normalize_platform_snapshot,
     parse_nvidia_smi_cuda_version,
     parse_nvidia_smi_csv,
     version_at_least,
@@ -43,16 +44,22 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertEqual(minimum_driver_for_cuda(None), "525.0")
         self.assertEqual(minimum_driver_for_cuda("13.0"), "580.0")
 
+    def test_normalize_platform_snapshot_accepts_windows_aliases(self):
+        self.assertEqual(normalize_platform_snapshot({"system": "Windows", "arch": "AMD64"})["system"], "windows")
+        self.assertEqual(normalize_platform_snapshot({"system": "Windows_NT", "arch": "x86_64"})["system"], "windows")
+        self.assertEqual(normalize_platform_snapshot({"system": "win32", "arch": "AMD64"})["arch"], "amd64")
+
     def test_windows_cuda_preflight_blocks_until_full_loop_is_proven(self):
         result = windows_cuda_preflight(
             nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9, 12.5\n",
-            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            platform_snapshot={"system": "Windows", "arch": "AMD64", "version": "11"},
             which=lambda _name: None,
         )
 
         selector = result["selector"]
         self.assertTrue(result["hardware_blocked"])
         self.assertEqual(selector["platform"]["system"], "windows")
+        self.assertEqual(selector["platform"]["arch"], "amd64")
         self.assertEqual(selector["accelerator"]["vendor"], "nvidia")
         self.assertEqual(selector["accelerator"]["compute_capability"], "8.9")
         self.assertEqual(selector["driver"]["minimum_required"], "525.0")
@@ -68,6 +75,7 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertIn("fallback_not_allowed", selector["compatibility"]["reason_codes"])
         self.assertIn("full_loop_not_proven", selector["compatibility"]["reason_codes"])
         self.assertIn("runtime_binary_missing", selector["compatibility"]["reason_codes"])
+        self.assertNotIn("windows_host_required", selector["compatibility"]["reason_codes"])
 
     def test_windows_cuda_preflight_reports_old_driver(self):
         result = windows_cuda_preflight(

@@ -99,6 +99,17 @@ def detect_windows_version() -> Dict[str, Optional[str]]:
     }
 
 
+def normalize_platform_snapshot(snapshot: Optional[Dict[str, str]]) -> Dict[str, Optional[str]]:
+    platform_info = dict(snapshot or detect_windows_version())
+    system = str(platform_info.get("system") or "").strip().lower()
+    if system in {"win32", "win64", "windows_nt"} or system.startswith("windows"):
+        system = "windows"
+    platform_info["system"] = system or "unknown"
+    if platform_info.get("arch"):
+        platform_info["arch"] = str(platform_info.get("arch")).strip().lower() or "unknown"
+    return platform_info
+
+
 def _run_nvidia_smi_query(nvidia_smi_path: str, fields: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
@@ -181,9 +192,7 @@ def windows_cuda_preflight(
     which: Callable[[str], Optional[str]] = shutil.which,
 ) -> Dict[str, Any]:
     """Return a runtime selector plus actionable CUDA readiness details."""
-    platform_info = dict(platform_snapshot or detect_windows_version())
-    if platform_info.get("system") == "win32":
-        platform_info["system"] = "windows"
+    platform_info = normalize_platform_snapshot(platform_snapshot)
     nvidia_smi = nvidia_smi_path or which("nvidia-smi")
     probes: List[Dict[str, Any]] = []
     reason_codes: List[str] = []
