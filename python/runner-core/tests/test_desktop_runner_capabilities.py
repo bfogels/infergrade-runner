@@ -59,7 +59,8 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn("data-runner-cli-version", html)
         self.assertIn("data-runtime-runner-version", html)
         self.assertIn("Current release", html)
-        self.assertIn("Pair with Hub, install the recommended runtime, choose a GGUF model, and start local runs.", html)
+        self.assertIn("Pair with Hub before this Runner accepts assigned work.", html)
+        self.assertIn("Runtime options", html)
         self.assertIn("Unsigned package smoke artifacts are built in CI; signed installers are not public yet.", html)
         self.assertNotIn("Installers are planned after the macOS lane is verified.", html)
         self.assertIn("Local companion app for InferGrade Hub runs", tauri_config)
@@ -72,7 +73,7 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn("function renderReleaseStatus()", js)
         self.assertIn("function refreshRunnerCliVersion()", js)
         self.assertIn('runDesktopSidecarDiagnostic(["--version"])', js)
-        self.assertIn(".release-card", css)
+        self.assertIn(".version-chip", css)
         self.assertIn(".status-list", css)
 
     def test_desktop_runner_validates_hub_url_like_sidecar_permissions(self):
@@ -88,7 +89,7 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         with open(helper_path, "r", encoding="utf-8") as handle:
             helper_js = handle.read()
 
-        self.assertIn("Use HTTPS for hosted Hubs", html)
+        self.assertIn('value="https://api.infergrade.com"', html)
         self.assertIn("function readApiUrl()", js)
         self.assertIn("normalizeDesktopApiUrl(form.elements.apiUrl.value)", js)
         self.assertIn('const HOSTED_API_URL = "https://api.infergrade.com";', helper_js)
