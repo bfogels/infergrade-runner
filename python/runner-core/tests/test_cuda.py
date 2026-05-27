@@ -1,4 +1,5 @@
 import sys
+import subprocess
 import unittest
 from unittest import mock
 
@@ -125,6 +126,29 @@ class WindowsCudaPreflightTests(unittest.TestCase):
             compatibility["probes"],
         )
 
+    @mock.patch("infergrade.cuda.subprocess.run")
+    def test_windows_cuda_preflight_reports_nvidia_smi_timeout(self, run_mock):
+        run_mock.side_effect = subprocess.TimeoutExpired(cmd=["nvidia-smi"], timeout=8)
+
+        result = windows_cuda_preflight(
+            nvidia_smi_path="nvidia-smi",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        compatibility = result["selector"]["compatibility"]
+        self.assertIn("nvidia_smi_timeout", compatibility["reason_codes"])
+        self.assertNotIn("nvidia_smi_failed", compatibility["reason_codes"])
+        self.assertNotIn("no_nvidia_gpu", compatibility["reason_codes"])
+        self.assertIn(
+            {"id": "nvidia_smi", "status": "failed", "detail": "nvidia-smi did not return within 8 seconds."},
+            compatibility["probes"],
+        )
+        self.assertNotIn(
+            {"id": "nvidia_smi", "status": "failed", "detail": "No NVIDIA GPU rows were reported."},
+            compatibility["probes"],
+        )
+
     def test_windows_cuda_preflight_reports_vram_and_artifact_failures(self):
         result = windows_cuda_preflight(
             nvidia_smi_output="NVIDIA RTX 3060, 555.85, 8192, 8.6\n",
@@ -169,6 +193,51 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertIn("full_loop_not_proven", selector["compatibility"]["reason_codes"])
         self.assertIn("fallback_not_allowed", selector["compatibility"]["reason_codes"])
         self.assertNotIn("runtime_smoke_failed", selector["compatibility"]["reason_codes"])
+
+    @mock.patch("infergrade.cuda.subprocess.run")
+    def test_windows_cuda_preflight_reports_runtime_binary_timeout(self, run_mock):
+        run_mock.side_effect = subprocess.TimeoutExpired(cmd=["C:\\llama.cpp\\llama-cli.exe", "--version"], timeout=5)
+
+        result = windows_cuda_preflight(
+            runtime_binary_path="C:\\llama.cpp\\llama-cli.exe",
+            nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9\n",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        selector = result["selector"]
+        self.assertIn("runtime_smoke_timeout", selector["compatibility"]["reason_codes"])
+        self.assertNotIn("runtime_smoke_failed", selector["compatibility"]["reason_codes"])
+        self.assertIn(
+            {
+                "id": "cuda_runtime_binary",
+                "status": "failed",
+                "detail": "Selected CUDA llama.cpp binary did not return --version within 5 seconds.",
+            },
+            selector["compatibility"]["probes"],
+        )
+
+    @mock.patch("infergrade.cuda.subprocess.run")
+    def test_windows_cuda_preflight_reports_runtime_binary_not_found(self, run_mock):
+        run_mock.side_effect = FileNotFoundError()
+
+        result = windows_cuda_preflight(
+            runtime_binary_path="C:\\llama.cpp\\missing.exe",
+            nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9\n",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        selector = result["selector"]
+        self.assertIn("runtime_binary_not_found", selector["compatibility"]["reason_codes"])
+        self.assertIn(
+            {
+                "id": "cuda_runtime_binary",
+                "status": "failed",
+                "detail": "Selected CUDA llama.cpp binary was not found.",
+            },
+            selector["compatibility"]["probes"],
+        )
 
     @mock.patch("infergrade.cuda.subprocess.run")
     def test_windows_cuda_preflight_queries_cuda_version_when_available(self, run_mock):

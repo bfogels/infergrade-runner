@@ -29,6 +29,14 @@ class NvidiaSmiError(RuntimeError):
     """Raised when nvidia-smi exists but cannot return bounded GPU rows."""
 
 
+class RuntimeBinarySmokeError(RuntimeError):
+    """Raised when a selected CUDA runtime binary cannot prove its version."""
+
+    def __init__(self, detail: str, reason_code: str = "runtime_smoke_failed"):
+        super().__init__(detail)
+        self.reason_code = reason_code
+
+
 def parse_version(value: Optional[str]) -> Tuple[int, ...]:
     parts = re.findall(r"\d+", str(value or ""))
     return tuple(int(part) for part in parts)
@@ -142,12 +150,23 @@ def _binary_version(path: Optional[str]) -> Optional[str]:
         return None
     try:
         completed = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=5)
-    except Exception:
-        return None
+    except subprocess.TimeoutExpired:
+        raise RuntimeBinarySmokeError(
+            "Selected CUDA llama.cpp binary did not return --version within 5 seconds.",
+            "runtime_smoke_timeout",
+        )
+    except FileNotFoundError:
+        raise RuntimeBinarySmokeError("Selected CUDA llama.cpp binary was not found.", "runtime_binary_not_found")
+    except PermissionError:
+        raise RuntimeBinarySmokeError("Selected CUDA llama.cpp binary is not executable.", "runtime_binary_not_executable")
+    except Exception as exc:
+        raise RuntimeBinarySmokeError("Selected CUDA llama.cpp binary could not be executed: %s" % exc.__class__.__name__)
     if completed.returncode != 0:
-        return None
+        raise RuntimeBinarySmokeError("Selected CUDA llama.cpp binary returned non-zero status from --version.")
     output = (completed.stdout or completed.stderr or "").strip()
-    return output.splitlines()[0] if output else None
+    if not output:
+        raise RuntimeBinarySmokeError("Selected CUDA llama.cpp binary returned no --version output.")
+    return output.splitlines()[0]
 
 
 def windows_cuda_preflight(
@@ -176,13 +195,17 @@ def windows_cuda_preflight(
     else:
         try:
             gpu_rows = parse_nvidia_smi_csv(nvidia_smi_output) if nvidia_smi_output is not None else _run_nvidia_smi(nvidia_smi)[0]
+        except subprocess.TimeoutExpired:
+            gpu_rows = []
+            probes.append({"id": "nvidia_smi", "status": "failed", "detail": "nvidia-smi did not return within 8 seconds."})
+            reason_codes.append("nvidia_smi_timeout")
         except Exception as exc:
             gpu_rows = []
             probes.append({"id": "nvidia_smi", "status": "failed", "detail": str(exc)})
             reason_codes.append("nvidia_smi_failed")
         if gpu_rows:
             probes.append({"id": "nvidia_smi", "status": "passed", "observed": "detected %d NVIDIA GPU(s)" % len(gpu_rows)})
-        elif "nvidia_smi_failed" not in reason_codes and "nvidia_smi_missing" not in reason_codes:
+        elif not any(code in reason_codes for code in ("nvidia_smi_failed", "nvidia_smi_missing", "nvidia_smi_timeout")):
             probes.append({"id": "nvidia_smi", "status": "failed", "detail": "No NVIDIA GPU rows were reported."})
             reason_codes.append("no_nvidia_gpu")
 
@@ -222,7 +245,13 @@ def windows_cuda_preflight(
         reason_codes.append("artifact_download_failed")
 
     runtime_path = runtime_binary_path or os.environ.get("INFERGRADE_LLAMA_CPP_CUDA_CLI")
-    runtime_version = _binary_version(runtime_path)
+    runtime_version = None
+    runtime_error = None
+    if runtime_path:
+        try:
+            runtime_version = _binary_version(runtime_path)
+        except RuntimeBinarySmokeError as exc:
+            runtime_error = exc
     if selected_binary_set != WINDOWS_CUDA_BINARY_SET:
         probes.append(
             {
@@ -236,8 +265,9 @@ def windows_cuda_preflight(
     if runtime_path and runtime_version:
         probes.append({"id": "cuda_runtime_binary", "status": "passed", "observed": runtime_version})
     elif runtime_path:
-        probes.append({"id": "cuda_runtime_binary", "status": "failed", "detail": "Selected CUDA llama.cpp binary did not pass version smoke."})
-        reason_codes.append("runtime_smoke_failed")
+        detail = str(runtime_error) if runtime_error else "Selected CUDA llama.cpp binary did not pass version smoke."
+        probes.append({"id": "cuda_runtime_binary", "status": "failed", "detail": detail})
+        reason_codes.append(runtime_error.reason_code if runtime_error else "runtime_smoke_failed")
     else:
         probes.append({"id": "cuda_runtime_binary", "status": "failed", "detail": "No pinned/checksummed CUDA llama.cpp binary is selected."})
         reason_codes.append("runtime_binary_missing")
