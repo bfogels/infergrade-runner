@@ -65,5 +65,9 @@ CUDA signal, the block says `included: false` with `reason:
 no_cuda_signal`. If the host reports NVIDIA/CUDA or `INFERGRADE_LLAMA_CPP_CUDA_CLI`
 is set, the block includes the same bounded preflight selector used by doctor,
 including driver floor, selected binary, fallback, and claim-boundary fields.
+The block also includes a compact `summary` with compatibility status, reason
+codes, GPU count, platform, driver floor, selected runtime source, binary smoke
+result, and next action so support triage does not need to parse the full
+runtime selector first.
 
 Public copy must say "Windows/NVIDIA CUDA preview" until the full loop is proven. After proof, the support tier can advance to `technical_beta` for the validated path only. Linux CUDA, ROCm, Vulkan, and Windows AMD remain separate paths and must not inherit NVIDIA support claims.

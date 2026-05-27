@@ -68,7 +68,45 @@ def _cuda_support_payload(execution_mode: str, environment: Dict[str, Any]) -> D
         "reason": "nvidia_cuda_environment",
         "execution_mode": execution_mode,
         "claim_boundary": WINDOWS_CUDA_CLAIM_BOUNDARY,
+        "summary": _cuda_support_summary(preflight),
         "preflight": preflight,
+    }
+
+
+def _cuda_support_summary(preflight: Dict[str, Any]) -> Dict[str, Any]:
+    selector = preflight.get("selector") or {}
+    compatibility = selector.get("compatibility") or {}
+    platform = selector.get("platform") or {}
+    accelerator = selector.get("accelerator") or {}
+    driver = selector.get("driver") or {}
+    delivery = selector.get("delivery") or {}
+    binary = selector.get("binary") or {}
+    return {
+        "status": compatibility.get("status") or "unknown",
+        "reason_codes": list(compatibility.get("reason_codes") or []),
+        "gpu_count": preflight.get("gpu_count"),
+        "platform": {
+            "system": platform.get("system"),
+            "arch": platform.get("arch"),
+            "version": platform.get("version"),
+        },
+        "gpu": {
+            "model": accelerator.get("model"),
+            "vram_bytes": accelerator.get("vram_bytes"),
+            "compute_capability": accelerator.get("compute_capability"),
+        },
+        "driver": {
+            "version": driver.get("version"),
+            "minimum_required": driver.get("minimum_required"),
+            "cuda_major": driver.get("cuda_major"),
+        },
+        "runtime": {
+            "source": delivery.get("source"),
+            "binary_set": delivery.get("binary_set"),
+            "binary_path_present": bool(binary.get("path")),
+            "version_output": binary.get("version_output"),
+        },
+        "next_action": preflight.get("next_action"),
     }
 
 
