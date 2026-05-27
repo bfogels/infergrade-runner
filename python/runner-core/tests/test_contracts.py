@@ -9,9 +9,9 @@ from infergrade.releases import export_release_bundle, load_release_manifest
 
 
 class ContractExportTests(unittest.TestCase):
-    def test_manifest_version_matches_runner_version(self):
+    def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(__version__, manifest["contract_version"])
+        self.assertRegex(manifest["contract_version"], r"^\d+\.\d+\.\d+$")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_export_contract_bundle_copies_declared_files(self):

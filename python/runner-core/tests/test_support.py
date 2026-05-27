@@ -48,6 +48,8 @@ class SupportExportTests(unittest.TestCase):
                 payload = build_support_export(run_dir=tempdir, execution_mode="local_native")
 
         self.assertEqual(payload["export_kind"], "infergrade_runner_support_v1")
+        self.assertEqual(payload["cuda"]["included"], False)
+        self.assertEqual(payload["cuda"]["reason"], "no_cuda_signal")
         self.assertTrue(payload["secrets_excluded"])
         self.assertEqual(payload["runner_profile"]["access_token_present"], True)
         self.assertNotIn("access_token", payload["runner_profile"])
@@ -103,6 +105,46 @@ class SupportExportTests(unittest.TestCase):
         self.assertNotIn("PRIVATE PROMPT", encoded)
         self.assertNotIn("PRIVATE COMPLETION", encoded)
         self.assertNotIn("X-Amz-Signature", encoded)
+
+    def test_build_support_export_includes_cuda_preflight_for_nvidia_environment(self):
+        with tempfile.TemporaryDirectory(prefix="infergrade-support-cuda-") as tempdir:
+            cuda_preflight = {
+                "selector": {
+                    "accelerator": {"api": "cuda", "vendor": "nvidia"},
+                    "compatibility": {"status": "blocked", "reason_codes": ["full_loop_not_proven"]},
+                },
+                "gpu_count": 1,
+                "hardware_blocked": True,
+            }
+            environment = {
+                "hardware_class": "nvidia_gpu",
+                "accelerator_vendor": "nvidia",
+                "accelerator_api": "cuda",
+                "driver_versions": {"cuda": "12.5", "nvidia": "555.85"},
+                "cpu_architecture": "AMD64",
+                "os": "windows-10",
+            }
+            with mock.patch("infergrade.support.load_runner_profile", return_value=None), mock.patch(
+                "infergrade.support.capture_environment",
+                return_value=environment,
+            ), mock.patch(
+                "infergrade.support.windows_cuda_preflight",
+                return_value=cuda_preflight,
+            ) as preflight_mock, mock.patch.dict(
+                os.environ,
+                {"INFERGRADE_LLAMA_CPP_CUDA_CLI": "C:\\llama.cpp\\llama-cli.exe"},
+                clear=False,
+            ):
+                payload = build_support_export(run_dir=tempdir, execution_mode="local_native")
+
+        self.assertTrue(payload["cuda"]["included"])
+        self.assertEqual(payload["cuda"]["reason"], "nvidia_cuda_environment")
+        self.assertEqual(payload["cuda"]["preflight"], cuda_preflight)
+        preflight_mock.assert_called_once_with(
+            runtime_binary_path="C:\\llama.cpp\\llama-cli.exe",
+            cuda_major="12",
+            platform_snapshot={"system": "windows", "arch": "amd64", "version": "windows-10"},
+        )
 
     def test_write_support_export_writes_json_payload(self):
         with tempfile.TemporaryDirectory(prefix="infergrade-support-output-") as tempdir:

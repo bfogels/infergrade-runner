@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, Optional
 
 from infergrade import __version__
+from infergrade.cuda import WINDOWS_CUDA_CLAIM_BOUNDARY, windows_cuda_preflight
 from infergrade.environment import capture_environment
 from infergrade.pairing import load_runner_profile, runner_profile_path
 from infergrade.progress import load_progress
@@ -19,6 +20,7 @@ def build_support_export(run_dir: Optional[str] = None, execution_mode: Optional
         or (progress or {}).get("request_context", {}).get("execution_mode")
         or "local_container"
     )
+    environment = _redact_support_payload(capture_environment(detected_mode))
     payload = {
         "export_kind": "infergrade_runner_support_v1",
         "generated_at": utcnow_iso(),
@@ -26,7 +28,8 @@ def build_support_export(run_dir: Optional[str] = None, execution_mode: Optional
         "secrets_excluded": True,
         "runner_profile_path": runner_profile_path(),
         "runner_profile": _sanitized_runner_profile(load_runner_profile()),
-        "environment": _redact_support_payload(capture_environment(detected_mode)),
+        "environment": environment,
+        "cuda": _redact_support_payload(_cuda_support_payload(detected_mode, environment)),
         "run_dir": resolved_run_dir,
         "progress": progress,
         "manifest": _read_json_if_present(resolved_run_dir, "manifest.json"),
@@ -44,6 +47,55 @@ def write_support_export(output_path: str, run_dir: Optional[str] = None, execut
     resolved_output = os.path.abspath(os.path.expanduser(output_path))
     write_json(resolved_output, build_support_export(run_dir=run_dir, execution_mode=execution_mode))
     return resolved_output
+
+
+def _cuda_support_payload(execution_mode: str, environment: Dict[str, Any]) -> Dict[str, Any]:
+    """Return CUDA preflight context when a support export has CUDA signals."""
+    if not _environment_suggests_cuda(environment):
+        return {
+            "included": False,
+            "reason": "no_cuda_signal",
+            "claim_boundary": WINDOWS_CUDA_CLAIM_BOUNDARY,
+        }
+    runtime_path = os.environ.get("INFERGRADE_LLAMA_CPP_CUDA_CLI")
+    preflight = windows_cuda_preflight(
+        runtime_binary_path=runtime_path,
+        cuda_major=_cuda_major_from_environment(environment),
+        platform_snapshot=_platform_snapshot_from_environment(environment),
+    )
+    return {
+        "included": True,
+        "reason": "nvidia_cuda_environment",
+        "execution_mode": execution_mode,
+        "claim_boundary": WINDOWS_CUDA_CLAIM_BOUNDARY,
+        "preflight": preflight,
+    }
+
+
+def _environment_suggests_cuda(environment: Dict[str, Any]) -> bool:
+    return (
+        environment.get("hardware_class") == "nvidia_gpu"
+        or environment.get("accelerator_vendor") == "nvidia"
+        or environment.get("accelerator_api") == "cuda"
+        or bool(os.environ.get("INFERGRADE_LLAMA_CPP_CUDA_CLI"))
+    )
+
+
+def _cuda_major_from_environment(environment: Dict[str, Any]) -> str:
+    cuda_version = ((environment.get("driver_versions") or {}).get("cuda") or "").strip()
+    return cuda_version.split(".", 1)[0] if cuda_version else "12"
+
+
+def _platform_snapshot_from_environment(environment: Dict[str, Any]) -> Dict[str, str]:
+    os_label = str(environment.get("os") or "").lower()
+    system = os_label.split("-", 1)[0] if os_label else None
+    if system == "win32":
+        system = "windows"
+    return {
+        "system": system or "unknown",
+        "arch": str(environment.get("cpu_architecture") or "unknown").lower(),
+        "version": str(environment.get("os") or "") or None,
+    }
 
 
 def _sanitized_runner_profile(profile: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

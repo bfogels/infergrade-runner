@@ -61,8 +61,8 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn('import packageInfo from "../package.json"', js)
         self.assertIn("const APP_VERSION_FALLBACK = packageInfo.version;", js)
         self.assertNotIn('APP_VERSION_FALLBACK = "0.1.', js)
-        self.assertIn("<strong data-app-version>checking...</strong>", html)
-        self.assertNotIn("<strong data-app-version>0.1.", html)
+        self.assertIn("<span class=\"version-chip\" data-app-version>checking...</span>", html)
+        self.assertNotIn("data-app-version>0.1.", html)
 
     def test_sync_versions_updates_required_manifest_copies_from_version_file(self):
         with TemporaryDirectory() as tmp:
