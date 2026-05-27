@@ -31,9 +31,17 @@ Runner CUDA preflight captures bounded, support-safe fields:
 
 `nvidia_smi_failed`: `nvidia-smi` was found but failed to return GPU rows. Repair the NVIDIA driver/runtime installation before attempting CUDA evidence.
 
+`nvidia_smi_timeout`: `nvidia-smi` was found but did not return within the bounded preflight timeout. Repair or restart the NVIDIA driver/runtime stack before attempting CUDA evidence.
+
 `driver_too_old`: The NVIDIA driver is below the selected CUDA major floor. Upgrade the driver or select a runtime that targets an older CUDA major.
 
 `runtime_binary_missing`: No pinned managed CUDA artifact or explicit binary was selected. Provide an existing CUDA-capable `llama.cpp` binary path for preflight.
+
+`runtime_binary_not_found`: The selected CUDA binary path does not exist. Re-select the binary path before attempting CUDA evidence.
+
+`runtime_binary_not_executable`: The selected CUDA binary path exists but cannot be executed. Repair file permissions or re-select the binary before attempting CUDA evidence.
+
+`runtime_smoke_timeout`: The selected CUDA binary did not return `--version` within the bounded smoke timeout. Re-select the binary, repair the runtime install, or keep CUDA evidence blocked.
 
 `runtime_smoke_failed`: The selected CUDA binary did not pass `--version`. Re-select the binary, repair the runtime install, or keep CUDA evidence blocked.
 
