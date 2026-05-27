@@ -17,6 +17,7 @@ InferGrade may proceed toward a Windows/NVIDIA technical beta only after one rea
 Runner CUDA preflight captures bounded, support-safe fields:
 
 - Windows system, architecture, and version.
+- Common Windows aliases such as `Windows`, `Windows_NT`, and `win32` are normalized before compatibility checks so support exports and external probes do not create false `windows_host_required` blockers.
 - `nvidia-smi` availability.
 - GPU name, VRAM, compute capability, driver version, and CUDA version when `nvidia-smi` reports it.
 - CUDA major version selected for driver-floor checks.
