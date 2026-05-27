@@ -98,6 +98,33 @@ class WindowsCudaPreflightTests(unittest.TestCase):
 
         self.assertIn("no_nvidia_gpu", result["selector"]["compatibility"]["reason_codes"])
 
+    @mock.patch("infergrade.cuda.subprocess.run")
+    def test_windows_cuda_preflight_reports_nvidia_smi_failure_separately_from_empty_gpu_rows(self, run_mock):
+        run_mock.side_effect = [
+            mock.Mock(returncode=1, stdout="", stderr="Field \"cuda_version\" is not a valid field"),
+            mock.Mock(returncode=1, stdout="", stderr="NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver."),
+            mock.Mock(returncode=1, stdout="", stderr="NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver."),
+        ]
+
+        result = windows_cuda_preflight(
+            nvidia_smi_path="nvidia-smi",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        compatibility = result["selector"]["compatibility"]
+        reason_codes = compatibility["reason_codes"]
+        self.assertIn("nvidia_smi_failed", reason_codes)
+        self.assertNotIn("no_nvidia_gpu", reason_codes)
+        self.assertIn(
+            {
+                "id": "nvidia_smi",
+                "status": "failed",
+                "detail": "NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver.",
+            },
+            compatibility["probes"],
+        )
+
     def test_windows_cuda_preflight_reports_vram_and_artifact_failures(self):
         result = windows_cuda_preflight(
             nvidia_smi_output="NVIDIA RTX 3060, 555.85, 8192, 8.6\n",
