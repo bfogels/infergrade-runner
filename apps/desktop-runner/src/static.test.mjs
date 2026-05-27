@@ -366,7 +366,10 @@ test("desktop legacy handoff path stays token-free and hidden from normal UI", (
   assert.ok(js.includes("FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY"));
   assert.ok(js.includes("firstRunHandoffFromParams"));
   assert.ok(js.includes("firstRunHandoffFromDeepLink"));
+  assert.ok(js.includes("urlHandoff.apiUrl"));
+  assert.ok(js.includes("expectedRunnerVersion"));
   assert.ok(js.includes("Ignored first-run handoff with"));
+  assert.ok(js.includes("window.localStorage.setItem(API_URL_STORAGE_KEY, urlHandoff.apiUrl);"));
   assert.ok(js.includes('invoke("run_desktop_native_first_run"'));
   assert.ok(js.includes("uploadRunId"));
   assert.ok(js.includes("uploadWorkerId"));
@@ -376,6 +379,8 @@ test("desktop legacy handoff path stays token-free and hidden from normal UI", (
   assert.equal(js.includes("execution_token"), false);
   assert.equal(js.includes("runnerToken"), false);
   assert.ok(helpers.includes("sensitiveKeys"));
+  assert.ok(helpers.includes("first_run_api_url"));
+  assert.ok(helpers.includes("expected_runner_version"));
   assert.ok(helpers.includes("token|secret|authorization|bearer"));
   assert.ok(helpers.includes("authorization"));
   assert.ok(helpers.includes("bearer"));

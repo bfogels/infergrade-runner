@@ -1692,7 +1692,7 @@ function firstRunHandoffFromDeepLinks(urls) {
       return handoff;
     }
   }
-  return { runId: "", workerId: "" };
+  return { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" };
 }
 
 function applyFirstRunHandoff(incomingHandoff = null) {
@@ -1701,8 +1701,15 @@ function applyFirstRunHandoff(incomingHandoff = null) {
   const storedWorkerId = window.localStorage.getItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY) || "";
   const runId = urlHandoff.runId || storedRunId;
   const workerId = urlHandoff.runId ? urlHandoff.workerId : storedWorkerId;
+  const expectedRunnerVersion = urlHandoff.expectedRunnerVersion || "";
+  const expectedContractVersion = urlHandoff.expectedContractVersion || "";
   currentHandoffRunId = runId;
   currentHandoffWorkerId = workerId;
+  if (urlHandoff.runId && urlHandoff.apiUrl) {
+    form.elements.apiUrl.value = urlHandoff.apiUrl;
+    lastNormalizedApiUrl = urlHandoff.apiUrl;
+    window.localStorage.setItem(API_URL_STORAGE_KEY, urlHandoff.apiUrl);
+  }
   if (runId && firstRunUploadRunIdInput && !firstRunUploadRunIdInput.value.trim()) {
     firstRunUploadRunIdInput.value = runId;
   }
@@ -1721,8 +1728,11 @@ function applyFirstRunHandoff(incomingHandoff = null) {
     }
   }
   if (firstRunHandoffStatus) {
+    const versionCopy = expectedRunnerVersion
+      ? ` Hub expects Runner ${expectedRunnerVersion}${expectedContractVersion ? ` with contract ${expectedContractVersion}` : ""}.`
+      : "";
     firstRunHandoffStatus.textContent = runId
-      ? `Ready to upload this first-run result to Hub run ${runId}.`
+      ? `Ready to upload this first-run result to Hub run ${runId}.${versionCopy}`
       : "If Hub opened Desktop with a run handoff, this fills automatically.";
   }
   renderAssignmentFromHandoff();
