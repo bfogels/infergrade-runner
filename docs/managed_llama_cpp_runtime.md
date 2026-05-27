@@ -33,6 +33,12 @@ infergrade install-runtime --runtime llama.cpp --select-existing \
   --llama-cpp-server-path /opt/homebrew/bin/llama-server
 ```
 
+For the Windows CUDA preview runtime, selection records the CUDA binary set and
+preview support tier, and it requires `llama-cli.exe`, `llama-server.exe`, and
+`llama-perplexity.exe` from the same selected runtime directory or explicit
+paths. InferGrade still does not download CUDA binaries until a pinned checksum
+exists.
+
 The legacy Python/runner-core command keeps an execute gate:
 
 ```bash

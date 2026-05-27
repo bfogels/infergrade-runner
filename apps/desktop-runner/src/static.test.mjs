@@ -189,6 +189,7 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(js.includes('invoke("install_managed_llama_cpp_runtime"'));
   assert.ok(js.includes('invoke("remove_selected_llama_cpp_runtime"'));
   assert.ok(js.includes('invoke("select_existing_llama_cpp_runtime"'));
+  assert.ok(js.includes("runtimeId: runtimeIdInput?.value.trim() || null"));
   assert.ok(js.includes("SHA-256 verified"));
   assert.ok(js.includes("no independent signature"));
   assert.ok(js.includes("Retry install, remove the selected runtime, or select an existing llama.cpp binary."));
@@ -196,6 +197,7 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(js.includes("Replacing the selected llama.cpp runtime with the managed runtime. Local binaries are not deleted."));
   assert.equal(js.includes("executeSidecar(runtimeCommandArgs([\"--select-existing\"])"), false);
   assert.ok(rust.includes("fn llama_cpp_runtime_plan"));
+  assert.ok(rust.includes("runtime_id: Option<String>"));
   assert.ok(rust.includes("fn install_managed_llama_cpp_runtime"));
   assert.ok(rust.includes("engine_install_managed_llama_cpp_runtime"));
   assert.ok(rust.includes("fn remove_selected_llama_cpp_runtime"));

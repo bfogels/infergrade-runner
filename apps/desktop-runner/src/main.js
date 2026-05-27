@@ -2242,6 +2242,7 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
       }
       return invoke("select_existing_llama_cpp_runtime", {
         runtimePath: readFirstRunRuntimePath(),
+        runtimeId: runtimeIdInput?.value.trim() || null,
       });
     })
     .then((selection) => {

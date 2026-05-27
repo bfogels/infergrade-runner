@@ -686,12 +686,18 @@ fn llama_cpp_runtime_plan() -> Value {
 }
 
 #[tauri::command]
-fn select_existing_llama_cpp_runtime(runtime_path: Option<String>) -> Result<Value, String> {
+fn select_existing_llama_cpp_runtime(
+    runtime_path: Option<String>,
+    runtime_id: Option<String>,
+) -> Result<Value, String> {
     let cli_path = runtime_path
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
-    engine_select_existing_llama_cpp_runtime(None, cli_path, None, None)
+    let runtime_id = runtime_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    engine_select_existing_llama_cpp_runtime(runtime_id.as_deref(), cli_path, None, None)
 }
 
 #[tauri::command]
@@ -1319,7 +1325,8 @@ mod tests {
         claim_run_job_payload, runner_heartbeat_payload, runner_register_payload,
         sanitized_runner_profile, ui_pairing_response, verify_runtime_download_manifest,
         worker_request_preview, NativeFirstRunRuntime, NativeRuntimeOutput,
-        MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID,
+        MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID, WINDOWS_CUDA_BINARY_SET,
+        WINDOWS_CUDA_PREVIEW_RUNTIME_ID,
     };
     use std::sync::{Mutex as TestMutex, OnceLock};
 
@@ -1805,8 +1812,9 @@ mod tests {
         let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
         env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
 
-        let selection = select_existing_llama_cpp_runtime(Some(runtime_path.display().to_string()))
-            .expect("runtime selected");
+        let selection =
+            select_existing_llama_cpp_runtime(Some(runtime_path.display().to_string()), None)
+                .expect("runtime selected");
 
         assert_eq!(selection["status"], "selected");
         assert_eq!(selection["selection"]["source"], "selected_existing");
@@ -1821,6 +1829,58 @@ mod tests {
             env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
         }
         let _ = fs::remove_file(runtime_path);
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn desktop_can_select_windows_cuda_preview_runtime_through_runner_engine() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-desktop-cuda-runtime-cache-{}",
+            std::process::id()
+        ));
+        let runtime_dir = env::temp_dir().join(format!(
+            "infergrade-desktop-cuda-runtime-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&runtime_dir);
+        fs::create_dir_all(&runtime_dir).expect("runtime dir");
+        let cli_path = runtime_dir.join("llama-cli.exe");
+        let server_path = runtime_dir.join("llama-server.exe");
+        let perplexity_path = runtime_dir.join("llama-perplexity.exe");
+        write_test_llama_binary(&cli_path);
+        write_test_llama_binary(&server_path);
+        write_test_llama_binary(&perplexity_path);
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let selection = select_existing_llama_cpp_runtime(
+            Some(cli_path.display().to_string()),
+            Some(WINDOWS_CUDA_PREVIEW_RUNTIME_ID.to_string()),
+        )
+        .expect("windows cuda preview runtime selected");
+
+        assert_eq!(
+            selection["selection"]["runtime_id"],
+            WINDOWS_CUDA_PREVIEW_RUNTIME_ID
+        );
+        assert_eq!(
+            selection["selection"]["binary_set"],
+            WINDOWS_CUDA_BINARY_SET
+        );
+        assert_eq!(selection["selection"]["support_tier"], "preview");
+        assert_eq!(selection["selection"]["checksum_verified"], false);
+        assert!(selection["selection"]["claim_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("full Hub loop"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_dir);
         let _ = fs::remove_dir_all(runtime_cache_dir);
     }
 
@@ -1844,7 +1904,7 @@ mod tests {
             if cfg!(windows) { ".cmd" } else { "" }
         ));
         write_test_llama_binary(&runtime_path);
-        select_existing_llama_cpp_runtime(Some(runtime_path.display().to_string()))
+        select_existing_llama_cpp_runtime(Some(runtime_path.display().to_string()), None)
             .expect("runtime selected");
         let removed = remove_selected_llama_cpp_runtime(Some(true)).expect("runtime removed");
         assert_eq!(removed["status"], "removed");
