@@ -40,6 +40,11 @@
         "observed": "driver 555.85"
       },
       {
+        "id": "cuda_version",
+        "status": "passed",
+        "observed": "12.5"
+      },
+      {
         "id": "full_loop_beta_gate",
         "status": "failed",
         "detail": "Windows/NVIDIA remains blocked until hardware proves one full Hub to Runner to upload loop."

@@ -52,6 +52,7 @@ class ContractExportTests(unittest.TestCase):
             (repo_root() / "schemas" / "examples" / "runtime_selector.windows_cuda_preview.json").read_text(encoding="utf-8")
         )
         self.assertEqual("cuda", cuda_example["accelerator"]["api"])
+        self.assertIn({"id": "cuda_version", "status": "passed", "observed": "12.5"}, cuda_example["compatibility"]["probes"])
         self.assertEqual("preview", cuda_example["support"]["tier"])
         self.assertFalse(cuda_example["fallback"]["allowed"])
         self.assertIn("full_loop_not_proven", cuda_example["compatibility"]["reason_codes"])

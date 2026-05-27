@@ -102,6 +102,13 @@ The v0.3 runtime selector should be a Runner-owned object attached to run config
 - `binary.checksum_verified`: true only when a managed download checksum has been verified against the Runner manifest.
 - `binary.signature_verified`: true only when an independent signature verification lane exists and passed. A checksum alone is not a signature.
 
+### Driver
+
+- `driver.version`: accelerator driver version when the local probe can capture it.
+- `driver.minimum_required`: minimum known driver version for the requested accelerator/runtime family.
+- `driver.cuda_major`: CUDA major used for NVIDIA driver-floor checks.
+- CUDA version reported by `nvidia-smi` should be recorded as a bounded compatibility probe when available. Older drivers may omit this signal; absence is not a preflight failure by itself.
+
 ### Compatibility
 
 - `compatibility.status`: `ready`, `warning`, `blocked`, `unsupported`, or `unknown`.
