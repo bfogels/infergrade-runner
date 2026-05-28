@@ -102,8 +102,8 @@ For the containerized setup path, the Hub should pin one released Runner artifac
 
 That released lane currently centers on the current `VERSION` plus the `-preview` channel, for example:
 
-- `infergrade-runner-core:$(cat VERSION)-preview`
-- `infergrade-llama-cpp:$(cat VERSION)-preview`
+- `infergrade-runner-core:$(cat VERSION)`
+- `infergrade-llama-cpp:$(cat VERSION)`
 - the matching Runner contract bundle and release manifest
 
 Development-only `:local` images still exist, but they should be treated as a clearly separate workflow.
@@ -212,7 +212,7 @@ docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$PWD/runs:/app/runs" \
   -v "$HOME/.cache/infergrade/artifacts:/root/.cache/infergrade/artifacts" \
-  infergrade-runner-core:$(cat VERSION)-preview start --api-url http://host.docker.internal:8000
+  infergrade-runner-core:$(cat VERSION) start --api-url http://host.docker.internal:8000
 ```
 
 For security and reproducibility on container-friendly hosts, the recommended container path runs the Runner inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. The desktop first-run path is intentionally different: it is being built to run native local benchmarks without making Docker, a globally installed CLI, or a local repo checkout part of onboarding.
@@ -257,6 +257,8 @@ Without `--output`, the same command prints the JSON payload to stdout. Support 
 - a simple file-presence checklist for first-user-path debugging
 
 This is designed to pair with the Hub-side support export so operator debugging does not depend on screenshots or ad hoc terminal copy/paste.
+
+For pairing, runtime, artifact-path, upload-retry, and support-export recovery details, see [Runner Recovery](docs/recovery.md).
 
 Run the runner test suite:
 

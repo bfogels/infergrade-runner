@@ -202,12 +202,15 @@ class RunnerTests(unittest.TestCase):
                 )
 
         output_dir = os.path.join(self.tempdir, "real-bundle")
+        with open("schemas/examples/runtime_selector.macos_metal_managed.json", "r", encoding="utf-8") as handle:
+            runtime_selector = json.load(handle)
         request = RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",
             backend="llama.cpp",
             tier="canary",
             quant_artifact=artifact_path,
             output_dir=output_dir,
+            runtime_selector=runtime_selector,
             simulate=False,
         )
         with mock.patch("infergrade.runner.get_adapter", return_value=FakeAdapter()):
@@ -221,9 +224,55 @@ class RunnerTests(unittest.TestCase):
         with open(os.path.join(output_dir, "results", "interactive_chat_v1.json"), "r", encoding="utf-8") as handle:
             payload = json.load(handle)
         self.assertTrue(payload["verification"]["artifact_pinned"])
+        self.assertEqual(payload["execution"]["runtime_selector"]["support"]["tier"], "reference")
+        self.assertEqual(payload["execution"]["runtime_selector"]["fallback"]["allowed"], False)
         self.assertEqual(payload["execution"]["container_image"], "infergrade-llama-cpp:test")
         self.assertEqual(payload["fidelity"]["fidelity_state"], "measured")
         self.assertEqual(payload["fidelity"]["perplexity"]["value"], 4.21)
+
+    @mock.patch("infergrade.runner.windows_cuda_preflight")
+    @mock.patch("infergrade.runner.get_adapter")
+    def test_cuda_runtime_selector_blocks_before_backend_resolution(self, get_adapter_mock, windows_cuda_preflight_mock):
+        windows_cuda_preflight_mock.return_value = {
+            "selector": {
+                "runtime_selector_version": "0.3",
+                "runtime_family": "llama.cpp",
+                "platform": {"system": "windows", "arch": "x86_64", "version": "11"},
+                "accelerator": {"vendor": "nvidia", "api": "cuda"},
+                "delivery": {
+                    "mode": "user_selected",
+                    "binary_set": "llama_cpp_windows_cuda_x86_64",
+                    "source": "run_config",
+                    "selected_by": "run_config",
+                },
+                "compatibility": {
+                    "status": "blocked",
+                    "reason_codes": ["fallback_not_allowed", "full_loop_not_proven"],
+                    "probes": [],
+                },
+                "support": {"tier": "preview", "claim_boundary": "preflight only"},
+                "fallback": {"allowed": False, "mode": None, "reason": "No silent fallback."},
+            },
+        }
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            output_dir=os.path.join(self.tempdir, "blocked-cuda"),
+            execution_mode="local_native",
+            runtime_selector={
+                "accelerator": {"vendor": "nvidia", "api": "cuda"},
+                "driver": {"cuda_major": "12"},
+                "delivery": {"binary_set": "llama_cpp_windows_cuda_x86_64"},
+            },
+            simulate=False,
+        )
+
+        with self.assertRaisesRegex(ValueError, "refusing silent fallback"):
+            run_infergrade(request)
+
+        self.assertEqual(request.runtime_selector["compatibility"]["status"], "blocked")
+        get_adapter_mock.assert_not_called()
 
     def test_selected_quant_fidelity_emits_capability_artifact_and_summary(self):
         artifact_path = os.path.join(self.tempdir, "model-q4_k_m.gguf")
@@ -332,7 +381,7 @@ class RunnerTests(unittest.TestCase):
             artifact = json.load(handle)
         self.assertEqual(artifact["evidence"]["surface"], "quant_fidelity")
         self.assertEqual(artifact["evidence"]["lane"], "reference")
-        self.assertEqual(artifact["evidence"]["confidence_label"], "reference_sample")
+        self.assertEqual(artifact["evidence"]["confidence_label"], "sampled_reference")
         self.assertTrue(artifact["evidence"]["experimental"])
         self.assertEqual(artifact["summary"]["score"], 3.25)
         self.assertEqual(artifact["summary"]["metrics"]["bits_per_byte"], 1.44)
@@ -357,7 +406,7 @@ class RunnerTests(unittest.TestCase):
         quant = by_surface["quant_fidelity"]
         self.assertEqual(quant["state"], "scored")
         self.assertEqual(quant["lane"], "reference")
-        self.assertEqual(quant["confidence_label"], "reference_sample")
+        self.assertEqual(quant["confidence_label"], "sampled_reference")
         self.assertEqual(quant["capability_artifacts"][0]["benchmark_id"], "perplexity_reference_v1")
         with open(os.path.join(output_dir, "results", "interactive_chat_v1.json"), "r", encoding="utf-8") as handle:
             result_record = json.load(handle)

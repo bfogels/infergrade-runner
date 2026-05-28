@@ -25,6 +25,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::UNIX_EPOCH;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
@@ -34,10 +35,13 @@ use tauri_plugin_shell::{
 const KEYRING_SERVICE: &str = "com.infergrade.runner";
 const KEYRING_USER: &str = "hub-runner-token";
 const SIDECAR_BINARY_NAME: &str = "infergrade-sidecar";
+const DESKTOP_EVENT_PREFIX: &str = "INFERGRADE_DESKTOP_EVENT ";
 const DESKTOP_SIDECAR_DIAGNOSTIC_COMMANDS: &[&str] =
     &["--version", "desktop-self-test", "desktop-readiness"];
 const STARTER_GGUF_URL: &str = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
 const STARTER_GGUF_FILENAME: &str = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
+const PARTIAL_ARTIFACT_PREFIX: &str = "infergrade-artifact-";
+const PARTIAL_ARTIFACT_SUFFIX: &str = ".tmp";
 
 #[derive(Default)]
 struct ListenerProcess {
@@ -168,6 +172,70 @@ fn desktop_artifact_cache_dir() -> Result<PathBuf, String> {
         )
     })?;
     Ok(path)
+}
+
+fn is_partial_artifact_name(name: &str) -> bool {
+    name.starts_with(PARTIAL_ARTIFACT_PREFIX) && name.ends_with(PARTIAL_ARTIFACT_SUFFIX)
+}
+
+fn cached_model_artifacts(cache_dir: &Path) -> Result<Vec<Value>, String> {
+    if !cache_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut artifacts = Vec::new();
+    for entry in fs::read_dir(cache_dir).map_err(|error| {
+        format!(
+            "could not read model cache at {}: {error}",
+            cache_dir.display()
+        )
+    })? {
+        let entry =
+            entry.map_err(|error| format!("could not inspect model cache entry: {error}"))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if is_partial_artifact_name(&name) {
+            continue;
+        }
+        let metadata = entry
+            .metadata()
+            .map_err(|error| format!("could not read cached model metadata for {name}: {error}"))?;
+        let modified_unix_seconds = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs());
+        artifacts.push(json!({
+            "name": name,
+            "path": path.display().to_string(),
+            "size_bytes": metadata.len(),
+            "modified_unix_seconds": modified_unix_seconds,
+        }));
+    }
+    artifacts.sort_by(|left, right| {
+        left["name"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(right["name"].as_str().unwrap_or(""))
+    });
+    Ok(artifacts)
+}
+
+fn desktop_model_cache_status_payload() -> Result<Value, String> {
+    let cache_dir = desktop_artifact_cache_dir()?;
+    let artifacts = cached_model_artifacts(&cache_dir)?;
+    let artifact_bytes = artifacts
+        .iter()
+        .map(|artifact| artifact["size_bytes"].as_u64().unwrap_or(0))
+        .sum::<u64>();
+    Ok(json!({
+        "cache_dir": cache_dir.display().to_string(),
+        "artifact_count": artifacts.len(),
+        "artifact_bytes": artifact_bytes,
+        "artifacts": artifacts,
+    }))
 }
 
 fn selected_llama_cpp_runtime() -> Value {
@@ -404,6 +472,49 @@ fn emit_listener_event(app: &AppHandle, payload: Value) {
     let _ = app.emit("runner-listener-event", payload);
 }
 
+fn redact_listener_event_value(value: Value, sensitive_values: &[String]) -> Value {
+    match value {
+        Value::String(text) => Value::String(redact_listener_text(&text, sensitive_values)),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| redact_listener_event_value(item, sensitive_values))
+                .collect(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, item)| (key, redact_listener_event_value(item, sensitive_values)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn desktop_assignment_event_from_line(line: &str, sensitive_values: &[String]) -> Option<Value> {
+    let payload = line.strip_prefix(DESKTOP_EVENT_PREFIX)?;
+    serde_json::from_str::<Value>(payload)
+        .ok()
+        .map(|value| redact_listener_event_value(value, sensitive_values))
+}
+
+fn listener_events_from_output(
+    stream_type: &str,
+    text: &str,
+    sensitive_values: &[String],
+) -> Vec<Value> {
+    text.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim_end();
+            if trimmed.is_empty() {
+                return None;
+            }
+            Some(desktop_assignment_event_from_line(trimmed, sensitive_values).unwrap_or_else(|| {
+                json!({"type": stream_type, "line": redact_listener_text(trimmed, sensitive_values)})
+            }))
+        })
+        .collect()
+}
+
 fn emit_first_run_event(app: &AppHandle, event: RunnerEvent) {
     if let Ok(payload) = serde_json::to_value(event) {
         let _ = app.emit("runner-first-run-event", payload);
@@ -458,7 +569,8 @@ fn start_runner_listener(
         .shell()
         .sidecar(SIDECAR_BINARY_NAME)
         .map_err(|error| format!("could not prepare Runner sidecar: {error}"))?
-        .args(["start", "--api-url", &normalized_api_url]);
+        .args(["start", "--api-url", &normalized_api_url])
+        .env("INFERGRADE_DESKTOP_EVENTS", "1");
     if let Some(token) = token_for_child {
         command = command.env("INFERGRADE_HUB_TOKEN", token);
     }
@@ -477,17 +589,15 @@ fn start_runner_listener(
             match event {
                 CommandEvent::Stdout(bytes) => {
                     let line = String::from_utf8_lossy(&bytes);
-                    emit_listener_event(
-                        &event_app,
-                        json!({"type": "stdout", "line": redact_listener_text(line.trim_end(), &sensitive_values)}),
-                    );
+                    for payload in listener_events_from_output("stdout", &line, &sensitive_values) {
+                        emit_listener_event(&event_app, payload);
+                    }
                 }
                 CommandEvent::Stderr(bytes) => {
                     let line = String::from_utf8_lossy(&bytes);
-                    emit_listener_event(
-                        &event_app,
-                        json!({"type": "stderr", "line": redact_listener_text(line.trim_end(), &sensitive_values)}),
-                    );
+                    for payload in listener_events_from_output("stderr", &line, &sensitive_values) {
+                        emit_listener_event(&event_app, payload);
+                    }
                 }
                 CommandEvent::Error(error) => emit_listener_event(
                     &event_app,
@@ -576,12 +686,18 @@ fn llama_cpp_runtime_plan() -> Value {
 }
 
 #[tauri::command]
-fn select_existing_llama_cpp_runtime(runtime_path: Option<String>) -> Result<Value, String> {
+fn select_existing_llama_cpp_runtime(
+    runtime_path: Option<String>,
+    runtime_id: Option<String>,
+) -> Result<Value, String> {
     let cli_path = runtime_path
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
-    engine_select_existing_llama_cpp_runtime(None, cli_path, None, None)
+    let runtime_id = runtime_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    engine_select_existing_llama_cpp_runtime(runtime_id.as_deref(), cli_path, None, None)
 }
 
 #[tauri::command]
@@ -601,6 +717,46 @@ async fn install_managed_llama_cpp_runtime(runtime_id: Option<String>) -> Result
 #[tauri::command]
 fn remove_selected_llama_cpp_runtime(remove_managed_files: Option<bool>) -> Result<Value, String> {
     engine_remove_selected_llama_cpp_runtime(remove_managed_files.unwrap_or(true))
+}
+
+#[tauri::command]
+fn desktop_model_cache_status() -> Result<Value, String> {
+    desktop_model_cache_status_payload()
+}
+
+#[tauri::command]
+fn clear_desktop_model_cache() -> Result<Value, String> {
+    let cache_dir = desktop_artifact_cache_dir()?;
+    let artifacts = cached_model_artifacts(&cache_dir)?;
+    let mut removed = Vec::new();
+    for artifact in artifacts {
+        let path = artifact["path"].as_str().unwrap_or("").to_string();
+        if path.is_empty() {
+            continue;
+        }
+        let artifact_path = PathBuf::from(&path);
+        if artifact_path.parent() != Some(cache_dir.as_path()) || !artifact_path.is_file() {
+            continue;
+        }
+        fs::remove_file(&artifact_path).map_err(|error| {
+            format!(
+                "could not remove cached model {}: {error}",
+                artifact_path.display()
+            )
+        })?;
+        removed.push(artifact);
+    }
+    let removed_bytes = removed
+        .iter()
+        .map(|artifact| artifact["size_bytes"].as_u64().unwrap_or(0))
+        .sum::<u64>();
+    Ok(json!({
+        "cache_dir": cache_dir.display().to_string(),
+        "removed_count": removed.len(),
+        "removed_bytes": removed_bytes,
+        "removed": removed,
+        "status": desktop_model_cache_status_payload()?,
+    }))
 }
 
 #[tauri::command]
@@ -1150,6 +1306,8 @@ pub fn run() {
             install_managed_llama_cpp_runtime,
             remove_selected_llama_cpp_runtime,
             select_existing_llama_cpp_runtime,
+            desktop_model_cache_status,
+            clear_desktop_model_cache,
             download_starter_gguf,
             run_desktop_native_first_run,
             retry_desktop_native_first_run_upload,
@@ -1167,7 +1325,8 @@ mod tests {
         claim_run_job_payload, runner_heartbeat_payload, runner_register_payload,
         sanitized_runner_profile, ui_pairing_response, verify_runtime_download_manifest,
         worker_request_preview, NativeFirstRunRuntime, NativeRuntimeOutput,
-        MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID,
+        MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID, WINDOWS_CUDA_BINARY_SET,
+        WINDOWS_CUDA_PREVIEW_RUNTIME_ID,
     };
     use std::sync::{Mutex as TestMutex, OnceLock};
 
@@ -1211,6 +1370,47 @@ mod tests {
             normalize_api_url("127.0.0.1:8000").expect("loopback shorthand"),
             "http://127.0.0.1:8000/"
         );
+    }
+
+    #[test]
+    fn parses_structured_desktop_assignment_events_from_sidecar_output() {
+        let event = desktop_assignment_event_from_line(
+            r#"INFERGRADE_DESKTOP_EVENT {"type":"assignment_update","phase":"Running","run_id":"run_123","progress":42}"#,
+            &[],
+        )
+        .expect("desktop event");
+
+        assert_eq!(event["type"], "assignment_update");
+        assert_eq!(event["phase"], "Running");
+        assert_eq!(event["run_id"], "run_123");
+        assert_eq!(event["progress"], 42);
+        assert_eq!(
+            desktop_assignment_event_from_line("regular stdout", &[]),
+            None
+        );
+        assert_eq!(
+            desktop_assignment_event_from_line("INFERGRADE_DESKTOP_EVENT not-json", &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn splits_listener_chunks_into_structured_and_redacted_events() {
+        let events = listener_events_from_output(
+            "stderr",
+            "INFERGRADE_DESKTOP_EVENT {\"type\":\"assignment_update\",\"phase\":\"Preparing\",\"run_id\":\"run_123\",\"description\":\"using qbhr_secret\"}\nClaimed run run_123 with qbhr_secret.\nINFERGRADE_DESKTOP_EVENT {\"type\":\"assignment_update\",\"phase\":\"Running\",\"run_id\":\"run_123\",\"progress\":60,\"nested\":[\"qbhr_secret\"]}\n",
+            &["qbhr_secret".to_string()],
+        );
+
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0]["type"], "assignment_update");
+        assert_eq!(events[0]["phase"], "Preparing");
+        assert_eq!(events[0]["description"], "using [redacted]");
+        assert_eq!(events[1]["type"], "stderr");
+        assert_eq!(events[1]["line"], "Claimed run run_123 with [redacted].");
+        assert_eq!(events[2]["phase"], "Running");
+        assert_eq!(events[2]["progress"], 60);
+        assert_eq!(events[2]["nested"][0], "[redacted]");
     }
 
     #[test]
@@ -1511,6 +1711,39 @@ mod tests {
     }
 
     #[test]
+    fn desktop_model_cache_lists_and_clears_top_level_artifacts_only() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let home_dir = env::temp_dir().join(format!(
+            "infergrade-desktop-model-cache-home-{}",
+            std::process::id()
+        ));
+        let previous_home = env::var("HOME").ok();
+        env::set_var("HOME", &home_dir);
+        let cache_dir = home_dir.join(".cache").join("infergrade").join("artifacts");
+        fs::create_dir_all(&cache_dir).expect("cache dir");
+        fs::write(cache_dir.join("qwen3.5-9b-q4.gguf"), b"model-bytes").expect("model");
+        fs::write(cache_dir.join("infergrade-artifact-active.tmp"), b"partial").expect("partial");
+
+        let status = desktop_model_cache_status().expect("cache status");
+        assert_eq!(status["artifact_count"], 1);
+        assert_eq!(status["artifacts"][0]["name"], "qwen3.5-9b-q4.gguf");
+        assert!(status["artifact_bytes"].as_u64().unwrap_or(0) > 0);
+
+        let cleared = clear_desktop_model_cache().expect("cache clear");
+        assert_eq!(cleared["removed_count"], 1);
+        assert!(!cache_dir.join("qwen3.5-9b-q4.gguf").exists());
+        assert!(cache_dir.join("infergrade-artifact-active.tmp").exists());
+        assert_eq!(cleared["status"]["artifact_count"], 0);
+
+        if let Some(previous_home) = previous_home {
+            env::set_var("HOME", previous_home);
+        } else {
+            env::remove_var("HOME");
+        }
+        let _ = fs::remove_dir_all(home_dir);
+    }
+
+    #[test]
     fn rejects_cleartext_hosted_api_urls() {
         let error =
             normalize_api_url("http://api.infergrade.com").expect_err("cleartext hosted rejected");
@@ -1579,8 +1812,9 @@ mod tests {
         let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
         env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
 
-        let selection = select_existing_llama_cpp_runtime(Some(runtime_path.display().to_string()))
-            .expect("runtime selected");
+        let selection =
+            select_existing_llama_cpp_runtime(Some(runtime_path.display().to_string()), None)
+                .expect("runtime selected");
 
         assert_eq!(selection["status"], "selected");
         assert_eq!(selection["selection"]["source"], "selected_existing");
@@ -1595,6 +1829,58 @@ mod tests {
             env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
         }
         let _ = fs::remove_file(runtime_path);
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn desktop_can_select_windows_cuda_preview_runtime_through_runner_engine() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-desktop-cuda-runtime-cache-{}",
+            std::process::id()
+        ));
+        let runtime_dir = env::temp_dir().join(format!(
+            "infergrade-desktop-cuda-runtime-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&runtime_dir);
+        fs::create_dir_all(&runtime_dir).expect("runtime dir");
+        let cli_path = runtime_dir.join("llama-cli.exe");
+        let server_path = runtime_dir.join("llama-server.exe");
+        let perplexity_path = runtime_dir.join("llama-perplexity.exe");
+        write_test_llama_binary(&cli_path);
+        write_test_llama_binary(&server_path);
+        write_test_llama_binary(&perplexity_path);
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let selection = select_existing_llama_cpp_runtime(
+            Some(cli_path.display().to_string()),
+            Some(WINDOWS_CUDA_PREVIEW_RUNTIME_ID.to_string()),
+        )
+        .expect("windows cuda preview runtime selected");
+
+        assert_eq!(
+            selection["selection"]["runtime_id"],
+            WINDOWS_CUDA_PREVIEW_RUNTIME_ID
+        );
+        assert_eq!(
+            selection["selection"]["binary_set"],
+            WINDOWS_CUDA_BINARY_SET
+        );
+        assert_eq!(selection["selection"]["support_tier"], "preview");
+        assert_eq!(selection["selection"]["checksum_verified"], false);
+        assert!(selection["selection"]["claim_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("full Hub loop"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_dir);
         let _ = fs::remove_dir_all(runtime_cache_dir);
     }
 
@@ -1618,7 +1904,7 @@ mod tests {
             if cfg!(windows) { ".cmd" } else { "" }
         ));
         write_test_llama_binary(&runtime_path);
-        select_existing_llama_cpp_runtime(Some(runtime_path.display().to_string()))
+        select_existing_llama_cpp_runtime(Some(runtime_path.display().to_string()), None)
             .expect("runtime selected");
         let removed = remove_selected_llama_cpp_runtime(Some(true)).expect("runtime removed");
         assert_eq!(removed["status"], "removed");

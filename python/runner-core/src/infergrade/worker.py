@@ -1,6 +1,8 @@
 """Worker loop for claiming and executing InferGrade run jobs."""
 
+import json
 import os
+import re
 import socket
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -23,6 +25,72 @@ from infergrade.transport import (
     register_runner,
     upload_run_bundle,
 )
+
+DESKTOP_EVENT_ENV = "INFERGRADE_DESKTOP_EVENTS"
+DESKTOP_EVENT_PREFIX = "INFERGRADE_DESKTOP_EVENT "
+_DESKTOP_EVENT_SENSITIVE_KEY_MARKERS = (
+    "access_token",
+    "api_token",
+    "authorization",
+    "bearer",
+    "credential",
+    "pair_code",
+    "pairing_code",
+    "password",
+    "secret",
+    "signed_url",
+    "token",
+)
+_DESKTOP_EVENT_SECRET_PATTERNS = (
+    (re.compile(r"\bqbhr_[^\s\"']+", re.IGNORECASE), "qbhr_[redacted]"),
+    (re.compile(r"\bigrt_[^\s\"']+", re.IGNORECASE), "igrt_[redacted]"),
+    (re.compile(r"\bigrp_[^\s\"']+", re.IGNORECASE), "igrp_[redacted]"),
+    (re.compile(r"\bIGRP-[A-Za-z0-9-]+"), "IGRP-[redacted]"),
+    (re.compile(r"\bBearer\s+[^\s\"']+", re.IGNORECASE), "Bearer [redacted]"),
+    (re.compile(r"([?&](?:token|signature|signed|x-amz-signature|x-goog-signature)=)[^&\s\"']+", re.IGNORECASE), r"\1[redacted]"),
+)
+
+
+def _desktop_event_key_is_sensitive(key: str) -> bool:
+    normalized = key.lower().replace("-", "_")
+    if normalized.endswith("_present"):
+        return False
+    return any(marker in normalized for marker in _DESKTOP_EVENT_SENSITIVE_KEY_MARKERS)
+
+
+def _redact_desktop_event_text(value: str) -> str:
+    redacted = value
+    for pattern, replacement in _DESKTOP_EVENT_SECRET_PATTERNS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
+def _redact_desktop_event_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: "[redacted]" if _desktop_event_key_is_sensitive(str(key)) else _redact_desktop_event_payload(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_desktop_event_payload(item) for item in value]
+    if isinstance(value, str):
+        return _redact_desktop_event_text(value)
+    return value
+
+
+def _emit_desktop_event(emit_progress: Optional[Callable[[str], None]], event_type: str, **payload: Any) -> None:
+    """Emit structured Desktop Runner progress only when the desktop app asked for it."""
+    if not emit_progress or os.environ.get(DESKTOP_EVENT_ENV) != "1":
+        return
+    safe_payload = {"type": event_type}
+    safe_payload.update(
+        {
+            key: _redact_desktop_event_payload(value)
+            for key, value in payload.items()
+            if value is not None
+        }
+    )
+    emit_progress(DESKTOP_EVENT_PREFIX + json.dumps(safe_payload, sort_keys=True))
 
 
 def execute_run_job(
@@ -61,6 +129,15 @@ def execute_run_job(
 
     doctor_report = None
     try:
+        _emit_desktop_event(
+            emit_progress,
+            "assignment_update",
+            phase="Preparing",
+            run_id=run_id,
+            description="Hub assigned work to this Runner. Fetching run configuration.",
+            progress=8,
+            check_name="Fetch run config",
+        )
         _runner_heartbeat("busy", current_run_id=run_id, message="Fetching run config.")
         heartbeat_run_job(api_url, run_id, worker_id, stage="fetch_run_config", message="Fetching run config.", api_token=api_token, run_token=run_token)
         payload = fetch_run_config(api_url, run_job["run_config_id"], api_token=api_token)
@@ -88,6 +165,15 @@ def execute_run_job(
             api_token=api_token,
             run_token=run_token,
         )
+        _emit_desktop_event(
+            emit_progress,
+            "assignment_update",
+            phase="Preparing",
+            run_id=run_id,
+            description="Checking local runtime readiness before execution.",
+            progress=12,
+            check_name="Local preflight",
+        )
         doctor_report = run_doctor(request=request, api_url=api_url)
         if not doctor_report.get("ok"):
             raise RuntimeError(_doctor_failure_message(doctor_report))
@@ -96,7 +182,16 @@ def execute_run_job(
             if emit_progress:
                 emit_progress(message)
             _runner_heartbeat("busy", current_run_id=run_id, message=message)
-            stage, detail, progress_percent = _runtime_progress_update(request.output_dir)
+            stage, detail, desktop_detail, progress_percent = _runtime_progress_update(request.output_dir)
+            _emit_desktop_event(
+                emit_progress,
+                "assignment_update",
+                phase="Running",
+                run_id=run_id,
+                description="Runner is executing Hub-assigned work.",
+                progress=progress_percent,
+                check_name=desktop_detail or detail or stage or message,
+            )
             heartbeat_run_job(
                 api_url,
                 run_id,
@@ -110,6 +205,15 @@ def execute_run_job(
             )
 
         result = run_infergrade(request, emit_progress=_emit)
+        _emit_desktop_event(
+            emit_progress,
+            "assignment_update",
+            phase="Uploading",
+            run_id=run_id,
+            description="Execution finished. Uploading the result bundle to Hub.",
+            progress=95,
+            check_name="Upload result bundle",
+        )
         heartbeat_run_job(api_url, run_id, worker_id, stage="upload", message="Uploading completed bundle.", progress_percent=95.0, api_token=api_token, run_token=run_token)
         upload = upload_run_bundle(result["output_dir"], api_url, run_id=run_id, run_token=run_token, api_token=api_token)
         completed = complete_run_job(
@@ -120,6 +224,15 @@ def execute_run_job(
             upload=upload,
             api_token=api_token,
             run_token=run_token,
+        )
+        _emit_desktop_event(
+            emit_progress,
+            "assignment_update",
+            phase="Complete",
+            run_id=run_id,
+            description="Hub-assigned work completed and uploaded.",
+            progress=100,
+            check_name=result.get("bundle_id"),
         )
         _runner_heartbeat("listening", current_run_id=None, message="Runner is listening for the next run.")
         return {
@@ -149,6 +262,15 @@ def execute_run_job(
             _runner_heartbeat("listening", current_run_id=None, message="Runner recovered and is listening for more work.")
         except Exception:
             pass
+        _emit_desktop_event(
+            emit_progress,
+            "assignment_update",
+            phase="Needs attention",
+            run_id=run_id,
+            description=failure["message"],
+            progress=100,
+            check_name=failure["error_code"],
+        )
         if emit_progress:
             emit_progress("Run %s failed: %s" % (run_id, exc))
         return {
@@ -193,10 +315,20 @@ def run_worker_once(
         raise RuntimeError(_claim_error_message(claimed))
     run_job = claimed.get("run")
     if not run_job:
+        _emit_desktop_event(emit_progress, "assignment_idle")
         if emit_progress:
             emit_progress("No matching run jobs are awaiting execution.")
         return {"claimed": False, "worker_id": resolved_worker_id}
     if emit_progress:
+        _emit_desktop_event(
+            emit_progress,
+            "assignment_update",
+            phase="Preparing",
+            run_id=run_job["run_id"],
+            description="Hub assigned work to this Runner.",
+            progress=5,
+            check_name="Claim accepted",
+        )
         emit_progress("Claimed run %s." % run_job["run_id"])
     result = execute_run_job(
         api_url=api_url,
@@ -529,14 +661,46 @@ def _classify_doctor_failure(report: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _runtime_progress_update(output_dir: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[float]]:
+def _runtime_progress_update(output_dir: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[float]]:
     """Project the local runner progress file into Hub-facing stage and percent updates."""
     if not output_dir:
-        return None, None, None
+        return None, None, None, None
     payload = load_progress(output_dir)
     if not payload:
-        return None, None, None
-    return payload.get("current_stage"), payload.get("current_detail"), _progress_percent(payload)
+        return None, None, None, None
+    detail = payload.get("current_detail")
+    return payload.get("current_stage"), detail, _progress_detail(payload), _progress_percent(payload)
+
+
+def _progress_detail(payload: Dict[str, Any]) -> Optional[str]:
+    """Return a human-readable current benchmark or deployment detail."""
+    stage = payload.get("current_stage")
+    detail = payload.get("current_detail")
+    if not detail:
+        return None
+
+    if stage == "capability":
+        benchmark = (payload.get("capability_benchmarks") or {}).get(detail) or {}
+        label = benchmark.get("display_name") or detail
+        progress_detail = benchmark.get("progress_detail")
+        if progress_detail == "completed":
+            return "%s complete" % label
+        if progress_detail == "failed":
+            return "%s failed" % label
+        if progress_detail:
+            return "%s %s" % (label, progress_detail)
+        return label
+
+    if stage == "deployment":
+        profile = (payload.get("deployment_profiles") or {}).get(detail) or {}
+        progress_detail = profile.get("progress_detail")
+        if progress_detail == "completed":
+            return "%s complete" % detail
+        if progress_detail:
+            return "%s %s" % (detail, progress_detail)
+        return detail
+
+    return detail
 
 
 def _progress_percent(payload: Dict[str, Any]) -> Optional[float]:

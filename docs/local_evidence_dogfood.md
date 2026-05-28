@@ -112,10 +112,14 @@ Expected useful artifacts per bundle:
 If a production pairing code is provided out of band, pair once:
 
 ```bash
+read -rsp 'InferGrade pairing code: ' INFERGRADE_PAIR_CODE
+printf '\n'
+printf '%s\n' "$INFERGRADE_PAIR_CODE" | \
 infergrade pair \
   --api-url 'https://api.infergrade.com' \
-  --pair-code '<PAIRING_CODE_PROVIDED_OUT_OF_BAND>' \
-  --label 'Paired Apple Silicon runner'
+  --pair-code-stdin \
+  --label "agent-dogfood-$(hostname -s)"
+unset INFERGRADE_PAIR_CODE
 ```
 
 Never write the real pairing code into this file, the matrix, shell history, issue comments, PR bodies, or screenshots.

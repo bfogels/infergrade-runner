@@ -94,7 +94,7 @@ Runner scope:
 
 Acceptance:
 
-- `evalplus_humaneval` is reference evidence with `reference_sample` confidence.
+- `evalplus_humaneval` is reference evidence with `sampled_reference` confidence.
 - It is not promoted to gold evidence.
 - MBPP+ is a separate follow-up coding breadth reference lane with its own artifact, catalog, and review gates.
 - Real dogfood runs still need to calibrate expected duration, token volume, and degraded behavior.
@@ -121,7 +121,7 @@ Runner scope:
 
 Acceptance:
 
-- `evalplus_mbpp` is reference evidence with `reference_sample` confidence.
+- `evalplus_mbpp` is reference evidence with `sampled_reference` confidence.
 - It is not promoted to gold evidence.
 - HumanEval+ and MBPP+ remain separate catalog checks, artifact protocol entries, summary artifact pointers, and Hub-facing evidence rows.
 - Real dogfood runs still need to calibrate expected duration, token volume, and degraded behavior.
@@ -142,7 +142,7 @@ Runner scope:
 
 Acceptance:
 
-- `perplexity_reference_v1` is reference evidence with `reference_sample` confidence.
+- `perplexity_reference_v1` is reference evidence with `sampled_reference` confidence.
 - It is not promoted to gold evidence.
 - Hub-facing summaries can discover it under `quant_fidelity`.
 - Real dogfood runs and reference-precision baselines are still needed before showing quality-retention deltas.

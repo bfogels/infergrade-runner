@@ -1,0 +1,51 @@
+{
+  "ontology_version": "0.1-draft",
+  "model_family": {
+    "family_id": "fam_qwen2-5_0f9d6ac7f1",
+    "family_name": "Qwen2.5",
+    "publisher": "Qwen",
+    "parameter_scale": "7B",
+    "primary_modality": "text"
+  },
+  "checkpoint": {
+    "checkpoint_id": "ckpt_qwen2-5-7b-instruct_f8f0c62a85",
+    "checkpoint_name": "Qwen2.5-7B-Instruct",
+    "upstream_model_ref": "Qwen/Qwen2.5-7B-Instruct",
+    "upstream_revision": "unspecified",
+    "training_stage": "instruction_tuned"
+  },
+  "quantization": {
+    "quantization_status": "quantized",
+    "quantization_format": "gguf",
+    "quantization_label": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "quantization_family": "k_quant",
+    "quantization_scheme": "q4_k_m",
+    "weight_precision_bits": 4.0
+  },
+  "artifact": {
+    "artifact_id": "art_qwen2-5-7b-instruct-q4-k-m-gguf_6ebea7f54d",
+    "artifact_kind": "quantized_weights",
+    "artifact_uri": "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "artifact_filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "artifact_sha256": "6ebea7f54d1af57d",
+    "artifact_resolved_by": "operator"
+  },
+  "runtime_binding": {
+    "runtime_binding_id": "rt_llama-cpp_3c35506061",
+    "backend_engine": "llama.cpp",
+    "backend_version": "0.1.0",
+    "backend_wrapper": null,
+    "execution_mode": "local_container",
+    "backend_flags_hash": "4ce52c4fc8389102",
+    "generation_preset_id": "default_text_generation_v1"
+  },
+  "benchmark_subject": {
+    "subject_id": "subj_qwen2-5-7b-instruct_9c4840dc96",
+    "subject_kind": "artifact_runtime_binding",
+    "family_id": "fam_qwen2-5_0f9d6ac7f1",
+    "checkpoint_id": "ckpt_qwen2-5-7b-instruct_f8f0c62a85",
+    "artifact_id": "art_qwen2-5-7b-instruct-q4-k-m-gguf_6ebea7f54d",
+    "runtime_binding_id": "rt_llama-cpp_3c35506061",
+    "comparison_scope": "deployable_quantized_model"
+  }
+}

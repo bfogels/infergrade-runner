@@ -47,7 +47,7 @@ jobs:
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             image_tag="${{ github.event.inputs.image_tag }}"
             if [ -z "$image_tag" ]; then
-              image_tag="$(cat VERSION)-preview"
+              image_tag="$(cat VERSION)"
             fi
             echo "image_tag=${image_tag}" >> "$GITHUB_OUTPUT"
           else
