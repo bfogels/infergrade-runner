@@ -18,6 +18,7 @@ from infergrade.cuda import (
     version_at_least,
     windows_cuda_preflight,
 )
+from infergrade.runtimes import windows_cuda_candidate_manifest
 
 
 class WindowsCudaPreflightTests(unittest.TestCase):
@@ -71,7 +72,14 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertEqual(selector["delivery"]["mode"], "user_selected")
         self.assertEqual(selector["delivery"]["source"], "run_config")
         self.assertEqual(selector["delivery"]["selected_by"], "run_config")
-        self.assertEqual(selector["delivery"]["runtime_delivery_gate"], WINDOWS_CUDA_RUNTIME_DELIVERY_GATE)
+        self.assertEqual(
+            selector["delivery"]["runtime_delivery_gate"]["status"],
+            WINDOWS_CUDA_RUNTIME_DELIVERY_GATE["status"],
+        )
+        self.assertEqual(
+            selector["delivery"]["runtime_delivery_gate"]["mode"],
+            WINDOWS_CUDA_RUNTIME_DELIVERY_GATE["mode"],
+        )
         self.assertTrue(selector["delivery"]["runtime_delivery_gate"]["pinned_manifest_available"])
         self.assertTrue(selector["delivery"]["runtime_delivery_gate"]["checksum_verification_available"])
         self.assertFalse(selector["delivery"]["runtime_delivery_gate"]["managed_download_available"])
@@ -382,6 +390,27 @@ class WindowsCudaPreflightTests(unittest.TestCase):
             selector["compatibility"]["probes"],
         )
         self.assertEqual(run_mock.call_count, 3)
+
+    def test_windows_cuda_runtime_delivery_gate_derives_candidate_from_runtime_manifest(self):
+        result = windows_cuda_preflight(
+            nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9, 12.5\n",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+        candidate = windows_cuda_candidate_manifest()
+        gate = result["selector"]["delivery"]["runtime_delivery_gate"]
+
+        self.assertEqual(gate["candidate_release"]["project"], candidate["upstream"]["project"])
+        self.assertEqual(gate["candidate_release"]["tag"], candidate["upstream"]["tag"])
+        self.assertEqual(gate["candidate_release"]["selected_at"], candidate["selected_for_review_at"])
+        self.assertEqual(gate["managed_download_available"], candidate["managed_download_enabled"])
+        artifacts_by_name = {item["name"]: item for item in gate["candidate_artifacts"]}
+        for artifact in candidate["artifacts"]:
+            expected_name = artifact["url"].rsplit("/", 1)[-1]
+            self.assertIn(expected_name, artifacts_by_name)
+            self.assertEqual(artifacts_by_name[expected_name]["sha256"], artifact["sha256"])
+        self.assertTrue(artifacts_by_name["llama-b9371-bin-win-cuda-12.4-x64.zip"]["required"])
+        self.assertFalse(artifacts_by_name["cudart-llama-bin-win-cuda-12.4-x64.zip"]["required"])
 
 
 if __name__ == "__main__":
