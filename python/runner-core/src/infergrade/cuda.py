@@ -34,6 +34,7 @@ WINDOWS_CUDA_RUNTIME_DELIVERY_GATE = {
     "reason_codes": ["candidate_runtime_not_validated", "managed_download_not_enabled"],
     "required_step": "validate_candidate_cuda_runtime_on_windows",
 }
+WINDOWS_CUDA_VALIDATED_CANDIDATE_STATUSES = {"validated", "candidate_validated"}
 WINDOWS_CUDA_PROOF_STEPS = [
     {
         "id": "select_runtime",
@@ -203,6 +204,12 @@ def _select_gpu_row(gpu_rows: List[Dict[str, Any]], required_vram_bytes: Optiona
 def _runtime_delivery_gate() -> Dict[str, Any]:
     candidate = windows_cuda_candidate_manifest()
     upstream = dict(candidate.get("upstream") or {})
+    managed_download_enabled = bool(candidate.get("managed_download_enabled"))
+    reason_codes = []
+    if str(candidate.get("status") or "") not in WINDOWS_CUDA_VALIDATED_CANDIDATE_STATUSES:
+        reason_codes.append("candidate_runtime_not_validated")
+    if not managed_download_enabled:
+        reason_codes.append("managed_download_not_enabled")
     artifacts = []
     role_map = {
         "llama_cpp_binaries": "runtime_archive",
@@ -224,8 +231,10 @@ def _runtime_delivery_gate() -> Dict[str, Any]:
             }
         )
     payload = dict(WINDOWS_CUDA_RUNTIME_DELIVERY_GATE)
-    payload["managed_download_available"] = bool(candidate.get("managed_download_enabled"))
-    payload["reason_codes"] = list(WINDOWS_CUDA_RUNTIME_DELIVERY_GATE["reason_codes"])
+    payload["status"] = "blocked" if reason_codes else "ready"
+    payload["mode"] = "managed_download" if managed_download_enabled else "user_selected_only"
+    payload["managed_download_available"] = managed_download_enabled
+    payload["reason_codes"] = reason_codes
     payload["candidate_release"] = {
         "project": upstream.get("project"),
         "tag": upstream.get("tag"),
