@@ -135,6 +135,22 @@ class SupportExportTests(unittest.TestCase):
                                     "required": True,
                                 }
                             ],
+                            "candidate_review": {
+                                "status": "blocked",
+                                "status_reason": "artifact_metadata_recorded_but_candidate_not_reviewed",
+                                "checks": [
+                                    {
+                                        "id": "asset_sha256_digests_pinned",
+                                        "status": "recorded",
+                                        "evidence": "GitHub release-asset SHA-256 digests are recorded.",
+                                    },
+                                    {
+                                        "id": "archive_contents_inspected",
+                                        "status": "pending",
+                                        "evidence": "Archive contents have not been inspected.",
+                                    },
+                                ],
+                            },
                             "reason_codes": ["candidate_runtime_not_validated", "managed_download_not_enabled"],
                             "required_step": "validate_candidate_cuda_runtime_on_windows",
                         },
@@ -241,6 +257,18 @@ class SupportExportTests(unittest.TestCase):
         self.assertEqual(
             payload["cuda"]["summary"]["runtime"]["delivery_gate"]["candidate_artifacts"][0]["name"],
             "llama-b9371-bin-win-cuda-12.4-x64.zip",
+        )
+        self.assertEqual(
+            payload["cuda"]["summary"]["runtime"]["delivery_gate"]["candidate_review"]["status"],
+            "blocked",
+        )
+        self.assertEqual(
+            payload["cuda"]["summary"]["runtime"]["delivery_gate"]["candidate_review"]["checks"][1]["id"],
+            "archive_contents_inspected",
+        )
+        self.assertEqual(
+            payload["cuda"]["summary"]["runtime"]["delivery_gate"]["candidate_review"]["checks"][1]["status"],
+            "pending",
         )
         self.assertIn(
             "candidate_runtime_not_validated",

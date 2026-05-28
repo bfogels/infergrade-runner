@@ -132,12 +132,34 @@ def _cuda_support_summary(preflight: Dict[str, Any]) -> Dict[str, Any]:
                     for item in list(delivery_gate.get("candidate_artifacts") or [])
                     if isinstance(item, dict) and item.get("name")
                 ],
+                "candidate_review": _cuda_support_candidate_review(delivery_gate.get("candidate_review")),
                 "reason_codes": list(delivery_gate.get("reason_codes") or []),
                 "required_step": delivery_gate.get("required_step"),
             },
         },
         "next_action": preflight.get("next_action"),
         "proof_gate": _cuda_support_proof_gate(preflight.get("proof_gate")),
+    }
+
+
+def _cuda_support_candidate_review(candidate_review: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    candidate_review = dict(candidate_review or {})
+    checks = [
+        item
+        for item in list(candidate_review.get("checks") or [])
+        if isinstance(item, dict) and item.get("id")
+    ]
+    return {
+        "status": candidate_review.get("status") or "blocked",
+        "status_reason": candidate_review.get("status_reason") or "candidate_review_not_complete",
+        "checks": [
+            {
+                "id": item.get("id"),
+                "status": item.get("status"),
+                "evidence": item.get("evidence"),
+            }
+            for item in checks
+        ],
     }
 
 

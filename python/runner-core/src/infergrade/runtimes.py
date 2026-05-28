@@ -29,6 +29,48 @@ WINDOWS_CUDA_CANDIDATE_CUDART_URL = (
 )
 WINDOWS_CUDA_CANDIDATE_CUDART_SHA256 = "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
 WINDOWS_CUDA_CANDIDATE_CUDART_SIZE_BYTES = 391443627
+WINDOWS_CUDA_CANDIDATE_REVIEW_CHECKS = [
+    {
+        "id": "upstream_release_recorded",
+        "status": "recorded",
+        "evidence": "ggml-org/llama.cpp release tag and asset URLs are recorded in the runtime manifest.",
+    },
+    {
+        "id": "asset_sha256_digests_pinned",
+        "status": "recorded",
+        "evidence": "GitHub release-asset SHA-256 digests are recorded for the runtime archive and companion cudart archive.",
+    },
+    {
+        "id": "archive_contents_inspected",
+        "status": "pending",
+        "evidence": "Archive contents have not been inspected for expected binaries and unexpected payloads.",
+    },
+    {
+        "id": "license_and_runtime_dll_distribution_reviewed",
+        "status": "pending",
+        "evidence": "License terms and CUDA runtime DLL redistribution boundaries have not been reviewed.",
+    },
+    {
+        "id": "windows_nvidia_version_smoke_completed",
+        "status": "pending",
+        "evidence": "No Windows/NVIDIA host has completed bounded llama-cli --version smoke for this candidate.",
+    },
+    {
+        "id": "known_good_gguf_run_completed",
+        "status": "pending",
+        "evidence": "No known-good GGUF run has completed with this candidate.",
+    },
+    {
+        "id": "hub_upload_and_result_reviewed",
+        "status": "pending",
+        "evidence": "No Hub upload and owner-visible Result review has been completed for this candidate.",
+    },
+    {
+        "id": "secret_free_support_export_captured",
+        "status": "pending",
+        "evidence": "No secret-free support export has been captured from the proof host.",
+    },
+]
 _CACHE_ENV = "INFERGRADE_RUNTIME_CACHE_DIR"
 _MAX_FINGERPRINT_BYTES = 512 * 1024 * 1024
 
@@ -131,6 +173,11 @@ def windows_cuda_candidate_manifest() -> Dict[str, Any]:
             "capture_secret_free_support_export",
             "review_license_and_runtime_dll_distribution",
         ],
+        "review": {
+            "status": "blocked",
+            "status_reason": "artifact_metadata_recorded_but_candidate_not_reviewed",
+            "checks": [dict(item) for item in WINDOWS_CUDA_CANDIDATE_REVIEW_CHECKS],
+        },
         "managed_download_enabled": False,
         "claim_boundary": WINDOWS_CUDA_CLAIM_BOUNDARY,
     }

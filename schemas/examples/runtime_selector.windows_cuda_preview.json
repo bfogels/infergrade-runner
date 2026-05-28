@@ -43,7 +43,33 @@
           "required": false
         }
       ],
-      "reason_codes": ["candidate_runtime_not_validated", "managed_download_not_enabled"],
+      "candidate_review": {
+        "status": "blocked",
+        "status_reason": "artifact_metadata_recorded_but_candidate_not_reviewed",
+        "checks": [
+          {
+            "id": "upstream_release_recorded",
+            "status": "recorded",
+            "evidence": "ggml-org/llama.cpp release tag and asset URLs are recorded in the runtime manifest."
+          },
+          {
+            "id": "asset_sha256_digests_pinned",
+            "status": "recorded",
+            "evidence": "GitHub release-asset SHA-256 digests are recorded for the runtime archive and companion cudart archive."
+          },
+          {
+            "id": "archive_contents_inspected",
+            "status": "pending",
+            "evidence": "Archive contents have not been inspected for expected binaries and unexpected payloads."
+          },
+          {
+            "id": "license_and_runtime_dll_distribution_reviewed",
+            "status": "pending",
+            "evidence": "License terms and CUDA runtime DLL redistribution boundaries have not been reviewed."
+          }
+        ]
+      },
+      "reason_codes": ["candidate_runtime_not_validated", "candidate_review_not_complete", "managed_download_not_enabled"],
       "required_step": "validate_candidate_cuda_runtime_on_windows"
     }
   },
