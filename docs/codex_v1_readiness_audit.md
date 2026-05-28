@@ -1,15 +1,15 @@
 # Codex v1 Readiness Audit
 
-Status: private-beta audit from 2026-05-28.
+Status: private-beta audit refreshed after Runner Batch A promotion on 2026-05-28.
 
 ## Current State
 
-- Branches: `origin/develop` was reclaimed by PR #246. Its final tree matches `origin/main` while preserving the historical develop-only v0.2.21 pair-hygiene commit in ancestry.
+- Branches: `origin/develop` was reclaimed by PR #246 and promoted by PR #248. `origin/main` and `origin/develop` now both point at `44679f0`.
 - Runner source version: `0.3.6`.
 - Runner contract version: `0.3.5`.
-- Current `origin/main`: `89db495`, the CUDA candidate review-status gate.
-- Current `origin/develop`: `8fa1216`, a branch-hygiene merge whose tree is equivalent to `origin/main`.
-- Immediately after PR #246 landed, no other Runner PRs were open; this audit PR is the next Runner change.
+- Current `origin/main`: `44679f0`, the Runner Batch A readiness-doc promotion.
+- Current `origin/develop`: `44679f0`, aligned with `main`.
+- Immediately after PR #248 landed, Runner branch hygiene was clean and no Runner feature work had been promoted beyond the readiness-doc batch in this pass.
 
 ## Latest Runner Capabilities
 
@@ -61,4 +61,11 @@ Internal or private-beta only:
 3. Improve managed runtime provenance with independent signature verification or clear v1 copy that the lane is checksum-only.
 4. Inspect the Windows CUDA candidate archive and update review checks without enabling managed download.
 5. Run one real Windows/NVIDIA proof loop when hardware is available, keeping all CUDA copy preview-gated until then.
-6. Run Apple Silicon repeat ladders for the top recommendation questions and feed the aggregate evidence back into Hub.
+6. Run Apple Silicon repeat ladders for the top recommendation questions and feed aggregate evidence back into Hub.
+
+## Landed In This Pass
+
+- PR #246 reclaimed `develop` without dropping the historical develop-only commit from ancestry.
+- PR #247 added this v1 readiness audit and the private beta readiness audit.
+- PR #248 promoted the readiness-doc batch to `main` and `develop` was fast-forwarded back to `main`.
+- No Runner version bump, v1.0.0 promotion, public launch, or CUDA support expansion happened in this pass.
