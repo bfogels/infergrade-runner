@@ -392,6 +392,7 @@ def _windows_cuda_preflight_check(request: RunRequest) -> Dict[str, Any]:
             "gpu_count": result.get("gpu_count"),
             "hardware_blocked": result.get("hardware_blocked"),
             "next_action": result.get("next_action"),
+            "proof_gate": result.get("proof_gate"),
         },
     )
 

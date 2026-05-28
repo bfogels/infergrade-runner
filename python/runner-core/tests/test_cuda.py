@@ -6,6 +6,7 @@ from unittest import mock
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.cuda import (
+    WINDOWS_CUDA_PROOF_STEPS,
     minimum_driver_for_cuda,
     normalize_platform_snapshot,
     parse_nvidia_smi_cuda_version,
@@ -76,6 +77,20 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertIn("full_loop_not_proven", selector["compatibility"]["reason_codes"])
         self.assertIn("runtime_binary_missing", selector["compatibility"]["reason_codes"])
         self.assertNotIn("windows_host_required", selector["compatibility"]["reason_codes"])
+        self.assertEqual(result["proof_gate"]["status"], "blocked")
+        self.assertEqual(result["proof_gate"]["reason_code"], "full_loop_not_proven")
+        self.assertEqual(result["proof_gate"]["required_steps"], WINDOWS_CUDA_PROOF_STEPS)
+        self.assertEqual(
+            [item["id"] for item in result["proof_gate"]["required_steps"]],
+            [
+                "select_runtime",
+                "pair_hub_runner",
+                "known_good_gguf_run",
+                "upload_result",
+                "review_result",
+                "capture_support_export",
+            ],
+        )
 
     def test_windows_cuda_preflight_reports_old_driver(self):
         result = windows_cuda_preflight(
