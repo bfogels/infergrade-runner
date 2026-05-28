@@ -1,3 +1,4 @@
+import hashlib
 import os
 import sys
 import tempfile
@@ -10,6 +11,7 @@ from infergrade.runtimes import (
     WINDOWS_CUDA_RUNTIME_ID,
     install_llama_cpp_runtime,
     known_llama_cpp_runtimes,
+    runtime_binary_fingerprint,
     runtime_manifest,
     select_llama_cpp_runtime,
     selected_llama_cpp_runtime,
@@ -101,10 +103,39 @@ class RuntimeManagementTests(unittest.TestCase):
         self.assertEqual(selection["binary_set"], "llama_cpp_windows_cuda_x86_64")
         self.assertEqual(selection["support_tier"], "preview")
         self.assertFalse(selection["checksum_verified"])
+        self.assertEqual(selection["checksum_status"], "user_selected_unverified")
         self.assertIn("full Hub loop", selection["claim_boundary"])
         self.assertIn("preview-only", selection["selection_warning"])
         self.assertEqual(selection["binaries"]["server"], "/cuda/llama-server.exe")
         self.assertEqual(selected_llama_cpp_runtime()["binaries"]["perplexity"], "/cuda/llama-perplexity.exe")
+
+    def test_runtime_binary_fingerprint_records_bounded_sha256(self):
+        path = os.path.join(self.tempdir.name, "llama-cli.exe")
+        with open(path, "wb") as handle:
+            handle.write(b"llama runtime")
+
+        fingerprint = runtime_binary_fingerprint(path)
+
+        self.assertEqual(fingerprint["status"], "recorded")
+        self.assertEqual(fingerprint["size_bytes"], len(b"llama runtime"))
+        self.assertEqual(fingerprint["sha256"], hashlib.sha256(b"llama runtime").hexdigest())
+
+    def test_select_windows_cuda_preview_records_binary_fingerprints(self):
+        for name in ("llama-cli.exe", "llama-server.exe", "llama-perplexity.exe"):
+            path = os.path.join(self.tempdir.name, name)
+            with open(path, "wb") as handle:
+                handle.write(name.encode("utf-8"))
+            os.chmod(path, 0o755)
+
+        selection = select_llama_cpp_runtime(
+            runtime_id=WINDOWS_CUDA_RUNTIME_ID,
+            cli_path=os.path.join(self.tempdir.name, "llama-cli.exe"),
+        )
+
+        cli_fingerprint = selection["binary_fingerprints"]["cli"]
+        self.assertEqual(cli_fingerprint["status"], "recorded")
+        self.assertEqual(cli_fingerprint["sha256"], hashlib.sha256(b"llama-cli.exe").hexdigest())
+        self.assertEqual(selected_llama_cpp_runtime()["binary_fingerprints"]["server"]["status"], "recorded")
 
     @mock.patch("infergrade.runtimes.shutil.which")
     def test_select_windows_cuda_preview_requires_perplexity_sibling(self, which_mock):
