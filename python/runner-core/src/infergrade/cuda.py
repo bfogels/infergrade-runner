@@ -401,6 +401,14 @@ def windows_cuda_preflight(
     return {
         "selector": selector,
         "gpu_count": len(gpu_rows),
+        "selected_gpu": {
+            "index": selected_gpu_index,
+            "position": selected_gpu_index + 1 if selected_gpu_index >= 0 else None,
+            "count": len(gpu_rows),
+            "model": selected_gpu.get("name"),
+            "vram_bytes": selected_gpu.get("vram_bytes"),
+            "compute_capability": selected_gpu.get("compute_capability"),
+        },
         "hardware_blocked": True,
         "next_action": "Validate on a Windows/NVIDIA machine before enabling evidence-producing technical beta.",
         "proof_gate": proof_gate,
