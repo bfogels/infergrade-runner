@@ -1,6 +1,6 @@
 # Codex Private Beta Readiness
 
-Status: working audit from 2026-05-28.
+Status: working audit refreshed after Runner Batch A promotion on 2026-05-28.
 
 ## Plausible 5-20 User Beta Path
 
@@ -41,3 +41,9 @@ The Mac path is close enough to invite a small technical beta only after one cle
 - Add a short first-user recovery table for the top failures: pairing expired, token revoked, runtime missing, model path missing, upload rejected, and support export needed.
 - Confirm Hub handoff commands use the current pinned Runner release and explain contract drift if present.
 - Keep Windows/CUDA language as preview until real hardware proof exists.
+
+## Batch Progress From This Pass
+
+- Branch hygiene is clean: Runner `origin/main` and `origin/develop` are aligned at `44679f0`.
+- The current audit docs are on both branches, but no new Mac proof run or CUDA hardware proof was performed in this pass.
+- The next Runner PR should be implementation/proof work, not another metadata-only pass: either refresh the Mac full-loop beta proof or make an explicit contract export/defer decision.
