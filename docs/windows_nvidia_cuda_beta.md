@@ -72,10 +72,10 @@ no_cuda_signal`. If the host reports NVIDIA/CUDA,
 `INFERGRADE_LLAMA_CPP_CUDA_CLI` is set, or the selected llama.cpp runtime record
 names the Windows CUDA preview binary set, the block includes the same bounded
 preflight selector used by doctor, including driver floor, selected binary,
-fallback, and claim-boundary fields. The block also includes a compact
+selected GPU position/count on multi-GPU hosts, fallback, and claim-boundary fields. The block also includes a compact
 `summary` with compatibility status, reason codes, GPU count, platform, driver
-floor, selected runtime source, binary smoke result, and next action so support
-triage does not need to parse the full runtime selector first.
+floor, selected GPU, selected runtime source, binary smoke result, and next action
+so support triage does not need to parse the full runtime selector first.
 
 The preflight payload also includes a machine-readable `proof_gate` while
 `full_loop_not_proven` is active. The required proof steps are:

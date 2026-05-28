@@ -200,6 +200,11 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         selector = result["selector"]
         self.assertEqual(selector["accelerator"]["model"], "NVIDIA RTX 4090")
         self.assertEqual(selector["accelerator"]["vram_bytes"], 24564 * 1024 * 1024)
+        self.assertEqual(result["selected_gpu"]["index"], 1)
+        self.assertEqual(result["selected_gpu"]["position"], 2)
+        self.assertEqual(result["selected_gpu"]["count"], 2)
+        self.assertEqual(result["selected_gpu"]["model"], "NVIDIA RTX 4090")
+        self.assertEqual(result["selected_gpu"]["vram_bytes"], 24564 * 1024 * 1024)
         self.assertNotIn("insufficient_vram", selector["compatibility"]["reason_codes"])
         self.assertIn(
             {"id": "selected_gpu", "status": "passed", "observed": "NVIDIA RTX 4090 (2 of 2)"},

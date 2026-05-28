@@ -83,6 +83,7 @@ def _cuda_support_summary(preflight: Dict[str, Any]) -> Dict[str, Any]:
     driver = selector.get("driver") or {}
     delivery = selector.get("delivery") or {}
     binary = selector.get("binary") or {}
+    selected_gpu = preflight.get("selected_gpu") or {}
     return {
         "status": compatibility.get("status") or "unknown",
         "reason_codes": list(compatibility.get("reason_codes") or []),
@@ -96,6 +97,8 @@ def _cuda_support_summary(preflight: Dict[str, Any]) -> Dict[str, Any]:
             "model": accelerator.get("model"),
             "vram_bytes": accelerator.get("vram_bytes"),
             "compute_capability": accelerator.get("compute_capability"),
+            "selected_position": selected_gpu.get("position"),
+            "candidate_count": selected_gpu.get("count"),
         },
         "driver": {
             "version": driver.get("version"),

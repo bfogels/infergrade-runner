@@ -118,6 +118,14 @@ class SupportExportTests(unittest.TestCase):
                     "compatibility": {"status": "blocked", "reason_codes": ["full_loop_not_proven", "fallback_not_allowed"]},
                 },
                 "gpu_count": 1,
+                "selected_gpu": {
+                    "index": 0,
+                    "position": 1,
+                    "count": 1,
+                    "model": "NVIDIA RTX 4090",
+                    "vram_bytes": 24564 * 1024 * 1024,
+                    "compute_capability": "8.9",
+                },
                 "hardware_blocked": True,
                 "next_action": "Validate on a Windows/NVIDIA machine before enabling evidence-producing technical beta.",
                 "proof_gate": {
@@ -160,6 +168,8 @@ class SupportExportTests(unittest.TestCase):
         self.assertEqual(payload["cuda"]["summary"]["status"], "blocked")
         self.assertEqual(payload["cuda"]["summary"]["gpu_count"], 1)
         self.assertEqual(payload["cuda"]["summary"]["platform"]["system"], "windows")
+        self.assertEqual(payload["cuda"]["summary"]["gpu"]["selected_position"], 1)
+        self.assertEqual(payload["cuda"]["summary"]["gpu"]["candidate_count"], 1)
         self.assertEqual(payload["cuda"]["summary"]["runtime"]["source"], "explicit_path")
         self.assertEqual(payload["cuda"]["summary"]["runtime"]["binary_path_present"], True)
         self.assertEqual(payload["cuda"]["summary"]["runtime"]["version_output"], "llama.cpp build 1234")
