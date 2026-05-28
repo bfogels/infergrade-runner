@@ -120,10 +120,10 @@ class SupportExportTests(unittest.TestCase):
                             "status": "blocked",
                             "mode": "user_selected_only",
                             "managed_download_available": False,
-                            "pinned_manifest_available": False,
-                            "checksum_verification_available": False,
-                            "reason_codes": ["checksum_manifest_missing", "managed_runtime_not_pinned"],
-                            "required_step": "pin_checksummed_cuda_runtime_artifact",
+                            "pinned_manifest_available": True,
+                            "checksum_verification_available": True,
+                            "reason_codes": ["candidate_runtime_not_validated", "managed_download_not_enabled"],
+                            "required_step": "validate_candidate_cuda_runtime_on_windows",
                         },
                     },
                     "binary": {
@@ -198,13 +198,15 @@ class SupportExportTests(unittest.TestCase):
         self.assertEqual(payload["cuda"]["summary"]["runtime"]["size_bytes"], 123456)
         self.assertEqual(payload["cuda"]["summary"]["runtime"]["delivery_gate"]["status"], "blocked")
         self.assertFalse(payload["cuda"]["summary"]["runtime"]["delivery_gate"]["managed_download_available"])
+        self.assertTrue(payload["cuda"]["summary"]["runtime"]["delivery_gate"]["pinned_manifest_available"])
+        self.assertTrue(payload["cuda"]["summary"]["runtime"]["delivery_gate"]["checksum_verification_available"])
         self.assertIn(
-            "managed_runtime_not_pinned",
+            "candidate_runtime_not_validated",
             payload["cuda"]["summary"]["runtime"]["delivery_gate"]["reason_codes"],
         )
         self.assertEqual(
             payload["cuda"]["summary"]["runtime"]["delivery_gate"]["required_step"],
-            "pin_checksummed_cuda_runtime_artifact",
+            "validate_candidate_cuda_runtime_on_windows",
         )
         self.assertIn("full_loop_not_proven", payload["cuda"]["summary"]["reason_codes"])
         self.assertIn("Windows/NVIDIA machine", payload["cuda"]["summary"]["next_action"])

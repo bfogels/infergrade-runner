@@ -17,6 +17,18 @@ WINDOWS_CUDA_BINARY_SET = "llama_cpp_windows_cuda_x86_64"
 WINDOWS_CUDA_CLAIM_BOUNDARY = (
     "Windows/NVIDIA CUDA is preview-only until a pinned, checksummed runtime and full Hub loop are proven."
 )
+WINDOWS_CUDA_CANDIDATE_TAG = "b9371"
+WINDOWS_CUDA_CANDIDATE_RELEASE_URL = "https://github.com/ggml-org/llama.cpp/releases/tag/b9371"
+WINDOWS_CUDA_CANDIDATE_ASSET_URL = (
+    "https://github.com/ggml-org/llama.cpp/releases/download/b9371/llama-b9371-bin-win-cuda-12.4-x64.zip"
+)
+WINDOWS_CUDA_CANDIDATE_SHA256 = "762585777eb39884848ce410f62140f79d21305203fe948ca57f54ec89dc2255"
+WINDOWS_CUDA_CANDIDATE_SIZE_BYTES = 260199565
+WINDOWS_CUDA_CANDIDATE_CUDART_URL = (
+    "https://github.com/ggml-org/llama.cpp/releases/download/b9371/cudart-llama-bin-win-cuda-12.4-x64.zip"
+)
+WINDOWS_CUDA_CANDIDATE_CUDART_SHA256 = "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
+WINDOWS_CUDA_CANDIDATE_CUDART_SIZE_BYTES = 391443627
 _CACHE_ENV = "INFERGRADE_RUNTIME_CACHE_DIR"
 _MAX_FINGERPRINT_BYTES = 512 * 1024 * 1024
 
@@ -73,6 +85,57 @@ def runtime_binary_fingerprint(path: Optional[str], max_bytes: int = _MAX_FINGER
     return payload
 
 
+def windows_cuda_candidate_manifest() -> Dict[str, Any]:
+    """Return the pinned-but-unvalidated Windows CUDA runtime candidate."""
+    return {
+        "status": "candidate_pinned_not_validated",
+        "selected_for_review_at": "2026-05-28",
+        "upstream": {
+            "project": "ggml-org/llama.cpp",
+            "tag": WINDOWS_CUDA_CANDIDATE_TAG,
+            "release_url": WINDOWS_CUDA_CANDIDATE_RELEASE_URL,
+            "digest_source": "github_release_asset_digest",
+        },
+        "platform": {
+            "system": "windows",
+            "arch": "x86_64",
+            "accelerator": "cuda",
+            "cuda_major": "12",
+            "cuda_runtime": "12.4",
+        },
+        "artifacts": [
+            {
+                "role": "llama_cpp_binaries",
+                "url": WINDOWS_CUDA_CANDIDATE_ASSET_URL,
+                "sha256": WINDOWS_CUDA_CANDIDATE_SHA256,
+                "size_bytes": WINDOWS_CUDA_CANDIDATE_SIZE_BYTES,
+                "format": "zip",
+                "required": True,
+            },
+            {
+                "role": "cuda_runtime_dlls",
+                "url": WINDOWS_CUDA_CANDIDATE_CUDART_URL,
+                "sha256": WINDOWS_CUDA_CANDIDATE_CUDART_SHA256,
+                "size_bytes": WINDOWS_CUDA_CANDIDATE_CUDART_SIZE_BYTES,
+                "format": "zip",
+                "required": "host_dependent",
+            },
+        ],
+        "expected_binaries": ["llama-cli.exe", "llama-server.exe", "llama-perplexity.exe"],
+        "validation_required": [
+            "inspect_archive_contents",
+            "verify_sha256_before_extracting",
+            "run_version_smoke_on_windows_nvidia_host",
+            "run_known_good_gguf",
+            "upload_result_to_hub",
+            "capture_secret_free_support_export",
+            "review_license_and_runtime_dll_distribution",
+        ],
+        "managed_download_enabled": False,
+        "claim_boundary": WINDOWS_CUDA_CLAIM_BOUNDARY,
+    }
+
+
 def known_llama_cpp_runtimes() -> List[Dict[str, Any]]:
     return [
         {
@@ -109,10 +172,11 @@ def known_llama_cpp_runtimes() -> List[Dict[str, Any]]:
             },
             "binary_set": WINDOWS_CUDA_BINARY_SET,
             "checksum": None,
+            "candidate_manifest": windows_cuda_candidate_manifest(),
             "support_tier": "preview",
             "notes": [
                 "Technical-beta prep only; not a supported public path.",
-                "No CUDA binary is downloaded by InferGrade until a pinned checksum exists.",
+                "A Windows CUDA upstream artifact is pinned as a review candidate, but managed download remains disabled until hardware validation and license review complete.",
                 "Users must explicitly select an existing CUDA-capable llama.cpp binary for preflight.",
                 "CUDA requests must not silently fall back to CPU evidence.",
             ],

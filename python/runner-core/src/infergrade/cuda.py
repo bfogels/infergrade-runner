@@ -29,10 +29,10 @@ WINDOWS_CUDA_RUNTIME_DELIVERY_GATE = {
     "status": "blocked",
     "mode": "user_selected_only",
     "managed_download_available": False,
-    "pinned_manifest_available": False,
-    "checksum_verification_available": False,
-    "reason_codes": ["checksum_manifest_missing", "managed_runtime_not_pinned"],
-    "required_step": "pin_checksummed_cuda_runtime_artifact",
+    "pinned_manifest_available": True,
+    "checksum_verification_available": True,
+    "reason_codes": ["candidate_runtime_not_validated", "managed_download_not_enabled"],
+    "required_step": "validate_candidate_cuda_runtime_on_windows",
 }
 WINDOWS_CUDA_PROOF_STEPS = [
     {
