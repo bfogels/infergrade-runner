@@ -113,7 +113,19 @@ class SupportExportTests(unittest.TestCase):
                     "platform": {"system": "windows", "arch": "amd64", "version": "windows-10"},
                     "accelerator": {"api": "cuda", "vendor": "nvidia"},
                     "driver": {"version": "555.85", "minimum_required": "525.0", "cuda_major": "12"},
-                    "delivery": {"source": "explicit_path", "binary_set": "llama_cpp_windows_cuda_x86_64"},
+                    "delivery": {
+                        "source": "explicit_path",
+                        "binary_set": "llama_cpp_windows_cuda_x86_64",
+                        "runtime_delivery_gate": {
+                            "status": "blocked",
+                            "mode": "user_selected_only",
+                            "managed_download_available": False,
+                            "pinned_manifest_available": False,
+                            "checksum_verification_available": False,
+                            "reason_codes": ["checksum_manifest_missing", "managed_runtime_not_pinned"],
+                            "required_step": "pin_checksummed_cuda_runtime_artifact",
+                        },
+                    },
                     "binary": {
                         "path": "C:\\llama.cpp\\llama-cli.exe",
                         "version_output": "llama.cpp build 1234",
@@ -184,6 +196,16 @@ class SupportExportTests(unittest.TestCase):
         self.assertEqual(payload["cuda"]["summary"]["runtime"]["fingerprint_status"], "recorded")
         self.assertEqual(payload["cuda"]["summary"]["runtime"]["sha256"], "abc123")
         self.assertEqual(payload["cuda"]["summary"]["runtime"]["size_bytes"], 123456)
+        self.assertEqual(payload["cuda"]["summary"]["runtime"]["delivery_gate"]["status"], "blocked")
+        self.assertFalse(payload["cuda"]["summary"]["runtime"]["delivery_gate"]["managed_download_available"])
+        self.assertIn(
+            "managed_runtime_not_pinned",
+            payload["cuda"]["summary"]["runtime"]["delivery_gate"]["reason_codes"],
+        )
+        self.assertEqual(
+            payload["cuda"]["summary"]["runtime"]["delivery_gate"]["required_step"],
+            "pin_checksummed_cuda_runtime_artifact",
+        )
         self.assertIn("full_loop_not_proven", payload["cuda"]["summary"]["reason_codes"])
         self.assertIn("Windows/NVIDIA machine", payload["cuda"]["summary"]["next_action"])
         self.assertEqual(payload["cuda"]["summary"]["proof_gate"]["status"], "blocked")

@@ -63,6 +63,32 @@
             "environment",
             "container_runtime"
           ]
+        },
+        "runtime_delivery_gate": {
+          "type": "object",
+          "required": [
+            "status",
+            "mode",
+            "managed_download_available",
+            "pinned_manifest_available",
+            "checksum_verification_available",
+            "reason_codes",
+            "required_step"
+          ],
+          "properties": {
+            "status": { "enum": ["ready", "blocked"] },
+            "mode": { "enum": ["managed_download", "user_selected_only"] },
+            "managed_download_available": { "type": "boolean" },
+            "pinned_manifest_available": { "type": "boolean" },
+            "checksum_verification_available": { "type": "boolean" },
+            "reason_codes": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "uniqueItems": true
+            },
+            "required_step": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -73,7 +99,23 @@
         "path": { "type": ["string", "null"] },
         "version_output": { "type": ["string", "null"] },
         "checksum_verified": { "type": "boolean" },
-        "signature_verified": { "type": "boolean" }
+        "signature_verified": { "type": "boolean" },
+        "fingerprint": {
+          "type": "object",
+          "required": ["path_present", "status", "size_bytes", "sha256"],
+          "properties": {
+            "path_present": { "type": "boolean" },
+            "status": {
+              "enum": ["missing_path", "unavailable", "not_file", "too_large", "recorded", "unknown"]
+            },
+            "size_bytes": { "type": ["integer", "null"], "minimum": 0 },
+            "sha256": { "type": ["string", "null"] },
+            "mtime_ns": { "type": "integer", "minimum": 0 },
+            "error": { "type": "string", "minLength": 1 },
+            "max_bytes": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },

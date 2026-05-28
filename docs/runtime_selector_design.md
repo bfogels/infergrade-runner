@@ -94,6 +94,10 @@ The v0.3 runtime selector should be a Runner-owned object attached to run config
 - `delivery.binary_set`: a stable Runner-owned identifier for the expected binary family, such as `llama_cpp_macos_metal_aarch64` or `llama_cpp_windows_cuda_x86_64`.
 - `delivery.source`: where the runtime came from, such as `infergrade_runtime_manifest`, `explicit_path`, `path_lookup`, `container_image`, or `desktop_bundle`.
 - `delivery.selected_by`: `managed_recommendation`, `user_choice`, `run_config`, `environment`, or `container_runtime`.
+- `delivery.runtime_delivery_gate`: optional status object for preview lanes that
+  are not yet available as a managed runtime. Windows/NVIDIA CUDA uses this to
+  state that the current lane is user-selected only until a pinned artifact and
+  checksum manifest exist.
 
 ### Binary
 
@@ -112,7 +116,7 @@ The v0.3 runtime selector should be a Runner-owned object attached to run config
 ### Compatibility
 
 - `compatibility.status`: `ready`, `warning`, `blocked`, `unsupported`, or `unknown`.
-- `compatibility.reason_codes`: stable machine-readable codes. Initial codes should include `no_accelerator_detected`, `nvidia_smi_missing`, `nvidia_smi_failed`, `driver_too_old`, `runtime_binary_missing`, `runtime_smoke_failed`, `checksum_failed`, `model_too_large`, `unsupported_model_architecture`, `container_runtime_missing`, and `fallback_not_allowed`.
+- `compatibility.reason_codes`: stable machine-readable codes. Initial codes should include `no_accelerator_detected`, `nvidia_smi_missing`, `nvidia_smi_failed`, `driver_too_old`, `runtime_binary_missing`, `runtime_smoke_failed`, `checksum_failed`, `managed_runtime_not_pinned`, `checksum_manifest_missing`, `model_too_large`, `unsupported_model_architecture`, `container_runtime_missing`, and `fallback_not_allowed`.
 - `compatibility.probes`: ordered probe records. Each probe should have `id`, `status`, and bounded `observed` or `detail` fields after redaction.
 
 ### Support Tier

@@ -25,6 +25,15 @@ WINDOWS_CUDA_BINARY_SET = "llama_cpp_windows_cuda_x86_64"
 WINDOWS_CUDA_CLAIM_BOUNDARY = (
     "Windows/NVIDIA CUDA path is preflight-only until one full install, run, upload, and publish loop is proven on hardware."
 )
+WINDOWS_CUDA_RUNTIME_DELIVERY_GATE = {
+    "status": "blocked",
+    "mode": "user_selected_only",
+    "managed_download_available": False,
+    "pinned_manifest_available": False,
+    "checksum_verification_available": False,
+    "reason_codes": ["checksum_manifest_missing", "managed_runtime_not_pinned"],
+    "required_step": "pin_checksummed_cuda_runtime_artifact",
+}
 WINDOWS_CUDA_PROOF_STEPS = [
     {
         "id": "select_runtime",
@@ -189,6 +198,12 @@ def _select_gpu_row(gpu_rows: List[Dict[str, Any]], required_vram_bytes: Optiona
 
     selected_index, selected_row = max(enumerate(gpu_rows), key=score)
     return selected_row, selected_index
+
+
+def _runtime_delivery_gate() -> Dict[str, Any]:
+    payload = dict(WINDOWS_CUDA_RUNTIME_DELIVERY_GATE)
+    payload["reason_codes"] = list(WINDOWS_CUDA_RUNTIME_DELIVERY_GATE["reason_codes"])
+    return payload
 
 
 def _run_nvidia_smi(nvidia_smi_path: str) -> Tuple[List[Dict[str, Any]], str]:
@@ -378,6 +393,7 @@ def windows_cuda_preflight(
             "binary_set": selected_binary_set,
             "source": "explicit_path" if runtime_path else "run_config",
             "selected_by": "user_choice" if runtime_path else "run_config",
+            "runtime_delivery_gate": _runtime_delivery_gate(),
         },
         "binary": {
             "path": runtime_path,

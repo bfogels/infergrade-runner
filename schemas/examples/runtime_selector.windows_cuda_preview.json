@@ -17,13 +17,28 @@
     "mode": "user_selected",
     "binary_set": "llama_cpp_windows_cuda_x86_64",
     "source": "run_config",
-    "selected_by": "run_config"
+    "selected_by": "run_config",
+    "runtime_delivery_gate": {
+      "status": "blocked",
+      "mode": "user_selected_only",
+      "managed_download_available": false,
+      "pinned_manifest_available": false,
+      "checksum_verification_available": false,
+      "reason_codes": ["checksum_manifest_missing", "managed_runtime_not_pinned"],
+      "required_step": "pin_checksummed_cuda_runtime_artifact"
+    }
   },
   "binary": {
     "path": null,
     "version_output": null,
     "checksum_verified": false,
-    "signature_verified": false
+    "signature_verified": false,
+    "fingerprint": {
+      "path_present": false,
+      "status": "missing_path",
+      "size_bytes": null,
+      "sha256": null
+    }
   },
   "driver": {
     "version": "555.85",
