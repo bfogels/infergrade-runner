@@ -81,6 +81,29 @@
             "managed_download_available": { "type": "boolean" },
             "pinned_manifest_available": { "type": "boolean" },
             "checksum_verification_available": { "type": "boolean" },
+            "candidate_release": {
+              "type": "object",
+              "properties": {
+                "project": { "type": "string" },
+                "tag": { "type": "string" },
+                "selected_at": { "type": "string" }
+              },
+              "additionalProperties": false
+            },
+            "candidate_artifacts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "role", "sha256", "required"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "role": { "type": "string" },
+                  "sha256": { "type": "string" },
+                  "required": { "type": "boolean" }
+                },
+                "additionalProperties": false
+              }
+            },
             "reason_codes": {
               "type": "array",
               "items": { "type": "string", "minLength": 1 },

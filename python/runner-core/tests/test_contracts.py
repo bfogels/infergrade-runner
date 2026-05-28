@@ -115,6 +115,11 @@ class ContractExportTests(unittest.TestCase):
         self.assertEqual("blocked", cuda_example["delivery"]["runtime_delivery_gate"]["status"])
         self.assertTrue(cuda_example["delivery"]["runtime_delivery_gate"]["pinned_manifest_available"])
         self.assertTrue(cuda_example["delivery"]["runtime_delivery_gate"]["checksum_verification_available"])
+        self.assertEqual(cuda_example["delivery"]["runtime_delivery_gate"]["candidate_release"]["tag"], "b9371")
+        self.assertIn(
+            "candidate_artifacts",
+            selector_schema["properties"]["delivery"]["properties"]["runtime_delivery_gate"]["properties"],
+        )
         self.assertIn(
             "candidate_runtime_not_validated",
             cuda_example["delivery"]["runtime_delivery_gate"]["reason_codes"],

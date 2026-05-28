@@ -121,6 +121,17 @@ def _cuda_support_summary(preflight: Dict[str, Any]) -> Dict[str, Any]:
                 "managed_download_available": delivery_gate.get("managed_download_available"),
                 "pinned_manifest_available": delivery_gate.get("pinned_manifest_available"),
                 "checksum_verification_available": delivery_gate.get("checksum_verification_available"),
+                "candidate_release": dict(delivery_gate.get("candidate_release") or {}),
+                "candidate_artifacts": [
+                    {
+                        "name": item.get("name"),
+                        "role": item.get("role"),
+                        "sha256": item.get("sha256"),
+                        "required": item.get("required"),
+                    }
+                    for item in list(delivery_gate.get("candidate_artifacts") or [])
+                    if isinstance(item, dict) and item.get("name")
+                ],
                 "reason_codes": list(delivery_gate.get("reason_codes") or []),
                 "required_step": delivery_gate.get("required_step"),
             },
