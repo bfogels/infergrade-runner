@@ -159,6 +159,90 @@ class SupportExportTests(unittest.TestCase):
             platform_snapshot={"system": "windows", "arch": "amd64", "version": "windows-10"},
         )
 
+    def test_build_support_export_includes_selected_cuda_runtime_preflight(self):
+        with tempfile.TemporaryDirectory(prefix="infergrade-support-cuda-selected-") as tempdir:
+            cuda_preflight = {
+                "selector": {
+                    "platform": {"system": "windows", "arch": "amd64", "version": "windows-11"},
+                    "accelerator": {"api": "cuda", "vendor": "unknown"},
+                    "driver": {"version": None, "minimum_required": "525.0", "cuda_major": "12"},
+                    "delivery": {"source": "explicit_path", "binary_set": "llama_cpp_windows_cuda_x86_64"},
+                    "binary": {"path": "C:\\llama.cpp\\llama-cli.exe", "version_output": None},
+                    "compatibility": {"status": "blocked", "reason_codes": ["nvidia_smi_missing", "full_loop_not_proven"]},
+                },
+                "gpu_count": 0,
+                "hardware_blocked": True,
+                "next_action": "Run CUDA preflight on the selected Windows/NVIDIA host.",
+            }
+            environment = {
+                "hardware_class": "cpu_only",
+                "accelerator_vendor": None,
+                "accelerator_api": None,
+                "driver_versions": {},
+                "cpu_architecture": "AMD64",
+                "os": "windows-11",
+            }
+            selected_runtime = {
+                "runtime_id": "llama-cpp-windows-cuda-cli-preview-2026-05",
+                "binary_set": "llama_cpp_windows_cuda_x86_64",
+                "binaries": {"cli": "C:\\llama.cpp\\llama-cli.exe"},
+            }
+            with mock.patch("infergrade.support.load_runner_profile", return_value=None), mock.patch(
+                "infergrade.support.capture_environment",
+                return_value=environment,
+            ), mock.patch(
+                "infergrade.support.selected_llama_cpp_runtime",
+                return_value=selected_runtime,
+            ), mock.patch(
+                "infergrade.support.windows_cuda_preflight",
+                return_value=cuda_preflight,
+            ) as preflight_mock, mock.patch.dict(
+                os.environ,
+                {},
+                clear=True,
+            ):
+                payload = build_support_export(run_dir=tempdir, execution_mode="local_native")
+
+        self.assertTrue(payload["cuda"]["included"])
+        self.assertEqual(payload["cuda"]["reason"], "selected_cuda_runtime")
+        self.assertEqual(payload["cuda"]["summary"]["runtime"]["binary_path_present"], True)
+        self.assertIn("nvidia_smi_missing", payload["cuda"]["summary"]["reason_codes"])
+        preflight_mock.assert_called_once_with(
+            runtime_binary_path="C:\\llama.cpp\\llama-cli.exe",
+            cuda_major="12",
+            platform_snapshot={"system": "windows", "arch": "amd64", "version": "windows-11"},
+        )
+
+    def test_build_support_export_ignores_non_cuda_selected_runtime_signal(self):
+        with mock.patch("infergrade.support.load_runner_profile", return_value=None), mock.patch(
+            "infergrade.support.capture_environment",
+            return_value={
+                "hardware_class": "cpu_only",
+                "accelerator_vendor": None,
+                "accelerator_api": None,
+                "driver_versions": {},
+                "cpu_architecture": "x86_64",
+                "os": "linux-6.0",
+            },
+        ), mock.patch(
+            "infergrade.support.selected_llama_cpp_runtime",
+            return_value={
+                "runtime_id": "llama-cpp-homebrew-stable-2026-04",
+                "binaries": {"cli": "/opt/homebrew/bin/llama-cli"},
+            },
+        ), mock.patch(
+            "infergrade.support.windows_cuda_preflight",
+        ) as preflight_mock, mock.patch.dict(
+            os.environ,
+            {},
+            clear=True,
+        ):
+            payload = build_support_export(execution_mode="local_native")
+
+        self.assertFalse(payload["cuda"]["included"])
+        self.assertEqual(payload["cuda"]["reason"], "no_cuda_signal")
+        preflight_mock.assert_not_called()
+
     def test_write_support_export_writes_json_payload(self):
         with tempfile.TemporaryDirectory(prefix="infergrade-support-output-") as tempdir:
             output_path = os.path.join(tempdir, "support.json")
