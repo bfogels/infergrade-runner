@@ -109,6 +109,20 @@ def _cuda_support_summary(preflight: Dict[str, Any]) -> Dict[str, Any]:
             "version_output": binary.get("version_output"),
         },
         "next_action": preflight.get("next_action"),
+        "proof_gate": _cuda_support_proof_gate(preflight.get("proof_gate")),
+    }
+
+
+def _cuda_support_proof_gate(proof_gate: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    proof_gate = dict(proof_gate or {})
+    return {
+        "status": proof_gate.get("status") or "blocked",
+        "reason_code": proof_gate.get("reason_code") or "full_loop_not_proven",
+        "required_step_ids": [
+            item.get("id")
+            for item in list(proof_gate.get("required_steps") or [])
+            if isinstance(item, dict) and item.get("id")
+        ],
     }
 
 

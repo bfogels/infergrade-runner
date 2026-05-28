@@ -77,4 +77,18 @@ fallback, and claim-boundary fields. The block also includes a compact
 floor, selected runtime source, binary smoke result, and next action so support
 triage does not need to parse the full runtime selector first.
 
+The preflight payload also includes a machine-readable `proof_gate` while
+`full_loop_not_proven` is active. The required proof steps are:
+
+1. Select a CUDA-capable `llama.cpp` runtime and record the Windows CUDA binary
+   set plus preview claim boundary.
+2. Pair a Windows/NVIDIA runner with Hub using a label and token state that can
+   be inspected without secrets.
+3. Run one known-good GGUF locally and keep manifest, summary, environment, and
+   benchmark artifacts.
+4. Upload the result bundle to Hub and preserve the CUDA runtime selector.
+5. Review the owner-visible Hub Result and keep Windows/NVIDIA caveats visible.
+6. Capture a secret-free support export that includes CUDA preflight and selected
+   runtime context.
+
 Public copy must say "Windows/NVIDIA CUDA preview" until the full loop is proven. After proof, the support tier can advance to `technical_beta` for the validated path only. Linux CUDA, ROCm, Vulkan, and Windows AMD remain separate paths and must not inherit NVIDIA support claims.

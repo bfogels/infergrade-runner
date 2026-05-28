@@ -120,6 +120,18 @@ class SupportExportTests(unittest.TestCase):
                 "gpu_count": 1,
                 "hardware_blocked": True,
                 "next_action": "Validate on a Windows/NVIDIA machine before enabling evidence-producing technical beta.",
+                "proof_gate": {
+                    "status": "blocked",
+                    "reason_code": "full_loop_not_proven",
+                    "required_steps": [
+                        {"id": "select_runtime"},
+                        {"id": "pair_hub_runner"},
+                        {"id": "known_good_gguf_run"},
+                        {"id": "upload_result"},
+                        {"id": "review_result"},
+                        {"id": "capture_support_export"},
+                    ],
+                },
             }
             environment = {
                 "hardware_class": "nvidia_gpu",
@@ -153,6 +165,18 @@ class SupportExportTests(unittest.TestCase):
         self.assertEqual(payload["cuda"]["summary"]["runtime"]["version_output"], "llama.cpp build 1234")
         self.assertIn("full_loop_not_proven", payload["cuda"]["summary"]["reason_codes"])
         self.assertIn("Windows/NVIDIA machine", payload["cuda"]["summary"]["next_action"])
+        self.assertEqual(payload["cuda"]["summary"]["proof_gate"]["status"], "blocked")
+        self.assertEqual(
+            payload["cuda"]["summary"]["proof_gate"]["required_step_ids"],
+            [
+                "select_runtime",
+                "pair_hub_runner",
+                "known_good_gguf_run",
+                "upload_result",
+                "review_result",
+                "capture_support_export",
+            ],
+        )
         preflight_mock.assert_called_once_with(
             runtime_binary_path="C:\\llama.cpp\\llama-cli.exe",
             cuda_major="12",
@@ -173,6 +197,11 @@ class SupportExportTests(unittest.TestCase):
                 "gpu_count": 0,
                 "hardware_blocked": True,
                 "next_action": "Run CUDA preflight on the selected Windows/NVIDIA host.",
+                "proof_gate": {
+                    "status": "blocked",
+                    "reason_code": "full_loop_not_proven",
+                    "required_steps": [{"id": "select_runtime"}],
+                },
             }
             environment = {
                 "hardware_class": "cpu_only",

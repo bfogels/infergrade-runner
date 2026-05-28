@@ -23,6 +23,38 @@ WINDOWS_CUDA_BINARY_SET = "llama_cpp_windows_cuda_x86_64"
 WINDOWS_CUDA_CLAIM_BOUNDARY = (
     "Windows/NVIDIA CUDA path is preflight-only until one full install, run, upload, and publish loop is proven on hardware."
 )
+WINDOWS_CUDA_PROOF_STEPS = [
+    {
+        "id": "select_runtime",
+        "label": "Select CUDA-capable llama.cpp runtime",
+        "evidence": "selected_runtime.json records the Windows CUDA binary set and preview claim boundary",
+    },
+    {
+        "id": "pair_hub_runner",
+        "label": "Pair a Windows/NVIDIA runner with Hub",
+        "evidence": "runner label, runner kind, and token status are visible without secrets",
+    },
+    {
+        "id": "known_good_gguf_run",
+        "label": "Run one known-good GGUF locally",
+        "evidence": "run directory contains manifest, summary, environment, and benchmark artifacts",
+    },
+    {
+        "id": "upload_result",
+        "label": "Upload the result bundle to Hub",
+        "evidence": "Hub accepts the bundle and records the CUDA runtime selector",
+    },
+    {
+        "id": "review_result",
+        "label": "Review the owner-visible Hub Result",
+        "evidence": "Result keeps Windows/NVIDIA marked as preview or technical beta with caveats",
+    },
+    {
+        "id": "capture_support_export",
+        "label": "Capture a secret-free support export",
+        "evidence": "support export includes CUDA preflight, selected runtime, and no tokens or signed URLs",
+    },
+]
 
 
 class NvidiaSmiError(RuntimeError):
@@ -361,9 +393,15 @@ def windows_cuda_preflight(
             "reason": "CUDA requests must not silently upload CPU evidence.",
         },
     }
+    proof_gate = {
+        "status": "blocked",
+        "reason_code": "full_loop_not_proven",
+        "required_steps": WINDOWS_CUDA_PROOF_STEPS,
+    }
     return {
         "selector": selector,
         "gpu_count": len(gpu_rows),
         "hardware_blocked": True,
         "next_action": "Validate on a Windows/NVIDIA machine before enabling evidence-producing technical beta.",
+        "proof_gate": proof_gate,
     }

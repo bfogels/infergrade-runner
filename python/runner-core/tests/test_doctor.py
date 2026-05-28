@@ -204,6 +204,11 @@ class DoctorTests(unittest.TestCase):
             "gpu_count": 1,
             "hardware_blocked": True,
             "next_action": "Validate on hardware.",
+            "proof_gate": {
+                "status": "blocked",
+                "reason_code": "full_loop_not_proven",
+                "required_steps": [{"id": "select_runtime"}],
+            },
         }
         request = RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",
@@ -225,6 +230,7 @@ class DoctorTests(unittest.TestCase):
         checks = {item["id"]: item for item in report["checks"]}
         self.assertEqual(checks["windows_cuda_preflight"]["status"], "error")
         self.assertTrue(checks["windows_cuda_preflight"]["details"]["hardware_blocked"])
+        self.assertEqual(checks["windows_cuda_preflight"]["details"]["proof_gate"]["reason_code"], "full_loop_not_proven")
         self.assertFalse(checks["windows_cuda_preflight"]["details"]["runtime_selector"]["fallback"]["allowed"])
         windows_cuda_preflight_mock.assert_called_once_with(
             runtime_binary_path="C:\\llama.cpp\\llama-cli.exe",
