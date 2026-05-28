@@ -32,12 +32,39 @@ test("rejects invalid or unsafe desktop API URLs with user-facing guidance", () 
 
 test("parses token-free first-run handoff URLs", () => {
   assert.deepEqual(
-    firstRunHandoffFromDeepLink("infergrade-runner://first-run?first_run_run_id=run_123&first_run_worker_id=worker_456"),
-    { runId: "run_123", workerId: "worker_456" }
+    firstRunHandoffFromDeepLink(
+      "infergrade-runner://first-run?first_run_run_id=run_123&first_run_worker_id=worker_456&first_run_api_url=https%3A%2F%2Fapi.infergrade.com&expected_runner_version=0.3.6&expected_contract_version=0.3.5"
+    ),
+    {
+      runId: "run_123",
+      workerId: "worker_456",
+      apiUrl: "https://api.infergrade.com/",
+      expectedRunnerVersion: "0.3.6",
+      expectedContractVersion: "0.3.5",
+    }
   );
   assert.deepEqual(
     firstRunHandoffFromParams(new URLSearchParams("run_id=run_abc&workerId=worker_def")),
-    { runId: "run_abc", workerId: "worker_def" }
+    {
+      runId: "run_abc",
+      workerId: "worker_def",
+      apiUrl: "",
+      expectedRunnerVersion: "",
+      expectedContractVersion: "",
+    }
+  );
+});
+
+test("parses localhost API URL handoffs for local Hub dogfood", () => {
+  assert.deepEqual(
+    firstRunHandoffFromParams(new URLSearchParams("run_id=run_local&first_run_api_url=http%3A%2F%2F127.0.0.1%3A8000")),
+    {
+      runId: "run_local",
+      workerId: "",
+      apiUrl: "http://127.0.0.1:8000/",
+      expectedRunnerVersion: "",
+      expectedContractVersion: "",
+    }
   );
 });
 
@@ -48,9 +75,53 @@ test("rejects first-run handoffs with sensitive parameters", () => {
       "infergrade-runner://first-run?first_run_run_id=run_123&upload_token=secret",
       (reason) => rejected.push(reason)
     ),
-    { runId: "", workerId: "" }
+    { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" }
   );
   assert.equal(rejected[0], "sensitive handoff parameter");
+});
+
+test("rejects first-run handoffs with unsafe API URLs or version text", () => {
+  const rejected = [];
+  assert.deepEqual(
+    firstRunHandoffFromDeepLink(
+      "infergrade-runner://first-run?first_run_run_id=run_123&first_run_api_url=http%3A%2F%2Fapi.infergrade.com",
+      (reason) => rejected.push(reason)
+    ),
+    { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" }
+  );
+  assert.deepEqual(
+    firstRunHandoffFromDeepLink(
+      "infergrade-runner://first-run?first_run_run_id=run_123&first_run_api_url=https%3A%2F%2Fevil.example",
+      (reason) => rejected.push(reason)
+    ),
+    { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" }
+  );
+  assert.deepEqual(
+    firstRunHandoffFromDeepLink(
+      "infergrade-runner://first-run?first_run_run_id=run_123&first_run_api_url=https%3A%2F%2Fuser%3Apass%40api.infergrade.com",
+      (reason) => rejected.push(reason)
+    ),
+    { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" }
+  );
+  assert.deepEqual(
+    firstRunHandoffFromDeepLink(
+      "infergrade-runner://first-run?first_run_run_id=run_123&first_run_api_url=https%3A%2F%2Fapi.infergrade.com%2F%3Fapi_key%3Dabc",
+      (reason) => rejected.push(reason)
+    ),
+    { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" }
+  );
+  assert.deepEqual(
+    firstRunHandoffFromDeepLink(
+      "infergrade-runner://first-run?first_run_run_id=run_123&expected_runner_version=bearer-secret",
+      (reason) => rejected.push(reason)
+    ),
+    { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" }
+  );
+  assert.equal(rejected[0], "invalid handoff API URL");
+  assert.equal(rejected[1], "unapproved handoff API URL");
+  assert.equal(rejected[2], "unapproved handoff API URL");
+  assert.equal(rejected[3], "unapproved handoff API URL");
+  assert.equal(rejected[4], "unsafe handoff version");
 });
 
 test("rejects first-run handoffs with unsafe or sensitive identifier values", () => {
@@ -60,11 +131,11 @@ test("rejects first-run handoffs with unsafe or sensitive identifier values", ()
       "infergrade-runner://first-run?first_run_run_id=igrt_secret_token&first_run_worker_id=worker_456",
       (reason) => rejected.push(reason)
     ),
-    { runId: "", workerId: "" }
+    { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" }
   );
   assert.deepEqual(
     firstRunHandoffFromParams(new URLSearchParams("run_id=run_abc/../../secret&workerId=worker_def")),
-    { runId: "", workerId: "" }
+    { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" }
   );
   assert.equal(rejected[0], "unsafe handoff identifier");
 });
@@ -76,7 +147,7 @@ test("rejects first-run handoffs from unexpected URL schemes", () => {
       "https://example.com/first-run?first_run_run_id=run_123",
       (reason) => rejected.push(reason)
     ),
-    { runId: "", workerId: "" }
+    { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" }
   );
   assert.equal(rejected[0], "unexpected first-run handoff URL scheme");
 });

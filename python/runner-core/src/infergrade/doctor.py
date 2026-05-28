@@ -17,6 +17,7 @@ from infergrade.artifacts import (
 )
 from infergrade.capabilities import capability_images_for_request
 from infergrade.contracts import load_contract_manifest
+from infergrade.cuda import windows_cuda_preflight
 from infergrade.environment import capture_environment
 from infergrade.images import docker_image_exists, local_build_command
 from infergrade.models import RunRequest
@@ -340,6 +341,8 @@ def _native_runtime_checks(request: RunRequest, environment: Dict[str, Any]) -> 
             )
         )
         return checks
+    if _request_selects_cuda(request):
+        checks.append(_windows_cuda_preflight_check(request))
     checks.append(_llama_native_binary_check("llama_cli_native", request.llama_cpp_cli_path, "INFERGRADE_LLAMA_CPP_CLI", "llama-cli", "Native llama-cli"))
     checks.append(_llama_native_binary_check("llama_server_native", request.llama_cpp_server_path, "INFERGRADE_LLAMA_CPP_SERVER", "llama-server", "Native llama-server"))
     if environment.get("hardware_class") == "apple_silicon":
@@ -355,6 +358,43 @@ def _native_runtime_checks(request: RunRequest, environment: Dict[str, Any]) -> 
             )
         )
     return checks
+
+
+def _request_selects_cuda(request: RunRequest) -> bool:
+    selector = request.runtime_selector or {}
+    accelerator = selector.get("accelerator") if isinstance(selector, dict) else {}
+    delivery = selector.get("delivery") if isinstance(selector, dict) else {}
+    return (
+        isinstance(accelerator, dict)
+        and accelerator.get("api") == "cuda"
+        and (accelerator.get("vendor") in (None, "nvidia", "unknown"))
+    ) or (
+        isinstance(delivery, dict)
+        and str(delivery.get("binary_set") or "").startswith("llama_cpp_windows_cuda")
+    )
+
+
+def _windows_cuda_preflight_check(request: RunRequest) -> Dict[str, Any]:
+    selector = request.runtime_selector or {}
+    driver = selector.get("driver") if isinstance(selector, dict) else {}
+    cuda_major = str((driver or {}).get("cuda_major") or "12")
+    result = windows_cuda_preflight(runtime_binary_path=request.llama_cpp_cli_path, cuda_major=cuda_major)
+    preflight_selector = result["selector"]
+    compatibility = preflight_selector["compatibility"]
+    status = compatibility.get("status")
+    doctor_status = "ok" if status == "ready" else ("warning" if status == "warning" else "error")
+    return _check(
+        "windows_cuda_preflight",
+        doctor_status,
+        "Windows/NVIDIA CUDA preflight is %s." % status,
+        {
+            "runtime_selector": preflight_selector,
+            "gpu_count": result.get("gpu_count"),
+            "hardware_blocked": result.get("hardware_blocked"),
+            "next_action": result.get("next_action"),
+            "proof_gate": result.get("proof_gate"),
+        },
+    )
 
 
 def _native_runner_checks(environment: Dict[str, Any]) -> List[Dict[str, Any]]:

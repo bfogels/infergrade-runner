@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-paired="false" data-listening="false">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,274 +7,348 @@
   </head>
   <body>
     <main class="app-shell">
-      <section class="hero-panel" aria-labelledby="app-title">
-        <div>
-          <p class="eyebrow">InferGrade Runner</p>
-          <h1 id="app-title">Run InferGrade on this Mac.</h1>
-          <p class="lede">
-            Pair with Hub, install the recommended runtime, choose a GGUF model, and start local runs.
-          </p>
-        </div>
-        <div class="hero-side">
-          <div class="theme-control" role="group" aria-label="Color theme">
-            <button type="button" data-theme-choice="system" aria-pressed="true">System</button>
-            <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
-            <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
-          </div>
-          <div class="status-card" aria-live="polite">
-            <span class="status-dot" data-status-dot></span>
+      <section class="app-frame" aria-labelledby="app-title">
+        <header class="top-bar">
+          <div class="brand-lockup">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 32 32" role="img">
+                <path d="M16 3 27 9.5v13L16 29 5 22.5v-13L16 3Z" fill="none" stroke="currentColor" stroke-width="2" />
+                <path d="m10 12 6-3.5 6 3.5v8l-6 3.5-6-3.5v-8Z" fill="currentColor" opacity="0.22" />
+                <path d="m10 12 6 3.5 6-3.5M16 15.5v8" fill="none" stroke="currentColor" stroke-width="2" />
+              </svg>
+            </span>
             <div>
-              <p class="status-label">Runner status</p>
-              <strong data-runner-status>Idle</strong>
+              <p class="eyebrow">InferGrade Runner</p>
+              <h1 id="app-title">Local execution companion</h1>
             </div>
           </div>
-          <div class="release-card" aria-label="App release status">
-            <p class="status-label">App version</p>
-            <strong data-app-version>checking...</strong>
-            <span data-update-channel>Current release</span>
-            <span data-runner-cli-version>Runner CLI: checking...</span>
-            <button type="button" class="button-secondary compact-button" data-check-update>Check for updates</button>
+          <div class="top-status">
+            <div class="connection-chip" data-connected-chip>
+              <span class="status-dot" data-status-dot></span>
+              <strong data-runner-status>Idle</strong>
+            </div>
+            <div class="hub-chip" title="Current Hub">
+              <span aria-hidden="true">Hub</span>
+              <strong data-hub-url-display>infergrade.com</strong>
+            </div>
+            <span class="version-chip" data-app-version>checking...</span>
+            <div class="theme-control" role="group" aria-label="Color theme">
+              <button type="button" data-theme-choice="system" aria-pressed="true">System</button>
+              <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+              <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+            </div>
           </div>
-        </div>
-      </section>
+        </header>
 
-      <section class="control-grid" aria-label="Runner setup">
-        <form class="panel setup-panel" data-runner-form>
-          <p class="eyebrow">Step 1</p>
-          <h2>Pair with Hub</h2>
-          <label>
-            <span>Hub URL</span>
-            <input name="apiUrl" type="url" value="https://api.infergrade.com" autocomplete="url" />
-          </label>
-          <p class="hint compact-hint">Use HTTPS for hosted Hubs. Local development can use localhost or 127.x.x.x.</p>
-          <label>
-            <span>Pairing code</span>
-            <input name="pairCode" type="text" autocomplete="off" placeholder="Paste the one-time code from Hub" />
-          </label>
-          <label>
-            <span>Runner label</span>
-            <input name="runnerLabel" type="text" autocomplete="organization-title" placeholder="This computer" />
-          </label>
-          <div class="button-row">
-            <button type="button" data-pair-runner>Pair and start</button>
-            <button type="button" class="button-secondary" data-reset-pairing>Reset Pairing</button>
+        <section class="primary-surface" aria-label="Runner readiness">
+          <div class="ready-column">
+            <div class="ready-mark" aria-hidden="true">
+              <svg viewBox="0 0 96 96">
+                <circle cx="48" cy="48" r="43" fill="none" stroke="currentColor" stroke-width="3" />
+                <path d="m29 50 13 13 27-31" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="7" />
+              </svg>
+            </div>
+            <h2 data-primary-state-title>Connect this machine</h2>
+            <p class="state-sentence" data-primary-state-message>Pair with Hub before this Runner accepts assigned work.</p>
+            <div class="fact-row" aria-label="Readiness facts">
+              <span data-readiness-fact="hub">Pair with Hub</span>
+              <span data-readiness-fact="runtime">Runtime check needed</span>
+              <span data-readiness-fact="token">Token missing</span>
+            </div>
+            <div class="primary-actions">
+              <button type="button" data-readiness-check>Run readiness check</button>
+              <button type="button" class="button-secondary" data-open-hub data-hub-target="home">Open Hub</button>
+            </div>
           </div>
-          <p class="hint" data-pair-state>Click Pair Local Runner in the Hub, then paste the one-time code here.</p>
-          <p class="hint" data-token-state>
-            Pairing stores the runner token in the OS credential store. Tokens are not shown in this browser UI.
-          </p>
-          <div class="listener-box">
-            <p class="eyebrow">Step 4</p>
-            <h2>Start listening</h2>
-            <p>Leave the Runner listening when you want this Mac to claim queued Hub runs.</p>
+
+          <aside class="backend-panel" aria-labelledby="backend-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Backend detail</p>
+                <h3 id="backend-title">Checking local backend</h3>
+              </div>
+            </div>
+            <div class="backend-list">
+              <div data-backend-row="platform">
+                <span class="row-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <rect x="7" y="7" width="10" height="10" rx="2"></rect>
+                    <path d="M4 9h3M4 15h3M17 9h3M17 15h3M9 4v3M15 4v3M9 17v3M15 17v3"></path>
+                  </svg>
+                </span>
+                <strong>Local platform</strong>
+                <span class="row-state">checking</span>
+              </div>
+              <div data-backend-row="runtime">
+                <span class="row-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M13 2 5 13h6l-1 9 9-13h-6l1-7Z"></path>
+                  </svg>
+                </span>
+                <strong>Managed Metal runtime</strong>
+                <span class="row-state" data-backend-runtime-status>checking</span>
+              </div>
+              <div data-backend-row="token">
+                <span class="row-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 3 19 6v5c0 4.5-2.8 8.2-7 10-4.2-1.8-7-5.5-7-10V6l7-3Z"></path>
+                    <path d="M12 11v4"></path>
+                    <path d="M12 8h.01"></path>
+                  </svg>
+                </span>
+                <strong>Keychain token</strong>
+                <span class="row-state" data-backend-token-status>checking</span>
+              </div>
+              <div data-backend-row="reconnect">
+                <span class="row-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M20 11a8 8 0 0 0-13.5-5.8L4 8"></path>
+                    <path d="M4 4v4h4"></path>
+                    <path d="M4 13a8 8 0 0 0 13.5 5.8L20 16"></path>
+                    <path d="M20 20v-4h-4"></path>
+                  </svg>
+                </span>
+                <strong>Auto-reconnect</strong>
+                <span class="row-state" data-backend-reconnect-status>ready</span>
+              </div>
+              <div data-backend-row="container">
+                <span class="row-icon muted" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"></path>
+                    <path d="m4 7.5 8 4.5 8-4.5"></path>
+                    <path d="M12 12v9"></path>
+                  </svg>
+                </span>
+                <strong>Docker / Podman</strong>
+                <span class="row-state muted" data-backend-container-status>optional</span>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <form class="pairing-surface" data-runner-form aria-label="Pair this machine">
+          <div class="pairing-copy">
+            <p class="eyebrow">Pairing</p>
+            <h2>Connect this machine</h2>
+            <p>Paste the one-time code from Hub. Pairing token is stored in Keychain.</p>
+            <div class="button-row pairing-actions">
+              <button type="button" data-open-hub data-hub-target="setup">Open Hub pairing</button>
+              <button type="button" class="button-secondary" data-pair-runner>Pair with Hub</button>
+            </div>
           </div>
-          <div class="button-row">
-            <button type="button" data-start-runner>Start listening</button>
-            <button type="button" data-stop-runner disabled>Stop</button>
+          <div class="pairing-fields">
+            <div class="pairing-inputs">
+              <label>
+                <span>Hub URL</span>
+                <input name="apiUrl" type="url" value="https://api.infergrade.com" autocomplete="url" />
+              </label>
+              <label>
+                <span>Pairing code</span>
+                <input name="pairCode" type="text" autocomplete="off" placeholder="Paste the one-time code from Hub" />
+              </label>
+              <label>
+                <span>Runner label</span>
+                <input name="runnerLabel" type="text" autocomplete="organization-title" placeholder="This computer" />
+              </label>
+            </div>
+            <div class="pairing-notes">
+              <p class="hint" data-pair-state>Click Pair Local Runner in the Hub, then paste the one-time code here.</p>
+              <p class="hint" data-token-state>Pairing stores the runner token in the OS credential store. Tokens are not shown in this browser UI.</p>
+            </div>
           </div>
         </form>
 
-        <section class="panel primary-workflow">
-          <div class="panel-heading compact-heading">
-            <div>
-              <p class="eyebrow">Steps 2 and 3</p>
-              <h2>Install runtime and choose a model</h2>
-              <p class="hint">Use the recommended llama.cpp runtime and a local GGUF file for the first benchmark.</p>
-            </div>
+        <section class="listener-surface" data-listener-surface aria-live="polite">
+          <div class="listener-status-mark" data-listener-status-mark aria-hidden="true">
+            <span></span>
           </div>
-          <p>
-            The Hub owns account and token state. This app keeps the local runtime, model file, and listener on your Mac.
-          </p>
-          <div class="button-row primary-actions">
-            <button type="button" data-runtime-install-managed>Install recommended runtime</button>
-            <button type="button" class="button-secondary" data-download-starter-gguf>Download starter model</button>
+          <div class="listener-copy">
+            <p class="eyebrow">Hub listener</p>
+            <h2 data-listener-title>Listening paused</h2>
+            <p data-listener-message>Start listening to accept Hub-assigned work on this machine.</p>
           </div>
-          <div class="first-run-panel" aria-label="Native first-run benchmark">
-            <h3>Run first local benchmark</h3>
-            <p class="hint compact-hint">
-              Start from a Hub run handoff when available. For a local smoke test, download the starter model and run a short native benchmark.
-            </p>
-            <label>
-              <span>Model path</span>
-              <input
-                name="firstRunModelPath"
-                type="text"
-                autocomplete="off"
-                placeholder="/path/to/model.gguf"
-              />
-            </label>
-            <details class="advanced-token-panel runtime-advanced-panel">
-              <summary>Advanced runtime path</summary>
-              <label>
-                <span>llama-cli path</span>
-                <input
-                  name="firstRunRuntimePath"
-                  type="text"
-                  autocomplete="off"
-                  placeholder="Leave blank to use the selected llama.cpp runtime"
-                />
-              </label>
-            </details>
-            <details class="advanced-token-panel runtime-advanced-panel">
-              <summary>Hub run handoff</summary>
-              <p class="hint" data-first-run-handoff-status>
-                If Hub opened Desktop with a run handoff, this fills automatically.
-              </p>
-              <label>
-                <span>Run ID</span>
-                <input
-                  name="firstRunUploadRunId"
-                  type="text"
-                  autocomplete="off"
-                  placeholder="Run ID from Hub"
-                />
-              </label>
-              <label>
-                <span>Worker ID</span>
-                <input
-                  name="firstRunUploadWorkerId"
-                  type="text"
-                  autocomplete="off"
-                  placeholder="Leave blank to use this paired runner"
-                />
-              </label>
-              <p class="hint">
-                The app reads the saved runner token from secure storage. Tokens are not shown in this browser UI.
-              </p>
-            </details>
-            <div class="button-row">
-              <button type="button" data-first-run-start>Run native first benchmark</button>
-              <button type="button" class="button-secondary" data-first-run-again disabled>Run again</button>
-              <button type="button" class="button-secondary" data-first-run-another-model disabled>Run another model</button>
-            </div>
-            <p class="hint" data-first-run-status>Choose a model and selected llama.cpp runtime before running.</p>
+          <div class="listener-actions">
+            <button type="button" data-start-runner>Start listening</button>
+            <button type="button" class="button-secondary" data-stop-runner disabled>Stop listening</button>
+            <button type="button" class="button-secondary" data-reset-pairing>Unpair</button>
           </div>
-          <div class="first-run-checklist" aria-label="First-run progress">
-            <h3>Setup progress</h3>
-            <div class="flow-list">
-              <div data-first-run-step="paired">
-                <strong>Paired with Hub</strong>
-                <span>Paste a Hub pairing code to save this machine.</span>
-              </div>
-              <div data-first-run-step="runtime">
-                <strong>Runtime selected</strong>
-                <span>Select or install a local llama.cpp runtime.</span>
-              </div>
-              <div data-first-run-step="model">
-                <strong>Model selected</strong>
-                <span>Select a local GGUF model.</span>
-              </div>
-              <div data-first-run-step="ready">
-                <strong>First-run ready</strong>
-                <span>Pairing, runtime, and model are required before running.</span>
-              </div>
-              <div data-first-run-step="result">
-                <strong>Result ready</strong>
-                <span>Local evidence is ready for Hub upload or support review.</span>
-              </div>
-            </div>
-          </div>
-          <details class="advanced-token-panel runtime-advanced-panel">
-            <summary>Advanced runtime version</summary>
-            <label>
-              <span>Managed runtime ID</span>
-              <input
-                name="runtimeId"
-                type="text"
-                autocomplete="off"
-                placeholder="llama-cpp-homebrew-stable-2026-04"
-              />
-            </label>
-            <p class="hint">
-              Leave blank for the Runner-pinned default. Use a specific ID only when a Hub or support note asks
-              for a newer compatibility lane.
-            </p>
-          </details>
-          <details class="advanced-token-panel runtime-advanced-panel">
-            <summary>Advanced runtime actions</summary>
-            <div class="button-row compact-actions">
-            <button type="button" data-runtime-reinstall-managed>Replace selection with managed runtime</button>
-            <button type="button" data-runtime-remove-selected>Remove selected runtime</button>
-            <button type="button" data-runtime-plan>Inspect plan</button>
-            <button type="button" data-runtime-select-existing>Select installed</button>
-              <button type="button" class="button-secondary" data-retry-first-run-upload disabled>Retry upload</button>
-              <button type="button" class="button-secondary" data-copy-artifact-path disabled>Copy artifact path</button>
-              <button type="button" class="button-secondary" data-copy-support-summary>Copy support summary</button>
-            </div>
-          </details>
-          <details class="readiness-checklist" aria-label="Local diagnostics">
-            <summary>Diagnostics</summary>
-            <div class="status-list">
-              <div>
-                <strong>Native benchmark suite</strong>
-                <span data-native-suite-status>Native first-run can run with a local GGUF model and selected llama.cpp runtime. Docker is optional for advanced sandboxed benchmarks.</span>
-              </div>
-              <div>
-                <strong>Hub connection</strong>
-                <span data-hub-connection-status>Hosted Hub: https://api.infergrade.com</span>
-              </div>
-              <div>
-                <strong>Pairing</strong>
-                <span data-pairing-readiness-status>Paste a Hub pairing code to save this machine.</span>
-              </div>
-              <div>
-                <strong>Runner core</strong>
-                <span data-runtime-runner-version>Checking bundled Runner version...</span>
-                <div class="button-row compact-actions">
-                  <button type="button" class="button-secondary compact-button" data-runner-self-test>Run startup self-test</button>
-                </div>
-              </div>
-              <div>
-                <strong>llama.cpp runtime</strong>
-                <span data-runtime-llama-status>Inspect the plan before running local llama.cpp jobs.</span>
-              </div>
-              <div>
-                <strong>Docker / Podman</strong>
-                <span data-container-runtime-status>Checking optional sandboxed benchmark support...</span>
-              </div>
-              <div>
-                <strong>Model path</strong>
-                <span data-model-path-status>Select a local GGUF model for the first benchmark.</span>
-              </div>
-            </div>
-          </details>
-          <details class="advanced-token-panel">
-            <summary>Update and platform status</summary>
-            <div class="status-list">
-              <div>
-                <strong>Updates</strong>
-                <span data-update-status>Ready when signed release artifacts are published.</span>
-              </div>
-              <div data-update-actions hidden>
-                <strong data-update-available>Update available</strong>
-                <span data-update-detail>Ready to download.</span>
-                <div class="button-row compact-actions">
-                  <button type="button" data-install-update>Install update</button>
-                  <button type="button" data-relaunch-update disabled>Relaunch</button>
-                </div>
-              </div>
-              <div>
-                <strong>macOS</strong>
-                <span>Apple Silicon downloads are published after signing and notarization checks pass.</span>
-              </div>
-              <div>
-                <strong>Windows/Linux</strong>
-                <span>Unsigned package smoke artifacts are built in CI; signed installers are not public yet.</span>
-              </div>
-            </div>
-          </details>
         </section>
-      </section>
 
-      <section class="panel log-panel" aria-labelledby="log-title">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow">Runtime output</p>
-            <h2 id="log-title">Logs</h2>
+        <section class="assignment-panel" data-assignment-panel data-state="idle" aria-live="polite">
+          <div class="assignment-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path d="M24 6 39 14.5v18L24 42 9 32.5v-18L24 6Z" fill="none" stroke="currentColor" stroke-width="2.5" />
+              <path d="m16 19 8 4.5 8-4.5M24 23.5V34" fill="none" stroke="currentColor" stroke-width="2.5" />
+            </svg>
           </div>
-          <button type="button" data-clear-logs>Clear logs</button>
-        </div>
-        <pre data-log-output>Waiting for Runner output...</pre>
+          <div class="assignment-copy">
+            <p class="eyebrow" data-assignment-kicker>Assigned by Hub</p>
+            <h3 data-assignment-title>No Hub assignment</h3>
+            <p data-assignment-description>Hub will send work here when a run is queued for this machine.</p>
+            <div class="progress-wrap" data-assignment-progress-wrap hidden>
+              <div class="progress-meta">
+                <span data-assignment-phase>Preparing</span>
+                <span data-assignment-time>Elapsed 0:00</span>
+              </div>
+              <div class="progress-bar" aria-hidden="true">
+                <span data-assignment-progress-bar style="width: 0%"></span>
+              </div>
+              <p class="hint compact-hint" data-assignment-check hidden></p>
+            </div>
+          </div>
+          <div class="assignment-actions">
+            <button type="button" class="button-secondary" data-open-hub data-hub-target="assignment">Open in Hub</button>
+            <button type="button" class="button-secondary" data-view-logs>View logs</button>
+          </div>
+        </section>
+
+        <details class="support-drawer" data-support-details>
+          <summary class="drawer-toggle">
+            <span class="drawer-title">
+              <span class="drawer-chevron" aria-hidden="true"></span>
+              <span>
+                <strong data-drawer-label>Details and support</strong>
+                <small>Pairing, runtime, logs, and support</small>
+              </span>
+            </span>
+            <span class="drawer-summary-meta">
+              <span data-update-channel>Current release</span>
+              <span data-last-check-label>Last check pending</span>
+            </span>
+          </summary>
+
+          <div class="drawer-body">
+          <div class="drawer-grid">
+            <section class="drawer-panel" aria-labelledby="connection-title">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Connection</p>
+                  <h3 id="connection-title">Pairing and listener</h3>
+                </div>
+              </div>
+              <div class="status-list">
+                <div>
+                  <strong>Hub connection</strong>
+                  <span data-hub-connection-status>Hosted Hub: https://api.infergrade.com</span>
+                </div>
+                <div>
+                  <strong>Pairing</strong>
+                  <span data-pairing-readiness-status>Paste a Hub pairing code to save this machine.</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="drawer-panel" aria-labelledby="runtime-title">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Runtime</p>
+                  <h3 id="runtime-title">llama.cpp readiness</h3>
+                </div>
+              </div>
+              <div class="status-list">
+                <div>
+                  <strong>Runner core</strong>
+                  <span data-runtime-runner-version>Checking bundled Runner version...</span>
+                </div>
+                <div>
+                  <strong>llama.cpp runtime</strong>
+                  <span data-runtime-llama-status>Inspect the plan before running local llama.cpp jobs.</span>
+                </div>
+                <div>
+                  <strong>Docker / Podman</strong>
+                  <span data-container-runtime-status>Checking optional sandboxed benchmark support...</span>
+                </div>
+                <div>
+                  <strong>Cached models</strong>
+                  <span data-model-cache-status>Checking local model cache...</span>
+                  <ul class="cache-list" data-model-cache-list aria-label="Cached model artifacts"></ul>
+                  <div class="button-row compact-actions">
+                    <button type="button" class="button-secondary" data-refresh-model-cache>Refresh cache</button>
+                    <button type="button" class="button-secondary" data-clear-model-cache>Clear cached models</button>
+                  </div>
+                </div>
+              </div>
+              <details class="inline-tools" data-runtime-tools>
+                <summary class="inline-disclosure">
+                  <span>
+                    <strong>Runtime options</strong>
+                    <small>Managed runtime, custom binary, and startup self-test</small>
+                  </span>
+                  <span class="mini-chevron" aria-hidden="true"></span>
+                </summary>
+                <div class="inline-tools-body">
+                  <label>
+                    <span>Managed runtime ID</span>
+                    <input name="runtimeId" type="text" autocomplete="off" placeholder="Use Runner-pinned default" />
+                  </label>
+                  <div class="button-row compact-actions">
+                    <button type="button" data-runtime-install-managed>Use managed runtime</button>
+                    <button type="button" class="button-secondary" data-runtime-select-existing>Select existing llama.cpp</button>
+                    <button type="button" class="button-secondary" data-runtime-plan>Inspect plan</button>
+                    <button type="button" class="button-secondary" data-runtime-reinstall-managed>Replace with managed</button>
+                    <button type="button" class="button-secondary" data-runtime-remove-selected>Remove selected runtime</button>
+                    <button type="button" class="button-secondary" data-runner-self-test>Run startup self-test</button>
+                  </div>
+                </div>
+              </details>
+            </section>
+
+            <section class="drawer-panel" aria-labelledby="support-title">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Support</p>
+                  <h3 id="support-title">Logs, updates, and export</h3>
+                </div>
+                <button type="button" class="button-secondary compact-button" data-copy-support-summary>Copy support summary</button>
+              </div>
+              <div class="status-list">
+                <div>
+                  <strong>Updates</strong>
+                  <span data-update-status>Ready when signed release artifacts are published.</span>
+                </div>
+                <div data-update-actions hidden>
+                  <strong data-update-available>Update available</strong>
+                  <span data-update-detail>Ready to download.</span>
+                  <div class="button-row compact-actions">
+                    <button type="button" data-install-update>Install update</button>
+                    <button type="button" data-relaunch-update disabled>Relaunch</button>
+                  </div>
+                </div>
+                <div>
+                  <strong>Runner CLI</strong>
+                  <span data-runner-cli-version>Runner CLI: checking...</span>
+                </div>
+                <div>
+                  <strong>macOS</strong>
+                  <span>Apple Silicon downloads are published after signing and notarization checks pass.</span>
+                </div>
+                <div>
+                  <strong>Windows/Linux</strong>
+                  <span>Unsigned package smoke artifacts are built in CI; signed installers are not public yet.</span>
+                </div>
+              </div>
+              <div class="button-row compact-actions">
+                <button type="button" class="button-secondary" data-check-update>Check for updates</button>
+              </div>
+              <details class="inline-tools log-disclosure">
+                <summary class="inline-disclosure">
+                  <span>
+                    <strong id="log-title">Logs</strong>
+                    <small>Listener output and support detail</small>
+                  </span>
+                  <span class="mini-chevron" aria-hidden="true"></span>
+                </summary>
+                <div class="inline-tools-body log-panel">
+                  <pre data-log-output>Waiting for Runner output...</pre>
+                  <div class="button-row compact-actions">
+                    <button type="button" class="button-secondary" data-clear-logs>Clear logs</button>
+                  </div>
+                </div>
+              </details>
+            </section>
+          </div>
+          </div>
+        </details>
       </section>
     </main>
     <script type="module" src="/src/main.js"></script>

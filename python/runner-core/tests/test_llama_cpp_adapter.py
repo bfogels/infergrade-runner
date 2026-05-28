@@ -177,6 +177,30 @@ class LlamaCppAdapterTests(unittest.TestCase):
 
     @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_resolve_version_uses_version_line_from_noisy_native_output(self, run_mock, which_mock):
+        which_mock.return_value = "/opt/homebrew/bin/llama-cli"
+        run_mock.return_value = mock.Mock(
+            returncode=0,
+            stdout=(
+                "ggml_metal_device_init: tensor API disabled for pre-M5 and pre-A19 devices\n"
+                "load_backend: loaded BLAS backend from /opt/homebrew/lib/libggml-blas.so\n"
+                "version: 9050 (3980e04d5)\n"
+            ),
+            stderr="",
+        )
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+        )
+        version = adapter.resolve_version(simulate=False, request=request)
+        self.assertEqual(version, "version: 9050 (3980e04d5)")
+
+    @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
     def test_resolve_version_uses_native_binary_for_local_native(self, run_mock, which_mock):
         which_mock.return_value = "/opt/homebrew/bin/llama-cli"
         run_mock.return_value = mock.Mock(returncode=0, stdout="version: native-test\n", stderr="")

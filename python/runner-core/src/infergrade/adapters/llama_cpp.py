@@ -79,6 +79,20 @@ def _decode_utf8_lossy(value) -> str:
     return value.decode("utf-8", errors="replace")
 
 
+def _llama_cpp_version_label(output: str) -> Optional[str]:
+    """Extract the stable version line from noisy llama.cpp startup output."""
+    lines = [line.strip() for line in str(output or "").splitlines() if line.strip()]
+    if not lines:
+        return None
+    for line in lines:
+        if line.lower().startswith("version:"):
+            return line
+    first = lines[0]
+    if first.lower().startswith(("ggml_", "llama_", "load_backend")):
+        return None
+    return first
+
+
 class LlamaCppAdapter(BaseAdapter):
     backend_name = "llama.cpp"
 
@@ -128,7 +142,7 @@ class LlamaCppAdapter(BaseAdapter):
                     % (self._native_command_path(request), message or "unknown error")
                 )
             output = (stdout or stderr or "").strip()
-            return output.splitlines()[0] if output else self._native_command_path(request)
+            return _llama_cpp_version_label(output) or self._native_command_path(request)
         self._ensure_docker()
         install_image(self._image_name(request))
         command = ["docker", "run", "--rm", "--entrypoint", _DEFAULT_COMMAND, self._image_name(request), "--version"]
@@ -142,7 +156,7 @@ class LlamaCppAdapter(BaseAdapter):
                 % (self._image_name(request), message or "unknown error")
             )
         output = (stdout or stderr or "").strip()
-        return output.splitlines()[0] if output else self._image_name(request)
+        return _llama_cpp_version_label(output) or self._image_name(request)
 
     def run_deployment_profile(
         self,

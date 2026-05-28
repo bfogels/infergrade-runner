@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -7,20 +8,67 @@ from urllib import error as urllib_error
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.worker import _claim_error_message, _classify_worker_failure, _progress_percent, run_worker_loop, run_worker_once
+from infergrade.worker import _claim_error_message, _classify_worker_failure, _emit_desktop_event, _progress_detail, _progress_percent, _runtime_progress_update, run_worker_loop, run_worker_once
+
+DESKTOP_EVENT_PREFIX = "INFERGRADE_DESKTOP_EVENT "
 
 
 class WorkerTests(unittest.TestCase):
     def test_worker_once_returns_unclaimed_when_no_job_available(self):
+        messages = []
         with mock.patch("infergrade.worker.claim_run_job", return_value={"run": None}):
             result = run_worker_once(
                 api_url="http://localhost:8000",
                 execution_mode="local_container",
                 worker_id="worker-1",
-                emit_progress=lambda _message: None,
+                emit_progress=messages.append,
             )
         self.assertFalse(result["claimed"])
         self.assertEqual(result["worker_id"], "worker-1")
+        self.assertEqual([message for message in messages if message.startswith(DESKTOP_EVENT_PREFIX)], [])
+
+    def test_worker_once_emits_desktop_idle_event_when_enabled(self):
+        messages = []
+        with mock.patch.dict("os.environ", {"INFERGRADE_DESKTOP_EVENTS": "1"}, clear=False):
+            with mock.patch("infergrade.worker.claim_run_job", return_value={"run": None}):
+                result = run_worker_once(
+                    api_url="http://localhost:8000",
+                    execution_mode="local_container",
+                    worker_id="worker-1",
+                    emit_progress=messages.append,
+                )
+
+        self.assertFalse(result["claimed"])
+        structured = [
+            json.loads(message[len(DESKTOP_EVENT_PREFIX) :])
+            for message in messages
+            if message.startswith(DESKTOP_EVENT_PREFIX)
+        ]
+        self.assertEqual(structured, [{"type": "assignment_idle"}])
+
+    def test_desktop_structured_events_redact_token_shaped_values(self):
+        messages = []
+        with mock.patch.dict("os.environ", {"INFERGRADE_DESKTOP_EVENTS": "1"}, clear=False):
+            _emit_desktop_event(
+                messages.append,
+                "assignment_update",
+                phase="Needs attention",
+                description="Bearer qbhr_secret failed for igrt_run_token and pairing code IGRP-8421",
+                check_name="signed https://example.test/private?token=secret",
+                nested={"api_token": "qbhr_nested_secret", "safe": ["keep", "igrp_pair_secret"]},
+            )
+
+        self.assertEqual(len(messages), 1)
+        event = json.loads(messages[0][len(DESKTOP_EVENT_PREFIX) :])
+        encoded = json.dumps(event)
+        self.assertNotIn("qbhr_secret", encoded)
+        self.assertNotIn("igrt_run_token", encoded)
+        self.assertNotIn("IGRP-8421", encoded)
+        self.assertNotIn("qbhr_nested_secret", encoded)
+        self.assertNotIn("igrp_pair_secret", encoded)
+        self.assertIn("Bearer [redacted]", event["description"])
+        self.assertEqual(event["nested"]["api_token"], "[redacted]")
+        self.assertEqual(event["nested"]["safe"][1], "igrp_[redacted]")
 
     def test_worker_once_passes_run_id_filter_when_provided(self):
         with mock.patch("infergrade.worker.claim_run_job", return_value={"run": None}) as claim_mock:
@@ -98,9 +146,11 @@ class WorkerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as output_root:
             expected_output_dir = os.path.join(os.path.realpath(output_root), "run_example")
+            messages = []
             env = {
                 "INFERGRADE_HOST_ARTIFACT_CACHE_DIR": "/host/cache",
                 "INFERGRADE_RUNNER_OUTPUT_ROOT": output_root,
+                "INFERGRADE_DESKTOP_EVENTS": "1",
             }
             with mock.patch.dict("os.environ", env, clear=False):
                 with mock.patch("infergrade.worker.claim_run_job", return_value={"run": claimed_run}) as claim_mock:
@@ -130,6 +180,7 @@ class WorkerTests(unittest.TestCase):
                                                         api_url="http://localhost:8000",
                                                         execution_mode="local_container",
                                                         worker_id="worker-1",
+                                                        emit_progress=messages.append,
                                                     )
 
         self.assertTrue(result["claimed"])
@@ -157,6 +208,23 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(fake_request.output_dir, expected_output_dir)
         self.assertEqual(fake_request.quant_artifact_cache_dir, "/host/cache")
         self.assertTrue(fake_request.resume)
+        structured = [
+            json.loads(message[len(DESKTOP_EVENT_PREFIX) :])
+            for message in messages
+            if message.startswith(DESKTOP_EVENT_PREFIX)
+        ]
+        self.assertEqual(
+            [event["phase"] for event in structured if event["type"] == "assignment_update"],
+            ["Preparing", "Preparing", "Preparing", "Running", "Uploading", "Complete"],
+        )
+        self.assertTrue(all(event["run_id"] == "run_example" for event in structured if event["type"] == "assignment_update"))
+        self.assertTrue(
+            any(
+                event.get("check_name") == "interactive_chat_v1"
+                for event in structured
+                if event["type"] == "assignment_update" and event["phase"] == "Running"
+            )
+        )
 
     def test_worker_rehomes_absolute_claim_output_dir_by_default(self):
         with tempfile.TemporaryDirectory() as output_root:
@@ -413,16 +481,26 @@ class WorkerTests(unittest.TestCase):
     def test_progress_percent_uses_capability_case_progress(self):
         payload = {
             "current_stage": "capability",
+            "current_detail": "multi_turn_chat_memory_v1",
             "capability_benchmarks": {
-                "evalplus_humaneval": {
+                "multi_turn_chat_memory_v1": {
                     "status": "running",
-                    "completed_cases": 82,
-                    "total_cases": 164,
+                    "display_name": "Multi-turn chat memory",
+                    "completed_cases": 5,
+                    "total_cases": 5,
+                    "progress_detail": "5/5",
                 }
             },
         }
         self.assertGreater(_progress_percent(payload), 52.0)
         self.assertLess(_progress_percent(payload), 60.1)
+        self.assertEqual(_progress_detail(payload), "Multi-turn chat memory 5/5")
+        with mock.patch("infergrade.worker.load_progress", return_value=payload):
+            stage, hub_detail, desktop_detail, progress_percent = _runtime_progress_update("runs/run_example")
+        self.assertEqual(stage, "capability")
+        self.assertEqual(hub_detail, "multi_turn_chat_memory_v1")
+        self.assertEqual(desktop_detail, "Multi-turn chat memory 5/5")
+        self.assertGreater(progress_percent, 52.0)
 
     def test_progress_percent_uses_deployment_iteration_progress(self):
         payload = {

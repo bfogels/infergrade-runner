@@ -1,0 +1,123 @@
+{
+  "runtime_selector_version": "0.3",
+  "runtime_family": "llama.cpp",
+  "platform": {
+    "system": "windows",
+    "arch": "x86_64",
+    "version": "11"
+  },
+  "accelerator": {
+    "vendor": "nvidia",
+    "api": "cuda",
+    "model": "NVIDIA RTX 4090",
+    "vram_bytes": 25757220864,
+    "compute_capability": "8.9"
+  },
+  "delivery": {
+    "mode": "user_selected",
+    "binary_set": "llama_cpp_windows_cuda_x86_64",
+    "source": "run_config",
+    "selected_by": "run_config",
+    "runtime_delivery_gate": {
+      "status": "blocked",
+      "mode": "user_selected_only",
+      "managed_download_available": false,
+      "pinned_manifest_available": true,
+      "checksum_verification_available": true,
+      "candidate_release": {
+        "project": "ggml-org/llama.cpp",
+        "tag": "b9371",
+        "selected_at": "2026-05-28"
+      },
+      "candidate_artifacts": [
+        {
+          "name": "llama-b9371-bin-win-cuda-12.4-x64.zip",
+          "role": "runtime_archive",
+          "sha256": "762585777eb39884848ce410f62140f79d21305203fe948ca57f54ec89dc2255",
+          "required": true
+        },
+        {
+          "name": "cudart-llama-bin-win-cuda-12.4-x64.zip",
+          "role": "cuda_runtime_companion",
+          "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+          "required": false
+        }
+      ],
+      "candidate_review": {
+        "status": "blocked",
+        "status_reason": "artifact_metadata_recorded_but_candidate_not_reviewed",
+        "checks": [
+          {
+            "id": "upstream_release_recorded",
+            "status": "recorded",
+            "evidence": "ggml-org/llama.cpp release tag and asset URLs are recorded in the runtime manifest."
+          },
+          {
+            "id": "asset_sha256_digests_pinned",
+            "status": "recorded",
+            "evidence": "GitHub release-asset SHA-256 digests are recorded for the runtime archive and companion cudart archive."
+          },
+          {
+            "id": "archive_contents_inspected",
+            "status": "pending",
+            "evidence": "Archive contents have not been inspected for expected binaries and unexpected payloads."
+          },
+          {
+            "id": "license_and_runtime_dll_distribution_reviewed",
+            "status": "pending",
+            "evidence": "License terms and CUDA runtime DLL redistribution boundaries have not been reviewed."
+          }
+        ]
+      },
+      "reason_codes": ["candidate_runtime_not_validated", "candidate_review_not_complete", "managed_download_not_enabled"],
+      "required_step": "validate_candidate_cuda_runtime_on_windows"
+    }
+  },
+  "binary": {
+    "path": null,
+    "version_output": null,
+    "checksum_verified": false,
+    "signature_verified": false,
+    "fingerprint": {
+      "path_present": false,
+      "status": "missing_path",
+      "size_bytes": null,
+      "sha256": null
+    }
+  },
+  "driver": {
+    "version": "555.85",
+    "minimum_required": "525.0",
+    "cuda_major": "12"
+  },
+  "compatibility": {
+    "status": "blocked",
+    "reason_codes": ["fallback_not_allowed", "full_loop_not_proven", "runtime_binary_missing"],
+    "probes": [
+      {
+        "id": "nvidia_smi",
+        "status": "passed",
+        "observed": "driver 555.85"
+      },
+      {
+        "id": "cuda_version",
+        "status": "passed",
+        "observed": "12.5"
+      },
+      {
+        "id": "full_loop_beta_gate",
+        "status": "failed",
+        "detail": "Windows/NVIDIA remains blocked until hardware proves one full Hub to Runner to upload loop."
+      }
+    ]
+  },
+  "support": {
+    "tier": "preview",
+    "claim_boundary": "Windows/NVIDIA CUDA path detected for preflight only; evidence-producing technical beta requires full-loop proof."
+  },
+  "fallback": {
+    "allowed": false,
+    "mode": null,
+    "reason": "CUDA requests must not silently upload CPU evidence."
+  }
+}
