@@ -9,6 +9,17 @@ InferGrade may proceed toward a Windows/NVIDIA technical beta only after one rea
 - Target runtime family: `llama.cpp`.
 - Target binary set: `llama_cpp_windows_cuda_x86_64`.
 - Current delivery mode: explicit user selection of an existing CUDA-capable `llama.cpp` binary.
+- Candidate managed runtime artifact: `ggml-org/llama.cpp` release `b9371`,
+  `llama-b9371-bin-win-cuda-12.4-x64.zip`, SHA-256
+  `762585777eb39884848ce410f62140f79d21305203fe948ca57f54ec89dc2255`,
+  selected from GitHub release asset metadata on 2026-05-28. The matching
+  `cudart-llama-bin-win-cuda-12.4-x64.zip` runtime-DLL package is recorded as a
+  host-dependent companion artifact with SHA-256
+  `8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6`.
+- This candidate is pinned for review only. It is not downloaded by InferGrade,
+  not exposed as a managed install lane, and not a support promise until archive
+  contents, licensing/runtime-DLL distribution, Windows hardware smoke, Hub
+  upload, Result review, and support export all pass.
 - A selected Windows CUDA preview runtime must record `binary_set`,
   `support_tier: preview`, checksum status, bounded binary fingerprints, and
   the preview claim boundary in `selected_runtime.json`.
@@ -63,9 +74,9 @@ Runner CUDA preflight captures bounded, support-safe fields:
 
 `artifact_download_failed`: The GGUF artifact could not be downloaded or verified. Retry the download or use a local artifact path.
 
-`managed_runtime_not_pinned`: InferGrade has not pinned a Windows CUDA managed runtime artifact. Keep the path user-selected preview only.
+`candidate_runtime_not_validated`: InferGrade has a pinned Windows CUDA runtime candidate, but it has not passed archive inspection, Windows hardware smoke, Hub upload, Result review, and support export.
 
-`checksum_manifest_missing`: No checksum manifest exists for a managed Windows CUDA runtime artifact. Do not enable managed download or checksum-verified claims.
+`managed_download_not_enabled`: A candidate checksum exists, but InferGrade must not download or select it as a managed runtime until the validation gate passes.
 
 `fallback_not_allowed`: A requested CUDA run must not silently execute as CPU evidence. Choose CPU explicitly if that is the intended recovery path.
 

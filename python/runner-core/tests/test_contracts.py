@@ -113,8 +113,10 @@ class ContractExportTests(unittest.TestCase):
         self.assertIn({"id": "cuda_version", "status": "passed", "observed": "12.5"}, cuda_example["compatibility"]["probes"])
         self.assertEqual("preview", cuda_example["support"]["tier"])
         self.assertEqual("blocked", cuda_example["delivery"]["runtime_delivery_gate"]["status"])
+        self.assertTrue(cuda_example["delivery"]["runtime_delivery_gate"]["pinned_manifest_available"])
+        self.assertTrue(cuda_example["delivery"]["runtime_delivery_gate"]["checksum_verification_available"])
         self.assertIn(
-            "managed_runtime_not_pinned",
+            "candidate_runtime_not_validated",
             cuda_example["delivery"]["runtime_delivery_gate"]["reason_codes"],
         )
         self.assertFalse(cuda_example["fallback"]["allowed"])

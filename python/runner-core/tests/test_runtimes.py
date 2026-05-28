@@ -37,13 +37,25 @@ class RuntimeManagementTests(unittest.TestCase):
     def test_runtime_manifest_lists_windows_cuda_preview_without_managed_download(self):
         runtimes = {item["runtime_id"]: item for item in known_llama_cpp_runtimes()}
         preview = runtimes["llama-cpp-windows-cuda-cli-preview-2026-05"]
+        candidate = preview["candidate_manifest"]
 
         self.assertEqual(preview["source"], "user_selected")
         self.assertEqual(preview["binary_set"], "llama_cpp_windows_cuda_x86_64")
         self.assertEqual(preview["support_tier"], "preview")
         self.assertEqual(preview["install_command"], [])
         self.assertIsNone(preview["checksum"])
-        self.assertIn("No CUDA binary is downloaded", " ".join(preview["notes"]))
+        self.assertEqual(candidate["status"], "candidate_pinned_not_validated")
+        self.assertEqual(candidate["upstream"]["tag"], "b9371")
+        self.assertEqual(candidate["platform"]["cuda_runtime"], "12.4")
+        self.assertEqual(candidate["artifacts"][0]["role"], "llama_cpp_binaries")
+        self.assertEqual(
+            candidate["artifacts"][0]["sha256"],
+            "762585777eb39884848ce410f62140f79d21305203fe948ca57f54ec89dc2255",
+        )
+        self.assertEqual(candidate["artifacts"][1]["role"], "cuda_runtime_dlls")
+        self.assertFalse(candidate["managed_download_enabled"])
+        self.assertIn("run_known_good_gguf", candidate["validation_required"])
+        self.assertIn("managed download remains disabled", " ".join(preview["notes"]))
 
     def test_install_runtime_without_execute_returns_plan_only(self):
         plan = install_llama_cpp_runtime(execute=False)
