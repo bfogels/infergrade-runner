@@ -132,13 +132,22 @@ def _cuda_support_summary(preflight: Dict[str, Any]) -> Dict[str, Any]:
 
 def _cuda_support_proof_gate(proof_gate: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     proof_gate = dict(proof_gate or {})
+    required_steps = [
+        item
+        for item in list(proof_gate.get("required_steps") or [])
+        if isinstance(item, dict) and item.get("id")
+    ]
     return {
         "status": proof_gate.get("status") or "blocked",
         "reason_code": proof_gate.get("reason_code") or "full_loop_not_proven",
-        "required_step_ids": [
-            item.get("id")
-            for item in list(proof_gate.get("required_steps") or [])
-            if isinstance(item, dict) and item.get("id")
+        "required_step_ids": [item.get("id") for item in required_steps],
+        "required_steps": [
+            {
+                "id": item.get("id"),
+                "label": item.get("label"),
+                "evidence": item.get("evidence"),
+            }
+            for item in required_steps
         ],
     }
 

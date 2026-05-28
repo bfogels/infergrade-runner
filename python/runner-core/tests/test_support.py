@@ -152,12 +152,36 @@ class SupportExportTests(unittest.TestCase):
                     "status": "blocked",
                     "reason_code": "full_loop_not_proven",
                     "required_steps": [
-                        {"id": "select_runtime"},
-                        {"id": "pair_hub_runner"},
-                        {"id": "known_good_gguf_run"},
-                        {"id": "upload_result"},
-                        {"id": "review_result"},
-                        {"id": "capture_support_export"},
+                        {
+                            "id": "select_runtime",
+                            "label": "Select CUDA-capable llama.cpp runtime",
+                            "evidence": "selected_runtime.json records the Windows CUDA binary set",
+                        },
+                        {
+                            "id": "pair_hub_runner",
+                            "label": "Pair a Windows/NVIDIA runner with Hub",
+                            "evidence": "runner label and token status are visible without secrets",
+                        },
+                        {
+                            "id": "known_good_gguf_run",
+                            "label": "Run one known-good GGUF locally",
+                            "evidence": "run directory contains manifest and benchmark artifacts",
+                        },
+                        {
+                            "id": "upload_result",
+                            "label": "Upload the result bundle to Hub",
+                            "evidence": "Hub records the CUDA runtime selector",
+                        },
+                        {
+                            "id": "review_result",
+                            "label": "Review the owner-visible Hub Result",
+                            "evidence": "Windows/NVIDIA caveats remain visible",
+                        },
+                        {
+                            "id": "capture_support_export",
+                            "label": "Capture a secret-free support export",
+                            "evidence": "support export includes CUDA preflight and no tokens",
+                        },
                     ],
                 },
             }
@@ -211,6 +235,7 @@ class SupportExportTests(unittest.TestCase):
         self.assertIn("full_loop_not_proven", payload["cuda"]["summary"]["reason_codes"])
         self.assertIn("Windows/NVIDIA machine", payload["cuda"]["summary"]["next_action"])
         self.assertEqual(payload["cuda"]["summary"]["proof_gate"]["status"], "blocked")
+        self.assertEqual(payload["cuda"]["summary"]["proof_gate"]["reason_code"], "full_loop_not_proven")
         self.assertEqual(
             payload["cuda"]["summary"]["proof_gate"]["required_step_ids"],
             [
@@ -221,6 +246,15 @@ class SupportExportTests(unittest.TestCase):
                 "review_result",
                 "capture_support_export",
             ],
+        )
+        self.assertEqual(payload["cuda"]["summary"]["proof_gate"]["required_steps"][0], {
+            "id": "select_runtime",
+            "label": "Select CUDA-capable llama.cpp runtime",
+            "evidence": "selected_runtime.json records the Windows CUDA binary set",
+        })
+        self.assertEqual(
+            payload["cuda"]["summary"]["proof_gate"]["required_steps"][-1]["id"],
+            "capture_support_export",
         )
         preflight_mock.assert_called_once_with(
             runtime_binary_path="C:\\llama.cpp\\llama-cli.exe",
