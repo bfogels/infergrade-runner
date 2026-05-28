@@ -4,10 +4,11 @@ import os
 from typing import Any, Dict, Optional
 
 from infergrade import __version__
-from infergrade.cuda import WINDOWS_CUDA_CLAIM_BOUNDARY, windows_cuda_preflight
+from infergrade.cuda import WINDOWS_CUDA_BINARY_SET, WINDOWS_CUDA_CLAIM_BOUNDARY, windows_cuda_preflight
 from infergrade.environment import capture_environment
 from infergrade.pairing import load_runner_profile, runner_profile_path
 from infergrade.progress import load_progress
+from infergrade.runtimes import selected_llama_cpp_runtime
 from infergrade.utils import read_json, utcnow_iso, write_json
 
 
@@ -51,13 +52,14 @@ def write_support_export(output_path: str, run_dir: Optional[str] = None, execut
 
 def _cuda_support_payload(execution_mode: str, environment: Dict[str, Any]) -> Dict[str, Any]:
     """Return CUDA preflight context when a support export has CUDA signals."""
-    if not _environment_suggests_cuda(environment):
+    cuda_signal_reason = _cuda_signal_reason(environment)
+    if not cuda_signal_reason:
         return {
             "included": False,
             "reason": "no_cuda_signal",
             "claim_boundary": WINDOWS_CUDA_CLAIM_BOUNDARY,
         }
-    runtime_path = os.environ.get("INFERGRADE_LLAMA_CPP_CUDA_CLI")
+    runtime_path = _cuda_runtime_binary_path()
     preflight = windows_cuda_preflight(
         runtime_binary_path=runtime_path,
         cuda_major=_cuda_major_from_environment(environment),
@@ -65,7 +67,7 @@ def _cuda_support_payload(execution_mode: str, environment: Dict[str, Any]) -> D
     )
     return {
         "included": True,
-        "reason": "nvidia_cuda_environment",
+        "reason": cuda_signal_reason,
         "execution_mode": execution_mode,
         "claim_boundary": WINDOWS_CUDA_CLAIM_BOUNDARY,
         "summary": _cuda_support_summary(preflight),
@@ -111,12 +113,34 @@ def _cuda_support_summary(preflight: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _environment_suggests_cuda(environment: Dict[str, Any]) -> bool:
-    return (
+    return bool(_cuda_signal_reason(environment))
+
+
+def _cuda_signal_reason(environment: Dict[str, Any]) -> Optional[str]:
+    if (
         environment.get("hardware_class") == "nvidia_gpu"
         or environment.get("accelerator_vendor") == "nvidia"
         or environment.get("accelerator_api") == "cuda"
-        or bool(os.environ.get("INFERGRADE_LLAMA_CPP_CUDA_CLI"))
-    )
+    ):
+        return "nvidia_cuda_environment"
+    if os.environ.get("INFERGRADE_LLAMA_CPP_CUDA_CLI"):
+        return "cuda_runtime_env_var"
+    if _selected_cuda_runtime_cli_path():
+        return "selected_cuda_runtime"
+    return None
+
+
+def _cuda_runtime_binary_path() -> Optional[str]:
+    return os.environ.get("INFERGRADE_LLAMA_CPP_CUDA_CLI") or _selected_cuda_runtime_cli_path()
+
+
+def _selected_cuda_runtime_cli_path() -> Optional[str]:
+    selection = selected_llama_cpp_runtime() or {}
+    if selection.get("binary_set") != WINDOWS_CUDA_BINARY_SET:
+        return None
+    binaries = selection.get("binaries") or {}
+    path = binaries.get("cli")
+    return str(path) if path else None
 
 
 def _cuda_major_from_environment(environment: Dict[str, Any]) -> str:
