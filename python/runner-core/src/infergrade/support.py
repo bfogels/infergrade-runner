@@ -82,6 +82,7 @@ def _cuda_support_summary(preflight: Dict[str, Any]) -> Dict[str, Any]:
     accelerator = selector.get("accelerator") or {}
     driver = selector.get("driver") or {}
     delivery = selector.get("delivery") or {}
+    delivery_gate = delivery.get("runtime_delivery_gate") or {}
     binary = selector.get("binary") or {}
     fingerprint = binary.get("fingerprint") or {}
     selected_gpu = preflight.get("selected_gpu") or {}
@@ -114,6 +115,15 @@ def _cuda_support_summary(preflight: Dict[str, Any]) -> Dict[str, Any]:
             "fingerprint_status": fingerprint.get("status"),
             "sha256": fingerprint.get("sha256"),
             "size_bytes": fingerprint.get("size_bytes"),
+            "delivery_gate": {
+                "status": delivery_gate.get("status"),
+                "mode": delivery_gate.get("mode"),
+                "managed_download_available": delivery_gate.get("managed_download_available"),
+                "pinned_manifest_available": delivery_gate.get("pinned_manifest_available"),
+                "checksum_verification_available": delivery_gate.get("checksum_verification_available"),
+                "reason_codes": list(delivery_gate.get("reason_codes") or []),
+                "required_step": delivery_gate.get("required_step"),
+            },
         },
         "next_action": preflight.get("next_action"),
         "proof_gate": _cuda_support_proof_gate(preflight.get("proof_gate")),

@@ -10,6 +10,7 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.cuda import (
     WINDOWS_CUDA_PROOF_STEPS,
+    WINDOWS_CUDA_RUNTIME_DELIVERY_GATE,
     minimum_driver_for_cuda,
     normalize_platform_snapshot,
     parse_nvidia_smi_cuda_version,
@@ -70,6 +71,7 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertEqual(selector["delivery"]["mode"], "user_selected")
         self.assertEqual(selector["delivery"]["source"], "run_config")
         self.assertEqual(selector["delivery"]["selected_by"], "run_config")
+        self.assertEqual(selector["delivery"]["runtime_delivery_gate"], WINDOWS_CUDA_RUNTIME_DELIVERY_GATE)
         self.assertEqual(selector["support"]["tier"], "preview")
         self.assertFalse(selector["fallback"]["allowed"])
         self.assertIn(
@@ -244,6 +246,8 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         selector = result["selector"]
         self.assertEqual(selector["delivery"]["mode"], "user_selected")
         self.assertEqual(selector["delivery"]["source"], "explicit_path")
+        self.assertEqual(selector["delivery"]["runtime_delivery_gate"]["status"], "blocked")
+        self.assertIn("managed_runtime_not_pinned", selector["delivery"]["runtime_delivery_gate"]["reason_codes"])
         self.assertEqual(selector["binary"]["version_output"], "llama.cpp build 1234")
         self.assertIn("full_loop_not_proven", selector["compatibility"]["reason_codes"])
         self.assertIn("fallback_not_allowed", selector["compatibility"]["reason_codes"])
