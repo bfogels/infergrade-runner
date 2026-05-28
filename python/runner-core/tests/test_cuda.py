@@ -276,6 +276,46 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertIn("fallback_not_allowed", selector["compatibility"]["reason_codes"])
         self.assertNotIn("runtime_smoke_failed", selector["compatibility"]["reason_codes"])
 
+    @mock.patch("infergrade.cuda.windows_cuda_candidate_manifest")
+    def test_runtime_delivery_gate_reflects_managed_download_candidate_flag(self, manifest_mock):
+        manifest = windows_cuda_candidate_manifest()
+        manifest["managed_download_enabled"] = True
+        manifest_mock.return_value = manifest
+
+        result = windows_cuda_preflight(
+            nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9\n",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        gate = result["selector"]["delivery"]["runtime_delivery_gate"]
+        self.assertEqual(gate["status"], "blocked")
+        self.assertEqual(gate["mode"], "managed_download")
+        self.assertTrue(gate["managed_download_available"])
+        self.assertIn("candidate_runtime_not_validated", gate["reason_codes"])
+        self.assertNotIn("managed_download_not_enabled", gate["reason_codes"])
+
+    @mock.patch("infergrade.cuda.windows_cuda_candidate_manifest")
+    def test_runtime_delivery_gate_can_be_ready_for_validated_managed_candidate(self, manifest_mock):
+        manifest = windows_cuda_candidate_manifest()
+        manifest["status"] = "validated"
+        manifest["managed_download_enabled"] = True
+        manifest_mock.return_value = manifest
+
+        result = windows_cuda_preflight(
+            nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9\n",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        gate = result["selector"]["delivery"]["runtime_delivery_gate"]
+        self.assertEqual(gate["status"], "ready")
+        self.assertEqual(gate["mode"], "managed_download")
+        self.assertTrue(gate["managed_download_available"])
+        self.assertEqual(gate["reason_codes"], [])
+        self.assertEqual(result["proof_gate"]["status"], "blocked")
+        self.assertEqual(result["proof_gate"]["reason_code"], "full_loop_not_proven")
+
     @mock.patch("infergrade.cuda.subprocess.run")
     def test_windows_cuda_preflight_records_runtime_binary_fingerprint(self, run_mock):
         run_mock.return_value = mock.Mock(returncode=0, stdout="llama.cpp build 1234\n", stderr="")
