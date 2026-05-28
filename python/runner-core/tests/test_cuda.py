@@ -333,6 +333,10 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         manifest["managed_download_enabled"] = True
         manifest["review"]["status"] = "ready"
         manifest["review"]["status_reason"] = "candidate_review_complete"
+        manifest["review"]["checks"] = [
+            dict(item, status="passed", evidence="Reviewed and passed.")
+            for item in manifest["review"]["checks"]
+        ]
         manifest_mock.return_value = manifest
 
         result = windows_cuda_preflight(

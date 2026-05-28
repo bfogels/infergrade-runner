@@ -82,15 +82,17 @@ Runner CUDA preflight captures bounded, support-safe fields:
 `candidate_runtime_not_validated`: InferGrade has a pinned Windows CUDA runtime candidate, but it has not passed archive inspection, Windows hardware smoke, Hub upload, Result review, and support export.
 
 `candidate_review_not_complete`: The candidate manifest still has review checks
-in a non-ready state, so managed download must remain blocked even if someone
-updates the candidate status or delivery flag.
+that are not `passed`, or the top-level review status is not `ready`, so managed
+download must remain blocked even if someone updates the candidate status or
+delivery flag.
 
 `managed_download_not_enabled`: A candidate checksum exists, but InferGrade must not download or select it as a managed runtime until the validation gate passes.
 
 Candidate review checks use `recorded` for bounded metadata that exists in the
 manifest, such as release tag and release-asset digests, and `pending` for work
-that has not happened yet. `recorded` is not a validation pass and must not be
-treated as permission to download or recommend the candidate.
+that has not happened yet. Only `passed` checks can contribute to a ready
+candidate review. `recorded` is not a validation pass and must not be treated as
+permission to download or recommend the candidate.
 
 `fallback_not_allowed`: A requested CUDA run must not silently execute as CPU evidence. Choose CPU explicitly if that is the intended recovery path.
 

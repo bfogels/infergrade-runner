@@ -205,11 +205,20 @@ def _runtime_delivery_gate() -> Dict[str, Any]:
     candidate = windows_cuda_candidate_manifest()
     upstream = dict(candidate.get("upstream") or {})
     review = dict(candidate.get("review") or {})
+    review_checks = [
+        item
+        for item in list(review.get("checks") or [])
+        if isinstance(item, dict) and item.get("id")
+    ]
+    review_ready = str(review.get("status") or "") == "ready" and bool(review_checks) and all(
+        str(item.get("status") or "") == "passed"
+        for item in review_checks
+    )
     managed_download_enabled = bool(candidate.get("managed_download_enabled"))
     reason_codes = []
     if str(candidate.get("status") or "") not in WINDOWS_CUDA_VALIDATED_CANDIDATE_STATUSES:
         reason_codes.append("candidate_runtime_not_validated")
-    if str(review.get("status") or "") != "ready":
+    if not review_ready:
         reason_codes.append("candidate_review_not_complete")
     if not managed_download_enabled:
         reason_codes.append("managed_download_not_enabled")
@@ -253,8 +262,7 @@ def _runtime_delivery_gate() -> Dict[str, Any]:
                 "status": item.get("status"),
                 "evidence": item.get("evidence"),
             }
-            for item in list(review.get("checks") or [])
-            if isinstance(item, dict) and item.get("id")
+            for item in review_checks
         ],
     }
     return payload
