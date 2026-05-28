@@ -37,7 +37,10 @@ For the Windows CUDA preview runtime, selection records the CUDA binary set and
 preview support tier, and it requires `llama-cli.exe`, `llama-server.exe`, and
 `llama-perplexity.exe` from the same selected runtime directory or explicit
 paths. InferGrade still does not download CUDA binaries until a pinned checksum
-exists.
+exists and the candidate review gate passes. The current candidate metadata can
+record release URLs and release-asset SHA-256 digests while archive inspection,
+license/runtime-DLL distribution review, Windows/NVIDIA smoke, Hub upload,
+Result review, and support export remain pending.
 
 The legacy Python/runner-core command keeps an execute gate:
 

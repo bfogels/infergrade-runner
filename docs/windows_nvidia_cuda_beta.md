@@ -20,6 +20,11 @@ InferGrade may proceed toward a Windows/NVIDIA technical beta only after one rea
   not exposed as a managed install lane, and not a support promise until archive
   contents, licensing/runtime-DLL distribution, Windows hardware smoke, Hub
   upload, Result review, and support export all pass.
+- The candidate manifest and `delivery.runtime_delivery_gate.candidate_review`
+  distinguish recorded metadata from completed review. The current recorded
+  checks are the upstream release and asset SHA-256 digests. Archive contents,
+  license/runtime-DLL distribution, Windows/NVIDIA smoke, known-good GGUF run,
+  Hub upload plus Result review, and secret-free support export remain pending.
 - A selected Windows CUDA preview runtime must record `binary_set`,
   `support_tier: preview`, checksum status, bounded binary fingerprints, and
   the preview claim boundary in `selected_runtime.json`.
@@ -76,7 +81,16 @@ Runner CUDA preflight captures bounded, support-safe fields:
 
 `candidate_runtime_not_validated`: InferGrade has a pinned Windows CUDA runtime candidate, but it has not passed archive inspection, Windows hardware smoke, Hub upload, Result review, and support export.
 
+`candidate_review_not_complete`: The candidate manifest still has review checks
+in a non-ready state, so managed download must remain blocked even if someone
+updates the candidate status or delivery flag.
+
 `managed_download_not_enabled`: A candidate checksum exists, but InferGrade must not download or select it as a managed runtime until the validation gate passes.
+
+Candidate review checks use `recorded` for bounded metadata that exists in the
+manifest, such as release tag and release-asset digests, and `pending` for work
+that has not happened yet. `recorded` is not a validation pass and must not be
+treated as permission to download or recommend the candidate.
 
 `fallback_not_allowed`: A requested CUDA run must not silently execute as CPU evidence. Choose CPU explicitly if that is the intended recovery path.
 
@@ -93,8 +107,8 @@ preflight selector used by doctor, including driver floor, selected binary,
 selected GPU position/count on multi-GPU hosts, fallback, and claim-boundary fields. The block also includes a compact
 `summary` with compatibility status, reason codes, GPU count, platform, driver
 floor, selected GPU, selected runtime source, binary smoke result, binary
-fingerprint status, runtime delivery gate, and next action so support triage
-does not need to parse the full runtime selector first.
+fingerprint status, runtime delivery gate, candidate review checks, and next
+action so support triage does not need to parse the full runtime selector first.
 
 The preflight payload also includes a machine-readable `proof_gate` while
 `full_loop_not_proven` is active. The required proof steps are:

@@ -31,7 +31,7 @@ WINDOWS_CUDA_RUNTIME_DELIVERY_GATE = {
     "managed_download_available": False,
     "pinned_manifest_available": True,
     "checksum_verification_available": True,
-    "reason_codes": ["candidate_runtime_not_validated", "managed_download_not_enabled"],
+    "reason_codes": ["candidate_runtime_not_validated", "candidate_review_not_complete", "managed_download_not_enabled"],
     "required_step": "validate_candidate_cuda_runtime_on_windows",
 }
 WINDOWS_CUDA_VALIDATED_CANDIDATE_STATUSES = {"validated", "candidate_validated"}
@@ -204,10 +204,13 @@ def _select_gpu_row(gpu_rows: List[Dict[str, Any]], required_vram_bytes: Optiona
 def _runtime_delivery_gate() -> Dict[str, Any]:
     candidate = windows_cuda_candidate_manifest()
     upstream = dict(candidate.get("upstream") or {})
+    review = dict(candidate.get("review") or {})
     managed_download_enabled = bool(candidate.get("managed_download_enabled"))
     reason_codes = []
     if str(candidate.get("status") or "") not in WINDOWS_CUDA_VALIDATED_CANDIDATE_STATUSES:
         reason_codes.append("candidate_runtime_not_validated")
+    if str(review.get("status") or "") != "ready":
+        reason_codes.append("candidate_review_not_complete")
     if not managed_download_enabled:
         reason_codes.append("managed_download_not_enabled")
     artifacts = []
@@ -241,6 +244,19 @@ def _runtime_delivery_gate() -> Dict[str, Any]:
         "selected_at": candidate.get("selected_for_review_at"),
     }
     payload["candidate_artifacts"] = artifacts
+    payload["candidate_review"] = {
+        "status": review.get("status") or "blocked",
+        "status_reason": review.get("status_reason") or "candidate_review_not_complete",
+        "checks": [
+            {
+                "id": item.get("id"),
+                "status": item.get("status"),
+                "evidence": item.get("evidence"),
+            }
+            for item in list(review.get("checks") or [])
+            if isinstance(item, dict) and item.get("id")
+        ],
+    }
     return payload
 
 

@@ -55,6 +55,12 @@ class RuntimeManagementTests(unittest.TestCase):
         self.assertEqual(candidate["artifacts"][1]["role"], "cuda_runtime_dlls")
         self.assertFalse(candidate["managed_download_enabled"])
         self.assertIn("run_known_good_gguf", candidate["validation_required"])
+        self.assertEqual(candidate["review"]["status"], "blocked")
+        review_checks = {item["id"]: item for item in candidate["review"]["checks"]}
+        self.assertEqual(review_checks["asset_sha256_digests_pinned"]["status"], "recorded")
+        self.assertEqual(review_checks["archive_contents_inspected"]["status"], "pending")
+        self.assertEqual(review_checks["license_and_runtime_dll_distribution_reviewed"]["status"], "pending")
+        self.assertEqual(review_checks["secret_free_support_export_captured"]["status"], "pending")
         self.assertIn("managed download remains disabled", " ".join(preview["notes"]))
 
     def test_install_runtime_without_execute_returns_plan_only(self):

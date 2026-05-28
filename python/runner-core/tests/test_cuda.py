@@ -90,6 +90,14 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         ]
         self.assertIn("llama-b9371-bin-win-cuda-12.4-x64.zip", artifact_names)
         self.assertIn("cudart-llama-bin-win-cuda-12.4-x64.zip", artifact_names)
+        candidate_review = selector["delivery"]["runtime_delivery_gate"]["candidate_review"]
+        self.assertEqual(candidate_review["status"], "blocked")
+        self.assertEqual(candidate_review["status_reason"], "artifact_metadata_recorded_but_candidate_not_reviewed")
+        review_checks = {item["id"]: item for item in candidate_review["checks"]}
+        self.assertEqual(review_checks["asset_sha256_digests_pinned"]["status"], "recorded")
+        self.assertEqual(review_checks["archive_contents_inspected"]["status"], "pending")
+        self.assertEqual(review_checks["license_and_runtime_dll_distribution_reviewed"]["status"], "pending")
+        self.assertEqual(review_checks["windows_nvidia_version_smoke_completed"]["status"], "pending")
         self.assertEqual(selector["support"]["tier"], "preview")
         self.assertFalse(selector["fallback"]["allowed"])
         self.assertIn(
@@ -270,6 +278,7 @@ class WindowsCudaPreflightTests(unittest.TestCase):
             "762585777eb39884848ce410f62140f79d21305203fe948ca57f54ec89dc2255",
         )
         self.assertIn("candidate_runtime_not_validated", selector["delivery"]["runtime_delivery_gate"]["reason_codes"])
+        self.assertIn("candidate_review_not_complete", selector["delivery"]["runtime_delivery_gate"]["reason_codes"])
         self.assertIn("managed_download_not_enabled", selector["delivery"]["runtime_delivery_gate"]["reason_codes"])
         self.assertEqual(selector["binary"]["version_output"], "llama.cpp build 1234")
         self.assertIn("full_loop_not_proven", selector["compatibility"]["reason_codes"])
@@ -293,13 +302,37 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertEqual(gate["mode"], "managed_download")
         self.assertTrue(gate["managed_download_available"])
         self.assertIn("candidate_runtime_not_validated", gate["reason_codes"])
+        self.assertIn("candidate_review_not_complete", gate["reason_codes"])
         self.assertNotIn("managed_download_not_enabled", gate["reason_codes"])
 
     @mock.patch("infergrade.cuda.windows_cuda_candidate_manifest")
-    def test_runtime_delivery_gate_can_be_ready_for_validated_managed_candidate(self, manifest_mock):
+    def test_runtime_delivery_gate_stays_blocked_when_validated_candidate_review_is_pending(self, manifest_mock):
         manifest = windows_cuda_candidate_manifest()
         manifest["status"] = "validated"
         manifest["managed_download_enabled"] = True
+        manifest_mock.return_value = manifest
+
+        result = windows_cuda_preflight(
+            nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9\n",
+            platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+            which=lambda _name: None,
+        )
+
+        gate = result["selector"]["delivery"]["runtime_delivery_gate"]
+        self.assertEqual(gate["status"], "blocked")
+        self.assertEqual(gate["mode"], "managed_download")
+        self.assertTrue(gate["managed_download_available"])
+        self.assertEqual(gate["reason_codes"], ["candidate_review_not_complete"])
+        self.assertEqual(result["proof_gate"]["status"], "blocked")
+        self.assertEqual(result["proof_gate"]["reason_code"], "full_loop_not_proven")
+
+    @mock.patch("infergrade.cuda.windows_cuda_candidate_manifest")
+    def test_runtime_delivery_gate_can_be_ready_for_validated_reviewed_managed_candidate(self, manifest_mock):
+        manifest = windows_cuda_candidate_manifest()
+        manifest["status"] = "validated"
+        manifest["managed_download_enabled"] = True
+        manifest["review"]["status"] = "ready"
+        manifest["review"]["status_reason"] = "candidate_review_complete"
         manifest_mock.return_value = manifest
 
         result = windows_cuda_preflight(
@@ -313,6 +346,7 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertEqual(gate["mode"], "managed_download")
         self.assertTrue(gate["managed_download_available"])
         self.assertEqual(gate["reason_codes"], [])
+        self.assertEqual(gate["candidate_review"]["status"], "ready")
         self.assertEqual(result["proof_gate"]["status"], "blocked")
         self.assertEqual(result["proof_gate"]["reason_code"], "full_loop_not_proven")
 
@@ -444,6 +478,10 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertEqual(gate["candidate_release"]["tag"], candidate["upstream"]["tag"])
         self.assertEqual(gate["candidate_release"]["selected_at"], candidate["selected_for_review_at"])
         self.assertEqual(gate["managed_download_available"], candidate["managed_download_enabled"])
+        self.assertEqual(gate["candidate_review"]["status"], candidate["review"]["status"])
+        review_checks = {item["id"]: item for item in gate["candidate_review"]["checks"]}
+        self.assertEqual(review_checks["asset_sha256_digests_pinned"]["status"], "recorded")
+        self.assertEqual(review_checks["hub_upload_and_result_reviewed"]["status"], "pending")
         artifacts_by_name = {item["name"]: item for item in gate["candidate_artifacts"]}
         for artifact in candidate["artifacts"]:
             expected_name = artifact["url"].rsplit("/", 1)[-1]

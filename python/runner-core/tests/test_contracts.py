@@ -121,6 +121,17 @@ class ContractExportTests(unittest.TestCase):
             selector_schema["properties"]["delivery"]["properties"]["runtime_delivery_gate"]["properties"],
         )
         self.assertIn(
+            "candidate_review",
+            selector_schema["properties"]["delivery"]["properties"]["runtime_delivery_gate"]["properties"],
+        )
+        self.assertEqual(cuda_example["delivery"]["runtime_delivery_gate"]["candidate_review"]["status"], "blocked")
+        example_review_checks = {
+            item["id"]: item
+            for item in cuda_example["delivery"]["runtime_delivery_gate"]["candidate_review"]["checks"]
+        }
+        self.assertEqual(example_review_checks["asset_sha256_digests_pinned"]["status"], "recorded")
+        self.assertEqual(example_review_checks["archive_contents_inspected"]["status"], "pending")
+        self.assertIn(
             "candidate_runtime_not_validated",
             cuda_example["delivery"]["runtime_delivery_gate"]["reason_codes"],
         )

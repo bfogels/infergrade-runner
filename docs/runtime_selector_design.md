@@ -117,7 +117,7 @@ The v0.3 runtime selector should be a Runner-owned object attached to run config
 ### Compatibility
 
 - `compatibility.status`: `ready`, `warning`, `blocked`, `unsupported`, or `unknown`.
-- `compatibility.reason_codes`: stable machine-readable codes. Initial codes should include `no_accelerator_detected`, `nvidia_smi_missing`, `nvidia_smi_failed`, `driver_too_old`, `runtime_binary_missing`, `runtime_smoke_failed`, `checksum_failed`, `candidate_runtime_not_validated`, `managed_download_not_enabled`, `model_too_large`, `unsupported_model_architecture`, `container_runtime_missing`, and `fallback_not_allowed`.
+- `compatibility.reason_codes`: stable machine-readable codes. Initial codes should include `no_accelerator_detected`, `nvidia_smi_missing`, `nvidia_smi_failed`, `driver_too_old`, `runtime_binary_missing`, `runtime_smoke_failed`, `checksum_failed`, `candidate_runtime_not_validated`, `candidate_review_not_complete`, `managed_download_not_enabled`, `model_too_large`, `unsupported_model_architecture`, `container_runtime_missing`, and `fallback_not_allowed`.
 - `compatibility.probes`: ordered probe records. Each probe should have `id`, `status`, and bounded `observed` or `detail` fields after redaction.
 
 ### Support Tier
