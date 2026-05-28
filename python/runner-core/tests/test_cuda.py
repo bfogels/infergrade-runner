@@ -75,6 +75,13 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertTrue(selector["delivery"]["runtime_delivery_gate"]["pinned_manifest_available"])
         self.assertTrue(selector["delivery"]["runtime_delivery_gate"]["checksum_verification_available"])
         self.assertFalse(selector["delivery"]["runtime_delivery_gate"]["managed_download_available"])
+        self.assertEqual(selector["delivery"]["runtime_delivery_gate"]["candidate_release"]["tag"], "b9371")
+        artifact_names = [
+            item["name"]
+            for item in selector["delivery"]["runtime_delivery_gate"]["candidate_artifacts"]
+        ]
+        self.assertIn("llama-b9371-bin-win-cuda-12.4-x64.zip", artifact_names)
+        self.assertIn("cudart-llama-bin-win-cuda-12.4-x64.zip", artifact_names)
         self.assertEqual(selector["support"]["tier"], "preview")
         self.assertFalse(selector["fallback"]["allowed"])
         self.assertIn(
@@ -250,6 +257,10 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertEqual(selector["delivery"]["mode"], "user_selected")
         self.assertEqual(selector["delivery"]["source"], "explicit_path")
         self.assertEqual(selector["delivery"]["runtime_delivery_gate"]["status"], "blocked")
+        self.assertEqual(
+            selector["delivery"]["runtime_delivery_gate"]["candidate_artifacts"][0]["sha256"],
+            "762585777eb39884848ce410f62140f79d21305203fe948ca57f54ec89dc2255",
+        )
         self.assertIn("candidate_runtime_not_validated", selector["delivery"]["runtime_delivery_gate"]["reason_codes"])
         self.assertIn("managed_download_not_enabled", selector["delivery"]["runtime_delivery_gate"]["reason_codes"])
         self.assertEqual(selector["binary"]["version_output"], "llama.cpp build 1234")

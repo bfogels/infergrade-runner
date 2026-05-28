@@ -31,6 +31,25 @@ WINDOWS_CUDA_RUNTIME_DELIVERY_GATE = {
     "managed_download_available": False,
     "pinned_manifest_available": True,
     "checksum_verification_available": True,
+    "candidate_release": {
+        "project": "ggml-org/llama.cpp",
+        "tag": "b9371",
+        "selected_at": "2026-05-28",
+    },
+    "candidate_artifacts": [
+        {
+            "name": "llama-b9371-bin-win-cuda-12.4-x64.zip",
+            "role": "runtime_archive",
+            "sha256": "762585777eb39884848ce410f62140f79d21305203fe948ca57f54ec89dc2255",
+            "required": True,
+        },
+        {
+            "name": "cudart-llama-bin-win-cuda-12.4-x64.zip",
+            "role": "cuda_runtime_companion",
+            "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+            "required": False,
+        },
+    ],
     "reason_codes": ["candidate_runtime_not_validated", "managed_download_not_enabled"],
     "required_step": "validate_candidate_cuda_runtime_on_windows",
 }
@@ -203,6 +222,10 @@ def _select_gpu_row(gpu_rows: List[Dict[str, Any]], required_vram_bytes: Optiona
 def _runtime_delivery_gate() -> Dict[str, Any]:
     payload = dict(WINDOWS_CUDA_RUNTIME_DELIVERY_GATE)
     payload["reason_codes"] = list(WINDOWS_CUDA_RUNTIME_DELIVERY_GATE["reason_codes"])
+    payload["candidate_release"] = dict(WINDOWS_CUDA_RUNTIME_DELIVERY_GATE["candidate_release"])
+    payload["candidate_artifacts"] = [
+        dict(item) for item in WINDOWS_CUDA_RUNTIME_DELIVERY_GATE["candidate_artifacts"]
+    ]
     return payload
 
 

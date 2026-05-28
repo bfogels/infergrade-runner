@@ -122,6 +122,19 @@ class SupportExportTests(unittest.TestCase):
                             "managed_download_available": False,
                             "pinned_manifest_available": True,
                             "checksum_verification_available": True,
+                            "candidate_release": {
+                                "project": "ggml-org/llama.cpp",
+                                "tag": "b9371",
+                                "selected_at": "2026-05-28",
+                            },
+                            "candidate_artifacts": [
+                                {
+                                    "name": "llama-b9371-bin-win-cuda-12.4-x64.zip",
+                                    "role": "runtime_archive",
+                                    "sha256": "762585777eb39884848ce410f62140f79d21305203fe948ca57f54ec89dc2255",
+                                    "required": True,
+                                }
+                            ],
                             "reason_codes": ["candidate_runtime_not_validated", "managed_download_not_enabled"],
                             "required_step": "validate_candidate_cuda_runtime_on_windows",
                         },
@@ -224,6 +237,11 @@ class SupportExportTests(unittest.TestCase):
         self.assertFalse(payload["cuda"]["summary"]["runtime"]["delivery_gate"]["managed_download_available"])
         self.assertTrue(payload["cuda"]["summary"]["runtime"]["delivery_gate"]["pinned_manifest_available"])
         self.assertTrue(payload["cuda"]["summary"]["runtime"]["delivery_gate"]["checksum_verification_available"])
+        self.assertEqual(payload["cuda"]["summary"]["runtime"]["delivery_gate"]["candidate_release"]["tag"], "b9371")
+        self.assertEqual(
+            payload["cuda"]["summary"]["runtime"]["delivery_gate"]["candidate_artifacts"][0]["name"],
+            "llama-b9371-bin-win-cuda-12.4-x64.zip",
+        )
         self.assertIn(
             "candidate_runtime_not_validated",
             payload["cuda"]["summary"]["runtime"]["delivery_gate"]["reason_codes"],
