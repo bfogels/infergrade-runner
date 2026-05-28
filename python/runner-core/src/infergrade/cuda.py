@@ -12,6 +12,8 @@ import shutil
 import subprocess
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from infergrade.runtimes import runtime_binary_fingerprint
+
 
 CUDA_DRIVER_FLOORS = {
     "13": "580.0",
@@ -312,6 +314,11 @@ def windows_cuda_preflight(
     runtime_path = runtime_binary_path or os.environ.get("INFERGRADE_LLAMA_CPP_CUDA_CLI")
     runtime_version = None
     runtime_error = None
+    runtime_fingerprint = (
+        runtime_binary_fingerprint(runtime_path)
+        if runtime_path
+        else runtime_binary_fingerprint(None)
+    )
     if runtime_path:
         try:
             runtime_version = _binary_version(runtime_path)
@@ -375,6 +382,7 @@ def windows_cuda_preflight(
         "binary": {
             "path": runtime_path,
             "version_output": runtime_version,
+            "fingerprint": runtime_fingerprint,
             "checksum_verified": False,
             "signature_verified": False,
         },

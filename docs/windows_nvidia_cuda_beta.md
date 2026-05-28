@@ -10,8 +10,8 @@ InferGrade may proceed toward a Windows/NVIDIA technical beta only after one rea
 - Target binary set: `llama_cpp_windows_cuda_x86_64`.
 - Current delivery mode: explicit user selection of an existing CUDA-capable `llama.cpp` binary.
 - A selected Windows CUDA preview runtime must record `binary_set`,
-  `support_tier: preview`, checksum status, and the preview claim boundary in
-  `selected_runtime.json`.
+  `support_tier: preview`, checksum status, bounded binary fingerprints, and
+  the preview claim boundary in `selected_runtime.json`.
 - The preview selector requires the complete sibling binary set
   (`llama-cli.exe`, `llama-server.exe`, and `llama-perplexity.exe`) so a partial
   CUDA install cannot be recorded as a viable runtime.
@@ -74,8 +74,9 @@ names the Windows CUDA preview binary set, the block includes the same bounded
 preflight selector used by doctor, including driver floor, selected binary,
 selected GPU position/count on multi-GPU hosts, fallback, and claim-boundary fields. The block also includes a compact
 `summary` with compatibility status, reason codes, GPU count, platform, driver
-floor, selected GPU, selected runtime source, binary smoke result, and next action
-so support triage does not need to parse the full runtime selector first.
+floor, selected GPU, selected runtime source, binary smoke result, binary
+fingerprint status, and next action so support triage does not need to parse
+the full runtime selector first.
 
 The preflight payload also includes a machine-readable `proof_gate` while
 `full_loop_not_proven` is active. The required proof steps are:

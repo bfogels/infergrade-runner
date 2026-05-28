@@ -1,5 +1,6 @@
 """Managed runtime metadata and selection helpers."""
 
+import hashlib
 import json
 import os
 import platform
@@ -17,6 +18,7 @@ WINDOWS_CUDA_CLAIM_BOUNDARY = (
     "Windows/NVIDIA CUDA is preview-only until a pinned, checksummed runtime and full Hub loop are proven."
 )
 _CACHE_ENV = "INFERGRADE_RUNTIME_CACHE_DIR"
+_MAX_FINGERPRINT_BYTES = 512 * 1024 * 1024
 
 
 def runtime_cache_root() -> Path:
@@ -29,6 +31,46 @@ def llama_cpp_runtime_dir() -> Path:
 
 def selected_llama_cpp_runtime_path() -> Path:
     return llama_cpp_runtime_dir() / "selected_runtime.json"
+
+
+def runtime_binary_fingerprint(path: Optional[str], max_bytes: int = _MAX_FINGERPRINT_BYTES) -> Dict[str, Any]:
+    """Return bounded, secret-free provenance for a selected runtime binary."""
+    payload: Dict[str, Any] = {
+        "path_present": bool(path),
+        "status": "missing_path" if not path else "unknown",
+        "size_bytes": None,
+        "sha256": None,
+    }
+    if not path:
+        return payload
+    try:
+        stat_result = os.stat(path)
+    except OSError as exc:
+        payload["status"] = "unavailable"
+        payload["error"] = exc.__class__.__name__
+        return payload
+    size_bytes = int(stat_result.st_size)
+    payload["size_bytes"] = size_bytes
+    payload["mtime_ns"] = int(getattr(stat_result, "st_mtime_ns", 0) or 0)
+    if not os.path.isfile(path):
+        payload["status"] = "not_file"
+        return payload
+    if size_bytes > max_bytes:
+        payload["status"] = "too_large"
+        payload["max_bytes"] = max_bytes
+        return payload
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        payload["status"] = "unavailable"
+        payload["error"] = exc.__class__.__name__
+        return payload
+    payload["status"] = "recorded"
+    payload["sha256"] = digest.hexdigest()
+    return payload
 
 
 def known_llama_cpp_runtimes() -> List[Dict[str, Any]]:
@@ -178,6 +220,11 @@ def select_llama_cpp_runtime(
         "provenance": runtime.get("provenance"),
         "manifest_version": RUNTIME_MANIFEST_VERSION,
         "binaries": resolved,
+        "binary_fingerprints": {
+            kind: runtime_binary_fingerprint(path)
+            for kind, path in resolved.items()
+            if path
+        },
         "selected_at_platform": {"system": platform.system(), "machine": platform.machine()},
     }
     for key in ("binary_set", "support_tier", "checksum", "notes"):
@@ -185,6 +232,11 @@ def select_llama_cpp_runtime(
             payload[key] = runtime.get(key)
     if _is_windows_cuda_runtime(runtime):
         payload["checksum_verified"] = bool(runtime.get("checksum"))
+        payload["checksum_status"] = (
+            "pinned_checksum_verified"
+            if runtime.get("checksum")
+            else "user_selected_unverified"
+        )
         payload["claim_boundary"] = WINDOWS_CUDA_CLAIM_BOUNDARY
         payload["selection_warning"] = WINDOWS_CUDA_CLAIM_BOUNDARY
     llama_cpp_runtime_dir().mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,8 @@
-import sys
+import hashlib
+import os
 import subprocess
+import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -245,6 +248,26 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertIn("full_loop_not_proven", selector["compatibility"]["reason_codes"])
         self.assertIn("fallback_not_allowed", selector["compatibility"]["reason_codes"])
         self.assertNotIn("runtime_smoke_failed", selector["compatibility"]["reason_codes"])
+
+    @mock.patch("infergrade.cuda.subprocess.run")
+    def test_windows_cuda_preflight_records_runtime_binary_fingerprint(self, run_mock):
+        run_mock.return_value = mock.Mock(returncode=0, stdout="llama.cpp build 1234\n", stderr="")
+        with tempfile.TemporaryDirectory(prefix="infergrade-cuda-runtime-") as tempdir:
+            runtime_path = os.path.join(tempdir, "llama-cli.exe")
+            with open(runtime_path, "wb") as handle:
+                handle.write(b"cuda runtime")
+
+            result = windows_cuda_preflight(
+                runtime_binary_path=runtime_path,
+                nvidia_smi_output="NVIDIA RTX 4090, 555.85, 24564, 8.9\n",
+                platform_snapshot={"system": "windows", "arch": "x86_64", "version": "11"},
+                which=lambda _name: None,
+            )
+
+        fingerprint = result["selector"]["binary"]["fingerprint"]
+        self.assertEqual(fingerprint["status"], "recorded")
+        self.assertEqual(fingerprint["size_bytes"], len(b"cuda runtime"))
+        self.assertEqual(fingerprint["sha256"], hashlib.sha256(b"cuda runtime").hexdigest())
 
     @mock.patch("infergrade.cuda.subprocess.run")
     def test_windows_cuda_preflight_reports_runtime_binary_timeout(self, run_mock):

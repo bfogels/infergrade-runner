@@ -114,7 +114,15 @@ class SupportExportTests(unittest.TestCase):
                     "accelerator": {"api": "cuda", "vendor": "nvidia"},
                     "driver": {"version": "555.85", "minimum_required": "525.0", "cuda_major": "12"},
                     "delivery": {"source": "explicit_path", "binary_set": "llama_cpp_windows_cuda_x86_64"},
-                    "binary": {"path": "C:\\llama.cpp\\llama-cli.exe", "version_output": "llama.cpp build 1234"},
+                    "binary": {
+                        "path": "C:\\llama.cpp\\llama-cli.exe",
+                        "version_output": "llama.cpp build 1234",
+                        "fingerprint": {
+                            "status": "recorded",
+                            "sha256": "abc123",
+                            "size_bytes": 123456,
+                        },
+                    },
                     "compatibility": {"status": "blocked", "reason_codes": ["full_loop_not_proven", "fallback_not_allowed"]},
                 },
                 "gpu_count": 1,
@@ -173,6 +181,9 @@ class SupportExportTests(unittest.TestCase):
         self.assertEqual(payload["cuda"]["summary"]["runtime"]["source"], "explicit_path")
         self.assertEqual(payload["cuda"]["summary"]["runtime"]["binary_path_present"], True)
         self.assertEqual(payload["cuda"]["summary"]["runtime"]["version_output"], "llama.cpp build 1234")
+        self.assertEqual(payload["cuda"]["summary"]["runtime"]["fingerprint_status"], "recorded")
+        self.assertEqual(payload["cuda"]["summary"]["runtime"]["sha256"], "abc123")
+        self.assertEqual(payload["cuda"]["summary"]["runtime"]["size_bytes"], 123456)
         self.assertIn("full_loop_not_proven", payload["cuda"]["summary"]["reason_codes"])
         self.assertIn("Windows/NVIDIA machine", payload["cuda"]["summary"]["next_action"])
         self.assertEqual(payload["cuda"]["summary"]["proof_gate"]["status"], "blocked")
