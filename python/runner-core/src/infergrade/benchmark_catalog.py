@@ -79,6 +79,12 @@ def capability_surface_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[s
     return {str(item["surface_id"]): dict(item) for item in list(payload.get("capability_surfaces") or [])}
 
 
+def surface_score_policy_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+    """Return task-scoped surface score policies keyed by surface id."""
+    payload = catalog or load_capability_catalog()
+    return {str(item["surface_id"]): dict(item) for item in list(payload.get("surface_score_policies") or [])}
+
+
 def coverage_expansion_priorities(catalog: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Return ordered coverage priorities that directly improve the answer loop."""
     payload = catalog or load_capability_catalog()
@@ -102,6 +108,7 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         if item.get("score_policy_id")
     }
     status_by_check = benchmark_status_index(payload)
+    surface_score_policies = surface_score_policy_index(payload)
     required_status_fields = {
         "check_id",
         "surface_id",
@@ -182,6 +189,28 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         for check_id in check_ids:
             if str(check_id) not in declared_check_ids:
                 failures.append(f"{priority_id or '<missing>'}: unknown coverage benchmark_check_id {check_id!r}")
+    checks_by_id = check_index(payload)
+    for surface_id, policy in surface_score_policies.items():
+        if surface_id not in surfaces:
+            failures.append(f"{surface_id}: surface score policy references an unknown surface")
+        for field in ("display_name", "score_version", "score_method", "claim_boundary"):
+            if not str(policy.get(field) or "").strip():
+                failures.append(f"{surface_id}: surface score policy field {field} must be non-empty")
+        minimum_coverage = policy.get("minimum_coverage_fraction")
+        if not isinstance(minimum_coverage, (int, float)) or not 0 <= float(minimum_coverage) <= 1:
+            failures.append(f"{surface_id}: minimum_coverage_fraction must be between 0 and 1")
+        weights = [
+            float(check.get("primary_score_weight"))
+            for check in checks_by_id.values()
+            if check.get("surface_id") == surface_id
+            and check.get("evidence_kind") == "capability"
+            and isinstance(check.get("primary_score_weight"), (int, float))
+            and float(check.get("primary_score_weight")) > 0
+        ]
+        if not weights:
+            failures.append(f"{surface_id}: surface score policy has no positively weighted capability checks")
+        elif abs(sum(weights) - 1.0) > 0.000001:
+            failures.append(f"{surface_id}: positive primary score weights must sum to 1.0")
     return failures
 
 

@@ -88,6 +88,8 @@ class CapabilityExecution:
     status: str
     benchmark_results: Dict[str, Any] = field(default_factory=dict)
     artifacts: Dict[str, Any] = field(default_factory=dict)
+    score_details: Dict[str, Any] = field(default_factory=dict)
+    task_performance: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

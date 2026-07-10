@@ -100,7 +100,49 @@
       "properties": {
         "use_case": { "type": "string", "enum": ["agentic_coding", "general_assistant"] },
         "capability_suite_id": { "type": ["string", "null"] },
-        "benchmark_tier": { "type": ["string", "null"] }
+        "benchmark_tier": { "type": ["string", "null"] },
+        "capability_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "capability_score_method": { "type": ["string", "null"] },
+        "capability_score_details": {
+          "type": "object",
+          "properties": {
+            "surface_id": { "type": ["string", "null"] },
+            "score_label": { "type": ["string", "null"] },
+            "score_version": { "type": ["string", "null"] },
+            "score_method": { "type": ["string", "null"] },
+            "score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+            "observed_weighted_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+            "score_ready": { "type": "boolean" },
+            "reason": { "type": "string" },
+            "coverage": { "type": ["object", "null"], "additionalProperties": true },
+            "components": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+            "claim_boundary": { "type": ["string", "null"] }
+          },
+          "additionalProperties": true
+        },
+        "task_performance": {
+          "type": "object",
+          "properties": {
+            "attempted_task_count": { "type": "integer", "minimum": 0 },
+            "completed_task_count": { "type": "integer", "minimum": 0 },
+            "timed_task_count": { "type": "integer", "minimum": 0 },
+            "output_token_task_count": { "type": "integer", "minimum": 0 },
+            "timing_coverage_fraction": { "type": "number", "minimum": 0, "maximum": 1 },
+            "output_token_coverage_fraction": { "type": "number", "minimum": 0, "maximum": 1 },
+            "time_per_task_seconds_median": { "type": ["number", "null"], "minimum": 0 },
+            "time_per_task_seconds_p95": { "type": ["number", "null"], "minimum": 0 },
+            "output_tokens_per_task_median": { "type": ["number", "null"], "minimum": 0 },
+            "output_tokens_per_task_p95": { "type": ["number", "null"], "minimum": 0 },
+            "decode_tokens_per_second_median": { "type": ["number", "null"], "minimum": 0 },
+            "decode_tokens_per_second_p95": { "type": ["number", "null"], "minimum": 0 },
+            "total_elapsed_seconds": { "type": ["number", "null"], "minimum": 0 },
+            "total_output_tokens": { "type": ["integer", "null"], "minimum": 0 },
+            "measurement_sources": { "type": "array", "items": { "type": "string" } },
+            "aggregation_method": { "type": "string" },
+            "measurement_status": { "enum": ["measured", "not_reported_by_backend"] }
+          },
+          "additionalProperties": true
+        }
       },
       "additionalProperties": true
     },

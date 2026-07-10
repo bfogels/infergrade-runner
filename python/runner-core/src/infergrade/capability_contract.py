@@ -187,9 +187,26 @@ def validate_capability_summary_artifact(artifact: Dict[str, Any]) -> List[str]:
                 errors.append(prefix + "surface must be unique")
             seen_surfaces.add(surface.get("surface"))
             if surface.get("state") == "scored" and surface.get("score") is None:
-                errors.append(prefix + "score is required when state is scored")
+                coverage_gated = (
+                    surface.get("score_ready") is False
+                    and bool(surface.get("score_version"))
+                    and isinstance(surface.get("score_coverage"), dict)
+                )
+                if not coverage_gated:
+                    errors.append(prefix + "score is required when state is scored unless versioned score coverage is insufficient")
             if surface.get("state") in ("failed", "skipped", "not_yet_benchmarked", "not_comparable") and surface.get("score") is not None:
                 errors.append(prefix + "score must be null unless the surface is scored or partial")
+            if surface.get("score_version") is not None:
+                if not surface.get("score_version") or not surface.get("score_method"):
+                    errors.append(prefix + "versioned score metadata requires score_version and score_method")
+                if not isinstance(surface.get("score_coverage"), dict):
+                    errors.append(prefix + "versioned score metadata requires score_coverage")
+                if not isinstance(surface.get("score_components"), list):
+                    errors.append(prefix + "versioned score metadata requires score_components")
+                if surface.get("score_ready") is True and surface.get("score") is None:
+                    errors.append(prefix + "score is required when score_ready is true")
+                if surface.get("score_ready") is False and surface.get("score") is not None:
+                    errors.append(prefix + "score must be null when score_ready is false")
             if not isinstance(surface.get("capability_artifacts"), list):
                 errors.append(prefix + "capability_artifacts must be an array")
             if not _confidence_allowed_for_lane(surface.get("lane"), surface.get("confidence_label")):

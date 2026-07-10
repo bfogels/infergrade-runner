@@ -20,6 +20,7 @@ from infergrade.benchmark_catalog import (
     normalize_request_selection,
     selection_metadata_for_request,
     shortcut_selection,
+    surface_score_policy_index,
     validate_benchmark_legitimacy_metadata,
 )
 from infergrade.models import RunRequest
@@ -39,6 +40,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("benchmark_status_matrix", catalog)
         self.assertEqual([item["lane_id"] for item in catalog["evidence_lanes"]], ["smoke", "decision", "reference", "gold"])
         self.assertIn("capability_surfaces", catalog)
+        self.assertIn("surface_score_policies", catalog)
         self.assertEqual(
             set(item["surface_id"] for item in catalog["capability_surfaces"]),
             {
@@ -75,6 +77,9 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.assertIn("primary_score_weight", check)
             self.assertTrue(check["score_policy_id"])
         self.assertTrue(catalog["planned_benchmark_candidates"])
+        score_policies = surface_score_policy_index(catalog)
+        self.assertEqual(score_policies["local_assistant_capability"]["score_version"], "local_assistant_score_v1")
+        self.assertEqual(score_policies["local_coding_capability"]["minimum_coverage_fraction"], 0.5)
 
     def test_coverage_expansion_priorities_are_ordered_and_answer_loop_scoped(self):
         priorities = coverage_expansion_priorities()

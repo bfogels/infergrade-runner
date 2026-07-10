@@ -173,6 +173,9 @@ Apple Silicon is the deliberate exception: when the goal is to benchmark local `
 Runner-produced result payloads now carry:
 
 - explicit capability states such as `scored`, `partial`, `failed`, `skipped`, `not_yet_benchmarked`, and `not_comparable`
+- a versioned task-scoped local assistant or coding score only after the selected evidence clears the Runner-owned coverage gate
+- inspectable score weights, coverage, missing checks, score version, and claim boundary under `capability_score_details`
+- backend-reported time per task, output tokens per task, and decode throughput under `task_performance` when the backend exposes those measurements
 - benchmark coverage metadata including planned, executed, and scored benchmark components
 - component-level capability reports for suites like `IFEval`, `EvalPlus HumanEval+`, and `EvalPlus MBPP+`
 - first-pass perplexity metadata under `fidelity` for `llama.cpp` when that measurement is available

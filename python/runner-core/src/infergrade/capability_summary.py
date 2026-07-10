@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Optional
 from infergrade import __version__
 from infergrade.benchmark_catalog import selection_metadata_for_request
 from infergrade.capability_contract import CAPABILITY_SURFACES, validate_capability_summary_artifact
+from infergrade.capability_scoring import score_capability_surface
+from infergrade.contracts import load_contract_manifest
 from infergrade.models import CapabilityExecution, RunRequest
 from infergrade.utils import stable_hash, utcnow_iso, write_json
 
@@ -65,6 +67,8 @@ STATE_ORDER = {
     "not_comparable": 5,
 }
 
+_CONTRACT_VERSION = str(load_contract_manifest().get("contract_version") or "unknown")
+
 
 def write_capability_summary_artifact(
     request: RunRequest,
@@ -108,7 +112,7 @@ def build_capability_summary_artifact(
         "runner": {
             "name": "infergrade-runner",
             "version": __version__,
-            "contract_version": "0.1.0",
+            "contract_version": _CONTRACT_VERSION,
         },
         "subject": _subject_from_artifacts_or_request(request, artifact_pointers),
         "surfaces": surfaces,
@@ -187,6 +191,7 @@ def _discover_capability_run_artifacts(execution: CapabilityExecution, output_di
                     failure_count=len([task for task in tasks if task.get("state") == "failed"]),
                     partial_count=int(summary.get("partial_count") or 0),
                 ),
+                "task_performance": dict(summary.get("task_performance") or {}),
                 "experimental": evidence.get("experimental"),
                 "unsupported_claims": list((artifact.get("claim_boundary") or {}).get("unsupported_claims") or []),
                 "subject": dict(artifact.get("subject") or {}),
@@ -238,6 +243,7 @@ def _fallback_benchmark_summary_pointers(
                     failure_count=int(result.get("generation_failure_count") or 0),
                     partial_count=1 if state == "partial" else 0,
                 ),
+                "task_performance": dict(result.get("task_performance") or {}),
                 "experimental": True,
                 "unsupported_claims": [
                     "This benchmark summary is not a global capability score.",
@@ -251,10 +257,19 @@ def _fallback_benchmark_summary_pointers(
 def _surface_summary(surface: str, artifact_pointers: List[Dict[str, Any]]) -> Dict[str, Any]:
     surface_artifacts = [item for item in artifact_pointers if item.get("surface") == surface]
     if not surface_artifacts:
+        missing_score_details = score_capability_surface(surface, {})
         return {
             "surface": surface,
             "state": "not_yet_benchmarked",
             "score": None,
+            "score_observed": missing_score_details.get("observed_weighted_score"),
+            "score_label": missing_score_details.get("score_label"),
+            "score_version": missing_score_details.get("score_version"),
+            "score_method": missing_score_details.get("score_method"),
+            "score_ready": False,
+            "score_coverage": missing_score_details.get("coverage"),
+            "score_components": missing_score_details.get("components", []),
+            "score_claim_boundary": missing_score_details.get("claim_boundary"),
             "lane": None,
             "confidence_label": None,
             "experimental": None,
@@ -268,12 +283,31 @@ def _surface_summary(surface: str, artifact_pointers: List[Dict[str, Any]]) -> D
     states = [str(item.get("state") or "not_comparable") for item in surface_artifacts]
     state = _aggregate_state(states)
     scores = [float(item["score"]) for item in surface_artifacts if isinstance(item.get("score"), (int, float))]
-    score = round(sum(scores) / float(len(scores)), 6) if scores and state in ("scored", "partial") else None
+    score_details = score_capability_surface(
+        surface,
+        {
+            str(item.get("benchmark_id")): float(item["score"])
+            for item in surface_artifacts
+            if item.get("benchmark_id") and isinstance(item.get("score"), (int, float))
+        },
+    )
+    if score_details.get("reason") == "surface_score_policy_missing":
+        score = round(sum(scores) / float(len(scores)), 6) if scores and state in ("scored", "partial") else None
+    else:
+        score = score_details.get("score") if state in ("scored", "partial") else None
     confidence_label = _conservative_confidence_label(surface_artifacts)
     return {
         "surface": surface,
         "state": state,
         "score": score,
+        "score_observed": score_details.get("observed_weighted_score"),
+        "score_label": score_details.get("score_label"),
+        "score_version": score_details.get("score_version"),
+        "score_method": score_details.get("score_method"),
+        "score_ready": bool(score_details.get("score_ready")),
+        "score_coverage": score_details.get("coverage"),
+        "score_components": list(score_details.get("components") or []),
+        "score_claim_boundary": score_details.get("claim_boundary"),
         "lane": _strongest_lane([item.get("lane") for item in surface_artifacts]),
         "confidence_label": confidence_label,
         "confidence_explanation": _confidence_explanation(confidence_label),
@@ -283,6 +317,7 @@ def _surface_summary(surface: str, artifact_pointers: List[Dict[str, Any]]) -> D
         "failure_count": sum(int(item.get("failure_count") or 0) for item in surface_artifacts),
         "partial_count": sum(int(item.get("partial_count") or 0) for item in surface_artifacts),
         "repeatability": _surface_repeatability_summary(surface_artifacts),
+        "task_performance": _surface_task_performance_summary(surface_artifacts),
         "capability_artifacts": surface_artifacts,
         "unsupported_claims": _dedupe_claims(
             claim
@@ -467,6 +502,38 @@ def _surface_repeatability_summary(artifacts: List[Dict[str, Any]]) -> Dict[str,
         "score_variance": _max_summary_value(summaries, "score_variance"),
         "unstable": any(bool(item.get("unstable")) for item in summaries),
         "instability_reasons": reasons,
+    }
+
+
+def _surface_task_performance_summary(artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    summaries = [dict(item.get("task_performance") or {}) for item in artifacts]
+    attempted = sum(int(item.get("attempted_task_count") or 0) for item in summaries)
+    timed = sum(int(item.get("timed_task_count") or 0) for item in summaries)
+    output_measured = sum(int(item.get("output_token_task_count") or 0) for item in summaries)
+    sources = sorted({source for item in summaries for source in list(item.get("measurement_sources") or [])})
+    total_elapsed = [float(item["total_elapsed_seconds"]) for item in summaries if isinstance(item.get("total_elapsed_seconds"), (int, float))]
+    total_input = [int(item["total_input_tokens"]) for item in summaries if isinstance(item.get("total_input_tokens"), int)]
+    total_output = [int(item["total_output_tokens"]) for item in summaries if isinstance(item.get("total_output_tokens"), int)]
+    return {
+        "attempted_task_count": attempted,
+        "completed_task_count": sum(int(item.get("completed_task_count") or 0) for item in summaries),
+        "timed_task_count": timed,
+        "output_token_task_count": output_measured,
+        "timing_coverage_fraction": round(timed / float(attempted), 6) if attempted else 0.0,
+        "output_token_coverage_fraction": round(output_measured / float(attempted), 6) if attempted else 0.0,
+        "time_per_task_seconds_median": _median_of_summaries(summaries, "time_per_task_seconds_median"),
+        "time_per_task_seconds_p95": _max_summary_value(summaries, "time_per_task_seconds_p95"),
+        "time_to_first_token_ms_median": _median_of_summaries(summaries, "time_to_first_token_ms_median"),
+        "output_tokens_per_task_median": _median_of_summaries(summaries, "output_tokens_per_task_median"),
+        "output_tokens_per_task_p95": _max_summary_value(summaries, "output_tokens_per_task_p95"),
+        "decode_tokens_per_second_median": _median_of_summaries(summaries, "decode_tokens_per_second_median"),
+        "decode_tokens_per_second_p95": _max_summary_value(summaries, "decode_tokens_per_second_p95"),
+        "total_elapsed_seconds": round(sum(total_elapsed), 6) if total_elapsed else None,
+        "total_input_tokens": sum(total_input) if total_input else None,
+        "total_output_tokens": sum(total_output) if total_output else None,
+        "measurement_sources": sources,
+        "aggregation_method": "benchmark_summary_rollup_v1",
+        "measurement_status": "measured" if timed or output_measured else "not_reported_by_backend",
     }
 
 
