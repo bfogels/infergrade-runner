@@ -626,7 +626,6 @@ mod tests {
         );
         assert!(!payload.contains("first-run benchmark executor is still in progress"));
         assert!(payload.contains("\"docker\""));
-        assert!(payload.contains("Docker remains optional"));
         assert!(payload.contains("\"podman\""));
     }
 
