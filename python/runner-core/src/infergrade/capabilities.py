@@ -599,9 +599,9 @@ def execute_capability_suite(
     score = score_details.get("score")
 
     confidence = None
-    if status == "completed":
+    if status == "completed" and score_details.get("score_ready"):
         confidence = 0.9
-    elif status == "partial":
+    elif status == "partial" and score_details.get("score_ready"):
         confidence = 0.6
 
     execution = CapabilityExecution(

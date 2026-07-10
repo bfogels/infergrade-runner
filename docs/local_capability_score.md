@@ -36,6 +36,8 @@ A surface needs at least `0.50` of its declared benchmark weight before the aggr
 
 But `capability_score` remains `null`. This prevents a perfect result on a three- or five-case microcheck from appearing as a broad `100/100` capability claim.
 
+The legacy numeric `capability_confidence` also remains `null` until the score clears the same coverage gate. Evidence state, component results, and coverage still show that the benchmark itself completed.
+
 Missing coverage does not reduce the observed score. Coverage and capability remain separate signals so users can distinguish “weak model” from “not enough evidence.”
 
 ## Per-task performance

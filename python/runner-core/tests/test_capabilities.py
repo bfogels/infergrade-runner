@@ -229,6 +229,7 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(execution.score, None)
         self.assertEqual(execution.score_details["observed_weighted_score"], 1.0)
         self.assertEqual(execution.score_details["coverage"]["coverage_fraction"], 0.25)
+        self.assertEqual(execution.confidence, None)
         self.assertEqual(execution.component_scores["multiturn_chat_memory_v1"], 1.0)
         result = execution.benchmark_results["multiturn_chat_memory_v1"]
         self.assertEqual(result["primary_metric"]["name"], "constraint_retention_accuracy")
@@ -692,6 +693,7 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(execution.score_method, "weighted_primary_metric_v1")
         self.assertEqual(execution.score_details["score_version"], "local_coding_score_v1")
         self.assertEqual(execution.score_details["coverage"]["coverage_fraction"], 0.85)
+        self.assertEqual(execution.confidence, 0.9)
         self.assertEqual(execution.component_scores["evalplus_humaneval"], 0.8)
         self.assertEqual(execution.component_scores["evalplus_mbpp"], 0.6)
         self.assertIn("evalplus_humaneval", execution.benchmark_results)
