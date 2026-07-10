@@ -615,12 +615,15 @@ mod tests {
     }
 
     #[test]
-    fn desktop_readiness_reports_native_first_and_optional_containers() {
+    fn desktop_readiness_reports_environment_truth_and_optional_containers() {
         let payload = desktop_readiness();
 
         assert!(payload.contains("\"native_benchmark_suite\""));
         assert!(payload.contains("\"first_run\""));
-        assert!(payload.contains("First-run can run locally with a selected GGUF model"));
+        assert!(
+            payload.contains("First-run can run locally with a selected GGUF model")
+                || payload.contains("Select or install a native llama.cpp runtime first")
+        );
         assert!(!payload.contains("first-run benchmark executor is still in progress"));
         assert!(payload.contains("\"docker\""));
         assert!(payload.contains("Docker remains optional"));
