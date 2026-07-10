@@ -359,6 +359,11 @@ class LlamaCppAdapter(BaseAdapter):
             "status": "completed",
             "error": None,
             "latency_ms": parsed.get("total_time_ms"),
+            "time_to_first_token_ms": _compute_ttft_ms(parsed),
+            "tokens_per_second": parsed.get("eval_tokens_per_second") or _safe_tokens_per_second(parsed),
+            "input_tokens": _whole_token_count(parsed.get("prompt_eval_tokens")),
+            "output_tokens": _whole_token_count(parsed.get("eval_tokens")),
+            "measurement_source": "llama_cpp_timings",
             "load_time_ms": parsed.get("load_time_ms"),
         }
 
@@ -1039,6 +1044,16 @@ def _safe_tokens_per_second(parsed: Dict[str, float]) -> Optional[float]:
     if not eval_time or not eval_tokens:
         return None
     return round(eval_tokens / (eval_time / 1000.0), 2)
+
+
+def _whole_token_count(value: Any) -> Optional[int]:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0 or not parsed.is_integer():
+        return None
+    return int(parsed)
 
 
 def _percentile(values: List[Optional[float]], percentile: float) -> Optional[float]:

@@ -47,7 +47,10 @@ class CapabilitySummaryTests(unittest.TestCase):
         self.assertEqual(validate_capability_summary_artifact(summary), [])
         by_surface = {item["surface"]: item for item in summary["surfaces"]}
         self.assertEqual(by_surface["local_assistant_capability"]["state"], "scored")
-        self.assertEqual(by_surface["local_assistant_capability"]["score"], 1.0)
+        self.assertEqual(by_surface["local_assistant_capability"]["score"], None)
+        self.assertEqual(by_surface["local_assistant_capability"]["score_observed"], 1.0)
+        self.assertFalse(by_surface["local_assistant_capability"]["score_ready"])
+        self.assertEqual(by_surface["local_assistant_capability"]["score_coverage"]["coverage_fraction"], 0.25)
         self.assertEqual(by_surface["local_coding_capability"]["state"], "partial")
         self.assertEqual(by_surface["local_coding_capability"]["failure_count"], 1)
         self.assertEqual(by_surface["local_reasoning_capability"]["state"], "not_yet_benchmarked")

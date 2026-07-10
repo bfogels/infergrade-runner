@@ -39,6 +39,22 @@ class _MemoryPassingAdapter(object):
         return {"text": "", "status": "completed", "error": None}
 
 
+class _MeasuredMemoryAdapter(_MemoryPassingAdapter):
+    def generate_text(self, request, prompt, max_tokens):
+        result = super().generate_text(request, prompt, max_tokens)
+        result.update(
+            {
+                "latency_ms": 2000.0,
+                "time_to_first_token_ms": 100.0,
+                "tokens_per_second": 40.0,
+                "input_tokens": 20,
+                "output_tokens": 12,
+                "measurement_source": "fixture_backend_timings",
+            }
+        )
+        return result
+
+
 class _CodingStaticPassingAdapter(object):
     def generate_text(self, request, prompt, max_tokens):
         if "clamp_score" in prompt:
@@ -210,7 +226,9 @@ class CapabilityTests(unittest.TestCase):
             execution = execute_capability_suite(_MemoryPassingAdapter(), request)
         container_mock.assert_not_called()
         self.assertEqual(execution.status, "completed")
-        self.assertEqual(execution.score, 1.0)
+        self.assertEqual(execution.score, None)
+        self.assertEqual(execution.score_details["observed_weighted_score"], 1.0)
+        self.assertEqual(execution.score_details["coverage"]["coverage_fraction"], 0.25)
         self.assertEqual(execution.component_scores["multiturn_chat_memory_v1"], 1.0)
         result = execution.benchmark_results["multiturn_chat_memory_v1"]
         self.assertEqual(result["primary_metric"]["name"], "constraint_retention_accuracy")
@@ -240,6 +258,37 @@ class CapabilityTests(unittest.TestCase):
             capability_summary["next_recommended_benchmark_action"]["action"],
             "run_coding_decision_lane",
         )
+
+    def test_native_capability_records_backend_reported_time_and_output_tokens_per_task(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["multiturn_chat_memory_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        execution = execute_capability_suite(_MeasuredMemoryAdapter(), request)
+
+        performance = execution.task_performance
+        self.assertEqual(performance["attempted_task_count"], 5)
+        self.assertEqual(performance["timed_task_count"], 5)
+        self.assertEqual(performance["output_token_task_count"], 5)
+        self.assertEqual(performance["time_per_task_seconds_median"], 2.0)
+        self.assertEqual(performance["output_tokens_per_task_median"], 12.0)
+        self.assertEqual(performance["decode_tokens_per_second_median"], 40.0)
+        self.assertEqual(performance["total_output_tokens"], 60)
+        self.assertEqual(performance["measurement_sources"], ["fixture_backend_timings"])
+
+        capability_run_path = execution.artifacts["multiturn_chat_memory_v1"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["tasks"][0]["latency_ms"], 2000.0)
+        self.assertEqual(artifact["tasks"][0]["output_tokens"], 12)
+        self.assertEqual(artifact["summary"]["duration_seconds"], 10.0)
+        self.assertEqual(artifact["summary"]["output_tokens"], 60)
+        self.assertEqual(artifact["summary"]["task_performance"]["time_per_task_seconds_median"], 2.0)
 
     def test_native_multiturn_preserves_generation_failures_without_docker(self):
         class _FailingMemoryAdapter(object):
@@ -331,7 +380,9 @@ class CapabilityTests(unittest.TestCase):
 
         container_mock.assert_not_called()
         self.assertEqual(execution.status, "completed")
-        self.assertEqual(execution.score, 1.0)
+        self.assertEqual(execution.score, None)
+        self.assertEqual(execution.score_details["observed_weighted_score"], 1.0)
+        self.assertEqual(execution.score_details["coverage"]["coverage_fraction"], 0.15)
         self.assertEqual(execution.component_scores["coding_static_repair_v1"], 1.0)
         result = execution.benchmark_results["coding_static_repair_v1"]
         self.assertEqual(result["primary_metric"]["name"], "static_constraint_accuracy")
@@ -520,7 +571,9 @@ class CapabilityTests(unittest.TestCase):
 
         container_mock.assert_not_called()
         self.assertEqual(execution.status, "completed")
-        self.assertEqual(execution.score, 1.0)
+        self.assertEqual(execution.score, None)
+        self.assertEqual(execution.score_details["observed_weighted_score"], 1.0)
+        self.assertEqual(execution.score_details["coverage"]["coverage_fraction"], 0.2)
         result = execution.benchmark_results["reasoning_exact_answer_v1"]
         self.assertEqual(result["primary_metric"]["name"], "exact_answer_accuracy")
         self.assertEqual(result["metrics"]["correct_count"], result["metrics"]["total_count"])
@@ -585,7 +638,8 @@ class CapabilityTests(unittest.TestCase):
         execution = execute_capability_suite(_ReasoningFormattedAnswerAdapter(), request)
 
         self.assertEqual(execution.status, "completed")
-        self.assertEqual(execution.score, 1.0)
+        self.assertEqual(execution.score, None)
+        self.assertEqual(execution.score_details["observed_weighted_score"], 1.0)
         result = execution.benchmark_results["reasoning_exact_answer_v1"]
         self.assertEqual(result["metrics"]["correct_count"], result["metrics"]["total_count"])
 
@@ -602,7 +656,8 @@ class CapabilityTests(unittest.TestCase):
         execution = execute_capability_suite(_ReasoningAmbiguousAnswerAdapter(), request)
 
         self.assertEqual(execution.status, "completed")
-        self.assertEqual(execution.score, 0.0)
+        self.assertEqual(execution.score, None)
+        self.assertEqual(execution.score_details["observed_weighted_score"], 0.0)
         result = execution.benchmark_results["reasoning_exact_answer_v1"]
         self.assertEqual(result["metrics"]["correct_count"], 0)
 
@@ -633,7 +688,10 @@ class CapabilityTests(unittest.TestCase):
             with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
                 execution = execute_capability_suite(_FakeAdapter(), request)
         self.assertEqual(execution.status, "completed")
-        self.assertAlmostEqual(execution.score, 0.7)
+        self.assertAlmostEqual(execution.score, 0.729412)
+        self.assertEqual(execution.score_method, "weighted_primary_metric_v1")
+        self.assertEqual(execution.score_details["score_version"], "local_coding_score_v1")
+        self.assertEqual(execution.score_details["coverage"]["coverage_fraction"], 0.85)
         self.assertEqual(execution.component_scores["evalplus_humaneval"], 0.8)
         self.assertEqual(execution.component_scores["evalplus_mbpp"], 0.6)
         self.assertIn("evalplus_humaneval", execution.benchmark_results)
