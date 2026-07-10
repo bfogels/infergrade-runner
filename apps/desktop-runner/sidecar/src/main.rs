@@ -557,8 +557,12 @@ mod tests {
     #[test]
     fn listener_start_command_is_the_long_running_worker() {
         assert!(is_listener_start_command(&[OsString::from("start")]));
-        assert!(!is_listener_start_command(&[OsString::from("desktop-readiness")]));
-        assert!(!is_listener_start_command(&[OsString::from("desktop-self-test")]));
+        assert!(!is_listener_start_command(&[OsString::from(
+            "desktop-readiness"
+        )]));
+        assert!(!is_listener_start_command(&[OsString::from(
+            "desktop-self-test"
+        )]));
     }
 
     #[test]

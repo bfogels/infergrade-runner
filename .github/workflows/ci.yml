@@ -113,7 +113,7 @@ jobs:
       - name: Install cargo-audit (prebuilt)
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-audit@0.21
+          tool: cargo-audit@0.22.2
 
       - name: cargo audit
         # Job-level continue-on-error keeps this advisory step non-blocking;
