@@ -222,6 +222,7 @@ def _build_result_record(
     if runtime_selector:
         record["execution"]["runtime_selector"] = runtime_selector
     record["capability"] = summarize_capability_execution(request, capability, completed_at=completed_at)
+    record["capability"]["task_performance"] = deepcopy(capability.task_performance or {})
     record["fidelity"] = {
         "fidelity_state": fidelity.state,
         "fidelity_reason_codes": list(fidelity.reason_codes or []),

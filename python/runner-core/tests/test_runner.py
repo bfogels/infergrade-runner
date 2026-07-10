@@ -82,10 +82,40 @@ class RunnerTests(unittest.TestCase):
 
             def generate_text(self, request, prompt, max_tokens):
                 if "HARBOR-17" in prompt:
-                    return {"text": "HARBOR-17 uses q4_k_m.", "status": "completed", "error": None}
+                    return {
+                        "text": "HARBOR-17 uses q4_k_m.",
+                        "status": "completed",
+                        "error": None,
+                        "latency_ms": 2400,
+                        "time_to_first_token_ms": 120,
+                        "tokens_per_second": 25,
+                        "input_tokens": 40,
+                        "output_tokens": 60,
+                        "measurement_source": "test_runtime",
+                    }
                 if "READY" in prompt:
-                    return {"text": "READY local runner", "status": "completed", "error": None}
-                return {"text": "simulated answer", "status": "completed", "error": None}
+                    return {
+                        "text": "READY local runner",
+                        "status": "completed",
+                        "error": None,
+                        "latency_ms": 1600,
+                        "time_to_first_token_ms": 80,
+                        "tokens_per_second": 20,
+                        "input_tokens": 32,
+                        "output_tokens": 32,
+                        "measurement_source": "test_runtime",
+                    }
+                return {
+                    "text": "simulated answer",
+                    "status": "completed",
+                    "error": None,
+                    "latency_ms": 2000,
+                    "time_to_first_token_ms": 100,
+                    "tokens_per_second": 22,
+                    "input_tokens": 36,
+                    "output_tokens": 44,
+                    "measurement_source": "test_runtime",
+                }
 
             def run_deployment_profile(self, request, profile_id, progress_callback=None):
                 return DeploymentExecution(
@@ -127,6 +157,13 @@ class RunnerTests(unittest.TestCase):
                 manifest = json.load(handle)
             self.assertEqual(manifest["files"]["capability_summary"], "artifacts/capability/capability_summary.json")
             self.assertTrue(os.path.exists(os.path.join(output_dir, "artifacts", "capability", "capability_summary.json")))
+            with open(os.path.join(output_dir, "results", "interactive_chat_v1.json"), "r", encoding="utf-8") as handle:
+                result_record = json.load(handle)
+            task_performance = result_record["capability"]["task_performance"]
+            self.assertEqual(task_performance["measurement_status"], "measured")
+            self.assertEqual(task_performance["measurement_sources"], ["test_runtime"])
+            self.assertGreater(task_performance["time_per_task_seconds_median"], 0)
+            self.assertGreater(task_performance["output_tokens_per_task_median"], 0)
         finally:
             shutil.rmtree(output_dir, ignore_errors=True)
 
