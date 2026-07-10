@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-05-13-v0.3.5",
+  "catalog_version": "2026-07-10-local-capability-score-v1",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -31,6 +31,32 @@
     "failure_rate": "unknown",
     "calibration_status": "estimated_static_catalog_v1"
   },
+  "surface_score_policies": [
+    {
+      "surface_id": "local_assistant_capability",
+      "display_name": "Local assistant score",
+      "score_version": "local_assistant_score_v1",
+      "score_method": "weighted_primary_metric_v1",
+      "minimum_coverage_fraction": 0.5,
+      "claim_boundary": "Task-scoped assistant evidence from the versioned benchmark mix. Compare only within this score version and use-case surface; this is not a global intelligence score."
+    },
+    {
+      "surface_id": "local_coding_capability",
+      "display_name": "Local coding score",
+      "score_version": "local_coding_score_v1",
+      "score_method": "weighted_primary_metric_v1",
+      "minimum_coverage_fraction": 0.5,
+      "claim_boundary": "Task-scoped coding evidence from the versioned benchmark mix. It does not imply repository-editing or general software-engineering capability."
+    },
+    {
+      "surface_id": "local_reasoning_capability",
+      "display_name": "Local reasoning score",
+      "score_version": "local_reasoning_score_v1",
+      "score_method": "weighted_primary_metric_v1",
+      "minimum_coverage_fraction": 0.5,
+      "claim_boundary": "Task-scoped reasoning evidence from the versioned benchmark mix. It is not an expert-reasoning, global intelligence, or leaderboard claim."
+    }
+  ],
   "coverage_expansion_priorities": [
     {
       "priority_id": "apple_silicon_assistant_quant_ladder",
@@ -815,7 +841,7 @@
       "score_dimension": "instruction_following",
       "primary_score_metric": "prompt_strict_accuracy",
       "score_floor": 0.0,
-      "primary_score_weight": 1.0,
+      "primary_score_weight": 0.75,
       "higher_is_better": true,
       "score_policy_id": "instruction_following_primary_accuracy_v1"
     },
@@ -842,7 +868,7 @@
       "score_dimension": "multiturn_instruction_retention",
       "primary_score_metric": "constraint_retention_accuracy",
       "score_floor": 0.0,
-      "primary_score_weight": 1.0,
+      "primary_score_weight": 0.25,
       "higher_is_better": true,
       "score_policy_id": "multiturn_constraint_retention_v1",
       "score_breakdown_fields": [
@@ -874,7 +900,7 @@
       "score_dimension": "broad_reasoning_knowledge",
       "primary_score_metric": "accuracy",
       "score_floor": 0.0,
-      "primary_score_weight": 1.0,
+      "primary_score_weight": 0.8,
       "higher_is_better": true,
       "score_policy_id": "multiple_choice_accuracy_v1",
       "score_breakdown_fields": [
@@ -910,7 +936,7 @@
       "score_dimension": "exact_reasoning",
       "primary_score_metric": "exact_answer_accuracy",
       "score_floor": 0.0,
-      "primary_score_weight": 1.0,
+      "primary_score_weight": 0.2,
       "higher_is_better": true,
       "score_policy_id": "reasoning_exact_answer_v1",
       "score_breakdown_fields": [
@@ -942,7 +968,7 @@
       "score_dimension": "static_code_repair",
       "primary_score_metric": "static_constraint_accuracy",
       "score_floor": 0.0,
-      "primary_score_weight": 1.0,
+      "primary_score_weight": 0.15,
       "higher_is_better": true,
       "score_policy_id": "coding_static_constraints_v1",
       "score_breakdown_fields": [
@@ -974,7 +1000,7 @@
       "score_dimension": "code_generation_core",
       "primary_score_metric": "pass_at_1_plus",
       "score_floor": 0.0,
-      "primary_score_weight": 1.0,
+      "primary_score_weight": 0.55,
       "higher_is_better": true,
       "score_policy_id": "coding_primary_pass_at_1_v1"
     },
@@ -1000,7 +1026,7 @@
       "score_dimension": "code_generation_breadth",
       "primary_score_metric": "pass_at_1_plus",
       "score_floor": 0.0,
-      "primary_score_weight": 1.0,
+      "primary_score_weight": 0.3,
       "higher_is_better": true,
       "score_policy_id": "coding_primary_pass_at_1_v1"
     },

@@ -315,6 +315,12 @@ class LlamaCppAdapterTests(unittest.TestCase):
         generated = adapter.generate_text(request, "Write a function", 128)
         self.assertEqual(generated["status"], "completed")
         self.assertIn("def solve()", generated["text"])
+        self.assertEqual(generated["latency_ms"], 1901.48)
+        self.assertEqual(generated["time_to_first_token_ms"], 614.38)
+        self.assertEqual(generated["tokens_per_second"], 24.9)
+        self.assertEqual(generated["input_tokens"], 16)
+        self.assertEqual(generated["output_tokens"], 32)
+        self.assertEqual(generated["measurement_source"], "llama_cpp_timings")
         command = run_mock.call_args[0][0]
         self.assertEqual(command[:4], ["docker", "run", "--rm", "--entrypoint"])
 

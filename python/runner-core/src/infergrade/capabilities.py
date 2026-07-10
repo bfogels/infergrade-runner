@@ -12,7 +12,9 @@ from infergrade.benchmark_catalog import (
     selection_metadata_for_request,
 )
 from infergrade.capability_contract import validate_capability_run_artifact
+from infergrade.capability_scoring import score_for_use_case
 from infergrade.capability_summary import write_capability_summary_artifact
+from infergrade.contracts import load_contract_manifest
 from infergrade.images import install_image
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcnow_iso, write_json
@@ -30,6 +32,7 @@ DEFAULT_CAPABILITY_IMAGES = {
 }
 
 _LISTENER_RUNS_DIR = "/app/runs"
+_CONTRACT_VERSION = str(load_contract_manifest().get("contract_version") or "unknown")
 
 
 @dataclass(frozen=True)
@@ -236,6 +239,7 @@ def summarize_capability_execution(
         "benchmark_results": benchmark_results,
         "capability_score": execution.score,
         "capability_score_method": execution.score_method,
+        "capability_score_details": dict(execution.score_details or {}),
         "capability_component_scores": dict(execution.component_scores or {}),
         "capability_component_reports": component_reports,
         "capability_confidence": execution.confidence,
@@ -245,6 +249,7 @@ def summarize_capability_execution(
         "capability_status": execution.status,
         "capability_state": state,
         "capability_reason_codes": reason_codes,
+        "task_performance": dict(execution.task_performance or {}),
         "benchmark_coverage": {
             "planned_benchmark_ids": planned_benchmark_ids,
             "executed_benchmark_ids": executed_benchmark_ids,
@@ -429,6 +434,7 @@ def execute_capability_suite(
     component_scores: Dict[str, float] = {}
     benchmark_results: Dict[str, Any] = {}
     benchmark_artifacts: Dict[str, Any] = {}
+    task_performance_rows: List[Dict[str, Any]] = []
     completed = 0
     degraded = 0
     hard_failed = 0
@@ -451,8 +457,10 @@ def execute_capability_suite(
                     }
                 )
             predictions = _generate_predictions(adapter, request, spec, cases, progress_callback=progress_callback)
+            task_performance_rows.extend(predictions)
             _write_jsonl(os.path.join(benchmark_dir, "predictions.jsonl"), predictions)
             summary = _evaluate_benchmark(spec, benchmark_dir)
+            summary["task_performance"] = _summarize_task_performance_rows(predictions)
             failure_count = len([item for item in predictions if item.get("generation_status") != "completed"])
             failure_severity = _generation_failure_severity(len(cases), failure_count)
             summary["generation_failure_count"] = failure_count
@@ -587,14 +595,13 @@ def execute_capability_suite(
     elif hard_failed == len(benchmark_ids):
         status = "failed"
 
-    score = None
-    if component_scores:
-        score = round(sum(component_scores.values()) / float(len(component_scores)), 6)
+    score_details = score_for_use_case(request.use_case, component_scores)
+    score = score_details.get("score")
 
     confidence = None
-    if status == "completed":
+    if status == "completed" and score_details.get("score_ready"):
         confidence = 0.9
-    elif status == "partial":
+    elif status == "partial" and score_details.get("score_ready"):
         confidence = 0.6
 
     execution = CapabilityExecution(
@@ -606,12 +613,14 @@ def execute_capability_suite(
         benchmark_check_ids=benchmark_ids,
         components=[CAPABILITY_BENCHMARKS[item].display_name for item in benchmark_ids],
         score=score,
-        score_method="mean_primary_metric_v1",
+        score_method=score_details.get("score_method"),
         component_scores=component_scores,
         confidence=confidence,
         status=status,
         benchmark_results=benchmark_results,
         artifacts=benchmark_artifacts,
+        score_details=score_details,
+        task_performance=_summarize_task_performance_rows(task_performance_rows),
     )
     summary_path = write_capability_summary_artifact(request, execution, request.output_dir or os.path.dirname(os.path.dirname(benchmark_root)))
     execution.artifacts["_summary"] = {"capability_summary_path": summary_path}
@@ -782,7 +791,7 @@ def _write_quant_fidelity_capability_run_artifact(
         "runner": {
             "name": "infergrade-runner",
             "version": __version__,
-            "contract_version": "0.1.0",
+            "contract_version": _CONTRACT_VERSION,
         },
         "evidence": {
             "lane": "reference",
@@ -991,11 +1000,7 @@ def _write_native_capability_run_artifact(
                 "scoring_policy": summary.get("scoring_policy") if task_state == "scored" else None,
                 "output_artifact": "predictions.jsonl#%s" % case_id,
                 "error_class": None if task_state == "scored" else (task_error_class or "scoring_failed"),
-                "latency_ms": None,
-                "time_to_first_token_ms": None,
-                "tokens_per_second": None,
-                "input_tokens": None,
-                "output_tokens": None,
+                **_task_performance_fields(prediction),
             }
         )
     artifact = {
@@ -1016,7 +1021,7 @@ def _write_native_capability_run_artifact(
         "runner": {
             "name": "infergrade-runner",
             "version": __version__,
-            "contract_version": "0.1.0",
+            "contract_version": _CONTRACT_VERSION,
         },
         "evidence": {
             "lane": check_metadata.get("evidence_lane_id") or "decision",
@@ -1064,11 +1069,7 @@ def _write_native_capability_run_artifact(
             "partial_count": summary.get("metrics", {}).get("malformed_output_count", 0),
             "skipped_count": 0,
             "not_comparable_count": 0,
-            "duration_seconds": None,
-            "time_to_first_token_ms": None,
-            "tokens_per_second": None,
-            "input_tokens": None,
-            "output_tokens": None,
+            **_artifact_summary_performance(summary.get("task_performance")),
         },
         "tasks": tasks,
         "artifacts": {
@@ -1142,11 +1143,7 @@ def _write_mmlu_pro_capability_run_artifact(
                 "scoring_policy": summary.get("scoring_policy") if task_state == "scored" else None,
                 "output_artifact": "predictions.jsonl#%s" % (task_id or str(case.get("case_id") or "")),
                 "error_class": error_class,
-                "latency_ms": None,
-                "time_to_first_token_ms": None,
-                "tokens_per_second": None,
-                "input_tokens": None,
-                "output_tokens": None,
+                **_task_performance_fields(prediction),
                 "category": result.get("category") or case.get("category"),
                 "expected": result.get("expected") or case.get("answer"),
                 "predicted": predicted,
@@ -1172,7 +1169,7 @@ def _write_mmlu_pro_capability_run_artifact(
         "runner": {
             "name": "infergrade-runner",
             "version": __version__,
-            "contract_version": "0.1.0",
+            "contract_version": _CONTRACT_VERSION,
         },
         "evidence": {
             "lane": "reference",
@@ -1222,11 +1219,7 @@ def _write_mmlu_pro_capability_run_artifact(
             "partial_count": summary.get("generation_failure_count") or 0,
             "skipped_count": 0,
             "not_comparable_count": 0,
-            "duration_seconds": None,
-            "time_to_first_token_ms": None,
-            "tokens_per_second": None,
-            "input_tokens": None,
-            "output_tokens": None,
+            **_artifact_summary_performance(summary.get("task_performance")),
             "category_metrics": dict(summary.get("category_metrics") or {}),
         },
         "tasks": tasks,
@@ -1303,11 +1296,7 @@ def _write_evalplus_capability_run_artifact(
                 "scoring_policy": scoring_policy,
                 "output_artifact": "predictions.jsonl#%s" % (task_id or str(case.get("case_id") or "")),
                 "error_class": error_class,
-                "latency_ms": None,
-                "time_to_first_token_ms": None,
-                "tokens_per_second": None,
-                "input_tokens": None,
-                "output_tokens": None,
+                **_task_performance_fields(prediction),
                 "entry_point": case.get("entry_point"),
                 "dataset": metadata.get("dataset") or summary.get("dataset"),
                 "base_passed": result.get("base_passed"),
@@ -1335,7 +1324,7 @@ def _write_evalplus_capability_run_artifact(
         "runner": {
             "name": "infergrade-runner",
             "version": __version__,
-            "contract_version": "0.1.0",
+            "contract_version": _CONTRACT_VERSION,
         },
         "evidence": {
             "lane": check_metadata.get("evidence_lane_id") or "reference",
@@ -1391,11 +1380,7 @@ def _write_evalplus_capability_run_artifact(
             "partial_count": summary.get("generation_failure_count") or 0,
             "skipped_count": 0,
             "not_comparable_count": 0,
-            "duration_seconds": None,
-            "time_to_first_token_ms": None,
-            "tokens_per_second": None,
-            "input_tokens": None,
-            "output_tokens": None,
+            **_artifact_summary_performance(summary.get("task_performance")),
             "pass_at_1_base": metrics.get("pass_at_1_base"),
             "pass_at_1_plus": metrics.get("pass_at_1_plus"),
         },
@@ -1736,15 +1721,18 @@ def _generate_predictions(
             text = generated.get("text", "")
             status = generated.get("status", "completed")
             error = generated.get("error")
+            performance = _task_performance_fields(generated)
         except Exception as exc:
             text = ""
             status = "failed"
             error = str(exc)
+            performance = _task_performance_fields({})
         record = {
             "case_id": case_id,
             "benchmark_id": spec.benchmark_id,
             "generation_status": status,
             "generation_error": error,
+            **performance,
         }
         if spec.benchmark_kind in {"instruction_following", "multiturn_instruction_retention"}:
             record["prompt"] = case["prompt"]
@@ -1766,6 +1754,112 @@ def _generate_predictions(
                 }
             )
     return predictions
+
+
+def _task_performance_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "latency_ms": _non_negative_number(payload.get("latency_ms")),
+        "time_to_first_token_ms": _non_negative_number(payload.get("time_to_first_token_ms")),
+        "tokens_per_second": _non_negative_number(payload.get("tokens_per_second")),
+        "input_tokens": _non_negative_integer(payload.get("input_tokens")),
+        "output_tokens": _non_negative_integer(payload.get("output_tokens")),
+        "measurement_source": str(payload.get("measurement_source") or "") or None,
+    }
+
+
+def _summarize_task_performance_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    attempted_count = len(rows)
+    completed_rows = [item for item in rows if item.get("generation_status") == "completed"]
+    latencies_ms = _numeric_values(completed_rows, "latency_ms")
+    ttft_ms = _numeric_values(completed_rows, "time_to_first_token_ms")
+    decode_tps = _numeric_values(completed_rows, "tokens_per_second")
+    input_tokens = _integer_values(completed_rows, "input_tokens")
+    output_tokens = _integer_values(completed_rows, "output_tokens")
+    sources = sorted({str(item.get("measurement_source")) for item in completed_rows if item.get("measurement_source")})
+    return {
+        "attempted_task_count": attempted_count,
+        "completed_task_count": len(completed_rows),
+        "timed_task_count": len(latencies_ms),
+        "output_token_task_count": len(output_tokens),
+        "timing_coverage_fraction": round(len(latencies_ms) / float(attempted_count), 6) if attempted_count else 0.0,
+        "output_token_coverage_fraction": round(len(output_tokens) / float(attempted_count), 6) if attempted_count else 0.0,
+        "time_per_task_seconds_median": _milliseconds_to_seconds(_percentile_numeric(latencies_ms, 0.50)),
+        "time_per_task_seconds_p95": _milliseconds_to_seconds(_percentile_numeric(latencies_ms, 0.95)),
+        "time_to_first_token_ms_median": _percentile_numeric(ttft_ms, 0.50),
+        "output_tokens_per_task_median": _percentile_numeric([float(item) for item in output_tokens], 0.50),
+        "output_tokens_per_task_p95": _percentile_numeric([float(item) for item in output_tokens], 0.95),
+        "decode_tokens_per_second_median": _percentile_numeric(decode_tps, 0.50),
+        "decode_tokens_per_second_p95": _percentile_numeric(decode_tps, 0.95),
+        "total_elapsed_seconds": round(sum(latencies_ms) / 1000.0, 6) if latencies_ms else None,
+        "total_input_tokens": sum(input_tokens) if input_tokens else None,
+        "total_output_tokens": sum(output_tokens) if output_tokens else None,
+        "measurement_sources": sources,
+        "aggregation_method": "task_observation_percentiles_v1",
+        "measurement_status": "measured" if latencies_ms or output_tokens else "not_reported_by_backend",
+    }
+
+
+def _artifact_summary_performance(performance: Dict[str, Any]) -> Dict[str, Any]:
+    performance = dict(performance or {})
+    return {
+        "duration_seconds": performance.get("total_elapsed_seconds"),
+        "time_to_first_token_ms": performance.get("time_to_first_token_ms_median"),
+        "tokens_per_second": performance.get("decode_tokens_per_second_median"),
+        "input_tokens": performance.get("total_input_tokens"),
+        "output_tokens": performance.get("total_output_tokens"),
+        "task_performance": performance,
+    }
+
+
+def _numeric_values(rows: List[Dict[str, Any]], key: str) -> List[float]:
+    values = []
+    for row in rows:
+        value = _non_negative_number(row.get(key))
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _integer_values(rows: List[Dict[str, Any]], key: str) -> List[int]:
+    values = []
+    for row in rows:
+        value = _non_negative_integer(row.get(key))
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _non_negative_number(value: Any) -> Optional[float]:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(parsed, 6) if parsed >= 0 else None
+
+
+def _non_negative_integer(value: Any) -> Optional[int]:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(parsed) if parsed >= 0 and parsed.is_integer() else None
+
+
+def _percentile_numeric(values: List[float], percentile: float) -> Optional[float]:
+    ordered = sorted(values)
+    if not ordered:
+        return None
+    if len(ordered) == 1:
+        return round(ordered[0], 6)
+    index = (len(ordered) - 1) * percentile
+    lower = int(index)
+    upper = min(lower + 1, len(ordered) - 1)
+    weight = index - lower
+    return round(ordered[lower] * (1.0 - weight) + ordered[upper] * weight, 6)
+
+
+def _milliseconds_to_seconds(value: Optional[float]) -> Optional[float]:
+    return None if value is None else round(value / 1000.0, 6)
 
 
 def _prepare_native_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir: str, tier: str) -> None:

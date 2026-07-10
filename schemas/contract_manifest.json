@@ -1,5 +1,5 @@
 {
-  "contract_version": "0.3.5",
+  "contract_version": "0.3.6",
   "publisher": "infergrade-runner",
   "ontology_source": "schemas/json/model_ontology.schema.json",
   "schema_files": [
@@ -28,6 +28,7 @@
     "docs/contract_ownership.md",
     "docs/input_output_spec.md",
     "docs/local_benchmark_methodology.md",
+    "docs/local_capability_score.md",
     "docs/schema_draft.md",
     "docs/windows_nvidia_cuda_beta.md",
     "docs/coverage_expansion_v0_3_5.md"
