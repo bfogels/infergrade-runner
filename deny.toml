@@ -26,9 +26,6 @@ ignore = [
   { id = "RUSTSEC-2024-0418", reason = "tauri -> wry -> gdk-sys (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
   { id = "RUSTSEC-2024-0419", reason = "tauri -> wry -> gtk3-macros (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
   { id = "RUSTSEC-2024-0420", reason = "tauri -> wry -> gtk-sys (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
-  # Soundness issue in glib::VariantStrIter on Linux GTK3 path. Same upgrade
-  # path resolves it (glib 0.18 -> 0.19+ via Tauri/wry).
-  { id = "RUSTSEC-2024-0429", reason = "tauri -> wry -> glib VariantStrIter unsoundness; revisit after Tauri GTK4 migration" },
   # Transitive proc-macro-error 1.x is unmaintained. Replacement requires
   # upstream tauri-plugin-* updates.
   { id = "RUSTSEC-2024-0370", reason = "transitive via Tauri plugin macros; revisit after Tauri 2.x minor bumps" },
@@ -39,6 +36,11 @@ ignore = [
   { id = "RUSTSEC-2025-0081", reason = "transitive unic-char-property via Linux desktop graph" },
   { id = "RUSTSEC-2025-0098", reason = "transitive unic-ucd-version via Linux desktop graph" },
   { id = "RUSTSEC-2025-0100", reason = "transitive unic-ucd-ident via Linux desktop graph" },
+  # plist 1.9.0 constrains quick-xml to 0.39.x through Tauri's desktop-only
+  # local plist parser. Revisit as soon as plist accepts quick-xml >=0.41.
+  # InferGrade does not expose this parser to benchmark payloads or Hub input.
+  { id = "RUSTSEC-2026-0194", reason = "tauri -> plist 1.9.0 -> quick-xml 0.39; local desktop plist parsing only; upgrade when plist permits 0.41+" },
+  { id = "RUSTSEC-2026-0195", reason = "tauri -> plist 1.9.0 -> quick-xml 0.39; local desktop plist parsing only; upgrade when plist permits 0.41+" },
 ]
 
 [bans]

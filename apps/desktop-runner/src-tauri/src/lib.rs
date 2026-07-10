@@ -283,15 +283,16 @@ async fn send_worker_json_request(
         .await
         .map_err(|error| format!("Could not read Hub worker response: {error}"))?;
     let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"error": text}));
+    let sensitive_tokens = [token.to_string()];
     if !status.is_success() {
-        let redacted = redact_worker_response(parsed, &[token.to_string()]);
+        let redacted = redact_worker_response(parsed, &sensitive_tokens);
         return Err(format!(
             "Hub worker request failed: HTTP {}: {}",
             status.as_u16(),
             pairing_error_detail(&redacted).unwrap_or("no detail")
         ));
     }
-    Ok(redact_worker_response(parsed, &[token.to_string()]))
+    Ok(redact_worker_response(parsed, &sensitive_tokens))
 }
 
 fn save_runner_profile(profile: &Value) -> Result<PathBuf, String> {
@@ -883,7 +884,7 @@ async fn upload_desktop_native_first_run(
         .await
         .map_err(|error| error.message().to_string())?;
     let redacted_claim_body =
-        redact_worker_response(claim_response.body.clone(), &[token.to_string()]);
+        redact_worker_response(claim_response.body.clone(), std::slice::from_ref(&token));
     let bundle_payload = native_first_run_bundle_payload(
         &result,
         NativeFirstRunBundleOptions {
@@ -898,7 +899,7 @@ async fn upload_desktop_native_first_run(
         .await
         .map_err(|error| error.message().to_string())?;
     let redacted_upload_body =
-        redact_worker_response(upload_response.body.clone(), &[token.to_string()]);
+        redact_worker_response(upload_response.body.clone(), std::slice::from_ref(&token));
     let bundle_id = upload_response
         .body
         .get("bundle_id")
@@ -917,8 +918,10 @@ async fn upload_desktop_native_first_run(
     let completion_response = execute_hub_json_request(&completion_request)
         .await
         .map_err(|error| error.message().to_string())?;
-    let redacted_completion_body =
-        redact_worker_response(completion_response.body.clone(), &[token.to_string()]);
+    let redacted_completion_body = redact_worker_response(
+        completion_response.body.clone(),
+        std::slice::from_ref(&token),
+    );
     payload["uploaded"] = Value::Bool(true);
     payload["result"]["uploaded"] = Value::Bool(true);
     payload["upload"] = json!({
@@ -969,7 +972,7 @@ async fn upload_desktop_native_first_run_bundle_payload(
         .await
         .map_err(|error| error.message().to_string())?;
     let redacted_claim_body =
-        redact_worker_response(claim_response.body.clone(), &[token.to_string()]);
+        redact_worker_response(claim_response.body.clone(), std::slice::from_ref(&token));
     let upload_request =
         build_run_bundle_upload_request(&api_url, run_id, bundle_payload, Some(&token))
             .map_err(|error| error.message().to_string())?;
@@ -977,7 +980,7 @@ async fn upload_desktop_native_first_run_bundle_payload(
         .await
         .map_err(|error| error.message().to_string())?;
     let redacted_upload_body =
-        redact_worker_response(upload_response.body.clone(), &[token.to_string()]);
+        redact_worker_response(upload_response.body.clone(), std::slice::from_ref(&token));
     let bundle_id = upload_response
         .body
         .get("bundle_id")
@@ -996,8 +999,10 @@ async fn upload_desktop_native_first_run_bundle_payload(
     let completion_response = execute_hub_json_request(&completion_request)
         .await
         .map_err(|error| error.message().to_string())?;
-    let redacted_completion_body =
-        redact_worker_response(completion_response.body.clone(), &[token.to_string()]);
+    let redacted_completion_body = redact_worker_response(
+        completion_response.body.clone(),
+        std::slice::from_ref(&token),
+    );
     payload["uploaded"] = Value::Bool(true);
     payload["result"]["uploaded"] = Value::Bool(true);
     payload["upload"] = json!({

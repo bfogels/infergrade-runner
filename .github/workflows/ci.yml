@@ -105,7 +105,6 @@ jobs:
   cargo-audit:
     name: cargo audit (advisory snapshot, non-blocking)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -113,12 +112,12 @@ jobs:
       - name: Install cargo-audit (prebuilt)
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-audit@0.21
+          tool: cargo-audit@0.22.2
 
       - name: cargo audit
-        # Job-level continue-on-error keeps this advisory step non-blocking;
-        # do not also append `|| true` so a real audit failure surfaces in
-        # the run UI instead of silently passing.
+        # Keep the snapshot visible as a warning without making its expected
+        # advisory/parser churn block the cargo-deny enforcement gate.
+        continue-on-error: true
         run: cargo audit --file Cargo.lock
 
   cargo-deny:
