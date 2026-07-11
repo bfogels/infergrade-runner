@@ -8,6 +8,7 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
+from infergrade import __version__
 from infergrade.capabilities import (
     _host_mount_path,
     _run_capability_container,
@@ -211,7 +212,7 @@ class CapabilityTests(unittest.TestCase):
         )
         images = capability_images_for_request(request)
         self.assertEqual([item["benchmark_id"] for item in images], ["mmlu_pro_reference_v1"])
-        self.assertEqual(images[0]["image"], "infergrade-mmlu-pro:local")
+        self.assertEqual(images[0]["image"], "ghcr.io/bfogels/infergrade-mmlu-pro:%s" % __version__)
 
     def test_execute_native_multiturn_benchmark_scores_constraints_without_docker(self):
         request = RunRequest(
@@ -1048,7 +1049,15 @@ class CapabilityTests(unittest.TestCase):
         )
         with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
             with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
-                execution = execute_capability_suite(_MmluProAdapter(), request)
+                with mock.patch(
+                    "infergrade.capabilities.container_image_identity",
+                    return_value={
+                        "container_image": "ghcr.io/bfogels/infergrade-mmlu-pro:%s" % __version__,
+                        "container_image_id": "sha256:scorer",
+                        "container_repo_digests": ["ghcr.io/bfogels/infergrade-mmlu-pro@sha256:scorer"],
+                    },
+                ):
+                    execution = execute_capability_suite(_MmluProAdapter(), request)
 
         capability_run_path = execution.artifacts["mmlu_pro_reference_v1"]["capability_run_path"]
         with open(capability_run_path, "r", encoding="utf-8") as handle:
@@ -1061,6 +1070,9 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(artifact["summary"]["state"], "scored")
         self.assertEqual(artifact["summary"]["score"], 0.5)
         self.assertEqual(artifact["summary"]["category_metrics"]["math"]["accuracy"], 1.0)
+        self.assertEqual(artifact["subject"]["runtime"]["container_image_id"], "sha256:scorer")
+        self.assertEqual(artifact["subject"]["runtime"]["container_repo_digests"], ["ghcr.io/bfogels/infergrade-mmlu-pro@sha256:scorer"])
+        self.assertEqual(execution.benchmark_results["mmlu_pro_reference_v1"]["container_runtime"]["container_image_id"], "sha256:scorer")
         self.assertEqual([task["score"] for task in artifact["tasks"]], [1.0, 0.0])
         self.assertIn("This is not public leaderboard evidence.", artifact["claim_boundary"]["unsupported_claims"])
 

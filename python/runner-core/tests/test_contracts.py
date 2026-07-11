@@ -202,7 +202,7 @@ class ContractExportTests(unittest.TestCase):
             self.assertEqual(__version__, manifest["runner_version"])
             self.assertEqual("preview", manifest["release_channel"])
             self.assertEqual(
-                "infergrade-runner-core:1.2.3-preview",
+                "ghcr.io/bfogels/infergrade-runner-core:1.2.3-preview",
                 manifest["golden_paths"]["local_listener_container"]["runner_image"],
             )
             self.assertTrue((bundle_dir / "contract" / "contract_manifest.json").exists())
@@ -211,6 +211,7 @@ class ContractExportTests(unittest.TestCase):
             self.assertFalse((source_root / "dist" / "contracts").exists())
             runtime_refs = {item["image_name"]: item for item in manifest["runtime_images"]}
             capability_refs = {item["image_name"]: item for item in manifest["capability_images"]}
+            self.assertTrue(all(item["image_ref"].startswith("ghcr.io/bfogels/") for item in manifest["runtime_images"] + manifest["capability_images"]))
             self.assertEqual(
                 "images/infergrade-runner-core_1.2.3-preview.tar",
                 runtime_refs["infergrade-runner-core"]["archive_path"],

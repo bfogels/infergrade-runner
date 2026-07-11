@@ -7,6 +7,8 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Optional
 
+from infergrade import __version__
+
 
 LOCAL_IMAGE_DOCKERFILES: Dict[str, str] = {
     "infergrade-llama-cpp": "containers/llama-cpp/Dockerfile",
@@ -39,9 +41,10 @@ def install_image(
     rebuild: bool = False,
 ) -> Dict[str, str]:
     """Ensure a Docker image is available, building or pulling when possible."""
-    repository, _, tag = image.partition(":")
-    if rebuild and prefer_local_build and tag == "local":
-        build_result = _try_build_local_image(repository, image)
+    repository, _, tag = image.rpartition(":")
+    known_repository = _known_repository_name(repository)
+    if rebuild and prefer_local_build and known_repository:
+        build_result = _try_build_local_image(known_repository, image)
         if build_result:
             build_result["action"] = "rebuilt"
             return build_result
@@ -49,8 +52,8 @@ def install_image(
     if docker_image_exists(image):
         return {"image": image, "action": "present"}
 
-    if prefer_local_build and tag == "local":
-        build_result = _try_build_local_image(repository, image)
+    if prefer_local_build and known_repository:
+        build_result = _try_build_local_image(known_repository, image)
         if build_result:
             return build_result
 
@@ -88,7 +91,7 @@ def install_known_images(image: Optional[str] = None, rebuild: bool = False) -> 
         installed[target] = install_image(
             target,
             prefer_local_build=True,
-            pull_if_missing=False,
+            pull_if_missing=True,
             rebuild=rebuild,
         )
     return installed
@@ -96,8 +99,8 @@ def install_known_images(image: Optional[str] = None, rebuild: bool = False) -> 
 
 def local_build_command(image: str) -> Optional[str]:
     """Return the local build command for a known image when source is available."""
-    repository, _, _tag = image.partition(":")
-    dockerfile = LOCAL_IMAGE_DOCKERFILES.get(repository)
+    repository, _, _tag = image.rpartition(":")
+    dockerfile = LOCAL_IMAGE_DOCKERFILES.get(_known_repository_name(repository))
     root = _repo_root()
     if not dockerfile or not root:
         return None
@@ -132,7 +135,7 @@ def _try_build_local_image(repository: str, full_image: str) -> Optional[Dict[st
 def _expand_install_targets(image: Optional[str]) -> list[str]:
     """Expand a requested install target into the images needed for the local flow."""
     if not image:
-        return [f"{name}:local" for name in LOCAL_IMAGE_DOCKERFILES]
+        return ["ghcr.io/bfogels/%s:%s" % (name, __version__) for name in LOCAL_IMAGE_DOCKERFILES]
     targets = []
     repository, _, tag = image.partition(":")
     if tag == "local" and repository != "infergrade-runner-core":
@@ -143,6 +146,37 @@ def _expand_install_targets(image: Optional[str]) -> list[str]:
         if target not in deduped:
             deduped.append(target)
     return deduped
+
+
+def _known_repository_name(repository: str) -> Optional[str]:
+    candidate = str(repository or "").rsplit("/", 1)[-1]
+    return candidate if candidate in LOCAL_IMAGE_DOCKERFILES else None
+
+
+def container_image_identity(image: str) -> Dict[str, object]:
+    """Return the exact local image identity used by a capability scorer."""
+    payload: Dict[str, object] = {"container_image": image, "container_image_id": None, "container_repo_digests": []}
+    if not image:
+        return payload
+    try:
+        completed = subprocess.run(
+            ["docker", "image", "inspect", image, "--format", "{{json .}}"],
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return payload
+    if completed.returncode != 0:
+        return payload
+    try:
+        import json
+
+        inspected = json.loads((completed.stdout or "").strip())
+    except (TypeError, ValueError):
+        return payload
+    payload["container_image_id"] = inspected.get("Id")
+    payload["container_repo_digests"] = list(inspected.get("RepoDigests") or [])
+    return payload
 
 
 def _repo_root() -> Optional[str]:

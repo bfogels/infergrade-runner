@@ -1,5 +1,7 @@
 # Capability Benchmarks
 
+Capability container defaults use the canonical public `ghcr.io/bfogels/<image>:<runner-version>` release reference. Source checkouts build that exact reference; installed runners pull it. Capability artifacts record the resolved local image ID and any repository digest so the actual scorer can be audited after the run. Source developers may override an image explicitly with `INFERGRADE_IFEVAL_IMAGE`, `INFERGRADE_EVALPLUS_IMAGE`, or `INFERGRADE_MMLU_PRO_IMAGE`; an unversioned `:local` image is never selected implicitly for evidence collection.
+
 InferGrade needs capability benchmarks that are:
 
 - representative of real user-facing skills,

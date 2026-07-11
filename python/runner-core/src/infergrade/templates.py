@@ -25,7 +25,7 @@ def build_run_request_template(
     if use_case:
         payload["run"]["use_case"] = use_case
     if backend == "llama.cpp":
-        payload["runtime"] = {"backend_image": "infergrade-llama-cpp:%s" % default_release_version()}
+        payload["runtime"] = {"backend_image": "ghcr.io/bfogels/infergrade-llama-cpp:%s" % default_release_version()}
         if model == "Qwen/Qwen2.5-7B-Instruct":
             payload["artifacts"] = {
                 "quantized_weights": {

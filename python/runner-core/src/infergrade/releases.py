@@ -94,7 +94,7 @@ def export_release_bundle(
     capability_images = []
     listener_image = None
     for item in KNOWN_RELEASE_IMAGES:
-        image_ref = "%s:%s" % (item["image_name"], resolved_release_version)
+        image_ref = "ghcr.io/bfogels/%s:%s" % (item["image_name"], resolved_release_version)
         archive_name = item["archive_name"].format(release_version=resolved_release_version)
         archive_path = "images/%s" % archive_name if archive_name in bundled_images else None
         archive_sha256 = bundled_images.get(archive_name)

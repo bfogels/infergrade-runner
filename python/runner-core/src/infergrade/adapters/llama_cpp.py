@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+from infergrade import __version__
 from infergrade.adapters.base import BaseAdapter
 from infergrade.benchmark_catalog import fidelity_enabled_for_request
 from infergrade.container_runtime import (
@@ -45,7 +46,7 @@ _MEMORY_BUFFER_RE = re.compile(
     re.IGNORECASE,
 )
 
-_DEFAULT_IMAGE = "infergrade-llama-cpp:local"
+_DEFAULT_IMAGE = "ghcr.io/bfogels/infergrade-llama-cpp:%s" % __version__
 _DEFAULT_COMMAND = "llama-cli"
 _DEFAULT_SERVER_COMMAND = "llama-server"
 _DEFAULT_PERPLEXITY_COMMAND = "llama-perplexity"

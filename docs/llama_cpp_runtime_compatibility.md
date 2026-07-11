@@ -4,7 +4,7 @@ InferGrade Runner treats `llama.cpp` as an explicit runtime dependency for real 
 
 ## Runtime Selection
 
-For container execution, Runner uses the configured runtime image, defaulting to `infergrade-llama-cpp:local` for local development. The result bundle records the container image, container runtime, and pinned runtime reference when available.
+For container execution, Runner uses the configured runtime image, defaulting to the canonical `ghcr.io/bfogels/infergrade-llama-cpp:<runner-version>` release image. Source developers can still select `infergrade-llama-cpp:local` explicitly. The result bundle records the container image, container runtime, and pinned runtime reference when available.
 
 For native execution, Runner resolves binaries in this order:
 
