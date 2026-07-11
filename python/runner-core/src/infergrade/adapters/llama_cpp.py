@@ -40,6 +40,10 @@ _SUMMARY_TPS_RE = re.compile(
 )
 _PERPLEXITY_RE = re.compile(r"Final estimate:\s*PPL\s*=\s*([0-9.]+)\s*\+/-\s*([0-9.]+)", re.IGNORECASE)
 _PERPLEXITY_TOKENIZATION_RE = re.compile(r"tokenizes to only\s*([0-9.]+)\s*tokens", re.IGNORECASE)
+_MEMORY_BUFFER_RE = re.compile(
+    r"(?P<label>[^\n]*?(?:model|kv)[^\n]*?buffer size)\s*=\s*(?P<value>[0-9.]+)\s*(?P<unit>[KMGT]i?B)",
+    re.IGNORECASE,
+)
 
 _DEFAULT_IMAGE = "infergrade-llama-cpp:local"
 _DEFAULT_COMMAND = "llama-cli"
@@ -272,6 +276,14 @@ class LlamaCppAdapter(BaseAdapter):
             "decode_tokens_per_second_p95": _percentile([item["decode_tokens_per_second"] for item in measurements], 0.95),
             "request_throughput_per_minute": round(60000.0 / max(_percentile([item["latency_ms"] for item in measurements], 0.50), 1.0), 2),
             "peak_vram_mb": _max_or_none([item["peak_vram_mb"] for item in measurements]),
+            "peak_memory_mb": _max_or_none([item.get("peak_memory_mb") for item in measurements]),
+            "peak_memory_measurement_method": _first_nonempty(
+                [item.get("peak_memory_measurement_method") for item in measurements]
+            ),
+            "model_weights_bytes": os.path.getsize(model_path),
+            "model_buffer_bytes": _max_or_none([item.get("model_buffer_bytes") for item in measurements]),
+            "kv_cache_bytes": _max_or_none([item.get("kv_cache_bytes") for item in measurements]),
+            "kv_cache_context_tokens": int(profile_spec["ctx_size"]),
             "load_time_ms": _percentile([item["load_time_ms"] for item in measurements], 0.50),
             "oom_or_failure_rate": round(len(failures) / float(warmup_runs + measured_runs), 4),
             "deployment_confidence": _deployment_confidence(profile_id, len(measurements), measured_runs, len(failures)),
@@ -546,6 +558,7 @@ class LlamaCppAdapter(BaseAdapter):
         )
 
         monitor = _start_gpu_monitor()
+        memory_monitor = None
         started = time.perf_counter()
         logs_text = ""
         try:
@@ -577,6 +590,7 @@ class LlamaCppAdapter(BaseAdapter):
             )
             logs_text = _fetch_container_logs(container_name)
             parsed = _parse_llama_timings(logs_text)
+            memory_allocations = _parse_llama_memory_allocations(logs_text)
             peak_vram_mb = _stop_gpu_monitor(monitor)
             metrics = _metrics_from_server_completion(
                 completion=completion,
@@ -584,6 +598,9 @@ class LlamaCppAdapter(BaseAdapter):
                 load_time_ms=load_time_ms,
                 peak_vram_mb=peak_vram_mb,
             )
+            metrics.update(memory_allocations)
+            metrics["peak_memory_mb"] = peak_vram_mb
+            metrics["peak_memory_measurement_method"] = "nvidia_smi_total_used_delta" if peak_vram_mb is not None else None
             return {
                 "iteration": iteration,
                 "warmup": is_warmup,
@@ -640,6 +657,7 @@ class LlamaCppAdapter(BaseAdapter):
         monitor = _start_gpu_monitor()
         started = time.perf_counter()
         process = None
+        memory_monitor = None
         logs_text = ""
         try:
             with open(log_path, "wb") as log_file:
@@ -648,6 +666,7 @@ class LlamaCppAdapter(BaseAdapter):
                     stdout=log_file,
                     stderr=subprocess.STDOUT,
                 )
+            memory_monitor = _start_process_rss_monitor(process.pid)
             base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
             completion = _stream_server_completion(
                 base_url=base_url,
@@ -657,12 +676,17 @@ class LlamaCppAdapter(BaseAdapter):
             logs_text = _read_log_file(log_path)
             parsed = _parse_llama_timings(logs_text)
             peak_vram_mb = _stop_gpu_monitor(monitor)
+            peak_memory_mb = _stop_process_rss_monitor(memory_monitor)
+            memory_allocations = _parse_llama_memory_allocations(logs_text)
             metrics = _metrics_from_server_completion(
                 completion=completion,
                 parsed_timings=parsed,
                 load_time_ms=load_time_ms,
                 peak_vram_mb=peak_vram_mb,
             )
+            metrics.update(memory_allocations)
+            metrics["peak_memory_mb"] = peak_memory_mb
+            metrics["peak_memory_measurement_method"] = "process_rss" if peak_memory_mb is not None else None
             return {
                 "iteration": iteration,
                 "warmup": is_warmup,
@@ -672,6 +696,7 @@ class LlamaCppAdapter(BaseAdapter):
                 if load_time_ms is not None and metrics.get("latency_ms") is not None
                 else round(time.perf_counter() - started, 4),
                 "peak_vram_mb": peak_vram_mb,
+                "peak_memory_mb": peak_memory_mb,
                 "metrics": metrics,
                 "parsed_timings": parsed,
                 "completion_summary": completion["final_payload"],
@@ -686,6 +711,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "command": command,
                 "duration_seconds": round(time.perf_counter() - started, 4),
                 "peak_vram_mb": _stop_gpu_monitor(monitor),
+                "peak_memory_mb": _stop_process_rss_monitor(memory_monitor),
                 "error": str(exc),
                 "log_tail": logs_text.splitlines()[-40:],
             }
@@ -1225,6 +1251,84 @@ def _read_log_file(path: str) -> str:
             return _decode_utf8_lossy(handle.read())
     except OSError:
         return ""
+
+
+def _memory_bytes(value: float, unit: str) -> int:
+    multipliers = {
+        "kb": 1000,
+        "kib": 1024,
+        "mb": 1000 ** 2,
+        "mib": 1024 ** 2,
+        "gb": 1000 ** 3,
+        "gib": 1024 ** 3,
+        "tb": 1000 ** 4,
+        "tib": 1024 ** 4,
+    }
+    return int(round(value * multipliers[unit.lower()]))
+
+
+def _first_nonempty(values: List[object]) -> Optional[object]:
+    return next((value for value in values if value not in (None, "")), None)
+
+
+def _parse_llama_memory_allocations(logs_text: str) -> Dict[str, Optional[int]]:
+    """Parse llama.cpp's own model and KV allocations without calling them RSS/VRAM."""
+    model_buffers = []
+    kv_buffers = []
+    for match in _MEMORY_BUFFER_RE.finditer(str(logs_text or "")):
+        size_bytes = _memory_bytes(float(match.group("value")), match.group("unit"))
+        label = match.group("label").lower()
+        if "kv" in label:
+            kv_buffers.append(size_bytes)
+        elif "model" in label:
+            model_buffers.append(size_bytes)
+    return {
+        "model_buffer_bytes": sum(model_buffers) if model_buffers else None,
+        "kv_cache_bytes": sum(kv_buffers) if kv_buffers else None,
+    }
+
+
+def _sample_process_rss_mb(pid: int) -> Optional[float]:
+    """Return process RSS in MiB. This is working-set evidence, not GPU-only memory."""
+    try:
+        completed = subprocess.run(
+            ["ps", "-o", "rss=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        )
+        if completed.returncode != 0 or not completed.stdout.strip():
+            return None
+        return round(float(completed.stdout.strip().splitlines()[0]) / 1024.0, 2)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def _start_process_rss_monitor(pid: int) -> Dict[str, object]:
+    samples: List[float] = []
+    stop_event = threading.Event()
+
+    def monitor() -> None:
+        while not stop_event.is_set():
+            sample = _sample_process_rss_mb(pid)
+            if sample is not None:
+                samples.append(sample)
+            stop_event.wait(0.1)
+
+    thread = threading.Thread(target=monitor, daemon=True)
+    thread.start()
+    return {"stop_event": stop_event, "thread": thread, "samples": samples}
+
+
+def _stop_process_rss_monitor(handle: Optional[Dict[str, object]]) -> Optional[float]:
+    if not handle:
+        return None
+    handle["stop_event"].set()
+    thread = handle.get("thread")
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=0.3)
+    samples = handle.get("samples") or []
+    return round(max(samples), 2) if samples else None
 
 
 def _stop_container(container_name: str) -> None:

@@ -150,7 +150,13 @@
       "type": "object",
       "properties": {
         "deployment_profile_id": { "type": "string", "enum": ["interactive_chat_v1", "batch_generation_v1", "long_context_v1"] },
-        "deployment_status": { "type": "string" }
+        "deployment_status": { "type": "string" },
+        "peak_memory_mb": { "type": ["number", "null"], "minimum": 0 },
+        "peak_memory_measurement_method": { "type": ["string", "null"], "enum": ["process_rss", "nvidia_smi_total_used_delta", null] },
+        "model_weights_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "model_buffer_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "kv_cache_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "kv_cache_context_tokens": { "type": ["integer", "null"], "minimum": 0 }
       },
       "additionalProperties": true
     },

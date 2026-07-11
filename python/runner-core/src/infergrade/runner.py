@@ -222,6 +222,7 @@ def _build_result_record(
     if runtime_selector:
         record["execution"]["runtime_selector"] = runtime_selector
     record["capability"] = summarize_capability_execution(request, capability, completed_at=completed_at)
+    record["capability"]["task_performance"] = deepcopy(capability.task_performance or {})
     record["fidelity"] = {
         "fidelity_state": fidelity.state,
         "fidelity_reason_codes": list(fidelity.reason_codes or []),
@@ -248,6 +249,12 @@ def _build_result_record(
         "decode_tokens_per_second_p95": deployment["decode_tokens_per_second_p95"],
         "request_throughput_per_minute": deployment["request_throughput_per_minute"],
         "peak_vram_mb": deployment["peak_vram_mb"],
+        "peak_memory_mb": deployment.get("peak_memory_mb"),
+        "peak_memory_measurement_method": deployment.get("peak_memory_measurement_method"),
+        "model_weights_bytes": deployment.get("model_weights_bytes"),
+        "model_buffer_bytes": deployment.get("model_buffer_bytes"),
+        "kv_cache_bytes": deployment.get("kv_cache_bytes"),
+        "kv_cache_context_tokens": deployment.get("kv_cache_context_tokens"),
         "load_time_ms": deployment["load_time_ms"],
         "oom_or_failure_rate": deployment["oom_or_failure_rate"],
         "deployment_confidence": deployment["deployment_confidence"],
@@ -362,6 +369,12 @@ def _deployment_metrics_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "decode_tokens_per_second_p95": deployment["decode_tokens_per_second_p95"],
         "request_throughput_per_minute": deployment["request_throughput_per_minute"],
         "peak_vram_mb": deployment["peak_vram_mb"],
+        "peak_memory_mb": deployment.get("peak_memory_mb"),
+        "peak_memory_measurement_method": deployment.get("peak_memory_measurement_method"),
+        "model_weights_bytes": deployment.get("model_weights_bytes"),
+        "model_buffer_bytes": deployment.get("model_buffer_bytes"),
+        "kv_cache_bytes": deployment.get("kv_cache_bytes"),
+        "kv_cache_context_tokens": deployment.get("kv_cache_context_tokens"),
         "load_time_ms": deployment["load_time_ms"],
         "oom_or_failure_rate": deployment["oom_or_failure_rate"],
         "deployment_confidence": deployment["deployment_confidence"],

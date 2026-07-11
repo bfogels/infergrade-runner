@@ -13,11 +13,13 @@ from infergrade.adapters.llama_cpp import (
     _decode_utf8_lossy,
     _fetch_container_logs,
     _metrics_from_server_completion,
+    _parse_llama_memory_allocations,
     _parse_llama_timings,
     _parse_perplexity_output,
     _read_log_file,
     _read_gguf_architecture,
     _safe_tokens_per_second,
+    _sample_process_rss_mb,
 )
 from infergrade.models import RunRequest
 from infergrade.runtimes import select_llama_cpp_runtime
@@ -35,6 +37,9 @@ _FAKE_SUMMARY_LOG = """
 """
 
 _FAKE_SERVER_LOG = """
+llama_model_load:        CPU_Mapped model buffer size =   108.50 MiB
+llama_model_load:      Metal_Mapped model buffer size =  3776.15 MiB
+llama_kv_cache_init:      Metal0 KV buffer size =   512.00 MiB
 slot print_timing: id  2 | task 2 |
 prompt eval time =    2185.99 ms /     8 tokens (  273.25 ms per token,     3.66 tokens per second)
        eval time =     908.05 ms /     6 tokens (  151.34 ms per token,     6.61 tokens per second)
@@ -79,6 +84,36 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.env_patch.stop()
         self.tempdir.cleanup()
 
+    @mock.patch(
+        "infergrade.adapters.llama_cpp._start_gpu_monitor",
+        return_value={"baseline_vram_mb": None, "samples": [], "stop_event": None, "thread": None},
+    )
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.Popen", side_effect=OSError("launch failed"))
+    @mock.patch.object(LlamaCppAdapter, "_native_server_path", return_value="/missing/llama-server")
+    def test_native_startup_failure_preserves_original_error(self, _server_path_mock, _popen_mock, _gpu_monitor_mock):
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            llama_cpp_server_path="/missing/llama-server",
+            simulate=False,
+        )
+
+        result = adapter._run_native_benchmark(
+            request=request,
+            model_path=self.model_path,
+            profile_id="interactive_chat_v1",
+            profile_spec={"ctx_size": 2048, "prompt": "hello", "max_tokens": 8},
+            is_warmup=False,
+            iteration=1,
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"], "launch failed")
+        self.assertIsNone(result["peak_memory_mb"])
+
     def test_parse_llama_timings_extracts_expected_metrics(self):
         parsed = _parse_llama_timings(_FAKE_TIMING_LOG)
         self.assertEqual(parsed["load_time_ms"], 617.57)
@@ -91,6 +126,14 @@ class LlamaCppAdapterTests(unittest.TestCase):
         parsed = _parse_llama_timings(_FAKE_SUMMARY_LOG)
         self.assertEqual(parsed["prompt_tokens_per_second"], 65.2)
         self.assertEqual(parsed["eval_tokens_per_second"], 25.1)
+
+    def test_parse_llama_memory_allocations_keeps_model_and_kv_distinct(self):
+        parsed = _parse_llama_memory_allocations(_FAKE_SERVER_LOG)
+        self.assertEqual(parsed["model_buffer_bytes"], 4073350758)
+        self.assertEqual(parsed["kv_cache_bytes"], 536870912)
+
+    def test_sample_process_rss_reports_current_process_working_set(self):
+        self.assertGreater(_sample_process_rss_mb(os.getpid()), 0)
 
     def test_metrics_from_server_completion_extracts_ttft_load_and_prompt_speed(self):
         metrics = _metrics_from_server_completion(
