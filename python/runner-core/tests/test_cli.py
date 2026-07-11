@@ -76,6 +76,51 @@ class CliTests(unittest.TestCase):
         status_mock.assert_called_once_with(cache_dir="/tmp/cache")
         self.assertIn('"total_bytes": 123', output.getvalue())
 
+    def test_upload_bundle_without_pairing_preserves_401_and_explains_how_to_pair(self):
+        api_error = "bundle upload failed (HTTP 401): Missing or invalid API token."
+        with mock.patch("infergrade.cli.upload_bundle", side_effect=RuntimeError(api_error)), mock.patch(
+            "infergrade.cli.resolve_runner_api_token",
+            return_value="",
+        ):
+            with self.assertRaises(SystemExit) as caught:
+                main(
+                    [
+                        "--all",
+                        "upload-bundle",
+                        "/tmp/example-bundle",
+                        "--api-url",
+                        "https://infergrade.com",
+                    ]
+                )
+
+        message = str(caught.exception)
+        self.assertIn(api_error, message)
+        self.assertIn("Pair this runner first", message)
+        self.assertIn("infergrade pair --api-url https://infergrade.com", message)
+
+    def test_upload_bundle_401_with_explicit_token_does_not_claim_runner_is_unpaired(self):
+        api_error = "bundle upload failed (HTTP 401): Invalid API token."
+        with mock.patch("infergrade.cli.upload_bundle", side_effect=RuntimeError(api_error)), mock.patch(
+            "infergrade.cli.resolve_runner_api_token",
+            return_value="bad-token",
+        ):
+            with self.assertRaises(SystemExit) as caught:
+                main(
+                    [
+                        "--all",
+                        "upload-bundle",
+                        "/tmp/example-bundle",
+                        "--api-url",
+                        "https://infergrade.com",
+                        "--api-token",
+                        "bad-token",
+                    ]
+                )
+
+        message = str(caught.exception)
+        self.assertIn(api_error, message)
+        self.assertNotIn("Pair this runner first", message)
+
     def test_cache_prune_partials_command_supports_dry_run(self):
         output = io.StringIO()
         with mock.patch(

@@ -506,8 +506,18 @@ def main(argv: Optional[list] = None) -> int:
         api_url = _require_secure_hub_api_url(args.api_url)
         try:
             payload = upload_bundle(args.path, api_url, api_token=args.api_token)
+        except RunnerTokenInvalidError as exc:
+            _exit_for_invalid_runner_token(exc)
         except (URLError, InsecureApiUrlError) as exc:
             raise SystemExit("Failed to upload bundle to %s: %s" % (api_url, exc))
+        except RuntimeError as exc:
+            message = "Failed to upload bundle to %s: %s" % (api_url, exc)
+            if "HTTP 401" in str(exc) and not resolve_runner_api_token(args.api_token):
+                message += (
+                    " Pair this runner first: create a pairing code in InferGrade Hub, then run "
+                    "`infergrade pair --api-url %s --label <name> --pair-code-stdin`." % api_url
+                )
+            raise SystemExit(message)
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
