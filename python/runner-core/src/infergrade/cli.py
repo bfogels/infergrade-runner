@@ -505,17 +505,19 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.command == "upload-bundle":
         api_url = _require_secure_hub_api_url(args.api_url)
-        credential_source = runner_api_credential_source(args.api_token)
-        if credential_source == "paired_runner_profile":
+        api_token = str(args.api_token).strip() if args.api_token is not None else None
+        api_token = api_token or None
+        credential_source = runner_api_credential_source(api_token)
+        if credential_source in {"paired_runner_profile", "hub_environment"}:
             raise SystemExit(
-                "Cannot upload a standalone bundle with the paired Runner profile. "
+                "Cannot upload a standalone bundle with a paired Runner credential. "
                 "Paired Runner credentials can upload only to an owned Hub run that the Runner claimed. "
                 "For a Hub-queued run, keep the bundle and run `infergrade start` to retry its run-scoped upload. "
                 "For new evidence, queue the setup from Hub Build and keep the Runner open. "
                 "This standalone bundle has not been uploaded; keep it staged for an authorized catalog import."
             )
         try:
-            payload = upload_bundle(args.path, api_url, api_token=args.api_token)
+            payload = upload_bundle(args.path, api_url, api_token=api_token)
         except RunnerTokenInvalidError as exc:
             raise SystemExit(
                 "Failed to upload bundle to %s: %s Paired Runner credentials do not authorize standalone catalog imports. "

@@ -116,7 +116,7 @@ class CliTests(unittest.TestCase):
 
         upload_mock.assert_not_called()
         message = str(caught.exception)
-        self.assertIn("Cannot upload a standalone bundle with the paired Runner profile", message)
+        self.assertIn("Cannot upload a standalone bundle with a paired Runner credential", message)
         self.assertIn("infergrade start", message)
         self.assertIn("keep it staged", message)
 
@@ -143,11 +143,32 @@ class CliTests(unittest.TestCase):
         self.assertIn("not authorized for a standalone catalog import", message)
         self.assertIn("Hub Build", message)
 
-    def test_upload_bundle_403_with_environment_token_explains_runner_boundary(self):
+    def test_upload_bundle_403_with_explicit_token_explains_runner_boundary(self):
         api_error = "bundle upload failed (HTTP 403): runner sessions cannot perform browser or catalog writes"
         with mock.patch("infergrade.cli.upload_bundle", side_effect=RuntimeError(api_error)), mock.patch(
-            "infergrade.cli.runner_api_credential_source", return_value="hub_environment"
+            "infergrade.cli.runner_api_credential_source", return_value="explicit"
         ):
+            with self.assertRaises(SystemExit) as caught:
+                main(
+                    [
+                        "--all",
+                        "upload-bundle",
+                        "/tmp/example-bundle",
+                        "--api-url",
+                        "https://infergrade.com",
+                        "--api-token",
+                        "runner-token-passed-explicitly",
+                    ]
+                )
+
+        message = str(caught.exception)
+        self.assertIn(api_error, message)
+        self.assertIn("Paired Runner credentials can upload only to an owned Hub run", message)
+
+    def test_upload_bundle_with_hub_environment_stops_before_transfer(self):
+        with mock.patch("infergrade.cli.runner_api_credential_source", return_value="hub_environment"), mock.patch(
+            "infergrade.cli.upload_bundle"
+        ) as upload_mock:
             with self.assertRaises(SystemExit) as caught:
                 main(
                     [
@@ -159,9 +180,29 @@ class CliTests(unittest.TestCase):
                     ]
                 )
 
-        message = str(caught.exception)
-        self.assertIn(api_error, message)
-        self.assertIn("Paired Runner credentials can upload only to an owned Hub run", message)
+        upload_mock.assert_not_called()
+        self.assertIn("paired Runner credential", str(caught.exception))
+
+    def test_upload_bundle_normalizes_blank_explicit_token_before_transport(self):
+        response = {"stored": True, "bundle_id": "bundle-1"}
+        with mock.patch("infergrade.cli.runner_api_credential_source", return_value="legacy_api_environment") as source_mock, mock.patch(
+            "infergrade.cli.upload_bundle", return_value=response
+        ) as upload_mock:
+            exit_code = main(
+                [
+                    "--all",
+                    "upload-bundle",
+                    "/tmp/example-bundle",
+                    "--api-url",
+                    "https://infergrade.com",
+                    "--api-token",
+                    "   ",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        source_mock.assert_called_once_with(None)
+        upload_mock.assert_called_once_with("/tmp/example-bundle", "https://infergrade.com", api_token=None)
 
     def test_upload_bundle_with_explicit_catalog_token_still_transfers(self):
         response = {"stored": True, "bundle_id": "bundle-1"}
