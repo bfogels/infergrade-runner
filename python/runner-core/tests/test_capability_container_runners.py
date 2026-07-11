@@ -272,6 +272,50 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertEqual(summary["category_metrics"]["math"]["accuracy"], 1.0)
         self.assertEqual(summary["category_metrics"]["other"]["accuracy"], 0.0)
 
+    def test_mmlu_pro_scores_25_letters_with_llama_cpp_terminal_markers(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
+        module = _load_module("mmlu_pro_terminal_marker_test_module", module_path)
+        with tempfile.TemporaryDirectory() as tempdir:
+            cases = []
+            predictions = []
+            for index in range(25):
+                letter = module.LETTERS[index % len(module.LETTERS)]
+                task_id = "mmlu_pro/%s" % index
+                cases.append(
+                    {
+                        "case_id": task_id,
+                        "task_id": task_id,
+                        "category": "fixture",
+                        "answer": letter,
+                    }
+                )
+                predictions.append(
+                    {"task_id": task_id, "completion": "%s [end of text]" % letter}
+                )
+            with open(os.path.join(tempdir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for case in cases:
+                    handle.write(json.dumps(case) + "\n")
+            with open(os.path.join(tempdir, "predictions.jsonl"), "w", encoding="utf-8") as handle:
+                for prediction in predictions:
+                    handle.write(json.dumps(prediction) + "\n")
+
+            module.evaluate(tempdir)
+            with open(os.path.join(tempdir, "summary.json"), "r", encoding="utf-8") as handle:
+                summary = json.load(handle)
+
+        self.assertEqual(summary["metrics"]["total_count"], 25)
+        self.assertEqual(summary["metrics"]["invalid_count"], 0)
+        self.assertEqual(summary["metrics"]["correct_count"], 25)
+        self.assertEqual(summary["primary_metric"], {"name": "accuracy", "value": 1.0})
+
+    def test_mmlu_pro_terminal_normalization_does_not_hide_extra_output(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
+        module = _load_module("mmlu_pro_strict_terminal_marker_test_module", module_path)
+
+        self.assertEqual(module._prediction_letter("B [end of text]"), "B")
+        self.assertIsNone(module._prediction_letter("B extra output [end of text]"))
+        self.assertIsNone(module._prediction_letter("[end of text] B"))
+
     def test_mmlu_pro_dockerfile_pins_official_dataset_revision(self):
         dockerfile_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "Dockerfile")
         with open(dockerfile_path, "r", encoding="utf-8") as handle:

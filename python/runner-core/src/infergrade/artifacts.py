@@ -83,19 +83,25 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
     ensure_dir(cache_dir)
     filename = _safe_artifact_filename(request.quant_artifact_filename) or _infer_filename(resolved_artifact_uri)
     cache_path = _cache_path(cache_dir, resolved_artifact_uri, filename, request.quant_artifact_sha256)
-    if os.path.isfile(cache_path):
-        cached_sha = compute_file_sha256(cache_path)
-        _verify_expected_sha256(cache_path, cached_sha, request.quant_artifact_sha256)
+    cached_path = _existing_cache_path(
+        cache_path,
+        _cache_path(cache_dir, resolved_artifact_uri, filename, None)
+        if request.quant_artifact_sha256
+        else None,
+    )
+    if cached_path:
+        cached_sha = compute_file_sha256(cached_path)
+        _verify_expected_sha256(cached_path, cached_sha, request.quant_artifact_sha256)
         return ResolvedArtifact(
             original_uri=resolved_artifact_uri,
-            resolved_path=cache_path,
+            resolved_path=cached_path,
             sha256=cached_sha,
-            filename=os.path.basename(cache_path),
+            filename=os.path.basename(cached_path),
             cache_hit=True,
             source_kind="cache",
             cache_dir=cache_dir,
             download_url=download_url,
-            size_bytes=os.path.getsize(cache_path),
+            size_bytes=os.path.getsize(cached_path),
         )
 
     ensure_min_free_space(cache_dir, min_artifact_cache_free_bytes(), "artifact cache")
@@ -119,7 +125,10 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
                 raise
         sha256 = compute_file_sha256(tmp_path)
         _verify_expected_sha256(tmp_path, sha256, request.quant_artifact_sha256)
-        os.replace(tmp_path, cache_path)
+        cache_was_installed = _install_cache_file_without_overwrite(tmp_path, cache_path)
+        if not cache_was_installed:
+            sha256 = compute_file_sha256(cache_path)
+            _verify_expected_sha256(cache_path, sha256, request.quant_artifact_sha256)
     except Exception:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -130,8 +139,8 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
         resolved_path=cache_path,
         sha256=sha256,
         filename=os.path.basename(cache_path),
-        cache_hit=False,
-        source_kind="download",
+        cache_hit=not cache_was_installed,
+        source_kind="cache" if not cache_was_installed else "download",
         cache_dir=cache_dir,
         download_url=download_url,
         size_bytes=os.path.getsize(cache_path),
@@ -448,6 +457,34 @@ def _cache_path(cache_dir: str, artifact: str, filename: str, expected_sha256: O
     """Derive a stable cache path for a remote artifact reference."""
     digest = expected_sha256 or stable_hash({"artifact": artifact, "filename": filename}, length=16)
     return os.path.join(cache_dir, "%s-%s" % (digest[:16], filename))
+
+
+def _existing_cache_path(
+    cache_path: str,
+    uri_cache_path: Optional[str],
+) -> Optional[str]:
+    """Find the requested entry or an identical entry cached before pinning."""
+    if os.path.isfile(cache_path):
+        return cache_path
+    if uri_cache_path and os.path.isfile(uri_cache_path):
+        return uri_cache_path
+    return None
+
+
+def _install_cache_file_without_overwrite(tmp_path: str, cache_path: str) -> bool:
+    """Atomically publish a completed download without replacing a race winner.
+
+    Temp files live in the cache directory, so a hard link is same-filesystem
+    and atomic. If another resolver published first, retain and verify that
+    winner instead of allowing a later unpinned request to overwrite it.
+    """
+    try:
+        os.link(tmp_path, cache_path)
+    except FileExistsError:
+        os.unlink(tmp_path)
+        return False
+    os.unlink(tmp_path)
+    return True
 
 
 def _infer_filename(uri: str) -> str:
