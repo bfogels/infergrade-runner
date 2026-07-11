@@ -657,6 +657,7 @@ class LlamaCppAdapter(BaseAdapter):
         monitor = _start_gpu_monitor()
         started = time.perf_counter()
         process = None
+        memory_monitor = None
         logs_text = ""
         try:
             with open(log_path, "wb") as log_file:

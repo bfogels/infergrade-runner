@@ -84,6 +84,36 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.env_patch.stop()
         self.tempdir.cleanup()
 
+    @mock.patch(
+        "infergrade.adapters.llama_cpp._start_gpu_monitor",
+        return_value={"baseline_vram_mb": None, "samples": [], "stop_event": None, "thread": None},
+    )
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.Popen", side_effect=OSError("launch failed"))
+    @mock.patch.object(LlamaCppAdapter, "_native_server_path", return_value="/missing/llama-server")
+    def test_native_startup_failure_preserves_original_error(self, _server_path_mock, _popen_mock, _gpu_monitor_mock):
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            llama_cpp_server_path="/missing/llama-server",
+            simulate=False,
+        )
+
+        result = adapter._run_native_benchmark(
+            request=request,
+            model_path=self.model_path,
+            profile_id="interactive_chat_v1",
+            profile_spec={"ctx_size": 2048, "prompt": "hello", "max_tokens": 8},
+            is_warmup=False,
+            iteration=1,
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"], "launch failed")
+        self.assertIsNone(result["peak_memory_mb"])
+
     def test_parse_llama_timings_extracts_expected_metrics(self):
         parsed = _parse_llama_timings(_FAKE_TIMING_LOG)
         self.assertEqual(parsed["load_time_ms"], 617.57)
