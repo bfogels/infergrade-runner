@@ -12,6 +12,7 @@ from infergrade.adapters.llama_cpp import (
     _compute_ttft_ms,
     _decode_utf8_lossy,
     _fetch_container_logs,
+    _llama_generation_protocol_error,
     _metrics_from_server_completion,
     _parse_llama_memory_allocations,
     _parse_llama_timings,
@@ -388,7 +389,10 @@ class LlamaCppAdapterTests(unittest.TestCase):
     @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
     def test_generate_text_local_native_uses_host_binary(self, run_mock, which_mock):
-        which_mock.return_value = "/opt/homebrew/bin/llama-cli"
+        which_mock.side_effect = lambda name: (
+            "/opt/homebrew/bin/llama-cli" if name == "llama-cli" else
+            "/opt/homebrew/bin/llama-completion" if "llama-completion" in name else None
+        )
         run_mock.return_value = mock.Mock(returncode=0, stdout="def solve():\n    return 1\n", stderr=_FAKE_TIMING_LOG)
         adapter = LlamaCppAdapter()
         request = RunRequest(
@@ -401,7 +405,49 @@ class LlamaCppAdapterTests(unittest.TestCase):
         )
         generated = adapter.generate_text(request, "Write a function", 128)
         self.assertEqual(generated["status"], "completed")
-        self.assertEqual(run_mock.call_args[0][0][0], "/opt/homebrew/bin/llama-cli")
+        self.assertEqual(run_mock.call_args[0][0][0], "/opt/homebrew/bin/llama-completion")
+
+    @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_generate_text_local_native_requires_noninteractive_completion_binary(self, run_mock, which_mock):
+        which_mock.side_effect = lambda name: "/opt/homebrew/bin/llama-cli" if name == "llama-cli" else None
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen3-0.6B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+        )
+        with self.assertRaisesRegex(RuntimeError, "requires llama-completion beside llama-cli"):
+            adapter.generate_text(request, "Answer only A", 64)
+        run_mock.assert_not_called()
+
+    def test_generation_protocol_rejects_observed_interactive_llama_cli_output(self):
+        observed = (
+            "Loading model...\n\navailable commands:\n  /exit stop or exit\n\n"
+            "> Question ... (truncated)\n\n[Start thinking]\nunfinished"
+        )
+        error = _llama_generation_protocol_error(observed, max_tokens=64, output_tokens=None)
+        self.assertIn("interactive llama-cli output contaminated", error)
+
+    def test_generation_protocol_rejects_token_exhaustion_inside_thinking(self):
+        error = _llama_generation_protocol_error(
+            "<think>Still reasoning and no final answer",
+            max_tokens=64,
+            output_tokens=64,
+        )
+        self.assertIn("exhausted max_tokens", error)
+
+    def test_generation_protocol_accepts_closed_thinking_with_answer(self):
+        self.assertIsNone(
+            _llama_generation_protocol_error(
+                "<think>brief</think>\nB",
+                max_tokens=64,
+                output_tokens=12,
+            )
+        )
 
     @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")

@@ -323,7 +323,7 @@ class LlamaCppAdapter(BaseAdapter):
         self._ensure_backend_model_compatibility(request)
         model_path = self._require_local_gguf_artifact(request)
         if request.execution_mode == "local_native":
-            command = [self._native_command_path(request)]
+            command = [self._native_completion_path(request)]
             command.extend(
                 self._build_llama_cli_command(
                     model_path=model_path,
@@ -366,8 +366,16 @@ class LlamaCppAdapter(BaseAdapter):
         if completed.returncode != 0:
             raise RuntimeError((raw_log or "llama.cpp generation failed").strip())
         parsed = _parse_llama_timings(raw_log)
+        output = stdout.strip()
+        protocol_error = _llama_generation_protocol_error(
+            output,
+            max_tokens=max_tokens,
+            output_tokens=_whole_token_count(parsed.get("eval_tokens")),
+        )
+        if protocol_error:
+            raise RuntimeError(protocol_error)
         return {
-            "text": stdout.strip(),
+            "text": output,
             "status": "completed",
             "error": None,
             "latency_ms": parsed.get("total_time_ms"),
@@ -754,6 +762,27 @@ class LlamaCppAdapter(BaseAdapter):
         command.extend(request.backend_flags)
         return command
 
+    def _native_completion_path(self, request: RunRequest) -> str:
+        """Resolve the non-interactive generation binary paired with llama-cli.
+
+        New llama.cpp builds auto-enable conversation mode in ``llama-cli`` for
+        chat-template models. Its banner, echoed prompt, and interactive markers
+        are stdout, so they cannot be distinguished from a model completion after
+        the fact. ``llama-completion`` is the supported subprocess protocol.
+        """
+        cli_path = self._native_command_path(request)
+        if os.path.basename(cli_path) in ("llama-completion", "llama-completion.exe"):
+            return cli_path
+        suffix = ".exe" if cli_path.lower().endswith(".exe") else ""
+        sibling = os.path.join(os.path.dirname(cli_path), "llama-completion%s" % suffix)
+        resolved = shutil.which(sibling) or shutil.which("llama-completion%s" % suffix)
+        if resolved:
+            return resolved
+        raise RuntimeError(
+            "llama.cpp generation protocol requires llama-completion beside llama-cli; "
+            "interactive llama-cli output is not safe to score."
+        )
+
     def _build_llama_server_command(
         self,
         model_path: str,
@@ -975,6 +1004,29 @@ class LlamaCppAdapter(BaseAdapter):
         ]
         command.extend(request.backend_flags)
         return command
+
+
+def _llama_generation_protocol_error(text: str, max_tokens: int, output_tokens: Optional[int]) -> Optional[str]:
+    """Identify runtime UI/protocol output that must not be scored as model text."""
+    lowered = text.lower()
+    if "available commands:" in lowered or ("loading model..." in lowered and "\n> " in text):
+        return (
+            "llama.cpp generation protocol failure: interactive llama-cli output "
+            "contaminated the completion; use llama-completion for non-interactive generation."
+        )
+    unfinished_thinking = (
+        ("[start thinking]" in lowered and "[end thinking]" not in lowered)
+        or ("<think>" in lowered and "</think>" not in lowered)
+    )
+    # llama.cpp timing logs commonly report generated runs as n_predict - 1
+    # because the terminal token is accounted separately.
+    exhausted_budget = output_tokens is not None and output_tokens >= max(1, max_tokens - 1)
+    if unfinished_thinking and exhausted_budget:
+        return (
+            "llama.cpp generation protocol failure: response exhausted max_tokens "
+            "inside an unfinished thinking block before a scorable answer."
+        )
+    return None
 
 
 def _parse_llama_timings(raw_log: str) -> Dict[str, float]:

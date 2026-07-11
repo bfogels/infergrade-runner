@@ -79,6 +79,10 @@ The planner writes:
 - `commands.sh`
 - `upload_commands.sh`
 
+Each generated request explicitly sets `metadata.evidence_source` to
+`agent_dogfood`. This attribution survives in standalone staged bundles; their
+local comparison grade is capped at `comparable`, never `official_eligible`.
+
 The default output root is `runs/local_evidence_dogfood/`, which is ignored by git.
 
 ## Execute Local Runs
