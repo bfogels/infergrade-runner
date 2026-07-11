@@ -168,6 +168,10 @@ Running the runner in its own container is the recommended production path becau
 
 Apple Silicon is the deliberate exception: when the goal is to benchmark local `llama.cpp` performance, the native path is the production path because it is the only path that can use Metal.
 
+Memory evidence follows the execution boundary instead of pretending every platform exposes VRAM. Native runs record the peak RSS of the `llama-server` process. Container runs prefer the container's monotonic kernel cgroup peak counter, read once after the benchmark; only hosts without a peak counter poll current usage at a bounded 250 ms interval. This is container-accounted memory usage (including memory charged by that cgroup), not host-wide memory, process RSS, or GPU-only VRAM. NVIDIA runs additionally retain the separately labeled `nvidia-smi` total-used delta. On Docker Desktop for macOS, container memory describes the Linux VM container and does not prove Metal/unified-memory use; use `local_native` for representative Apple Silicon measurements.
+
+On Apple Silicon, Runner uses native macOS hardware signals to identify the host even when the invoking Python process is translated by Rosetta 2. `cpu_architecture` describes the host (`arm64`), while `process_architecture` and `process_translation` preserve the actual process context rather than silently treating a translated process as an Intel Mac.
+
 ## Capability And Fidelity Signals
 
 Runner-produced result payloads now carry:
