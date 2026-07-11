@@ -374,6 +374,7 @@ class ArtifactResolutionTests(unittest.TestCase):
             quant_artifact=artifact_uri,
             quant_artifact_filename=filename,
             quant_artifact_sha256=expected_sha,
+            quant_artifact_revision="main",
             quant_artifact_cache_dir=self.cache_dir,
         )
         pinned = resolve_quant_artifact(pinned_request)
@@ -383,6 +384,75 @@ class ArtifactResolutionTests(unittest.TestCase):
         self.assertEqual(pinned.sha256, expected_sha)
         self.assertEqual(os.listdir(self.cache_dir), [os.path.basename(unpinned.resolved_path)])
         download_mock.assert_not_called()
+
+    @mock.patch("infergrade.artifacts._download_remote_artifact")
+    def test_unpinned_hf_revisions_use_distinct_cache_entries(self, download_mock):
+        artifact_uri = "hf://example/model-GGUF/model.gguf"
+        payloads = [b"revision-a", b"revision-b"]
+
+        def download_next(_url, path):
+            with open(path, "wb") as handle:
+                handle.write(payloads.pop(0))
+
+        download_mock.side_effect = download_next
+        resolved = []
+        for revision in ("revision-a", "revision-b"):
+            resolved.append(
+                resolve_quant_artifact(
+                    RunRequest(
+                        model="example/model",
+                        backend="llama.cpp",
+                        tier="canary",
+                        quant_artifact=artifact_uri,
+                        quant_artifact_revision=revision,
+                        quant_artifact_cache_dir=self.cache_dir,
+                    )
+                )
+            )
+
+        self.assertNotEqual(resolved[0].resolved_path, resolved[1].resolved_path)
+        self.assertEqual(download_mock.call_count, 2)
+        self.assertIn("/resolve/revision-a/", download_mock.call_args_list[0].args[0])
+        self.assertIn("/resolve/revision-b/", download_mock.call_args_list[1].args[0])
+
+    @mock.patch("infergrade.artifacts._download_remote_artifact")
+    def test_revision_a_cache_does_not_satisfy_pinned_revision_b(self, download_mock):
+        artifact_uri = "hf://example/model-GGUF/model.gguf"
+        payload_a = b"revision-a"
+        payload_b = b"revision-b"
+
+        def download_for_revision(url, path):
+            payload = payload_a if "/revision-a/" in url else payload_b
+            with open(path, "wb") as handle:
+                handle.write(payload)
+
+        download_mock.side_effect = download_for_revision
+        resolved_a = resolve_quant_artifact(
+            RunRequest(
+                model="example/model",
+                backend="llama.cpp",
+                tier="canary",
+                quant_artifact=artifact_uri,
+                quant_artifact_revision="revision-a",
+                quant_artifact_cache_dir=self.cache_dir,
+            )
+        )
+        resolved_b = resolve_quant_artifact(
+            RunRequest(
+                model="example/model",
+                backend="llama.cpp",
+                tier="canary",
+                quant_artifact=artifact_uri,
+                quant_artifact_revision="revision-b",
+                quant_artifact_sha256=hashlib.sha256(payload_b).hexdigest(),
+                quant_artifact_cache_dir=self.cache_dir,
+            )
+        )
+
+        self.assertNotEqual(resolved_a.resolved_path, resolved_b.resolved_path)
+        self.assertFalse(resolved_b.cache_hit)
+        self.assertEqual(resolved_b.sha256, hashlib.sha256(payload_b).hexdigest())
+        self.assertEqual(download_mock.call_count, 2)
 
     @mock.patch("infergrade.artifacts._download_remote_artifact")
     def test_known_sha_rejects_mismatched_uri_cached_artifact_without_redownload(self, download_mock):
@@ -443,6 +513,28 @@ class ArtifactResolutionTests(unittest.TestCase):
         self.assertTrue(resolved.cache_hit)
         self.assertEqual(resolved.resolved_path, legacy_path)
         self.assertEqual(resolved.sha256, expected_sha)
+        download_mock.assert_not_called()
+
+    @mock.patch("infergrade.artifacts._download_remote_artifact")
+    def test_checksum_keyed_cache_entry_is_rehashed_before_reuse(self, download_mock):
+        filename = "legacy-model.gguf"
+        expected_sha = hashlib.sha256(b"expected-bytes").hexdigest()
+        legacy_path = os.path.join(self.cache_dir, "%s-%s" % (expected_sha[:16], filename))
+        os.makedirs(self.cache_dir, exist_ok=True)
+        with open(legacy_path, "wb") as handle:
+            handle.write(b"tampered-bytes")
+
+        request = RunRequest(
+            model="example/model",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="https://example.test/legacy-model.gguf",
+            quant_artifact_filename=filename,
+            quant_artifact_sha256=expected_sha,
+            quant_artifact_cache_dir=self.cache_dir,
+        )
+        with self.assertRaisesRegex(ValueError, "SHA256 mismatch"):
+            resolve_quant_artifact(request)
         download_mock.assert_not_called()
 
     @mock.patch("infergrade.artifacts._download_remote_artifact")

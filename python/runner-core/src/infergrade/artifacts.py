@@ -82,10 +82,17 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
     cache_dir = _normalized_cache_dir(request.quant_artifact_cache_dir or default_artifact_cache_dir())
     ensure_dir(cache_dir)
     filename = _safe_artifact_filename(request.quant_artifact_filename) or _infer_filename(resolved_artifact_uri)
-    cache_path = _cache_path(cache_dir, resolved_artifact_uri, filename, request.quant_artifact_sha256)
+    cache_revision = _artifact_cache_revision(resolved_artifact_uri, request.quant_artifact_revision)
+    cache_path = _cache_path(
+        cache_dir,
+        resolved_artifact_uri,
+        filename,
+        request.quant_artifact_sha256,
+        revision=cache_revision,
+    )
     cached_path = _existing_cache_path(
         cache_path,
-        _cache_path(cache_dir, resolved_artifact_uri, filename, None)
+        _cache_path(cache_dir, resolved_artifact_uri, filename, None, revision=cache_revision)
         if request.quant_artifact_sha256
         else None,
     )
@@ -117,7 +124,17 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
                     resolved_artifact_uri = canonical_artifact_uri
                     download_url = artifact_to_download_url(resolved_artifact_uri, revision=request.quant_artifact_revision)
                     filename = _safe_artifact_filename(request.quant_artifact_filename) or _infer_filename(resolved_artifact_uri)
-                    cache_path = _cache_path(cache_dir, resolved_artifact_uri, filename, request.quant_artifact_sha256)
+                    cache_revision = _artifact_cache_revision(
+                        resolved_artifact_uri,
+                        request.quant_artifact_revision,
+                    )
+                    cache_path = _cache_path(
+                        cache_dir,
+                        resolved_artifact_uri,
+                        filename,
+                        request.quant_artifact_sha256,
+                        revision=cache_revision,
+                    )
                     _download_remote_artifact(download_url, tmp_path)
                 else:
                     raise
@@ -453,10 +470,33 @@ def _huggingface_token(url: str) -> Optional[str]:
     return None
 
 
-def _cache_path(cache_dir: str, artifact: str, filename: str, expected_sha256: Optional[str]) -> str:
+def _cache_path(
+    cache_dir: str,
+    artifact: str,
+    filename: str,
+    expected_sha256: Optional[str],
+    revision: Optional[str] = None,
+) -> str:
     """Derive a stable cache path for a remote artifact reference."""
-    digest = expected_sha256 or stable_hash({"artifact": artifact, "filename": filename}, length=16)
+    identity = {"artifact": artifact, "filename": filename}
+    if revision:
+        identity["revision"] = revision
+    digest = expected_sha256 or stable_hash(identity, length=16)
     return os.path.join(cache_dir, "%s-%s" % (digest[:16], filename))
+
+
+def _artifact_cache_revision(artifact: str, revision: Optional[str]) -> Optional[str]:
+    """Return the revision component needed for remote cache identity.
+
+    Hugging Face resolves an absent revision as ``main``. Keep absent and
+    explicit ``main`` on the historical URI cache key so existing large model
+    downloads remain reusable; every other effective revision gets its own
+    identity. Revisions do not affect direct HTTP download URLs.
+    """
+    if not artifact.startswith("hf://"):
+        return None
+    effective_revision = str(revision or "main")
+    return None if effective_revision == "main" else effective_revision
 
 
 def _existing_cache_path(
