@@ -72,6 +72,20 @@ def resolve_runner_api_token(api_token: Optional[str] = None) -> Optional[str]:
     return str(profile.get("access_token") or "").strip() or None
 
 
+def runner_api_credential_source(api_token: Optional[str] = None) -> str:
+    """Describe which credential generic transport would use without exposing it."""
+    if str(api_token or "").strip():
+        return "explicit"
+    if env_value("INFERGRADE_HUB_TOKEN", "QUANTBENCH_HUB_TOKEN"):
+        return "hub_environment"
+    if env_value("INFERGRADE_API_TOKEN", "QUANTBENCH_API_TOKEN"):
+        return "legacy_api_environment"
+    profile = load_runner_profile() or {}
+    if str(profile.get("access_token") or "").strip():
+        return "paired_runner_profile"
+    return "none"
+
+
 def preferred_local_execution_mode() -> str:
     """Return the clearest default local execution mode for this machine."""
     environment = capture_environment("local_native")

@@ -204,15 +204,14 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade run-job \
   --run-id run_example
 ```
 
-If you need the lower-level manual path, the Runner still supports:
+If you need the lower-level manual execution path, the Runner still supports:
 
 ```bash
 PYTHONPATH=python/runner-core/src python3 -m infergrade doctor --api-url http://localhost:8000 --run-config-id rcfg_example
 PYTHONPATH=python/runner-core/src python3 -m infergrade run-config --api-url http://localhost:8000 --run-config-id rcfg_example --output runs/rcfg_example --resume --real-run
-PYTHONPATH=python/runner-core/src python3 -m infergrade upload-bundle runs/rcfg_example --api-url http://localhost:8000
 ```
 
-If you are talking to a legacy or development API that still expects a shared bearer token, `INFERGRADE_API_TOKEN` remains supported.
+For Hub-queued work, start the paired Runner to perform the owned run-scoped upload: `infergrade start`. A paired Runner token cannot import an arbitrary standalone bundle into the catalog. The advanced `upload-bundle` command remains available for local development and explicitly authorized service-token imports. If you are talking to a legacy or development API that still expects a shared bearer token, `INFERGRADE_API_TOKEN` remains supported.
 
 ## Release Prep
 
