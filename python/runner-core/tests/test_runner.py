@@ -64,6 +64,55 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(progress["status"], "completed")
         self.assertEqual(progress["deployment_profiles"]["interactive_chat_v1"]["status"], "completed")
 
+    def test_standalone_agent_dogfood_is_attributed_and_never_official_eligible(self):
+        output_dir = os.path.join(self.tempdir, "agent-dogfood-bundle")
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="general_assistant",
+            output_dir=output_dir,
+            evidence_source="agent_dogfood",
+            simulate=False,
+        )
+        with mock.patch("infergrade.runner.get_adapter") as get_adapter_mock, mock.patch(
+            "infergrade.runner.capture_environment",
+            return_value={"accelerator_type": "gpu", "accelerator_count": 1, "accelerator_vram_gb": 24},
+        ):
+            adapter = get_adapter_mock.return_value
+            adapter.default_backend_flags.return_value = []
+            adapter.resolve_version.return_value = "llama.cpp-test"
+            adapter.runtime_metadata.return_value = {}
+            from infergrade.models import CapabilityExecution, FidelityExecution
+            adapter.run_capability.return_value = CapabilityExecution(
+                use_case="general_assistant", suite_id=None, suite_ids=[], benchmark_tier="standard",
+                benchmark_group_ids=[], benchmark_check_ids=[], components=["test"], score=0.8,
+                score_method="test", component_scores={"test": 0.8}, confidence=0.5, status="completed",
+            )
+            adapter.run_fidelity.return_value = FidelityExecution(state="not_yet_measured")
+            adapter.run_deployment_profile.return_value = DeploymentExecution(
+                profile_id="interactive_chat_v1",
+                metrics={
+                    "ttft_p50_ms": 100.0, "ttft_p95_ms": 110.0,
+                    "latency_p50_ms": 400.0, "latency_p95_ms": 450.0,
+                    "decode_tokens_per_second_p50": 50.0, "decode_tokens_per_second_p95": 48.0,
+                    "request_throughput_per_minute": 150.0, "peak_vram_mb": 1024.0,
+                    "load_time_ms": 250.0, "oom_or_failure_rate": 0.0,
+                    "deployment_confidence": 0.9,
+                },
+                status="completed",
+            )
+            run_infergrade(request)
+        payload = self.read_json(os.path.join(output_dir, "results", "interactive_chat_v1.json"))
+        self.assertEqual(payload["provenance"]["evidence_source"], "agent_dogfood")
+        self.assertEqual(payload["verification"]["local_comparison_grade_candidate"], "comparable")
+        validation = self.read_json(os.path.join(output_dir, "validation.json"))
+        self.assertEqual(validation["comparison_grade"], "comparable")
+
+    def read_json(self, path):
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+
     def test_default_output_dir_writes_capability_summary_inside_bundle(self):
         class FakeAdapter(object):
             def default_backend_flags(self):

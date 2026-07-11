@@ -129,6 +129,10 @@
       "type": "object",
       "properties": {
         "submitter": { "type": "string" },
+        "evidence_source": {
+          "type": "string",
+          "enum": ["founder_dogfood", "agent_dogfood", "external_user"]
+        },
         "notes": { "type": "string" },
         "tags": {
           "type": "array",

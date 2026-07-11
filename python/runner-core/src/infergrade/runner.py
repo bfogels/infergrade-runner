@@ -67,6 +67,11 @@ def _local_comparison_grade_candidate(request: RunRequest, verification_level: s
         return "informational_only"
     if request.tier == "canary":
         return "comparable"
+    # Official eligibility requires explicit provenance. Paired Hub ingestion may
+    # derive this field from runner identity, but a standalone bundle must not
+    # silently promote unattributed or dogfood evidence.
+    if request.evidence_source != "external_user":
+        return "comparable"
     if has_capability:
         return "official_eligible"
     return "comparable"
@@ -219,6 +224,8 @@ def _build_result_record(
             "run_config_source": request.run_config_source,
         },
     }
+    if request.evidence_source:
+        record["provenance"]["evidence_source"] = request.evidence_source
     if runtime_selector:
         record["execution"]["runtime_selector"] = runtime_selector
     record["capability"] = summarize_capability_execution(request, capability, completed_at=completed_at)
