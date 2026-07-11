@@ -32,6 +32,12 @@ def validate_request(request: RunRequest) -> None:
         errors.append("Unsupported capability mode: %s" % request.capability)
     if request.cost_source and request.cost_source not in SUPPORTED_COST_SOURCES:
         errors.append("Unsupported cost source: %s" % request.cost_source)
+    if request.evidence_source and request.evidence_source not in (
+        "founder_dogfood",
+        "agent_dogfood",
+        "external_user",
+    ):
+        errors.append("Unsupported evidence source: %s" % request.evidence_source)
     if request.use_case and request.use_case not in SUPPORTED_USE_CASES:
         errors.append("Unsupported use case: %s" % request.use_case)
     suites = suite_index()

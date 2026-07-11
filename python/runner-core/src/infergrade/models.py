@@ -37,6 +37,7 @@ class RunRequest:
     hourly_rate_usd: Optional[float] = None
     capability: str = "auto"
     submitter: Optional[str] = None
+    evidence_source: Optional[str] = None
     notes: Optional[str] = None
     run_config_id: Optional[str] = None
     run_config_name: Optional[str] = None

@@ -65,6 +65,7 @@ class RequestResolutionTests(unittest.TestCase):
                     },
                 },
             },
+            "metadata": {"evidence_source": "agent_dogfood"},
         }
         request = request_from_dict(payload)
         self.assertEqual(
@@ -81,6 +82,7 @@ class RequestResolutionTests(unittest.TestCase):
         self.assertEqual(request.llama_cpp_perplexity_path, "/custom/llama-perplexity")
         self.assertEqual(request.runtime_selector["runtime_selector_version"], "0.3")
         self.assertEqual(request.runtime_selector["support"]["tier"], "best_effort")
+        self.assertEqual(request.evidence_source, "agent_dogfood")
 
     def test_hub_run_config_rejects_runtime_selector_binary_path(self):
         payload = {

@@ -241,6 +241,7 @@ def request_payload(model: Dict[str, Any], provenance: Dict[str, Any], lane: Dic
             "quantization_scheme": provenance.get("quantization_scheme"),
         },
         "metadata": {
+            "evidence_source": "agent_dogfood",
             "notes": "Dogfood evidence. %s" % lane["claim_boundary"],
         },
     }

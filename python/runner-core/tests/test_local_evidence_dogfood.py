@@ -96,6 +96,7 @@ class LocalEvidenceDogfoodTests(unittest.TestCase):
             for item in manifest["models"][0]["lanes"]
         ]
         requests = [self.read_json(path) for path in request_paths]
+        self.assertTrue(all(item["metadata"]["evidence_source"] == "agent_dogfood" for item in requests))
         by_checks = {
             tuple(payload["run"]["benchmark_check_ids"]): payload
             for payload in requests
