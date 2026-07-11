@@ -17,7 +17,10 @@ images=(
 
 for image in "${images[@]}"; do
   ref="${REGISTRY_PREFIX}/${image}:${VERSION_TAG}"
-  manifest="$(DOCKER_CONFIG="${DOCKER_CONFIG_DIR}" docker manifest inspect "${ref}")"
+  if ! manifest="$(DOCKER_CONFIG="${DOCKER_CONFIG_DIR}" docker manifest inspect "${ref}")"; then
+    echo "Anonymous image verification failed: ${ref}" >&2
+    exit 1
+  fi
   digest="$(printf '%s' "${manifest}" | shasum -a 256 | awk '{print $1}')"
   printf '%s\tmanifest_sha256:%s\n' "${ref}" "${digest}"
 done
