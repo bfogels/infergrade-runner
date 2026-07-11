@@ -179,14 +179,7 @@ If local execution succeeds but upload fails:
 3. confirm the Hub run still exists and is owned by the paired user;
 4. retry from the same local artifacts instead of rerunning the benchmark when possible.
 
-Manual upload fallback:
-
-```bash
-infergrade upload-bundle '<LOCAL_RUN_DIR>' \
-  --api-url 'https://api.infergrade.com'
-```
-
-`upload-bundle` uploads the bundle identity preserved in the local artifact. If Hub rejects the upload because the original run is missing or no longer owned by the paired user, keep the local bundle and support export rather than editing the run id into the command.
+Restart `infergrade start` to let the paired listener retry the owned run's run-scoped upload. A paired Runner credential cannot use the generic `upload-bundle` catalog-import route. If the original Hub run is missing or no longer owned by the paired user, keep the local bundle and support export for an authorized operator import rather than editing a run id or repeatedly sending the bundle.
 
 If upload still fails, create a secret-free support export:
 
