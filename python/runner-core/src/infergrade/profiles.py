@@ -48,6 +48,7 @@ DEPLOYMENT_PROFILES: Dict[str, DeploymentProfile] = {
 DEFAULT_DEPLOYMENT_PROFILES = {
     "agentic_coding": ["interactive_chat_v1", "long_context_v1"],
     "general_assistant": ["interactive_chat_v1"],
+    "reasoning": ["interactive_chat_v1"],
     None: ["interactive_chat_v1"],
 }
 

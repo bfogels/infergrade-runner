@@ -1,6 +1,6 @@
 SUPPORTED_BACKENDS = ("llama.cpp", "vllm")
 SUPPORTED_TIERS = ("canary", "standard", "gold")
-SUPPORTED_USE_CASES = ("agentic_coding", "general_assistant")
+SUPPORTED_USE_CASES = ("agentic_coding", "general_assistant", "reasoning")
 SUPPORTED_DEPLOYMENT_PROFILES = (
     "interactive_chat_v1",
     "batch_generation_v1",

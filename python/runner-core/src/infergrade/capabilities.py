@@ -137,6 +137,11 @@ CAPABILITY_SUITES: Dict[str, Dict[str, tuple]] = {
         "standard": ("assistant_standard_v3", ["IFEval", "Multi-turn chat memory"]),
         "gold": ("assistant_gold_v3", ["IFEval", "Multi-turn chat memory"]),
     },
+    "reasoning": {
+        "canary": ("reasoning_canary_v1", ["Reasoning exact answer"]),
+        "standard": ("reasoning_standard_v1", ["Reasoning exact answer", "MMLU-Pro reference"]),
+        "gold": ("reasoning_gold_v1", ["Reasoning exact answer", "MMLU-Pro reference"]),
+    },
 }
 
 
@@ -150,6 +155,11 @@ SUITE_BENCHMARK_IDS: Dict[str, Dict[str, List[str]]] = {
         "canary": ["ifeval"],
         "standard": ["ifeval", "multiturn_chat_memory_v1"],
         "gold": ["ifeval", "multiturn_chat_memory_v1"],
+    },
+    "reasoning": {
+        "canary": ["reasoning_exact_answer_v1"],
+        "standard": ["reasoning_exact_answer_v1", "mmlu_pro_reference_v1"],
+        "gold": ["reasoning_exact_answer_v1", "mmlu_pro_reference_v1"],
     },
 }
 
