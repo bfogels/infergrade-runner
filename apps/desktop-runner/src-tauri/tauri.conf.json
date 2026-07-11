@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "InferGrade Runner",
-  "version": "0.3.9",
+  "version": "0.3.11",
   "identifier": "com.infergrade.runner",
   "build": {
     "beforeDevCommand": "npm run dev",
