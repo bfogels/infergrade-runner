@@ -21,6 +21,7 @@ class StartLocalListenerScriptTests(unittest.TestCase):
         self.python_log = self.temp_path / "python.log"
         self.docker_log = self.temp_path / "docker.log"
         self.script_path = Path(__file__).resolve().parents[3] / "scripts" / "start_local_listener.sh"
+        self.runner_version = (self.script_path.parent.parent / "VERSION").read_text(encoding="utf-8").strip()
         self._write_executable(
             self.fake_bin / "python3",
             "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"" + str(self.python_log) + "\"\n",
@@ -54,7 +55,9 @@ class StartLocalListenerScriptTests(unittest.TestCase):
         result = self._run_script("--api-url", "http://example.invalid:8000")
         self.assertEqual(result.returncode, 0, result.stderr)
         docker_args = self.docker_log.read_text(encoding="utf-8")
-        self.assertIn("infergrade-runner-core:local start --api-url http://example.invalid:8000", docker_args)
+        self.assertIn("ghcr.io/bfogels/infergrade-runner-core:%s start --api-url http://example.invalid:8000" % self.runner_version, docker_args)
+        python_args = self.python_log.read_text(encoding="utf-8")
+        self.assertIn("--image ghcr.io/bfogels/infergrade-runner-core:%s" % self.runner_version, python_args)
 
     def test_passes_through_extra_listener_args(self):
         result = self._run_script("--api-url", "http://example.invalid:8000", "--", "--once", "--simulate")

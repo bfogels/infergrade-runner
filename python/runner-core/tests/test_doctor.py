@@ -6,6 +6,7 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
+from infergrade import __version__
 from infergrade.doctor import collect_runner_diagnostics, run_doctor
 from infergrade.models import RunRequest
 
@@ -264,6 +265,7 @@ class DoctorTests(unittest.TestCase):
         checks = {item["id"]: item for item in diagnostics["diagnostics"]["checks"]}
         self.assertEqual(checks["local_image_ifeval"]["status"], "warning")
         self.assertIn("not present locally", checks["local_image_ifeval"]["message"])
+        self.assertEqual(checks["local_image_ifeval"]["details"]["image"], "ghcr.io/bfogels/infergrade-ifeval:%s" % __version__)
 
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.shutil.which")

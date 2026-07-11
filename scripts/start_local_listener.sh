@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_URL="${INFERGRADE_API_URL:-http://host.docker.internal:8000}"
-RUNNER_IMAGE="${INFERGRADE_LOCAL_RUNNER_IMAGE:-infergrade-runner-core:local}"
+RUNNER_VERSION="$(<"$ROOT_DIR/VERSION")"
+RUNNER_IMAGE="${INFERGRADE_LOCAL_RUNNER_IMAGE:-ghcr.io/bfogels/infergrade-runner-core:$RUNNER_VERSION}"
 RUNS_DIR="${INFERGRADE_RUNS_DIR:-$ROOT_DIR/runs}"
 ARTIFACT_CACHE_DIR="${INFERGRADE_ARTIFACT_CACHE_DIR:-$HOME/.cache/infergrade/artifacts}"
 REBUILD_IMAGE="${INFERGRADE_REBUILD_LISTENER_IMAGE:-1}"

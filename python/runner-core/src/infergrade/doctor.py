@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+from infergrade import __version__
 from infergrade.adapters.llama_cpp import LlamaCppAdapter
 from infergrade.artifacts import (
     artifact_cache_status,
@@ -25,13 +26,13 @@ from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cp
 
 
 DEFAULT_BACKEND_IMAGES = {
-    "llama.cpp": "infergrade-llama-cpp:local",
-    "vllm": "infergrade-vllm:local",
+    "llama.cpp": "ghcr.io/bfogels/infergrade-llama-cpp:%s" % __version__,
+    "vllm": "ghcr.io/bfogels/infergrade-vllm:%s" % __version__,
 }
 DEFAULT_LOCAL_CAPABILITY_IMAGES = (
-    {"benchmark_id": "ifeval", "display_name": "IFEval", "image": "infergrade-ifeval:local"},
-    {"benchmark_id": "evalplus", "display_name": "EvalPlus", "image": "infergrade-evalplus:local"},
-    {"benchmark_id": "mmlu_pro_reference_v1", "display_name": "MMLU-Pro reference", "image": "infergrade-mmlu-pro:local"},
+    {"benchmark_id": "ifeval", "display_name": "IFEval", "image": "ghcr.io/bfogels/infergrade-ifeval:%s" % __version__},
+    {"benchmark_id": "evalplus", "display_name": "EvalPlus", "image": "ghcr.io/bfogels/infergrade-evalplus:%s" % __version__},
+    {"benchmark_id": "mmlu_pro_reference_v1", "display_name": "MMLU-Pro reference", "image": "ghcr.io/bfogels/infergrade-mmlu-pro:%s" % __version__},
 )
 DEFAULT_MIN_OUTPUT_FREE_GB = 1.0
 
