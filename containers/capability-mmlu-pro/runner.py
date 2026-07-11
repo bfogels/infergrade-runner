@@ -12,6 +12,12 @@ ANSWER_PATTERNS = (
     re.compile(r"\b(?:answer|option|choice)\s*(?:is|:)?\s*\(?([A-J])\)?\b", re.IGNORECASE),
     re.compile(r"^\s*\(?([A-J])\)?(?:[\).:]|\s*$)", re.IGNORECASE),
 )
+TERMINAL_MARKERS = (
+    "[end of text]",
+    "<|end_of_text|>",
+    "<|endoftext|>",
+    "</s>",
+)
 
 
 def _write_json(path: str, payload) -> None:
@@ -119,12 +125,34 @@ def _case_from_row(row: dict) -> dict:
 
 
 def _prediction_letter(completion: str) -> Optional[str]:
-    text = str(completion or "").strip()
+    text = _strip_terminal_markers(str(completion or ""))
     for pattern in ANSWER_PATTERNS:
         match = pattern.search(text)
         if match:
             return match.group(1).upper()
     return None
+
+
+def _strip_terminal_markers(completion: str) -> str:
+    """Remove only trailing runtime end-of-generation sentinels.
+
+    llama.cpp may render a terminal token after otherwise valid model output.
+    These markers are transport metadata, not model-authored answer text. Keep
+    normalization deliberately suffix-only so additional prose remains visible
+    to the strict multiple-choice parser instead of being hidden.
+    """
+    text = completion.strip()
+    while text:
+        lowered = text.lower()
+        matched = False
+        for marker in TERMINAL_MARKERS:
+            if lowered.endswith(marker.lower()):
+                text = text[: -len(marker)].rstrip()
+                matched = True
+                break
+        if not matched:
+            break
+    return text
 
 
 def prepare(output_dir: str, limit: int = None, data_path: str = DEFAULT_DATA_PATH) -> None:
