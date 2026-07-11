@@ -45,6 +45,17 @@ class CapabilityScoringTests(unittest.TestCase):
         self.assertEqual(details["score"], None)
         self.assertEqual(details["reason"], "no_scored_components")
 
+    def test_reasoning_use_case_scores_the_reasoning_surface(self):
+        details = score_for_use_case(
+            "reasoning",
+            {"reasoning_exact_answer_v1": 1.0, "mmlu_pro_reference_v1": 0.44},
+        )
+
+        self.assertTrue(details["score_ready"])
+        self.assertEqual(details["surface_id"], "local_reasoning_capability")
+        self.assertEqual(details["score_version"], "local_reasoning_score_v1")
+        self.assertEqual(details["coverage"]["coverage_fraction"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

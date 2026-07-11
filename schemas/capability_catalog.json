@@ -621,6 +621,20 @@
       "effort_level": "balanced"
     },
     {
+      "suite_id": "reasoning_problem_solving",
+      "surface_id": "local_reasoning_capability",
+      "display_name": "Reasoning and problem solving",
+      "description": "Exact-answer reasoning plus a sampled broad-knowledge reference signal for local setup decisions.",
+      "primary_use_case": "reasoning",
+      "default_group_ids": [
+        "reasoning_exact_answer",
+        "broad_reasoning_knowledge",
+        "deployment_chat"
+      ],
+      "default_scope": "decision",
+      "effort_level": "balanced"
+    },
+    {
       "suite_id": "quant_fidelity",
       "surface_id": "quant_fidelity",
       "display_name": "Quant fidelity and perplexity",
@@ -1389,6 +1403,51 @@
           "interactive_chat_v1",
           "batch_generation_v1",
           "perplexity_reference_v1"
+        ]
+      }
+    },
+    "reasoning": {
+      "canary": {
+        "suite_ids": [
+          "reasoning_problem_solving"
+        ],
+        "group_ids": [
+          "reasoning_exact_answer",
+          "deployment_chat"
+        ],
+        "check_ids": [
+          "reasoning_exact_answer_v1",
+          "interactive_chat_v1"
+        ]
+      },
+      "standard": {
+        "suite_ids": [
+          "reasoning_problem_solving"
+        ],
+        "group_ids": [
+          "reasoning_exact_answer",
+          "broad_reasoning_knowledge",
+          "deployment_chat"
+        ],
+        "check_ids": [
+          "reasoning_exact_answer_v1",
+          "mmlu_pro_reference_v1",
+          "interactive_chat_v1"
+        ]
+      },
+      "gold": {
+        "suite_ids": [
+          "reasoning_problem_solving"
+        ],
+        "group_ids": [
+          "reasoning_exact_answer",
+          "broad_reasoning_knowledge",
+          "deployment_chat"
+        ],
+        "check_ids": [
+          "reasoning_exact_answer_v1",
+          "mmlu_pro_reference_v1",
+          "interactive_chat_v1"
         ]
       }
     },

@@ -214,6 +214,17 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(capability_benchmark_ids_for_request(request), ["reasoning_exact_answer_v1"])
         self.assertEqual(request.capability, "auto")
 
+    def test_reasoning_suite_resolves_to_reasoning_use_case(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            capability_suite_ids=["reasoning_problem_solving"],
+        )
+        normalize_request_selection(request)
+        self.assertEqual(request.use_case, "reasoning")
+        self.assertIn("reasoning_exact_answer_v1", request.benchmark_check_ids)
+
     def test_assistant_suite_defaults_do_not_mix_reasoning_surface(self):
         request = RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",

@@ -98,7 +98,7 @@
     "capability": {
       "type": "object",
       "properties": {
-        "use_case": { "type": "string", "enum": ["agentic_coding", "general_assistant"] },
+        "use_case": { "type": "string", "enum": ["agentic_coding", "general_assistant", "reasoning"] },
         "capability_suite_id": { "type": ["string", "null"] },
         "benchmark_tier": { "type": ["string", "null"] },
         "capability_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
