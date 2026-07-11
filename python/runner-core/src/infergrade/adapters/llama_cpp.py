@@ -52,6 +52,7 @@ _DEFAULT_PERPLEXITY_COMMAND = "llama-perplexity"
 _DEFAULT_SERVER_PORT = 8080
 _SERVER_READY_TIMEOUT_SECONDS = 180.0
 _SERVER_REQUEST_TIMEOUT_SECONDS = 300.0
+_CONTAINER_MEMORY_SAMPLE_INTERVAL_SECONDS = 0.25
 _PINNED_LLAMA_CPP_REF = "9f102a140"
 _UNSUPPORTED_ARCHITECTURES = {
     "gemma4": "the pinned llama.cpp runtime predates Gemma 4 GGUF support",
@@ -585,6 +586,8 @@ class LlamaCppAdapter(BaseAdapter):
                     "error": startup_output or "llama.cpp server container failed to start",
                 }
 
+            memory_monitor = _start_container_memory_monitor(container_name)
+
             published_port = _resolve_published_port(container_name, _DEFAULT_SERVER_PORT)
             base_url, load_time_ms = _wait_for_server_ready(
                 container_name=container_name,
@@ -600,6 +603,8 @@ class LlamaCppAdapter(BaseAdapter):
             parsed = _parse_llama_timings(logs_text)
             memory_allocations = _parse_llama_memory_allocations(logs_text)
             peak_vram_mb = _stop_gpu_monitor(monitor)
+            peak_memory_mb, peak_memory_method = _stop_container_memory_monitor(memory_monitor)
+            memory_monitor = None
             metrics = _metrics_from_server_completion(
                 completion=completion,
                 parsed_timings=parsed,
@@ -607,8 +612,12 @@ class LlamaCppAdapter(BaseAdapter):
                 peak_vram_mb=peak_vram_mb,
             )
             metrics.update(memory_allocations)
-            metrics["peak_memory_mb"] = peak_vram_mb
-            metrics["peak_memory_measurement_method"] = "nvidia_smi_total_used_delta" if peak_vram_mb is not None else None
+            metrics["peak_memory_mb"] = peak_memory_mb if peak_memory_mb is not None else peak_vram_mb
+            metrics["peak_memory_measurement_method"] = (
+                peak_memory_method
+                if peak_memory_mb is not None
+                else ("nvidia_smi_total_used_delta" if peak_vram_mb is not None else None)
+            )
             return {
                 "iteration": iteration,
                 "warmup": is_warmup,
@@ -636,6 +645,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "log_tail": logs_text.splitlines()[-40:],
             }
         finally:
+            _stop_container_memory_monitor(memory_monitor)
             _stop_container(container_name)
 
     def _run_native_benchmark(
@@ -1381,6 +1391,97 @@ def _stop_process_rss_monitor(handle: Optional[Dict[str, object]]) -> Optional[f
         thread.join(timeout=0.3)
     samples = handle.get("samples") or []
     return round(max(samples), 2) if samples else None
+
+
+def _sample_container_cgroup_memory(container_name: str) -> Tuple[Optional[float], Optional[str]]:
+    """Read container-scoped memory from cgroup counters inside the container.
+
+    Kernel peak counters are preferred. A sampled current counter is retained as
+    an honest fallback for cgroup layouts that do not expose a peak file.
+    """
+    script = (
+        "if [ -r /sys/fs/cgroup/memory.peak ]; then "
+        "printf 'container_cgroup_v2_peak:'; cat /sys/fs/cgroup/memory.peak; "
+        "elif [ -r /sys/fs/cgroup/memory/memory.max_usage_in_bytes ]; then "
+        "printf 'container_cgroup_v1_max_usage:'; cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes; "
+        "elif [ -r /sys/fs/cgroup/memory.current ]; then "
+        "printf 'container_cgroup_current_sampled:'; cat /sys/fs/cgroup/memory.current; "
+        "elif [ -r /sys/fs/cgroup/memory/memory.usage_in_bytes ]; then "
+        "printf 'container_cgroup_current_sampled:'; cat /sys/fs/cgroup/memory/memory.usage_in_bytes; "
+        "else exit 1; fi"
+    )
+    try:
+        completed = subprocess.run(
+            ["docker", "exec", container_name, "sh", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        )
+        if completed.returncode != 0 or ":" not in completed.stdout:
+            return None, None
+        method, raw_bytes = completed.stdout.strip().split(":", 1)
+        value = int(raw_bytes.strip())
+        if value <= 0:
+            return None, None
+        return round(value / float(1024 ** 2), 2), method
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None, None
+
+
+def _start_container_memory_monitor(container_name: str) -> Dict[str, object]:
+    samples: List[Tuple[float, str]] = []
+    stop_event = threading.Event()
+    initial_value, initial_method = _sample_container_cgroup_memory(container_name)
+    if initial_value is not None and initial_method:
+        samples.append((initial_value, initial_method))
+    if initial_method in {"container_cgroup_v2_peak", "container_cgroup_v1_max_usage"}:
+        # Kernel peak counters are monotonic for the container lifetime. Reading
+        # once at stop is exact and avoids perturbing the benchmark with polling.
+        return {
+            "stop_event": stop_event,
+            "thread": None,
+            "samples": samples,
+            "container_name": container_name,
+            "polling": False,
+        }
+
+    def monitor() -> None:
+        while not stop_event.is_set():
+            value, method = _sample_container_cgroup_memory(container_name)
+            if value is not None and method:
+                samples.append((value, method))
+                if method in {"container_cgroup_v2_peak", "container_cgroup_v1_max_usage"}:
+                    break
+            stop_event.wait(_CONTAINER_MEMORY_SAMPLE_INTERVAL_SECONDS)
+
+    thread = threading.Thread(target=monitor, daemon=True)
+    thread.start()
+    return {
+        "stop_event": stop_event,
+        "thread": thread,
+        "samples": samples,
+        "container_name": container_name,
+        "polling": True,
+    }
+
+
+def _stop_container_memory_monitor(
+    handle: Optional[Dict[str, object]],
+) -> Tuple[Optional[float], Optional[str]]:
+    if not handle:
+        return None, None
+    handle["stop_event"].set()
+    thread = handle.get("thread")
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=1.3)
+    final_sample = _sample_container_cgroup_memory(str(handle.get("container_name") or ""))
+    samples = list(handle.get("samples") or [])
+    if final_sample[0] is not None and final_sample[1]:
+        samples.append(final_sample)
+    if not samples:
+        return None, None
+    value, method = max(samples, key=lambda item: item[0])
+    return round(value, 2), method
 
 
 def _stop_container(container_name: str) -> None:

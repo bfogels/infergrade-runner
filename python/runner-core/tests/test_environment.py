@@ -7,7 +7,15 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.environment import _detect_amd_gpu, _detect_apple_silicon_gpu, _detect_nvidia_gpu, capture_environment
+from infergrade.environment import (
+    _detect_amd_gpu,
+    _detect_apple_silicon_fallback,
+    _detect_apple_silicon_gpu,
+    _detect_cpu_architecture,
+    _detect_nvidia_gpu,
+    _detect_process_translation,
+    capture_environment,
+)
 
 
 class EnvironmentTests(unittest.TestCase):
@@ -68,6 +76,64 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(gpu["hardware_class"], "apple_silicon")
         self.assertEqual(gpu["memory_architecture"], "unified_memory")
         self.assertEqual(gpu["accelerator_api"], "metal")
+
+    def test_apple_silicon_fallback_uses_native_host_signal_under_rosetta(self):
+        def command(command):
+            values = {
+                ("sysctl", "-n", "hw.optional.arm64"): "1",
+                ("sysctl", "-n", "machdep.cpu.brand_string"): "Apple M1 Pro",
+                ("sysctl", "-n", "hw.model"): "MacBookPro18,3",
+                ("sysctl", "-n", "hw.memsize"): str(16 * 1024 ** 3),
+            }
+            return values.get(tuple(command))
+
+        with mock.patch("infergrade.environment.platform.system", return_value="Darwin"):
+            with mock.patch("infergrade.environment.platform.machine", return_value="x86_64"):
+                with mock.patch("infergrade.environment._run_command", side_effect=command):
+                    gpu = _detect_apple_silicon_fallback()
+
+        self.assertEqual(gpu["hardware_class"], "apple_silicon")
+        self.assertEqual(gpu["accelerator_model"], "Apple M1 Pro")
+        self.assertEqual(gpu["machine_model"], "MacBookPro18,3")
+        self.assertEqual(gpu["accelerator_vram_gb"], 16.0)
+
+    def test_cpu_architecture_and_translation_report_host_and_process_separately(self):
+        def command(command):
+            if command[-1] == "hw.optional.arm64":
+                return "1"
+            if command[-1] == "sysctl.proc_translated":
+                return "1"
+            return None
+
+        with mock.patch("infergrade.environment.platform.system", return_value="Darwin"):
+            with mock.patch("infergrade.environment.platform.machine", return_value="x86_64"):
+                with mock.patch("infergrade.environment._run_command", side_effect=command):
+                    self.assertEqual(_detect_cpu_architecture(), "arm64")
+                    self.assertEqual(_detect_process_translation(), "rosetta_2")
+
+    def test_process_translation_does_not_fragment_hardware_identity(self):
+        common_patches = (
+            mock.patch("infergrade.environment._detect_nvidia_gpu", return_value=None),
+            mock.patch("infergrade.environment._detect_amd_gpu", return_value=None),
+            mock.patch("infergrade.environment._detect_apple_silicon_gpu", return_value=None),
+            mock.patch("infergrade.environment._detect_cpu_model", return_value="Test CPU"),
+            mock.patch("infergrade.environment._detect_cpu_architecture", return_value="arm64"),
+            mock.patch("infergrade.environment._detect_memory_gb", return_value=16.0),
+            mock.patch("infergrade.environment._detect_machine_model", return_value="MacBookPro18,3"),
+            mock.patch("infergrade.environment._run_command", return_value=None),
+        )
+        for patcher in common_patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        with mock.patch("infergrade.environment.platform.machine", return_value="arm64"):
+            with mock.patch("infergrade.environment._detect_process_translation", return_value=None):
+                native = capture_environment("local_native")
+        with mock.patch("infergrade.environment.platform.machine", return_value="x86_64"):
+            with mock.patch("infergrade.environment._detect_process_translation", return_value="rosetta_2"):
+                translated = capture_environment("local_native")
+        self.assertEqual(native["hardware_id"], translated["hardware_id"])
+        self.assertEqual(translated["process_architecture"], "x86_64")
+        self.assertEqual(translated["process_translation"], "rosetta_2")
 
     def test_capture_environment_prefers_detected_accelerator(self):
         with mock.patch(

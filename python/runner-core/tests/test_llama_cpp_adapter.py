@@ -20,7 +20,10 @@ from infergrade.adapters.llama_cpp import (
     _read_log_file,
     _read_gguf_architecture,
     _safe_tokens_per_second,
+    _sample_container_cgroup_memory,
     _sample_process_rss_mb,
+    _start_container_memory_monitor,
+    _stop_container_memory_monitor,
 )
 from infergrade.models import RunRequest
 from infergrade.runtimes import select_llama_cpp_runtime
@@ -135,6 +138,52 @@ class LlamaCppAdapterTests(unittest.TestCase):
 
     def test_sample_process_rss_reports_current_process_working_set(self):
         self.assertGreater(_sample_process_rss_mb(os.getpid()), 0)
+
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_sample_container_memory_prefers_kernel_cgroup_peak(self, run_mock):
+        run_mock.return_value = mock.Mock(returncode=0, stdout="container_cgroup_v2_peak:1258291200\n")
+        value, method = _sample_container_cgroup_memory("infergrade-test")
+        self.assertEqual(value, 1200.0)
+        self.assertEqual(method, "container_cgroup_v2_peak")
+        self.assertEqual(run_mock.call_args[0][0][0:3], ["docker", "exec", "infergrade-test"])
+
+    @mock.patch("infergrade.adapters.llama_cpp._sample_container_cgroup_memory")
+    def test_stop_container_memory_monitor_keeps_largest_sample_and_method(self, sample_mock):
+        sample_mock.return_value = (900.0, "container_cgroup_v2_peak")
+        stop_event = mock.Mock()
+        handle = {
+            "stop_event": stop_event,
+            "thread": None,
+            "samples": [
+                (850.0, "container_cgroup_current_sampled"),
+                (950.0, "container_cgroup_v2_peak"),
+            ],
+            "container_name": "infergrade-test",
+        }
+        value, method = _stop_container_memory_monitor(handle)
+        self.assertEqual(value, 950.0)
+        self.assertEqual(method, "container_cgroup_v2_peak")
+        stop_event.set.assert_called_once_with()
+
+    @mock.patch("infergrade.adapters.llama_cpp.threading.Thread")
+    @mock.patch("infergrade.adapters.llama_cpp._sample_container_cgroup_memory")
+    def test_container_kernel_peak_counter_does_not_start_polling_thread(self, sample_mock, thread_mock):
+        sample_mock.return_value = (900.0, "container_cgroup_v2_peak")
+        handle = _start_container_memory_monitor("infergrade-test")
+        self.assertFalse(handle["polling"])
+        self.assertIsNone(handle["thread"])
+        thread_mock.assert_not_called()
+
+    @mock.patch("infergrade.adapters.llama_cpp.threading.Thread")
+    @mock.patch("infergrade.adapters.llama_cpp._sample_container_cgroup_memory")
+    def test_container_current_counter_starts_bounded_polling_fallback(self, sample_mock, thread_mock):
+        sample_mock.return_value = (850.0, "container_cgroup_current_sampled")
+        thread = mock.Mock()
+        thread_mock.return_value = thread
+        handle = _start_container_memory_monitor("infergrade-test")
+        self.assertTrue(handle["polling"])
+        self.assertIs(handle["thread"], thread)
+        thread.start.assert_called_once_with()
 
     def test_metrics_from_server_completion_extracts_ttft_load_and_prompt_speed(self):
         metrics = _metrics_from_server_completion(
