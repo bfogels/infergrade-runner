@@ -200,6 +200,7 @@ Allowed draft values:
 
 - `agentic_coding`
 - `general_assistant`
+- `reasoning`
 
 If omitted:
 
@@ -459,6 +460,7 @@ If no deployment profile is supplied:
 
 - `general_assistant` should default to `interactive_chat_v1`
 - `agentic_coding` should default to `interactive_chat_v1` and `long_context_v1`
+- `reasoning` should default to `interactive_chat_v1`; its capability score remains the task-scoped local reasoning surface, not a global intelligence claim
 - no use case should default to a minimal deployment telemetry profile only
 
 ### Capability Resolution

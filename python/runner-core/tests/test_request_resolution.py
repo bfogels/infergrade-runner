@@ -11,6 +11,21 @@ from infergrade.validators import RequestValidationError, validate_request
 
 
 class RequestResolutionTests(unittest.TestCase):
+    def test_reasoning_use_case_is_valid_and_gets_interactive_defaults(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="reasoning",
+        )
+        request.capability = resolve_capability_behavior(request.tier, request.use_case, request.capability)
+        request.deployment_profiles = resolve_deployment_profiles(request.use_case, request.deployment_profiles)
+
+        validate_request(request)
+
+        self.assertEqual(request.capability, "auto")
+        self.assertEqual(request.deployment_profiles, ["interactive_chat_v1"])
+
     def test_canary_without_use_case_can_skip_capability(self):
         request = RunRequest(model="Qwen/Qwen2.5-7B-Instruct", backend="llama.cpp", tier="canary")
         request.capability = resolve_capability_behavior(request.tier, request.use_case, request.capability)

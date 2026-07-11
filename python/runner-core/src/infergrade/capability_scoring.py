@@ -13,6 +13,7 @@ from infergrade.benchmark_catalog import check_index, load_capability_catalog, s
 USE_CASE_PRIMARY_SURFACE = {
     "general_assistant": "local_assistant_capability",
     "agentic_coding": "local_coding_capability",
+    "reasoning": "local_reasoning_capability",
 }
 
 

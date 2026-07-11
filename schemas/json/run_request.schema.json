@@ -32,7 +32,7 @@
         },
         "benchmark_shortcut_id": { "type": "string" },
         "quant_artifact": { "type": "string" },
-        "use_case": { "type": "string", "enum": ["agentic_coding", "general_assistant"] },
+        "use_case": { "type": "string", "enum": ["agentic_coding", "general_assistant", "reasoning"] },
         "deployment_profiles": {
           "type": "array",
           "items": {

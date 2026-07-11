@@ -172,6 +172,7 @@ The first official slice remains a strong candidate:
 - `llama.cpp` first, then `vLLM`
 
 But this is a hosted analysis concern, not a limit on what the runner may execute.
+The runner also accepts task-scoped `reasoning` runs; a reasoning canonical slice should be added only when the Hub publishes a matching comparison policy.
 
 ## Data Model
 
