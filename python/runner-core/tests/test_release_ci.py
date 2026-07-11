@@ -43,6 +43,13 @@ class ReleaseCiTests(unittest.TestCase):
         build_script = (ROOT / "scripts" / "build_release_images.sh").read_text(encoding="utf-8")
         self.assertIn('-t "ghcr.io/bfogels/${name}:${VERSION_TAG}"', build_script)
 
+    def test_release_image_verifier_is_anonymous_and_checks_every_image(self):
+        script = (ROOT / "scripts" / "verify_release_images.sh").read_text(encoding="utf-8")
+        self.assertIn('DOCKER_CONFIG_DIR="$(mktemp -d)"', script)
+        self.assertIn('DOCKER_CONFIG="${DOCKER_CONFIG_DIR}" docker manifest inspect', script)
+        for image in ("infergrade-runner-core", "infergrade-llama-cpp", "infergrade-ifeval", "infergrade-evalplus", "infergrade-mmlu-pro"):
+            self.assertIn(image, script)
+
     def test_ci_checks_version_sync_before_running_tests(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 

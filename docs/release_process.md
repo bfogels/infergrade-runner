@@ -34,6 +34,14 @@ Local equivalent:
 ./scripts/build_release_bundle.sh
 ```
 
+Before merging a Runner release, publish all five canonical container tags and verify that they are anonymously readable:
+
+```bash
+INFERGRADE_IMAGE_TAG="$(cat VERSION)" ./scripts/verify_release_images.sh
+```
+
+The verifier uses an empty temporary Docker credential store, checks every runtime and capability image, and prints a manifest hash for the release record. Do not distribute a Runner version whose matching images fail this check.
+
 Before a public release candidate, also run the local readiness summary:
 
 ```bash
