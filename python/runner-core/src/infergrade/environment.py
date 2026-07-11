@@ -149,7 +149,7 @@ def _detect_amd_gpu() -> Optional[Dict[str, Any]]:
     try:
         payload = json.loads(output)
     except json.JSONDecodeError:
-        return None
+        return _detect_apple_silicon_fallback()
     if not isinstance(payload, dict):
         return None
     cards = [value for value in payload.values() if isinstance(value, dict)]
@@ -185,7 +185,7 @@ def _detect_apple_silicon_gpu() -> Optional[Dict[str, Any]]:
         return None
     output = _run_command(["system_profiler", "SPDisplaysDataType", "SPHardwareDataType", "-json"])
     if not output:
-        return None
+        return _detect_apple_silicon_fallback()
     try:
         payload = json.loads(output)
     except json.JSONDecodeError:
@@ -193,7 +193,7 @@ def _detect_apple_silicon_gpu() -> Optional[Dict[str, Any]]:
     displays = payload.get("SPDisplaysDataType") or []
     hardware = (payload.get("SPHardwareDataType") or [{}])[0]
     if not displays:
-        return None
+        return _detect_apple_silicon_fallback(hardware)
     gpu = displays[0]
     model = gpu.get("sppci_model") or gpu.get("_name") or hardware.get("chip_type")
     vendor = gpu.get("spdisplays_vendor") or "apple"
@@ -214,6 +214,33 @@ def _detect_apple_silicon_gpu() -> Optional[Dict[str, Any]]:
         "machine_model": hardware.get("machine_model"),
         "chip_type": hardware.get("chip_type"),
         "gpu_cores": gpu.get("sppci_cores"),
+    }
+
+
+def _detect_apple_silicon_fallback(hardware: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """Detect an Apple Silicon host even when display profiling is unavailable.
+
+    ``platform.machine()`` can report ``x86_64`` for a Python process translated
+    by Rosetta. The host-owned ``hw.optional.arm64`` sysctl remains authoritative
+    for the machine architecture and avoids classifying that host as CPU-only.
+    """
+    if platform.system().lower() != "darwin" or _run_command(["sysctl", "-n", "hw.optional.arm64"]) != "1":
+        return None
+    hardware = hardware or {}
+    chip_type = hardware.get("chip_type") or _run_command(["sysctl", "-n", "machdep.cpu.brand_string"])
+    model = chip_type or "Apple Silicon"
+    return {
+        "accelerator_type": "unified_memory_gpu",
+        "accelerator_vendor": "apple",
+        "accelerator_model": model,
+        "accelerator_vram_gb": _parse_gb(str(hardware.get("physical_memory") or "")) or _detect_memory_gb(),
+        "accelerator_count": 1,
+        "hardware_class": "apple_silicon",
+        "memory_architecture": "unified_memory",
+        "accelerator_api": "metal",
+        "machine_model": hardware.get("machine_model") or _detect_machine_model(),
+        "chip_type": chip_type,
+        "gpu_cores": None,
     }
 
 
@@ -299,6 +326,23 @@ def _detect_machine_model() -> Optional[str]:
     return None
 
 
+def _detect_cpu_architecture() -> str:
+    """Return host CPU architecture, correcting Rosetta process translation."""
+    process_architecture = platform.machine()
+    if platform.system().lower() == "darwin" and _run_command(["sysctl", "-n", "hw.optional.arm64"]) == "1":
+        return "arm64"
+    return process_architecture
+
+
+def _detect_process_translation() -> Optional[str]:
+    """Describe a known process translation layer without inferring one."""
+    if platform.system().lower() != "darwin":
+        return None
+    if _run_command(["sysctl", "-n", "sysctl.proc_translated"]) == "1":
+        return "rosetta_2"
+    return None
+
+
 def capture_environment(execution_mode: str) -> Dict[str, Any]:
     """Capture hardware and OS facts for a InferGrade run."""
     gpu = _normalize_accelerator_payload(
@@ -321,7 +365,9 @@ def capture_environment(execution_mode: str) -> Dict[str, Any]:
         "memory_architecture": gpu.get("memory_architecture"),
         "accelerator_api": gpu.get("accelerator_api"),
         "cpu_model": _detect_cpu_model(),
-        "cpu_architecture": platform.machine(),
+        "cpu_architecture": _detect_cpu_architecture(),
+        "process_architecture": platform.machine(),
+        "process_translation": _detect_process_translation(),
         "cpu_core_count": os.cpu_count(),
         "memory_gb": _detect_memory_gb(),
         "os": "%s-%s" % (platform.system().lower(), platform.release()),
@@ -345,5 +391,11 @@ def capture_environment(execution_mode: str) -> Dict[str, Any]:
     if host_override:
         payload.update(host_override)
         payload["environment_class"] = environment_class
-    payload["hardware_id"] = "hw_%s" % stable_hash(payload)
+    # Process translation is execution context, not hardware identity. Excluding
+    # it preserves one hardware id when the same Mac alternates between native
+    # and Rosetta Python processes.
+    hardware_identity = dict(payload)
+    hardware_identity.pop("process_architecture", None)
+    hardware_identity.pop("process_translation", None)
+    payload["hardware_id"] = "hw_%s" % stable_hash(hardware_identity)
     return payload
