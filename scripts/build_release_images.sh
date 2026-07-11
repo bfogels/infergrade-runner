@@ -12,6 +12,7 @@ build_image() {
   docker build \
     -t "${name}:${VERSION_TAG}" \
     -t "${name}:local" \
+    -t "ghcr.io/bfogels/${name}:${VERSION_TAG}" \
     -f "${ROOT_DIR}/${dockerfile}" \
     "${ROOT_DIR}"
 }
@@ -29,3 +30,4 @@ echo "  infergrade-ifeval:${VERSION_TAG}"
 echo "  infergrade-evalplus:${VERSION_TAG}"
 echo "  infergrade-mmlu-pro:${VERSION_TAG}"
 echo "  infergrade-runner-core:${VERSION_TAG}"
+echo "  Canonical GHCR tags: ghcr.io/bfogels/<image>:${VERSION_TAG}"
