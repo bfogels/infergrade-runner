@@ -607,10 +607,31 @@ def main(argv: Optional[list] = None) -> int:
         if not profile:
             raise SystemExit("Hub pairing response did not include a runner profile.")
         path = save_runner_profile(profile)
+        public_profile = {
+            key: profile[key]
+            for key in (
+                "api_url",
+                "runner_id",
+                "label",
+                "runner_label",
+                "runner_kind",
+                "preferred_execution_mode",
+                "paired_at",
+                "expires_at",
+                "user",
+            )
+            if key in profile
+        }
+        if isinstance(public_profile.get("user"), dict):
+            public_profile["user"] = {
+                key: public_profile["user"][key]
+                for key in ("user_id", "handle", "display_name")
+                if key in public_profile["user"]
+            }
         result = {
             "paired": True,
             "profile_path": path,
-            "runner_profile": profile,
+            "runner_profile": public_profile,
             "next_action": "start_runner",
             "commands": {
                 "start": "infergrade start",

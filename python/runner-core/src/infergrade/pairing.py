@@ -36,7 +36,11 @@ def load_runner_profile() -> Optional[Dict[str, Any]]:
 def save_runner_profile(profile: Dict[str, Any]) -> str:
     """Persist the paired runner profile to disk with user-only permissions."""
     path = runner_profile_path()
-    ensure_dir(os.path.dirname(path))
+    config_dir = os.path.dirname(path)
+    if not os.path.exists(config_dir):
+        os.makedirs(config_dir, mode=0o700, exist_ok=True)
+    else:
+        ensure_dir(config_dir)
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(profile, handle, indent=2, sort_keys=True)
         handle.write("\n")

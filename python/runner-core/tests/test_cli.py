@@ -1,4 +1,5 @@
 import io
+import json
 import sys
 import unittest
 from contextlib import redirect_stdout
@@ -505,7 +506,13 @@ class CliTests(unittest.TestCase):
             "runner_profile": {
                 "api_url": "http://localhost:8000",
                 "access_token": "qbhr_pair_token",
+                "refresh_secret": "must-not-print",
+                "runner_id": "runner-local",
                 "label": "Brian MacBook Pro",
+                "runner_kind": "agent_dogfood",
+                "preferred_execution_mode": "local_native",
+                "expires_at": "2026-07-12T12:00:00Z",
+                "user": {"handle": "brian"},
             }
         }
         with mock.patch(
@@ -547,6 +554,15 @@ class CliTests(unittest.TestCase):
         self.assertIn('"paired": true', output.getvalue().lower())
         self.assertIn('"next_action": "start_runner"', output.getvalue())
         self.assertIn('"start": "infergrade start"', output.getvalue())
+        printed = json.loads(output.getvalue())
+        self.assertEqual(printed["runner_profile"]["label"], "Brian MacBook Pro")
+        self.assertEqual(printed["runner_profile"]["runner_id"], "runner-local")
+        self.assertEqual(printed["runner_profile"]["runner_kind"], "agent_dogfood")
+        self.assertEqual(printed["runner_profile"]["expires_at"], "2026-07-12T12:00:00Z")
+        self.assertEqual(printed["runner_profile"]["user"], {"handle": "brian"})
+        self.assertNotIn("access_token", printed["runner_profile"])
+        self.assertNotIn("qbhr_pair_token", output.getvalue())
+        self.assertNotIn("must-not-print", output.getvalue())
 
     def test_pair_command_refuses_remote_http_before_redeeming_code(self):
         with mock.patch("infergrade.cli.redeem_runner_pairing") as redeem_mock:
