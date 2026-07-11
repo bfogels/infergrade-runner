@@ -40,6 +40,8 @@ class ReleaseCiTests(unittest.TestCase):
             script = (ROOT / relative_path).read_text(encoding="utf-8")
             self.assertIn('VERSION_TAG="${INFERGRADE_IMAGE_TAG:-$(<"${ROOT_DIR}/VERSION")}"', script)
             self.assertNotIn("0.1.0-preview", script)
+        build_script = (ROOT / "scripts" / "build_release_images.sh").read_text(encoding="utf-8")
+        self.assertIn('-t "ghcr.io/bfogels/${name}:${VERSION_TAG}"', build_script)
 
     def test_ci_checks_version_sync_before_running_tests(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
