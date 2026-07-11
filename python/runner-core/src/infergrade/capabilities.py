@@ -15,7 +15,7 @@ from infergrade.capability_contract import validate_capability_run_artifact
 from infergrade.capability_scoring import score_for_use_case
 from infergrade.capability_summary import write_capability_summary_artifact
 from infergrade.contracts import load_contract_manifest
-from infergrade.images import install_image
+from infergrade.images import container_image_identity, install_image
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcnow_iso, write_json
 
@@ -24,11 +24,16 @@ CODING_STATIC_REPAIR_FIXTURE_REVISION = "2026-05-coding-static-preview"
 REASONING_EXACT_ANSWER_FIXTURE_REVISION = "2026-05-reasoning-exact-preview"
 _DOMINANT_GENERATION_FAILURE_RATE = 0.5
 
+
+def _released_capability_image(image_name: str) -> str:
+    """Bind scorer code and dataset containers to the installed Runner release."""
+    return "ghcr.io/bfogels/%s:%s" % (image_name, __version__)
+
 DEFAULT_CAPABILITY_IMAGES = {
-    "ifeval": env_value("INFERGRADE_IFEVAL_IMAGE", "QUANTBENCH_IFEVAL_IMAGE", "infergrade-ifeval:local"),
-    "evalplus_humaneval": env_value("INFERGRADE_EVALPLUS_IMAGE", "QUANTBENCH_EVALPLUS_IMAGE", "infergrade-evalplus:local"),
-    "evalplus_mbpp": env_value("INFERGRADE_EVALPLUS_IMAGE", "QUANTBENCH_EVALPLUS_IMAGE", "infergrade-evalplus:local"),
-    "mmlu_pro_reference_v1": env_value("INFERGRADE_MMLU_PRO_IMAGE", "QUANTBENCH_MMLU_PRO_IMAGE", "infergrade-mmlu-pro:local"),
+    "ifeval": env_value("INFERGRADE_IFEVAL_IMAGE", "QUANTBENCH_IFEVAL_IMAGE", _released_capability_image("infergrade-ifeval")),
+    "evalplus_humaneval": env_value("INFERGRADE_EVALPLUS_IMAGE", "QUANTBENCH_EVALPLUS_IMAGE", _released_capability_image("infergrade-evalplus")),
+    "evalplus_mbpp": env_value("INFERGRADE_EVALPLUS_IMAGE", "QUANTBENCH_EVALPLUS_IMAGE", _released_capability_image("infergrade-evalplus")),
+    "mmlu_pro_reference_v1": env_value("INFERGRADE_MMLU_PRO_IMAGE", "QUANTBENCH_MMLU_PRO_IMAGE", _released_capability_image("infergrade-mmlu-pro")),
 }
 
 _LISTENER_RUNS_DIR = "/app/runs"
@@ -470,6 +475,8 @@ def execute_capability_suite(
             task_performance_rows.extend(predictions)
             _write_jsonl(os.path.join(benchmark_dir, "predictions.jsonl"), predictions)
             summary = _evaluate_benchmark(spec, benchmark_dir)
+            if spec.execution_mode == "container":
+                summary["container_runtime"] = container_image_identity(spec.container_image)
             summary["task_performance"] = _summarize_task_performance_rows(predictions)
             failure_count = len([item for item in predictions if item.get("generation_status") != "completed"])
             failure_severity = _generation_failure_severity(len(cases), failure_count)
@@ -1199,6 +1206,7 @@ def _write_mmlu_pro_capability_run_artifact(
                 "backend": request.backend,
                 "execution_mode": request.execution_mode,
                 "llama_cpp_cli_path": request.llama_cpp_cli_path,
+                **dict(summary.get("container_runtime") or container_image_identity(spec.container_image)),
             },
             "hardware": {
                 "source": "run_bundle_environment",
@@ -1354,7 +1362,7 @@ def _write_evalplus_capability_run_artifact(
                 "backend": request.backend,
                 "execution_mode": request.execution_mode,
                 "llama_cpp_cli_path": request.llama_cpp_cli_path,
-                "container_image": spec.container_image,
+                **dict(summary.get("container_runtime") or container_image_identity(spec.container_image)),
             },
             "hardware": {
                 "source": "run_bundle_environment",

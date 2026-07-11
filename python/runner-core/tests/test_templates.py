@@ -11,7 +11,7 @@ class TemplateTests(unittest.TestCase):
     def test_standard_template_defaults_use_case(self):
         payload = build_run_request_template(tier="standard")
         self.assertEqual(payload["run"]["use_case"], "general_assistant")
-        self.assertEqual(payload["runtime"]["backend_image"], f"infergrade-llama-cpp:{__version__}")
+        self.assertEqual(payload["runtime"]["backend_image"], f"ghcr.io/bfogels/infergrade-llama-cpp:{__version__}")
         self.assertEqual(
             payload["artifacts"]["quantized_weights"]["uri"],
             "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",

@@ -7,6 +7,7 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
+from infergrade import __version__
 from infergrade.adapters.llama_cpp import (
     LlamaCppAdapter,
     _compute_ttft_ms,
@@ -582,7 +583,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(len(execution.artifacts["runs"]), 2)
         command = execution.artifacts["runs"][0]["command"]
         self.assertEqual(command[0:2], ["docker", "run"])
-        self.assertIn("infergrade-llama-cpp:local", command)
+        self.assertIn("ghcr.io/bfogels/infergrade-llama-cpp:%s" % __version__, command)
         self.assertIn("llama-server", command)
 
     def test_real_run_requires_local_gguf_artifact(self):

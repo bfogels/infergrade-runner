@@ -4,7 +4,8 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.images import docker_image_exists, install_image, install_known_images, local_build_command
+from infergrade import __version__
+from infergrade.images import container_image_identity, docker_image_exists, install_image, install_known_images, local_build_command
 
 
 class ImageInstallTests(unittest.TestCase):
@@ -28,6 +29,17 @@ class ImageInstallTests(unittest.TestCase):
         result = install_image("infergrade-llama-cpp:local")
         self.assertEqual(result["action"], "built")
         self.assertIn("containers/llama-cpp/Dockerfile", result["dockerfile"])
+
+    @mock.patch("infergrade.images._repo_root", return_value="/tmp/infergrade-runner")
+    @mock.patch("infergrade.images.subprocess.run")
+    def test_install_image_builds_canonical_versioned_image_from_source(self, run_mock, _repo_root_mock):
+        run_mock.side_effect = [
+            mock.Mock(returncode=1, stdout="", stderr="missing"),
+            mock.Mock(returncode=0, stdout="built", stderr=""),
+        ]
+        image = "ghcr.io/bfogels/infergrade-mmlu-pro:%s" % __version__
+        result = install_image(image)
+        self.assertEqual(result, {"image": image, "action": "built", "dockerfile": "/tmp/infergrade-runner/containers/capability-mmlu-pro/Dockerfile"})
 
     @mock.patch("infergrade.images._repo_root", return_value="/tmp/infergrade-runner")
     @mock.patch("infergrade.images.subprocess.run")
@@ -75,6 +87,25 @@ class ImageInstallTests(unittest.TestCase):
         installed = install_known_images("infergrade-runner-core:local", rebuild=True)
         self.assertEqual(installed["infergrade-runner-core:local"]["action"], "rebuilt")
         self.assertTrue(install_mock.call_args.kwargs["rebuild"])
+
+    @mock.patch("infergrade.images.install_image")
+    def test_install_known_images_defaults_to_canonical_runner_version(self, install_mock):
+        install_mock.side_effect = lambda image, **_kwargs: {"image": image, "action": "present"}
+        installed = install_known_images()
+        self.assertEqual(len(installed), 5)
+        self.assertTrue(all(image.startswith("ghcr.io/bfogels/") and image.endswith(":" + __version__) for image in installed))
+        self.assertTrue(all(call.kwargs["pull_if_missing"] for call in install_mock.call_args_list))
+
+    @mock.patch("infergrade.images.subprocess.run")
+    def test_container_image_identity_records_id_and_repo_digest(self, run_mock):
+        run_mock.return_value = mock.Mock(
+            returncode=0,
+            stdout='{"Id":"sha256:abc","RepoDigests":["ghcr.io/bfogels/infergrade-mmlu-pro@sha256:def"]}',
+            stderr="",
+        )
+        identity = container_image_identity("ghcr.io/bfogels/infergrade-mmlu-pro:0.3.11")
+        self.assertEqual(identity["container_image_id"], "sha256:abc")
+        self.assertEqual(identity["container_repo_digests"], ["ghcr.io/bfogels/infergrade-mmlu-pro@sha256:def"])
 
 
 if __name__ == "__main__":
