@@ -166,7 +166,31 @@
         "model_weights_bytes": { "type": ["integer", "null"], "minimum": 0 },
         "model_buffer_bytes": { "type": ["integer", "null"], "minimum": 0 },
         "kv_cache_bytes": { "type": ["integer", "null"], "minimum": 0 },
-        "kv_cache_context_tokens": { "type": ["integer", "null"], "minimum": 0 }
+        "kv_cache_context_tokens": { "type": ["integer", "null"], "minimum": 0 },
+        "memory_fit": {
+          "type": "object",
+          "required": ["current_context_status", "current_context", "standard_contexts"],
+          "properties": {
+            "current_context_status": { "type": "string", "enum": ["runtime_reported", "unknown"] },
+            "current_context": {
+              "oneOf": [
+                { "$ref": "#/$defs/memoryFitEstimate" },
+                { "type": "null" }
+              ]
+            },
+            "standard_contexts": {
+              "type": "object",
+              "required": ["2048", "8192", "32768"],
+              "properties": {
+                "2048": { "$ref": "#/$defs/memoryFitEstimate" },
+                "8192": { "$ref": "#/$defs/memoryFitEstimate" },
+                "32768": { "$ref": "#/$defs/memoryFitEstimate" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": true
     },
@@ -199,5 +223,79 @@
       "additionalProperties": true
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "memoryComponent": {
+      "type": "object",
+      "required": ["estimate_bytes", "lower_bound_bytes", "upper_bound_bytes", "source", "residency_group", "memory_domain", "offload_semantics"],
+      "properties": {
+        "estimate_bytes": { "type": ["integer", "null"], "minimum": 1 },
+        "lower_bound_bytes": { "type": ["integer", "null"], "minimum": 1 },
+        "upper_bound_bytes": { "type": ["integer", "null"], "minimum": 1 },
+        "estimate_range_low_bytes": { "type": ["integer", "null"], "minimum": 1 },
+        "estimate_range_high_bytes": { "type": ["integer", "null"], "minimum": 1 },
+        "source": { "type": "string", "enum": ["measured", "runtime_reported", "artifact_exact", "formula_estimated", "unknown"] },
+        "residency_group": { "type": "string" },
+        "memory_domain": { "type": "string" },
+        "offload_semantics": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "memoryFitEstimate": {
+      "type": "object",
+      "required": ["estimator_version", "status", "context_tokens", "support_proof", "fit_verdict", "fit_verdict_reason", "components", "required_memory", "residency_semantics"],
+      "properties": {
+        "estimator_version": { "type": "string", "const": "memory_fit_v1" },
+        "status": { "type": "string", "enum": ["estimated", "unknown"] },
+        "context_tokens": { "type": "integer", "minimum": 1 },
+        "support_proof": { "type": "boolean" },
+        "fit_verdict": { "type": "string", "const": "not_evaluated" },
+        "fit_verdict_reason": { "type": "string" },
+        "components": {
+          "type": "object",
+          "required": ["model_weights", "model_buffer", "kv_cache", "runtime_overhead", "observed_peak"],
+          "properties": {
+            "model_weights": { "$ref": "#/$defs/memoryComponent" },
+            "model_buffer": { "$ref": "#/$defs/memoryComponent" },
+            "kv_cache": { "$ref": "#/$defs/memoryComponent" },
+            "runtime_overhead": { "$ref": "#/$defs/memoryComponent" },
+            "observed_peak": { "$ref": "#/$defs/memoryComponent" }
+          },
+          "additionalProperties": false
+        },
+        "required_memory": {
+          "type": "object",
+          "required": ["estimate_range_low_bytes", "estimate_range_high_bytes", "lower_bound_bytes", "upper_bound_bytes", "source", "memory_domain"],
+          "properties": {
+            "estimate_range_low_bytes": { "type": ["integer", "null"], "minimum": 1 },
+            "estimate_range_high_bytes": { "type": ["integer", "null"], "minimum": 1 },
+            "lower_bound_bytes": { "type": "null" },
+            "upper_bound_bytes": { "type": "null" },
+            "source": { "type": "string", "enum": ["mixed_estimate", "unknown"] },
+            "memory_domain": { "type": "string", "const": "unified_or_combined_memory" }
+          },
+          "additionalProperties": false
+        },
+        "residency_semantics": {
+          "type": "object",
+          "required": ["aggregation", "non_additive_component_groups", "observed_peak_aggregated", "offload_policy", "domain_compatibility_required", "applicable_memory_domains", "device_vram_fit_prohibited", "notes"],
+          "properties": {
+            "aggregation": { "type": "string", "const": "max_overlapping_model_representations_then_add_context_and_overhead_estimates" },
+            "non_additive_component_groups": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } },
+            "observed_peak_aggregated": { "type": "boolean", "const": false },
+            "offload_policy": { "type": "string", "const": "unknown" },
+            "domain_compatibility_required": { "type": "boolean", "const": true },
+            "applicable_memory_domains": {
+              "type": "array",
+              "const": ["unified_memory", "combined_system_memory"]
+            },
+            "device_vram_fit_prohibited": { "type": "boolean", "const": true },
+            "notes": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
 }

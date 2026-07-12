@@ -12,6 +12,7 @@ from infergrade.cuda import WINDOWS_CUDA_BINARY_SET, windows_cuda_preflight
 from infergrade.environment import capture_environment
 from infergrade.capabilities import attach_quant_fidelity_capability_artifact, summarize_capability_execution
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
+from infergrade.memory_fit import estimate_memory_fit, standard_context_estimates
 from infergrade.ontology import build_ontology, resolve_artifact_sha256, resolve_quant_format
 from infergrade.progress import (
     initialize_progress,
@@ -267,6 +268,13 @@ def _build_result_record(
         "deployment_confidence": deployment["deployment_confidence"],
         "deployment_status": "simulated" if request.simulate else "completed",
     }
+    model_weights_bytes = deployment.get("model_weights_bytes")
+    if model_weights_bytes is None and request.quant_artifact_resolved_path and os.path.isfile(request.quant_artifact_resolved_path):
+        model_weights_bytes = os.path.getsize(request.quant_artifact_resolved_path)
+    record["deployment"]["model_weights_bytes"] = model_weights_bytes
+    record["deployment"]["memory_fit"] = _memory_fit_payload(
+        deployment, deployment_profile, model_weights_bytes
+    )
     slices = _canonical_slice_ids(record, request)
     record["derived"]["canonical_analysis_slice_ids"] = slices
     record["derived"]["frontier_group_id"] = (
@@ -276,6 +284,64 @@ def _build_result_record(
         record["derived"]["is_pareto_frontier_member"] = True
         record["derived"]["recommendation_labels"] = ["candidate_frontier_member"]
     return record
+
+
+def _memory_fit_payload(
+    deployment: Dict[str, Any], deployment_profile: str, model_weights_bytes: Optional[int]
+) -> Dict[str, Any]:
+    """Propagate only context-matched runtime allocations into an estimate."""
+    def positive_int_or_none(value: Any, name: str) -> Optional[int]:
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("%s must be a positive integer when provided" % name)
+        if value == 0:
+            return None
+        if value < 0:
+            raise ValueError("%s must be a positive integer when provided" % name)
+        return value
+
+    def peak_bytes_or_none(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("peak_memory_mb must be a positive number when provided")
+        if value == 0:
+            return None
+        if value < 0:
+            raise ValueError("peak_memory_mb must be a positive number when provided")
+        return int(value * 1024 * 1024)
+
+    reported_kv_context = positive_int_or_none(deployment.get("kv_cache_context_tokens"), "kv_cache_context_tokens")
+    weights = positive_int_or_none(model_weights_bytes, "model_weights_bytes")
+    model_buffer = positive_int_or_none(deployment.get("model_buffer_bytes"), "model_buffer_bytes")
+    kv_cache = positive_int_or_none(deployment.get("kv_cache_bytes"), "kv_cache_bytes")
+    peak_bytes = peak_bytes_or_none(deployment.get("peak_memory_mb"))
+    memory_inputs = {
+        "model_weights_bytes": weights,
+        "model_buffer_bytes": model_buffer,
+        "runtime_reported_kv_cache_bytes": (
+            kv_cache if reported_kv_context is not None else None
+        ),
+        "peak_memory_bytes": peak_bytes,
+        "peak_memory_measurement_method": deployment.get("peak_memory_measurement_method"),
+        "architecture": deployment.get("model_architecture"),
+    }
+    return {
+        "current_context_status": "runtime_reported" if reported_kv_context is not None else "unknown",
+        "current_context": (
+            estimate_memory_fit(context_tokens=reported_kv_context, **memory_inputs)
+            if reported_kv_context is not None else None
+        ),
+        "standard_contexts": standard_context_estimates(
+            **{
+                **memory_inputs,
+                "runtime_reported_kv_cache_bytes": None,
+                "peak_memory_bytes": None,
+                "peak_memory_measurement_method": None,
+            }
+        ),
+    }
 
 
 def _request_selects_cuda_runtime(request: RunRequest) -> bool:
