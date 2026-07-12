@@ -615,11 +615,9 @@ def execute_capability_suite(
     score_details = score_for_use_case(request.use_case, component_scores)
     score = score_details.get("score")
 
+    # Capability Score v2 exposes an inspectable evidence basis instead of a
+    # hard-coded probability-like confidence number.
     confidence = None
-    if status == "completed" and score_details.get("score_ready"):
-        confidence = 0.9
-    elif status == "partial" and score_details.get("score_ready"):
-        confidence = 0.6
 
     execution = CapabilityExecution(
         use_case=request.use_case,

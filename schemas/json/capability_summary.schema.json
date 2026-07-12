@@ -127,6 +127,10 @@
         "score_ready": { "type": "boolean" },
         "score_coverage": { "$ref": "#/$defs/score_coverage" },
         "score_components": { "type": "array", "items": { "$ref": "#/$defs/score_component" } },
+        "score_failed_gates": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "score_eligibility": { "anyOf": [{ "$ref": "#/$defs/score_eligibility" }, { "type": "null" }] },
+        "score_robustness": { "anyOf": [{ "$ref": "#/$defs/score_robustness" }, { "type": "null" }] },
+        "score_confidence_basis": { "anyOf": [{ "$ref": "#/$defs/score_confidence_basis" }, { "type": "null" }] },
         "score_claim_boundary": { "type": ["string", "null"] },
         "lane": { "anyOf": [{ "$ref": "#/$defs/lane" }, { "type": "null" }] },
         "confidence_label": { "anyOf": [{ "$ref": "#/$defs/confidence_label" }, { "type": "null" }] },
@@ -220,6 +224,64 @@
         "observed": { "type": "boolean" }
       },
       "additionalProperties": true
+    },
+    "score_eligibility": {
+      "type": "object",
+      "required": ["minimum_scored_components", "observed_scored_components", "minimum_score_dimensions", "observed_score_dimensions", "coverage_ready", "diversity_ready", "maximum_component_weight_fraction", "influence_ready"],
+      "properties": {
+        "minimum_scored_components": { "type": "integer", "minimum": 2 },
+        "observed_scored_components": { "type": "integer", "minimum": 0 },
+        "minimum_score_dimensions": { "type": "integer", "minimum": 2 },
+        "observed_score_dimensions": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "coverage_ready": { "type": "boolean" },
+        "diversity_ready": { "type": "boolean" },
+        "maximum_component_weight_fraction": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "influence_ready": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "score_robustness": {
+      "type": "object",
+      "required": ["method", "leave_one_component_out", "max_absolute_delta", "dominant_component_threshold", "dominant_component", "dominant_benchmark_ids", "maximum_observed_weight_fraction", "claim_boundary"],
+      "properties": {
+        "method": { "const": "leave_one_component_out_v1" },
+        "leave_one_component_out": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["omitted_benchmark_id", "score_without_component", "absolute_delta"],
+            "properties": {
+              "omitted_benchmark_id": { "type": "string", "minLength": 1 },
+              "score_without_component": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+              "absolute_delta": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "max_absolute_delta": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "dominant_component_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "dominant_component": { "type": "boolean" },
+        "dominant_benchmark_ids": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "maximum_observed_weight_fraction": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "claim_boundary": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "score_confidence_basis": {
+      "type": "object",
+      "required": ["kind", "calibration_status", "label", "score_ready", "coverage_fraction", "observed_component_count", "observed_dimension_count", "repeat_measurements_included", "explanation"],
+      "properties": {
+        "kind": { "const": "inspectable_evidence_basis_v1" },
+        "calibration_status": { "const": "not_psychometrically_calibrated" },
+        "label": { "enum": ["not_score_ready", "multi_component_dominant", "multi_component_partial_coverage", "multi_component_complete_coverage"] },
+        "score_ready": { "type": "boolean" },
+        "coverage_fraction": { "type": "number", "minimum": 0, "maximum": 1 },
+        "observed_component_count": { "type": "integer", "minimum": 0 },
+        "observed_dimension_count": { "type": "integer", "minimum": 0 },
+        "repeat_measurements_included": { "type": "boolean" },
+        "explanation": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
     },
     "task_performance_summary": {
       "type": "object",

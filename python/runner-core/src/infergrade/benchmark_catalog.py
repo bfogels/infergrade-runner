@@ -199,6 +199,16 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         minimum_coverage = policy.get("minimum_coverage_fraction")
         if not isinstance(minimum_coverage, (int, float)) or not 0 <= float(minimum_coverage) <= 1:
             failures.append(f"{surface_id}: minimum_coverage_fraction must be between 0 and 1")
+        for field in ("minimum_scored_components", "minimum_score_dimensions"):
+            value = policy.get(field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 2:
+                failures.append(f"{surface_id}: {field} must be an integer of at least 2")
+        for field in ("dominant_component_weight_fraction", "maximum_component_weight_fraction"):
+            fraction = policy.get(field)
+            if not isinstance(fraction, (int, float)) or isinstance(fraction, bool) or not 0 < float(fraction) <= 1:
+                failures.append(f"{surface_id}: {field} must be above 0 and at most 1")
+        if policy.get("calibration_status") != "not_psychometrically_calibrated":
+            failures.append(f"{surface_id}: calibration_status must preserve the non-calibrated claim boundary")
         weights = [
             float(check.get("primary_score_weight"))
             for check in checks_by_id.values()

@@ -207,6 +207,8 @@ def validate_capability_summary_artifact(artifact: Dict[str, Any]) -> List[str]:
                     errors.append(prefix + "score is required when score_ready is true")
                 if surface.get("score_ready") is False and surface.get("score") is not None:
                     errors.append(prefix + "score must be null when score_ready is false")
+                if str(surface.get("score_version") or "").endswith("_v2"):
+                    _validate_v2_score_diagnostics(surface, prefix, errors)
             if not isinstance(surface.get("capability_artifacts"), list):
                 errors.append(prefix + "capability_artifacts must be an array")
             if not _confidence_allowed_for_lane(surface.get("lane"), surface.get("confidence_label")):
@@ -242,6 +244,59 @@ def validate_capability_summary_artifact(artifact: Dict[str, Any]) -> List[str]:
         errors.append("unsupported_claim_summary must be a non-empty string array")
 
     return errors
+
+
+def _validate_v2_score_diagnostics(surface: Dict[str, Any], prefix: str, errors: List[str]) -> None:
+    failed_gates = surface.get("score_failed_gates")
+    if not isinstance(failed_gates, list) or not all(isinstance(item, str) and item.strip() for item in failed_gates):
+        errors.append(prefix + "v2 score requires score_failed_gates as a string array")
+        failed_gates = []
+    if surface.get("score_ready") is True and failed_gates:
+        errors.append(prefix + "v2 ready score cannot have failed gates")
+    if surface.get("score_ready") is False and not failed_gates:
+        errors.append(prefix + "v2 unready score requires at least one failed gate")
+
+    eligibility = surface.get("score_eligibility")
+    if not isinstance(eligibility, dict):
+        errors.append(prefix + "v2 score requires score_eligibility")
+    else:
+        for key in ("minimum_scored_components", "observed_scored_components", "minimum_score_dimensions"):
+            value = eligibility.get(key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                errors.append(prefix + "score_eligibility.%s must be a non-negative integer" % key)
+        dimensions = eligibility.get("observed_score_dimensions")
+        if not isinstance(dimensions, list) or not all(isinstance(item, str) and item.strip() for item in dimensions):
+            errors.append(prefix + "score_eligibility.observed_score_dimensions must be a string array")
+        for key in ("coverage_ready", "diversity_ready", "influence_ready"):
+            if not isinstance(eligibility.get(key), bool):
+                errors.append(prefix + "score_eligibility.%s must be boolean" % key)
+        maximum = eligibility.get("maximum_component_weight_fraction")
+        if not isinstance(maximum, (int, float)) or isinstance(maximum, bool) or not 0 < float(maximum) <= 1:
+            errors.append(prefix + "score_eligibility.maximum_component_weight_fraction must be above 0 and at most 1")
+
+    robustness = surface.get("score_robustness")
+    if not isinstance(robustness, dict):
+        errors.append(prefix + "v2 score requires score_robustness")
+    else:
+        if robustness.get("method") != "leave_one_component_out_v1":
+            errors.append(prefix + "score_robustness.method must be leave_one_component_out_v1")
+        if not isinstance(robustness.get("leave_one_component_out"), list):
+            errors.append(prefix + "score_robustness.leave_one_component_out must be an array")
+        if not isinstance(robustness.get("dominant_component"), bool):
+            errors.append(prefix + "score_robustness.dominant_component must be boolean")
+        if not isinstance(robustness.get("dominant_benchmark_ids"), list):
+            errors.append(prefix + "score_robustness.dominant_benchmark_ids must be an array")
+
+    basis = surface.get("score_confidence_basis")
+    if not isinstance(basis, dict):
+        errors.append(prefix + "v2 score requires score_confidence_basis")
+    else:
+        if basis.get("kind") != "inspectable_evidence_basis_v1":
+            errors.append(prefix + "score_confidence_basis.kind must be inspectable_evidence_basis_v1")
+        if basis.get("calibration_status") != "not_psychometrically_calibrated":
+            errors.append(prefix + "score_confidence_basis must remain not psychometrically calibrated")
+        if not isinstance(basis.get("repeat_measurements_included"), bool):
+            errors.append(prefix + "score_confidence_basis.repeat_measurements_included must be boolean")
 
 
 def _require(payload: Dict[str, Any], key: str, errors: List[str], prefix: str = "") -> None:

@@ -331,6 +331,46 @@ class CapabilityContractTests(unittest.TestCase):
 
         self.assertTrue(any("capability_artifacts[0].artifact_kind" in error for error in errors), errors)
 
+    def test_v2_summary_requires_inspectable_score_diagnostics(self):
+        artifact = {
+            "artifact_spec_version": "0.1.0",
+            "artifact_kind": "capability_summary",
+            "summary_id": "capsum_bad_v2",
+            "created_at": "2026-05-08T12:00:00Z",
+            "runner": {"name": "infergrade-runner", "version": "0.3.2"},
+            "subject": {},
+            "surfaces": [
+                {
+                    "surface": "local_coding_capability",
+                    "state": "scored",
+                    "score": 0.7,
+                    "score_version": "local_coding_score_v2",
+                    "score_method": "weighted_primary_metric_v2",
+                    "score_ready": True,
+                    "score_coverage": {},
+                    "score_components": [],
+                    "lane": "reference",
+                    "confidence_label": "sampled_reference",
+                    "repetition_count": 1,
+                    "task_count": 2,
+                    "failure_count": 0,
+                    "partial_count": 0,
+                    "capability_artifacts": [],
+                    "unsupported_claims": ["Not a global score."],
+                }
+            ],
+            "capability_artifacts": [],
+            "unsupported_claim_summary": ["This summary is not a global intelligence score."],
+            "next_recommended_benchmark_action": {"action": "repeat", "reason": "Repeat the run."},
+        }
+
+        errors = validate_capability_summary_artifact(artifact)
+
+        self.assertIn("surfaces[0].v2 score requires score_failed_gates as a string array", errors)
+        self.assertIn("surfaces[0].v2 score requires score_eligibility", errors)
+        self.assertIn("surfaces[0].v2 score requires score_robustness", errors)
+        self.assertIn("surfaces[0].v2 score requires score_confidence_basis", errors)
+
 
 if __name__ == "__main__":
     unittest.main()

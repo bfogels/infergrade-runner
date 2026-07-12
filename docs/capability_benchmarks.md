@@ -205,6 +205,12 @@ The summary lists the capability artifacts produced in the bundle, keeps each su
 
 The summary may recommend actions such as running a missing assistant/coding/reasoning decision lane, retrying a failed or partial lane, or repeating local capability checks after all thin samples are present. It must not combine assistant, coding, reasoning, quant fidelity, and deployment fitness into a global intelligence score.
 
+### Local Capability Score v2
+
+Assistant, coding, and reasoning scores are separate, versioned task scores. A v2 score is headline-ready only when the selected surface has at least 50% of its configured benchmark weight, two scored components, two distinct score dimensions, and no component above 80% of the observed normalized weight. The Runner keeps an observed weighted score when a gate fails, but publishes the task score as `null` and names every failed gate.
+
+Every v2 score includes configured component weights, coverage, leave-one-component-out sensitivity, dominant-component flags, and an inspectable confidence basis. That basis describes evidence coverage and sensitivity; it is not a probability, confidence interval, psychometric calibration, or global intelligence claim. Composite confidence conservatively uses the weakest evidence label on the capability surface, and consumers must not compare scores across score versions.
+
 ## Container Contract
 
 Each benchmark container follows the same basic contract:
