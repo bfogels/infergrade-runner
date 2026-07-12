@@ -43,7 +43,7 @@ LANE_PLANS = [
             "coding_static_repair_v1",
             "reasoning_exact_answer_v1",
         ],
-        "claim_boundary": "Real local dogfood evidence for setup guidance; thin local samples are not reference, gold, or leaderboard evidence.",
+        "claim_boundary": "Real local development evidence for setup guidance; thin local samples are not reference, gold, or leaderboard evidence.",
     },
     {
         "lane_id": "mmlu_pro_sampled_reference",
@@ -242,7 +242,7 @@ def request_payload(model: Dict[str, Any], provenance: Dict[str, Any], lane: Dic
         },
         "metadata": {
             "evidence_source": "agent_dogfood",
-            "notes": "Dogfood evidence. %s" % lane["claim_boundary"],
+            "notes": "Maintainer-run evidence. %s" % lane["claim_boundary"],
         },
     }
 
@@ -306,7 +306,7 @@ def generate_plan(matrix: Dict[str, Any], output_root: Path, compute_sha256: boo
         "matrix_id": matrix.get("matrix_id"),
         "hardware_label": matrix.get("hardware_label"),
         "evidence_honesty": [
-            "Dogfood evidence is real local evidence from the named machine, not official validation.",
+            "Maintainer-run evidence is real local evidence from the named machine, not official validation.",
             "Thin local samples are setup guidance, not broad capability proof.",
             "Reference samples remain reference evidence, not gold or leaderboard-grade evidence.",
             "Quant-fidelity evidence is comparable only within the same family/checkpoint/tokenizer/corpus/protocol boundary.",
