@@ -230,7 +230,7 @@
       "claim_boundary": "Sampled MMLU-Pro reference evidence; useful as a broad knowledge/reasoning reference signal, not a leaderboard or gold claim.",
       "promotion_blockers": [
         "Observed duration and token-volume metadata are needed for stronger local recommendation copy.",
-        "Real dogfood runs are needed to calibrate local duration and failure behavior.",
+        "Observed local runs are needed to calibrate duration and failure behavior.",
         "Leaderboard-style claims require the full official protocol and separate publication controls."
       ]
     },
@@ -250,7 +250,7 @@
       "claim_boundary": "EvalPlus HumanEval+ reference coding evidence under pass@1 unit tests; not repo-edit, LiveCodeBench, SWE-bench, gold, or broad agentic coding proof.",
       "promotion_blockers": [
         "Observed duration and token-volume metadata are needed for stronger local recommendation copy.",
-        "Real dogfood runs are needed to calibrate local duration and failure behavior.",
+        "Observed local runs are needed to calibrate duration and failure behavior.",
         "Gold or leaderboard-style claims require separate publication controls and maintainer review."
       ]
     },
@@ -270,7 +270,7 @@
       "claim_boundary": "EvalPlus MBPP+ reference coding breadth evidence under pass@1 unit tests; not repo-edit, LiveCodeBench, SWE-bench, gold, or broad agentic coding proof.",
       "promotion_blockers": [
         "Observed duration and token-volume metadata are needed for stronger local recommendation copy.",
-        "Real dogfood runs are needed to calibrate local duration and failure behavior.",
+        "Observed local runs are needed to calibrate duration and failure behavior.",
         "Gold or leaderboard-style claims require separate publication controls and maintainer review."
       ]
     },
@@ -289,7 +289,7 @@
       "sandbox_requirement": "none_native_llama_cpp_perplexity",
       "claim_boundary": "Same-family quant-fidelity reference evidence only; perplexity does not prove assistant, coding, reasoning, cross-family quality, or general model capability.",
       "promotion_blockers": [
-        "Observed duration and token-volume metadata are needed across real local dogfood runs.",
+        "Observed duration and token-volume metadata are needed across real contributed local runs.",
         "Reference precision baselines are needed before Hub can present quality-retention deltas.",
         "Gold or leaderboard-style quant claims require deeper corpus controls and maintainer review."
       ]
