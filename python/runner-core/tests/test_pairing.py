@@ -1,4 +1,5 @@
 import os
+import stat
 import tempfile
 import unittest
 from unittest import mock
@@ -46,6 +47,15 @@ class PairingTests(unittest.TestCase):
         self.assertEqual(loaded["api_url"], "http://localhost:8000")
         self.assertEqual(resolve_runner_api_url(None), "http://localhost:8000")
         self.assertEqual(resolve_runner_api_token(None), "qbhr_pair_test")
+
+    def test_save_creates_config_directory_with_user_only_permissions(self):
+        config_dir = os.path.join(self.tempdir.name, "missing", "infergrade")
+        os.environ["INFERGRADE_CONFIG_DIR"] = config_dir
+
+        path = save_runner_profile({"api_url": "http://localhost:8000", "access_token": "paired-token"})
+
+        self.assertEqual(stat.S_IMODE(os.stat(config_dir).st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
 
     def test_resolve_runner_identity_from_saved_profile(self):
         save_runner_profile(
