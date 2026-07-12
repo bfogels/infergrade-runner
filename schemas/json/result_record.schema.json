@@ -114,8 +114,55 @@
             "observed_weighted_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
             "score_ready": { "type": "boolean" },
             "reason": { "type": "string" },
+            "failed_gates": { "type": "array", "items": { "type": "string", "minLength": 1 } },
             "coverage": { "type": ["object", "null"], "additionalProperties": true },
             "components": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+            "eligibility": {
+              "type": "object",
+              "required": ["minimum_scored_components", "observed_scored_components", "minimum_score_dimensions", "observed_score_dimensions", "coverage_ready", "diversity_ready", "maximum_component_weight_fraction", "influence_ready"],
+              "properties": {
+                "minimum_scored_components": { "type": "integer", "minimum": 2 },
+                "observed_scored_components": { "type": "integer", "minimum": 0 },
+                "minimum_score_dimensions": { "type": "integer", "minimum": 2 },
+                "observed_score_dimensions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                "coverage_ready": { "type": "boolean" },
+                "diversity_ready": { "type": "boolean" },
+                "maximum_component_weight_fraction": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+                "influence_ready": { "type": "boolean" }
+              },
+              "additionalProperties": false
+            },
+            "robustness": {
+              "type": "object",
+              "required": ["method", "leave_one_component_out", "dominant_component", "dominant_benchmark_ids", "maximum_observed_weight_fraction", "claim_boundary"],
+              "properties": {
+                "method": { "const": "leave_one_component_out_v1" },
+                "leave_one_component_out": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+                "max_absolute_delta": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+                "dominant_component_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+                "dominant_component": { "type": "boolean" },
+                "dominant_benchmark_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                "maximum_observed_weight_fraction": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+                "claim_boundary": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            },
+            "confidence_basis": {
+              "type": "object",
+              "required": ["kind", "calibration_status", "label", "score_ready", "coverage_fraction", "observed_component_count", "observed_dimension_count", "repeat_measurements_included", "explanation"],
+              "properties": {
+                "kind": { "const": "inspectable_evidence_basis_v1" },
+                "calibration_status": { "const": "not_psychometrically_calibrated" },
+                "label": { "type": "string", "minLength": 1 },
+                "score_ready": { "type": "boolean" },
+                "coverage_fraction": { "type": "number", "minimum": 0, "maximum": 1 },
+                "observed_component_count": { "type": "integer", "minimum": 0 },
+                "observed_dimension_count": { "type": "integer", "minimum": 0 },
+                "repeat_measurements_included": { "type": "boolean" },
+                "explanation": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            },
             "claim_boundary": { "type": ["string", "null"] }
           },
           "additionalProperties": true
