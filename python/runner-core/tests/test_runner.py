@@ -10,7 +10,7 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.models import DeploymentExecution
 from infergrade.models import RunRequest
-from infergrade.runner import run_infergrade
+from infergrade.runner import _memory_fit_payload, run_infergrade
 
 
 class RunnerTests(unittest.TestCase):
@@ -19,6 +19,38 @@ class RunnerTests(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.tempdir)
+
+    def test_runtime_kv_without_reported_context_is_not_assigned_to_fallback_context(self):
+        payload = _memory_fit_payload(
+            {"kv_cache_bytes": 123456, "kv_cache_context_tokens": None},
+            "interactive_chat_v1",
+            4 * 1024**3,
+        )
+        self.assertEqual(payload["current_context_status"], "unknown")
+        self.assertIsNone(payload["current_context"])
+
+    def test_zero_context_and_measurements_are_treated_as_absent_at_runner_boundary(self):
+        payload = _memory_fit_payload(
+            {"kv_cache_bytes": 0, "kv_cache_context_tokens": 0, "model_buffer_bytes": 0, "peak_memory_mb": 0},
+            "interactive_chat_v1",
+            0,
+        )
+        self.assertEqual(payload["current_context_status"], "unknown")
+        self.assertIsNone(payload["current_context"])
+
+    def test_non_integer_runtime_context_is_rejected(self):
+        for invalid in ("8192", 8192.0, True, False):
+            with self.assertRaises(ValueError):
+                _memory_fit_payload({"kv_cache_context_tokens": invalid}, "interactive_chat_v1", None)
+
+    def test_non_integer_runtime_memory_evidence_is_rejected(self):
+        for field in ("model_buffer_bytes", "kv_cache_bytes"):
+            for invalid in (1.0, 0.0, True, False, "1"):
+                with self.assertRaises(ValueError):
+                    _memory_fit_payload({field: invalid}, "interactive_chat_v1", None)
+        for invalid in (True, False, "1"):
+            with self.assertRaises(ValueError):
+                _memory_fit_payload({"peak_memory_mb": invalid}, "interactive_chat_v1", None)
 
     def test_run_creates_multi_profile_bundle_for_agentic_coding(self):
         output_dir = os.path.join(self.tempdir, "bundle")
@@ -45,6 +77,12 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(payload["ontology"]["checkpoint"]["checkpoint_name"], "Qwen2.5-7B-Instruct")
         self.assertEqual(payload["ontology"]["benchmark_subject"]["subject_kind"], "artifact_runtime_binding")
         self.assertEqual(payload["deployment"]["deployment_profile_id"], "interactive_chat_v1")
+        self.assertEqual(payload["deployment"]["memory_fit"]["current_context_status"], "unknown")
+        self.assertIsNone(payload["deployment"]["memory_fit"]["current_context"])
+        self.assertEqual(
+            sorted(payload["deployment"]["memory_fit"]["standard_contexts"]),
+            ["2048", "32768", "8192"],
+        )
         self.assertEqual(payload["capability"]["use_case"], "agentic_coding")
         self.assertEqual(payload["capability"]["capability_state"], "scored")
         self.assertEqual(payload["capability"]["benchmark_coverage"]["planned_count"], 3)
@@ -97,6 +135,9 @@ class RunnerTests(unittest.TestCase):
                     "latency_p50_ms": 400.0, "latency_p95_ms": 450.0,
                     "decode_tokens_per_second_p50": 50.0, "decode_tokens_per_second_p95": 48.0,
                     "request_throughput_per_minute": 150.0, "peak_vram_mb": 1024.0,
+                    "peak_memory_mb": 6144.0, "peak_memory_measurement_method": "process_rss",
+                    "model_weights_bytes": 4 * 1024**3, "model_buffer_bytes": 5 * 1024**3,
+                    "kv_cache_bytes": 256 * 1024**2, "kv_cache_context_tokens": 8192,
                     "load_time_ms": 250.0, "oom_or_failure_rate": 0.0,
                     "deployment_confidence": 0.9,
                 },
@@ -106,6 +147,18 @@ class RunnerTests(unittest.TestCase):
         payload = self.read_json(os.path.join(output_dir, "results", "interactive_chat_v1.json"))
         self.assertEqual(payload["provenance"]["evidence_source"], "agent_dogfood")
         self.assertEqual(payload["verification"]["local_comparison_grade_candidate"], "comparable")
+        memory_fit = payload["deployment"]["memory_fit"]["current_context"]
+        self.assertEqual(memory_fit["status"], "estimated")
+        self.assertEqual(memory_fit["components"]["model_weights"]["source"], "artifact_exact")
+        self.assertEqual(memory_fit["components"]["model_buffer"]["source"], "runtime_reported")
+        self.assertEqual(memory_fit["components"]["kv_cache"]["source"], "runtime_reported")
+        self.assertEqual(memory_fit["fit_verdict"], "not_evaluated")
+        self.assertIsNone(memory_fit["required_memory"]["upper_bound_bytes"])
+        self.assertEqual(
+            payload["deployment"]["memory_fit"]["standard_contexts"]["8192"]
+            ["components"]["observed_peak"]["source"],
+            "unknown",
+        )
         validation = self.read_json(os.path.join(output_dir, "validation.json"))
         self.assertEqual(validation["comparison_grade"], "comparable")
 

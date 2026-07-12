@@ -691,10 +691,14 @@ class CapabilityTests(unittest.TestCase):
                 execution = execute_capability_suite(_FakeAdapter(), request)
         self.assertEqual(execution.status, "completed")
         self.assertAlmostEqual(execution.score, 0.729412)
-        self.assertEqual(execution.score_method, "weighted_primary_metric_v1")
-        self.assertEqual(execution.score_details["score_version"], "local_coding_score_v1")
+        self.assertEqual(execution.score_method, "weighted_primary_metric_v2")
+        self.assertEqual(execution.score_details["score_version"], "local_coding_score_v2")
         self.assertEqual(execution.score_details["coverage"]["coverage_fraction"], 0.85)
-        self.assertEqual(execution.confidence, 0.9)
+        self.assertEqual(execution.confidence, None)
+        self.assertEqual(
+            execution.score_details["confidence_basis"]["calibration_status"],
+            "not_psychometrically_calibrated",
+        )
         self.assertEqual(execution.component_scores["evalplus_humaneval"], 0.8)
         self.assertEqual(execution.component_scores["evalplus_mbpp"], 0.6)
         self.assertIn("evalplus_humaneval", execution.benchmark_results)
@@ -1220,7 +1224,9 @@ class CapabilityTests(unittest.TestCase):
             with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
                 execution = execute_capability_suite(_FakeAdapter(), request)
         self.assertEqual(execution.status, "partial")
-        self.assertAlmostEqual(execution.score, 0.5)
+        self.assertIsNone(execution.score)
+        self.assertEqual(execution.score_details["observed_weighted_score"], 0.5)
+        self.assertIn("insufficient_scored_components", execution.score_details["failed_gates"])
         self.assertEqual(execution.benchmark_results["evalplus_mbpp"]["status"], "failed")
 
     def test_summarize_capability_execution_reports_state_and_coverage(self):

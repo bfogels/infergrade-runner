@@ -56,19 +56,13 @@ Removing a selected runtime clears InferGrade's selection record. It does not de
 
 ## Artifact And Upload Recovery
 
-When a native first-run completes locally but upload fails, keep the local run directory. Do not edit bundle ids or run ids by hand.
-
-Retry upload from a saved bundle:
-
-```bash
-infergrade upload-bundle runs/example/bundle.json --api-url https://infergrade.com
-```
-
-For Hub-backed run jobs, prefer restarting the paired listener so it can retry from its persisted state:
+When a native first-run completes locally but upload fails, keep the local run directory. Do not edit bundle ids or run ids by hand. For Hub-backed run jobs, restart the paired listener so it can retry the owned run's upload from persisted state:
 
 ```bash
 infergrade start
 ```
+
+A paired Runner credential intentionally cannot import an arbitrary standalone bundle into the catalog. If a local-only run was not queued by Hub, keep its bundle staged for an authorized operator import; pairing and repeating `upload-bundle` will not grant catalog-write authority. The advanced `upload-bundle` command remains available for local development and explicitly authorized service-token imports.
 
 The Desktop app provides two local first-run support actions:
 
@@ -106,6 +100,6 @@ Advanced recovery commands are discoverable with:
 ```bash
 infergrade --all --help
 infergrade export-support --help
-infergrade upload-bundle --help
+infergrade upload-bundle --help  # development and authorized service imports
 infergrade install-runtime --help
 ```

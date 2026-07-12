@@ -35,25 +35,40 @@
     {
       "surface_id": "local_assistant_capability",
       "display_name": "Local assistant score",
-      "score_version": "local_assistant_score_v1",
-      "score_method": "weighted_primary_metric_v1",
+      "score_version": "local_assistant_score_v2",
+      "score_method": "weighted_primary_metric_v2",
       "minimum_coverage_fraction": 0.5,
+      "minimum_scored_components": 2,
+      "minimum_score_dimensions": 2,
+      "maximum_component_weight_fraction": 0.8,
+      "dominant_component_weight_fraction": 0.67,
+      "calibration_status": "not_psychometrically_calibrated",
       "claim_boundary": "Task-scoped assistant evidence from the versioned benchmark mix. Compare only within this score version and use-case surface; this is not a global intelligence score."
     },
     {
       "surface_id": "local_coding_capability",
       "display_name": "Local coding score",
-      "score_version": "local_coding_score_v1",
-      "score_method": "weighted_primary_metric_v1",
+      "score_version": "local_coding_score_v2",
+      "score_method": "weighted_primary_metric_v2",
       "minimum_coverage_fraction": 0.5,
+      "minimum_scored_components": 2,
+      "minimum_score_dimensions": 2,
+      "maximum_component_weight_fraction": 0.8,
+      "dominant_component_weight_fraction": 0.67,
+      "calibration_status": "not_psychometrically_calibrated",
       "claim_boundary": "Task-scoped coding evidence from the versioned benchmark mix. It does not imply repository-editing or general software-engineering capability."
     },
     {
       "surface_id": "local_reasoning_capability",
       "display_name": "Local reasoning score",
-      "score_version": "local_reasoning_score_v1",
-      "score_method": "weighted_primary_metric_v1",
+      "score_version": "local_reasoning_score_v2",
+      "score_method": "weighted_primary_metric_v2",
       "minimum_coverage_fraction": 0.5,
+      "minimum_scored_components": 2,
+      "minimum_score_dimensions": 2,
+      "maximum_component_weight_fraction": 0.8,
+      "dominant_component_weight_fraction": 0.67,
+      "calibration_status": "not_psychometrically_calibrated",
       "claim_boundary": "Task-scoped reasoning evidence from the versioned benchmark mix. It is not an expert-reasoning, global intelligence, or leaderboard claim."
     }
   ],
@@ -230,7 +245,7 @@
       "claim_boundary": "Sampled MMLU-Pro reference evidence; useful as a broad knowledge/reasoning reference signal, not a leaderboard or gold claim.",
       "promotion_blockers": [
         "Observed duration and token-volume metadata are needed for stronger local recommendation copy.",
-        "Real dogfood runs are needed to calibrate local duration and failure behavior.",
+        "Observed local runs are needed to calibrate duration and failure behavior.",
         "Leaderboard-style claims require the full official protocol and separate publication controls."
       ]
     },
@@ -250,7 +265,7 @@
       "claim_boundary": "EvalPlus HumanEval+ reference coding evidence under pass@1 unit tests; not repo-edit, LiveCodeBench, SWE-bench, gold, or broad agentic coding proof.",
       "promotion_blockers": [
         "Observed duration and token-volume metadata are needed for stronger local recommendation copy.",
-        "Real dogfood runs are needed to calibrate local duration and failure behavior.",
+        "Observed local runs are needed to calibrate duration and failure behavior.",
         "Gold or leaderboard-style claims require separate publication controls and maintainer review."
       ]
     },
@@ -270,7 +285,7 @@
       "claim_boundary": "EvalPlus MBPP+ reference coding breadth evidence under pass@1 unit tests; not repo-edit, LiveCodeBench, SWE-bench, gold, or broad agentic coding proof.",
       "promotion_blockers": [
         "Observed duration and token-volume metadata are needed for stronger local recommendation copy.",
-        "Real dogfood runs are needed to calibrate local duration and failure behavior.",
+        "Observed local runs are needed to calibrate duration and failure behavior.",
         "Gold or leaderboard-style claims require separate publication controls and maintainer review."
       ]
     },
@@ -289,7 +304,7 @@
       "sandbox_requirement": "none_native_llama_cpp_perplexity",
       "claim_boundary": "Same-family quant-fidelity reference evidence only; perplexity does not prove assistant, coding, reasoning, cross-family quality, or general model capability.",
       "promotion_blockers": [
-        "Observed duration and token-volume metadata are needed across real local dogfood runs.",
+        "Observed duration and token-volume metadata are needed across real contributed local runs.",
         "Reference precision baselines are needed before Hub can present quality-retention deltas.",
         "Gold or leaderboard-style quant claims require deeper corpus controls and maintainer review."
       ]

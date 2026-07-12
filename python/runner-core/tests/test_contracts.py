@@ -62,6 +62,20 @@ def _validate_schema_subset(value, schema, path="$"):
 
 
 class ContractExportTests(unittest.TestCase):
+    def test_result_record_contract_declares_versioned_memory_fit_bounds(self):
+        schema = json.loads(
+            (repo_root() / "schemas" / "json" / "result_record.schema.json").read_text(encoding="utf-8")
+        )
+        memory_fit = schema["properties"]["deployment"]["properties"]["memory_fit"]
+        self.assertEqual(memory_fit["properties"]["current_context_status"]["enum"], ["runtime_reported", "unknown"])
+        self.assertEqual(memory_fit["properties"]["current_context"]["oneOf"][0]["$ref"], "#/$defs/memoryFitEstimate")
+        self.assertEqual(memory_fit["properties"]["current_context"]["oneOf"][1]["type"], "null")
+        estimate = schema["$defs"]["memoryFitEstimate"]
+        self.assertEqual(estimate["properties"]["estimator_version"]["const"], "memory_fit_v1")
+        self.assertEqual(estimate["properties"]["status"]["enum"], ["estimated", "unknown"])
+        self.assertEqual(estimate["properties"]["fit_verdict"]["const"], "not_evaluated")
+        self.assertIn("runtime_reported", schema["$defs"]["memoryComponent"]["properties"]["source"]["enum"])
+
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
         self.assertRegex(manifest["contract_version"], r"^\d+\.\d+\.\d+$")

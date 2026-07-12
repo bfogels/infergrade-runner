@@ -78,8 +78,11 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.assertTrue(check["score_policy_id"])
         self.assertTrue(catalog["planned_benchmark_candidates"])
         score_policies = surface_score_policy_index(catalog)
-        self.assertEqual(score_policies["local_assistant_capability"]["score_version"], "local_assistant_score_v1")
+        self.assertEqual(score_policies["local_assistant_capability"]["score_version"], "local_assistant_score_v2")
         self.assertEqual(score_policies["local_coding_capability"]["minimum_coverage_fraction"], 0.5)
+        self.assertEqual(score_policies["local_coding_capability"]["minimum_scored_components"], 2)
+        self.assertEqual(score_policies["local_coding_capability"]["minimum_score_dimensions"], 2)
+        self.assertEqual(score_policies["local_coding_capability"]["maximum_component_weight_fraction"], 0.8)
 
     def test_coverage_expansion_priorities_are_ordered_and_answer_loop_scoped(self):
         priorities = coverage_expansion_priorities()

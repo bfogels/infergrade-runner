@@ -1,6 +1,8 @@
 import os
+import stat
 import tempfile
 import unittest
+from unittest import mock
 
 import sys
 
@@ -13,6 +15,7 @@ from infergrade.pairing import (
     resolve_runner_api_url,
     resolve_runner_execution_mode,
     resolve_runner_id,
+    runner_api_credential_source,
     runner_profile_path,
     save_runner_profile,
 )
@@ -45,6 +48,15 @@ class PairingTests(unittest.TestCase):
         self.assertEqual(resolve_runner_api_url(None), "http://localhost:8000")
         self.assertEqual(resolve_runner_api_token(None), "qbhr_pair_test")
 
+    def test_save_creates_config_directory_with_user_only_permissions(self):
+        config_dir = os.path.join(self.tempdir.name, "missing", "infergrade")
+        os.environ["INFERGRADE_CONFIG_DIR"] = config_dir
+
+        path = save_runner_profile({"api_url": "http://localhost:8000", "access_token": "paired-token"})
+
+        self.assertEqual(stat.S_IMODE(os.stat(config_dir).st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+
     def test_resolve_runner_identity_from_saved_profile(self):
         save_runner_profile(
             {
@@ -62,6 +74,36 @@ class PairingTests(unittest.TestCase):
         self.assertTrue(clear_runner_profile())
         self.assertIsNone(load_runner_profile())
         self.assertFalse(clear_runner_profile())
+
+    def test_runner_api_credential_source_matches_transport_precedence(self):
+        save_runner_profile({"api_url": "http://localhost:8000", "access_token": "paired-token"})
+        with mock.patch.dict(
+            os.environ,
+            {
+                "INFERGRADE_HUB_TOKEN": "",
+                "QUANTBENCH_HUB_TOKEN": "",
+                "INFERGRADE_API_TOKEN": "",
+                "QUANTBENCH_API_TOKEN": "",
+            },
+        ):
+            self.assertEqual(runner_api_credential_source(None), "paired_runner_profile")
+            with mock.patch.dict(os.environ, {"INFERGRADE_API_TOKEN": "legacy-token"}):
+                self.assertEqual(runner_api_credential_source(None), "legacy_api_environment")
+            with mock.patch.dict(os.environ, {"INFERGRADE_HUB_TOKEN": "hub-token", "INFERGRADE_API_TOKEN": "legacy-token"}):
+                self.assertEqual(runner_api_credential_source(None), "hub_environment")
+                self.assertEqual(runner_api_credential_source("explicit-token"), "explicit")
+
+    def test_runner_api_credential_source_is_none_without_credentials(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "INFERGRADE_HUB_TOKEN": "",
+                "QUANTBENCH_HUB_TOKEN": "",
+                "INFERGRADE_API_TOKEN": "",
+                "QUANTBENCH_API_TOKEN": "",
+            },
+        ):
+            self.assertEqual(runner_api_credential_source(None), "none")
 
 
 if __name__ == "__main__":

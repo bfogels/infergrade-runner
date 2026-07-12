@@ -36,7 +36,11 @@ def load_runner_profile() -> Optional[Dict[str, Any]]:
 def save_runner_profile(profile: Dict[str, Any]) -> str:
     """Persist the paired runner profile to disk with user-only permissions."""
     path = runner_profile_path()
-    ensure_dir(os.path.dirname(path))
+    config_dir = os.path.dirname(path)
+    if not os.path.exists(config_dir):
+        os.makedirs(config_dir, mode=0o700, exist_ok=True)
+    else:
+        ensure_dir(config_dir)
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(profile, handle, indent=2, sort_keys=True)
         handle.write("\n")
@@ -70,6 +74,20 @@ def resolve_runner_api_token(api_token: Optional[str] = None) -> Optional[str]:
         return str(api_token).strip()
     profile = load_runner_profile() or {}
     return str(profile.get("access_token") or "").strip() or None
+
+
+def runner_api_credential_source(api_token: Optional[str] = None) -> str:
+    """Describe which credential generic transport would use without exposing it."""
+    if str(api_token or "").strip():
+        return "explicit"
+    if env_value("INFERGRADE_HUB_TOKEN", "QUANTBENCH_HUB_TOKEN"):
+        return "hub_environment"
+    if env_value("INFERGRADE_API_TOKEN", "QUANTBENCH_API_TOKEN"):
+        return "legacy_api_environment"
+    profile = load_runner_profile() or {}
+    if str(profile.get("access_token") or "").strip():
+        return "paired_runner_profile"
+    return "none"
 
 
 def preferred_local_execution_mode() -> str:

@@ -176,6 +176,39 @@ class CapabilitySummaryTests(unittest.TestCase):
         self.assertEqual(coding["confidence_label"], "sampled_reference")
         self.assertEqual(summary["capability_artifacts"][0]["confidence_label"], "sampled_reference")
 
+    def test_composite_confidence_uses_weakest_score_contributing_evidence(self):
+        execution = self._execution(
+            {
+                "evalplus_humaneval": self._write_capability_run(
+                    "evalplus_humaneval",
+                    surface="local_coding_capability",
+                    state="scored",
+                    score=0.75,
+                    task_states=["scored"],
+                    lane="reference",
+                    confidence_label="sampled_reference",
+                ),
+                "evalplus_mbpp": self._write_capability_run(
+                    "evalplus_mbpp",
+                    surface="local_coding_capability",
+                    state="scored",
+                    score=0.65,
+                    task_states=["scored"],
+                    lane="decision",
+                    confidence_label="thin_local_sample",
+                ),
+            }
+        )
+
+        summary = build_capability_summary_artifact(self._request(), execution, self.tempdir)
+
+        coding = {item["surface"]: item for item in summary["surfaces"]}["local_coding_capability"]
+        self.assertEqual(coding["confidence_label"], "thin_local_sample")
+        self.assertEqual(coding["score_version"], "local_coding_score_v2")
+        self.assertTrue(coding["score_ready"])
+        self.assertEqual(coding["score_failed_gates"], [])
+        self.assertEqual(coding["score_confidence_basis"]["calibration_status"], "not_psychometrically_calibrated")
+
     def test_summary_uses_legacy_benchmark_summaries_when_capability_run_is_absent(self):
         benchmark_dir = os.path.join(self.tempdir, "artifacts", "capability", "evalplus_humaneval")
         summary_path = os.path.join(benchmark_dir, "summary.json")
@@ -218,7 +251,10 @@ class CapabilitySummaryTests(unittest.TestCase):
 
         by_surface = {item["surface"]: item for item in summary["surfaces"]}
         self.assertEqual(by_surface["local_coding_capability"]["state"], "scored")
-        self.assertEqual(by_surface["local_coding_capability"]["score"], 0.75)
+        self.assertIsNone(by_surface["local_coding_capability"]["score"])
+        self.assertEqual(by_surface["local_coding_capability"]["score_observed"], 0.75)
+        self.assertFalse(by_surface["local_coding_capability"]["score_ready"])
+        self.assertIn("insufficient_scored_components", by_surface["local_coding_capability"]["score_failed_gates"])
         self.assertEqual(summary["capability_artifacts"][0]["artifact_kind"], "benchmark_summary")
         self.assertEqual(summary["capability_artifacts"][0]["path"], "artifacts/capability/evalplus_humaneval/summary.json")
 

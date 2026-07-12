@@ -22,6 +22,7 @@ from infergrade.pairing import (
     resolve_runner_api_url,
     resolve_runner_execution_mode,
     resolve_runner_id,
+    runner_api_credential_source,
     runner_profile_path,
     save_runner_profile,
 )
@@ -504,10 +505,42 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.command == "upload-bundle":
         api_url = _require_secure_hub_api_url(args.api_url)
+        api_token = str(args.api_token).strip() if args.api_token is not None else None
+        api_token = api_token or None
+        credential_source = runner_api_credential_source(api_token)
+        if credential_source in {"paired_runner_profile", "hub_environment"}:
+            raise SystemExit(
+                "Cannot upload a standalone bundle with a paired Runner credential. "
+                "Paired Runner credentials can upload only to an owned Hub run that the Runner claimed. "
+                "For a Hub-queued run, keep the bundle and run `infergrade start` to retry its run-scoped upload. "
+                "For new evidence, queue the setup from Hub Build and keep the Runner open. "
+                "This standalone bundle has not been uploaded; keep it staged for an authorized catalog import."
+            )
         try:
-            payload = upload_bundle(args.path, api_url, api_token=args.api_token)
+            payload = upload_bundle(args.path, api_url, api_token=api_token)
+        except RunnerTokenInvalidError as exc:
+            raise SystemExit(
+                "Failed to upload bundle to %s: %s Paired Runner credentials do not authorize standalone catalog imports. "
+                "Keep the bundle staged; for normal contributions, queue the setup from Hub Build and run `infergrade start`."
+                % (api_url, exc)
+            )
         except (URLError, InsecureApiUrlError) as exc:
             raise SystemExit("Failed to upload bundle to %s: %s" % (api_url, exc))
+        except RuntimeError as exc:
+            message = "Failed to upload bundle to %s: %s" % (api_url, exc)
+            if "HTTP 401" in str(exc) and credential_source == "none":
+                message += (
+                    " No catalog-import credential is configured. Pairing does not authorize standalone bundle imports. "
+                    "For normal contributions, queue the setup from Hub Build and run `infergrade start`; "
+                    "keep this bundle staged."
+                )
+            elif "HTTP 401" in str(exc) or "HTTP 403" in str(exc):
+                message += (
+                    " This credential is not authorized for a standalone catalog import. Paired Runner credentials "
+                    "can upload only to an owned Hub run that the Runner claimed. Keep the bundle staged; for normal "
+                    "contributions, queue the setup from Hub Build and run `infergrade start`."
+                )
+            raise SystemExit(message)
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
@@ -574,10 +607,31 @@ def main(argv: Optional[list] = None) -> int:
         if not profile:
             raise SystemExit("Hub pairing response did not include a runner profile.")
         path = save_runner_profile(profile)
+        public_profile = {
+            key: profile[key]
+            for key in (
+                "api_url",
+                "runner_id",
+                "label",
+                "runner_label",
+                "runner_kind",
+                "preferred_execution_mode",
+                "paired_at",
+                "expires_at",
+                "user",
+            )
+            if key in profile
+        }
+        if isinstance(public_profile.get("user"), dict):
+            public_profile["user"] = {
+                key: public_profile["user"][key]
+                for key in ("user_id", "handle", "display_name")
+                if key in public_profile["user"]
+            }
         result = {
             "paired": True,
             "profile_path": path,
-            "runner_profile": profile,
+            "runner_profile": public_profile,
             "next_action": "start_runner",
             "commands": {
                 "start": "infergrade start",

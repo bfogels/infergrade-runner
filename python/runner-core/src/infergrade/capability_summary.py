@@ -269,6 +269,10 @@ def _surface_summary(surface: str, artifact_pointers: List[Dict[str, Any]]) -> D
             "score_ready": False,
             "score_coverage": missing_score_details.get("coverage"),
             "score_components": missing_score_details.get("components", []),
+            "score_failed_gates": list(missing_score_details.get("failed_gates") or []),
+            "score_eligibility": missing_score_details.get("eligibility"),
+            "score_robustness": missing_score_details.get("robustness"),
+            "score_confidence_basis": missing_score_details.get("confidence_basis"),
             "score_claim_boundary": missing_score_details.get("claim_boundary"),
             "lane": None,
             "confidence_label": None,
@@ -307,6 +311,10 @@ def _surface_summary(surface: str, artifact_pointers: List[Dict[str, Any]]) -> D
         "score_ready": bool(score_details.get("score_ready")),
         "score_coverage": score_details.get("coverage"),
         "score_components": list(score_details.get("components") or []),
+        "score_failed_gates": list(score_details.get("failed_gates") or []),
+        "score_eligibility": score_details.get("eligibility"),
+        "score_robustness": score_details.get("robustness"),
+        "score_confidence_basis": score_details.get("confidence_basis"),
         "score_claim_boundary": score_details.get("claim_boundary"),
         "lane": _strongest_lane([item.get("lane") for item in surface_artifacts]),
         "confidence_label": confidence_label,
@@ -382,13 +390,13 @@ def _conservative_confidence_label(artifacts: List[Dict[str, Any]]) -> Optional[
     labels = [item.get("confidence_label") for item in artifacts if item.get("confidence_label") in CONFIDENCE_ORDER]
     if not labels:
         return None
-    strongest = sorted(labels, key=lambda item: CONFIDENCE_ORDER[item], reverse=True)[0]
-    lane = _strongest_lane([item.get("lane") for item in artifacts])
-    if lane == "decision" and CONFIDENCE_ORDER[strongest] > CONFIDENCE_ORDER["repeated_local_sample"]:
-        return "repeated_local_sample"
-    if lane == "smoke" and strongest != "single_smoke":
+    weakest = sorted(labels, key=lambda item: CONFIDENCE_ORDER[item])[0]
+    lanes = [item.get("lane") for item in artifacts]
+    if "smoke" in lanes and weakest != "single_smoke":
         return "single_smoke"
-    return _canonical_confidence_label(strongest)
+    if "decision" in lanes and CONFIDENCE_ORDER[weakest] > CONFIDENCE_ORDER["repeated_local_sample"]:
+        return "repeated_local_sample"
+    return _canonical_confidence_label(weakest)
 
 
 def _confidence_for_lane(lane: str) -> str:
