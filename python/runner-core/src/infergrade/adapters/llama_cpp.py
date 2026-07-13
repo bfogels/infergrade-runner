@@ -178,8 +178,20 @@ class LlamaCppAdapter(BaseAdapter):
         self._ensure_backend_model_compatibility(request)
         model_path = self._require_local_gguf_artifact(request)
         profile_spec = self._profile_spec(profile_id, request.use_case)
-        warmup_runs = 1 if request.tier == "canary" else 2
-        measured_runs = 1 if request.tier == "canary" else 5
+        warmup_runs = _bounded_deployment_run_count(
+            request.deployment_warmup_runs,
+            default=1 if request.tier == "canary" else 2,
+            minimum=0,
+            maximum=5,
+            field_name="deployment_warmup_runs",
+        )
+        measured_runs = _bounded_deployment_run_count(
+            request.deployment_measured_runs,
+            default=1 if request.tier == "canary" else 5,
+            minimum=1,
+            maximum=20,
+            field_name="deployment_measured_runs",
+        )
         total_iterations = warmup_runs + measured_runs
         measurements = []
         raw_runs = []
@@ -265,6 +277,8 @@ class LlamaCppAdapter(BaseAdapter):
             )
 
         metrics = {
+            "warmup_runs": warmup_runs,
+            "measured_runs": measured_runs,
             "ttft_p50_ms": _percentile([item["ttft_ms"] for item in measurements], 0.50),
             "ttft_p95_ms": _percentile([item["ttft_ms"] for item in measurements], 0.95),
             "latency_p50_ms": _percentile([item["latency_ms"] for item in measurements], 0.50),
@@ -1185,6 +1199,20 @@ def _whole_token_count(value: Any) -> Optional[int]:
     if parsed < 0 or not parsed.is_integer():
         return None
     return int(parsed)
+
+
+def _bounded_deployment_run_count(
+    value: Optional[int],
+    default: int,
+    minimum: int,
+    maximum: int,
+    field_name: str,
+) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum or value > maximum:
+        raise ValueError("%s must be an integer from %d to %d" % (field_name, minimum, maximum))
+    return value
 
 
 def _percentile(values: List[Optional[float]], percentile: float) -> Optional[float]:

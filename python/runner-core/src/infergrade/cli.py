@@ -714,6 +714,10 @@ def main(argv: Optional[list] = None) -> int:
                 "notes": request.notes,
             },
         }
+        if request.deployment_warmup_runs is not None:
+            request_payload["run"]["deployment_warmup_runs"] = request.deployment_warmup_runs
+        if request.deployment_measured_runs is not None:
+            request_payload["run"]["deployment_measured_runs"] = request.deployment_measured_runs
         if request.quant_artifact:
             request_payload["run"]["quant_artifact"] = request.quant_artifact
             quantized_weights = {"uri": request.quant_artifact}

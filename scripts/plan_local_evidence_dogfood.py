@@ -38,6 +38,8 @@ LANE_PLANS = [
         "label": "Interactive deployment speed, output length, and stop semantics",
         "use_case": None,
         "capability": "none",
+        "deployment_warmup_runs": 2,
+        "deployment_measured_runs": 5,
         "capability_suite_ids": [],
         "benchmark_check_ids": ["interactive_chat_v1"],
         "claim_boundary": "Fixed-prompt deployment throughput and output-length evidence; natural stopping is not semantic correctness or scored task completion.",
@@ -226,6 +228,10 @@ def request_payload(model: Dict[str, Any], provenance: Dict[str, Any], lane: Dic
     }
     if lane.get("use_case"):
         run_payload["use_case"] = lane["use_case"]
+    if lane.get("deployment_warmup_runs") is not None:
+        run_payload["deployment_warmup_runs"] = lane["deployment_warmup_runs"]
+    if lane.get("deployment_measured_runs") is not None:
+        run_payload["deployment_measured_runs"] = lane["deployment_measured_runs"]
     artifacts = {
         "quantized_weights": {
             "uri": provenance["artifact_uri_for_request"],

@@ -732,6 +732,8 @@ class LlamaCppAdapterTests(unittest.TestCase):
             backend="llama.cpp",
             tier="canary",
             use_case="general_assistant",
+            deployment_warmup_runs=0,
+            deployment_measured_runs=2,
             simulate=False,
         )
         execution = adapter.run_deployment_profile(request, "interactive_chat_v1")
@@ -740,6 +742,8 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(execution.metrics["ttft_p50_ms"], 2242.26)
         self.assertEqual(execution.metrics["prompt_tokens_per_second_p50"], 3.65)
         self.assertEqual(execution.metrics["decode_tokens_per_second_p50"], 6.63)
+        self.assertEqual(execution.metrics["warmup_runs"], 0)
+        self.assertEqual(execution.metrics["measured_runs"], 2)
         self.assertEqual(execution.metrics["output_tokens_p50"], 6.0)
         self.assertEqual(execution.metrics["token_budget_exhaustion_rate"], 0.0)
         self.assertFalse(execution.metrics["semantic_task_completion_proof"])

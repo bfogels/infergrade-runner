@@ -70,6 +70,8 @@ class LocalEvidenceDogfoodTests(unittest.TestCase):
         self.assertEqual(request["run"]["benchmark_check_ids"], ["interactive_chat_v1"])
         self.assertEqual(request["run"]["capability_suite_ids"], [])
         self.assertEqual(request["run"]["capability"], "none")
+        self.assertEqual(request["run"]["deployment_warmup_runs"], 2)
+        self.assertEqual(request["run"]["deployment_measured_runs"], 5)
         self.assertIn("not semantic correctness", request["metadata"]["notes"])
 
     def test_generate_plan_writes_distinct_requests_and_token_free_commands(self):

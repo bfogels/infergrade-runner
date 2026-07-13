@@ -41,6 +41,8 @@
           },
           "uniqueItems": true
         },
+        "deployment_warmup_runs": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "deployment_measured_runs": { "type": "integer", "minimum": 1, "maximum": 20 },
         "execution_mode": {
           "type": "string",
           "enum": ["local_container", "local_native", "cloud_container", "manual_external"]

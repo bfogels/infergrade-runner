@@ -245,8 +245,8 @@ def _build_result_record(
         "context_length_bucket": "2k_to_8k" if deployment_profile != "long_context_v1" else "8k_to_32k",
         "batch_size": 1 if deployment_profile != "batch_generation_v1" else 8,
         "concurrency": 1 if deployment_profile != "batch_generation_v1" else 4,
-        "warmup_runs": 1 if request.tier == "canary" else 2,
-        "measured_runs": 1 if request.tier == "canary" else 5,
+        "warmup_runs": deployment.get("warmup_runs", 1 if request.tier == "canary" else 2),
+        "measured_runs": deployment.get("measured_runs", 1 if request.tier == "canary" else 5),
         "ttft_p50_ms": deployment["ttft_p50_ms"],
         "ttft_p95_ms": deployment["ttft_p95_ms"],
         "latency_p50_ms": deployment["latency_p50_ms"],
@@ -438,6 +438,8 @@ def _deployment_metrics_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
     """Extract the deployment-metric subset needed for resumable artifacts."""
     deployment = record["deployment"]
     return {
+        "warmup_runs": deployment.get("warmup_runs"),
+        "measured_runs": deployment.get("measured_runs"),
         "ttft_p50_ms": deployment["ttft_p50_ms"],
         "ttft_p95_ms": deployment["ttft_p95_ms"],
         "latency_p50_ms": deployment["latency_p50_ms"],

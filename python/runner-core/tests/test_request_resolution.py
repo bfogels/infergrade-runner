@@ -56,6 +56,8 @@ class RequestResolutionTests(unittest.TestCase):
                 "model": "Qwen/Qwen2.5-7B-Instruct",
                 "backend": "llama.cpp",
                 "tier": "canary",
+                "deployment_warmup_runs": 2,
+                "deployment_measured_runs": 7,
             },
                 "artifacts": {
                     "quantized_weights": {
@@ -92,6 +94,8 @@ class RequestResolutionTests(unittest.TestCase):
         self.assertEqual(request.quant_artifact_filename, "Qwen2.5-7B-Instruct-Q4_K_M.gguf")
         self.assertEqual(request.quant_artifact_revision, "main")
         self.assertEqual(request.quant_artifact_download_size_bytes, 123456)
+        self.assertEqual(request.deployment_warmup_runs, 2)
+        self.assertEqual(request.deployment_measured_runs, 7)
         self.assertEqual(request.backend_image, "infergrade-llama-cpp:local")
         self.assertEqual(request.quant_artifact_cache_dir, "/tmp/infergrade-cache")
         self.assertEqual(request.llama_cpp_cli_path, "/custom/llama-cli")
