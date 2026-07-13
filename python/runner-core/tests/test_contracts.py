@@ -62,6 +62,26 @@ def _validate_schema_subset(value, schema, path="$"):
 
 
 class ContractExportTests(unittest.TestCase):
+    def test_contract_declares_artifact_memory_fit_policy_schema_and_docs(self):
+        manifest = load_contract_manifest()
+        self.assertIn("schemas/json/artifact_memory_fit.schema.json", manifest["schema_files"])
+        self.assertIn("schemas/json/artifact_memory_fit_policy.schema.json", manifest["schema_files"])
+        self.assertIn("schemas/policies/artifact_memory_fit_policy.v1.json", manifest["policy_files"])
+        self.assertNotIn("schemas/policies/artifact_memory_fit_policy.v1.json", manifest["catalog_files"])
+        self.assertIn("docs/artifact_memory_fit_policy.md", manifest["supporting_docs"])
+
+        policy = json.loads(
+            (repo_root() / "schemas" / "policies" / "artifact_memory_fit_policy.v1.json").read_text(encoding="utf-8")
+        )
+        schema = json.loads(
+            (repo_root() / "schemas" / "json" / "artifact_memory_fit.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(policy["policy_id"], schema["properties"]["policy_id"]["const"])
+        self.assertEqual(policy["estimator_version"], schema["properties"]["estimator_version"]["const"])
+        self.assertEqual(policy["context_buckets_tokens"], [2048, 8192, 32768])
+        self.assertEqual(schema["properties"]["claim_boundary"]["properties"]["fit_verdict"]["const"], "not_evaluated")
+        self.assertFalse(schema["properties"]["claim_boundary"]["properties"]["guaranteed_bounds"]["const"])
+
     def test_result_record_contract_declares_versioned_memory_fit_bounds(self):
         schema = json.loads(
             (repo_root() / "schemas" / "json" / "result_record.schema.json").read_text(encoding="utf-8")
@@ -78,7 +98,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertRegex(manifest["contract_version"], r"^\d+\.\d+\.\d+$")
+        self.assertEqual(manifest["contract_version"], "0.3.9")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_export_contract_bundle_copies_declared_files(self):
@@ -96,6 +116,8 @@ class ContractExportTests(unittest.TestCase):
             for relative_path in exported_manifest["example_files"]:
                 self.assertTrue((bundle_dir / relative_path).exists(), relative_path)
             for relative_path in exported_manifest.get("catalog_files", []):
+                self.assertTrue((bundle_dir / relative_path).exists(), relative_path)
+            for relative_path in exported_manifest.get("policy_files", []):
                 self.assertTrue((bundle_dir / relative_path).exists(), relative_path)
             for relative_path in exported_manifest["supporting_docs"]:
                 self.assertTrue((bundle_dir / relative_path).exists(), relative_path)

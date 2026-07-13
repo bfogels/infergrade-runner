@@ -1,8 +1,10 @@
 {
-  "contract_version": "0.3.8",
+  "contract_version": "0.3.9",
   "publisher": "infergrade-runner",
   "ontology_source": "schemas/json/model_ontology.schema.json",
   "schema_files": [
+    "schemas/json/artifact_memory_fit.schema.json",
+    "schemas/json/artifact_memory_fit_policy.schema.json",
     "schemas/json/capability_run.schema.json",
     "schemas/json/capability_summary.schema.json",
     "schemas/json/manifest.schema.json",
@@ -24,7 +26,11 @@
   "catalog_files": [
     "schemas/capability_catalog.json"
   ],
+  "policy_files": [
+    "schemas/policies/artifact_memory_fit_policy.v1.json"
+  ],
   "supporting_docs": [
+    "docs/artifact_memory_fit_policy.md",
     "docs/contract_ownership.md",
     "docs/input_output_spec.md",
     "docs/local_benchmark_methodology.md",

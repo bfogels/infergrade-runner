@@ -1,0 +1,113 @@
+{
+  "policy_format_version": "1.0",
+  "policy_id": "gguf_artifact_memory_fit_v1",
+  "publisher": "infergrade-runner",
+  "artifact_format": "gguf",
+  "estimator_version": "memory_fit_v1",
+  "context_buckets_tokens": [2048, 8192, 32768],
+  "required_gguf_architecture_fields": [
+    "layer_count",
+    "embedding_length",
+    "attention_head_count",
+    "attention_head_count_kv"
+  ],
+  "accepted_artifact_size_sources": [
+    "local_file_stat",
+    "repository_metadata"
+  ],
+  "accepted_architecture_metadata_sources": [
+    "gguf_metadata",
+    "repository_config"
+  ],
+  "deployment_profile_context_buckets": {
+    "interactive_chat_v1": 2048,
+    "batch_generation_v1": 8192,
+    "long_context_v1": 32768
+  },
+  "fit_thresholds": {
+    "ratio_basis": "estimate_range_high_bytes / available_capacity_bytes",
+    "fits_max_inclusive": 0.80,
+    "tight_min_exclusive": 0.80,
+    "tight_max_inclusive": 1.00,
+    "over_min_exclusive": 1.00
+  },
+  "kv_cache_policy": {
+    "element_bytes": 2,
+    "formula": "context_tokens * layer_count * 2 * attention_head_count_kv * (embedding_length / attention_head_count) * element_bytes",
+    "source": "architecture_metadata_formula_estimated"
+  },
+  "fallback_context_ranges": {
+    "2048": {
+      "low_ratio_of_artifact_size": 0.01,
+      "high_ratio_of_artifact_size": 0.25,
+      "low_floor_bytes": 67108864,
+      "high_floor_bytes": 1073741824
+    },
+    "8192": {
+      "low_ratio_of_artifact_size": 0.04,
+      "high_ratio_of_artifact_size": 0.50,
+      "low_floor_bytes": 268435456,
+      "high_floor_bytes": 4294967296
+    },
+    "32768": {
+      "low_ratio_of_artifact_size": 0.16,
+      "high_ratio_of_artifact_size": 2.00,
+      "low_floor_bytes": 1073741824,
+      "high_floor_bytes": 17179869184
+    }
+  },
+  "fallback_network_policy": {
+    "additional_metadata_fetch_required": false,
+    "basis": "artifact_size_already_returned_by_the_existing_resolver"
+  },
+  "runtime_overhead_policy": {
+    "low_ratio_of_artifact_size": 0.05,
+    "high_ratio_of_artifact_size": 0.20,
+    "low_floor_bytes": 268435456,
+    "high_floor_bytes": 1073741824,
+    "source": "policy_range_estimated"
+  },
+  "aggregation_policy": {
+    "formula": "artifact_size_proxy + kv_cache_estimate + runtime_overhead_range",
+    "memory_domain": "unified_or_combined_memory",
+    "offload_policy": "unknown"
+  },
+  "assumptions": [
+    {
+      "id": "artifact_size_is_resident_tensor_proxy",
+      "statement": "The exact GGUF file size is used as a policy proxy for resident model tensors; file headers, mappings, runtime transforms, and duplicated buffers can make runtime allocation differ in either direction."
+    },
+    {
+      "id": "dense_transformer_kv_layout",
+      "statement": "The KV formula assumes a dense transformer with the declared grouped-query attention geometry and no sliding-window, recurrent, hybrid, or MLA cache semantics."
+    },
+    {
+      "id": "f16_kv_elements",
+      "statement": "KV elements are assumed to use two bytes. A runtime configured for another KV precision is outside this policy."
+    },
+    {
+      "id": "runtime_overhead_uncalibrated_range",
+      "statement": "Runtime overhead is an uncalibrated policy range, not a measured or guaranteed bound."
+    },
+    {
+      "id": "missing_architecture_fallback",
+      "statement": "When architecture metadata is unavailable, context memory uses deliberately wide uncalibrated policy ranges derived from artifact size; even the high estimate is not a guaranteed upper bound."
+    }
+  ],
+  "claim_boundary": {
+    "evidence_tier": "artifact_estimated",
+    "can_claim": [
+      "artifact-only allocation estimate under this named policy",
+      "relative context-length effect under the declared formula or fallback assumptions"
+    ],
+    "cannot_claim": [
+      "that the setup fits on any machine",
+      "measured RAM, unified-memory, or VRAM use",
+      "a guaranteed lower or upper bound",
+      "runtime-specific buffer residency or offload behavior",
+      "successful model load or benchmark execution"
+    ],
+    "fit_verdict": "not_evaluated",
+    "support_proof": false
+  }
+}
