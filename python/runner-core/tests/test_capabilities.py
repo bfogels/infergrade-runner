@@ -10,7 +10,10 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade import __version__
 from infergrade.capabilities import (
+    CAPABILITY_BENCHMARKS,
+    _generation_prompt_for_case,
     _host_mount_path,
+    _normalize_evalplus_completion,
     _run_capability_container,
     capability_images_for_request,
     execute_capability_suite,
@@ -150,6 +153,211 @@ class CapabilityTests(unittest.TestCase):
         suite = resolve_capability_suite("agentic_coding", "gold")
         self.assertEqual(suite["suite_id"], "coding_gold_v2")
         self.assertEqual(suite["benchmark_ids"], ["evalplus_humaneval", "evalplus_mbpp"])
+
+    def test_evalplus_prompts_request_dataset_specific_completion_shapes(self):
+        humaneval = _generation_prompt_for_case(
+            CAPABILITY_BENCHMARKS["evalplus_humaneval"],
+            {"prompt": "def add(a, b):\n"},
+        )
+        mbpp = _generation_prompt_for_case(
+            CAPABILITY_BENCHMARKS["evalplus_mbpp"],
+            {"prompt": '"""Write add."""'},
+        )
+
+        self.assertIn("only the indented function body", humaneval)
+        self.assertIn("def add(a, b):", humaneval)
+        self.assertIn("only executable Python code", mbpp)
+        self.assertIn('"""Write add."""', mbpp)
+
+    def test_humaneval_normalization_extracts_fenced_full_function_body(self):
+        raw = (
+            "Here is the solution:\n\n```python\n"
+            "from typing import List\n\n"
+            "def has_close_elements(numbers: List[float], threshold: float) -> bool:\n"
+            "    for index, left in enumerate(numbers):\n"
+            "        for right in numbers[index + 1:]:\n"
+            "            if abs(left - right) < threshold:\n"
+            "                return True\n"
+            "    return False\n"
+            "```\nThat checks every pair. [end of text]"
+        )
+
+        completion, metadata = _normalize_evalplus_completion(
+            "evalplus_humaneval",
+            {
+                "entry_point": "has_close_elements",
+                "prompt": "def has_close_elements(numbers: List[float], threshold: float) -> bool:\n",
+            },
+            raw,
+        )
+
+        self.assertTrue(completion.startswith("    for index"))
+        self.assertTrue(completion.endswith("    return False"))
+        self.assertNotIn("def has_close_elements", completion)
+        self.assertEqual(metadata["method"], "python_fence_to_function_body")
+        self.assertTrue(metadata["changed"])
+        self.assertIsNone(metadata["error"])
+
+    def test_humaneval_normalization_nests_required_helper_and_ignores_test_calls(self):
+        raw = (
+            "```python\n"
+            "def helper(value):\n"
+            "    return value + 1\n\n"
+            "def solve(value):\n"
+            "    return helper(value)\n\n"
+            "print(solve(2))\n"
+            "```"
+        )
+
+        completion, metadata = _normalize_evalplus_completion(
+            "evalplus_humaneval",
+            {"entry_point": "solve", "prompt": "def solve(value):\n"},
+            raw,
+        )
+
+        self.assertIn("    def helper(value):", completion)
+        self.assertIn("        return value + 1", completion)
+        self.assertTrue(completion.endswith("    return helper(value)"))
+        self.assertNotIn("print(solve(2))", completion)
+        self.assertEqual(metadata["method"], "python_fence_to_function_body")
+        self.assertIsNone(metadata["error"])
+
+    def test_humaneval_normalization_fails_closed_on_decorated_helper(self):
+        raw = (
+            "```python\n"
+            "@cache\n"
+            "def helper(value):\n"
+            "    return value + 1\n\n"
+            "def solve(value):\n"
+            "    return helper(value)\n"
+            "```"
+        )
+
+        completion, metadata = _normalize_evalplus_completion(
+            "evalplus_humaneval",
+            {"entry_point": "solve", "prompt": "def solve(value):\n"},
+            raw,
+        )
+
+        self.assertEqual(completion, "")
+        self.assertEqual(metadata["method"], "failed_function_body_extraction")
+
+    def test_humaneval_normalization_fails_closed_on_module_state_dependency(self):
+        raw = (
+            "```python\n"
+            "cache = {}\n\n"
+            "def solve(value):\n"
+            "    cache[value] = value\n"
+            "    return cache[value]\n"
+            "```"
+        )
+
+        completion, metadata = _normalize_evalplus_completion(
+            "evalplus_humaneval",
+            {"entry_point": "solve", "prompt": "def solve(value):\n"},
+            raw,
+        )
+
+        self.assertEqual(completion, "")
+        self.assertEqual(metadata["method"], "failed_function_body_extraction")
+
+    def test_humaneval_normalization_fails_closed_on_decorated_entry_point(self):
+        raw = "```python\n@cache\ndef solve(value):\n    return value\n```"
+
+        completion, metadata = _normalize_evalplus_completion(
+            "evalplus_humaneval",
+            {"entry_point": "solve", "prompt": "def solve(value):\n"},
+            raw,
+        )
+
+        self.assertEqual(completion, "")
+        self.assertEqual(metadata["method"], "failed_function_body_extraction")
+
+    def test_humaneval_normalization_preserves_raw_body_completion(self):
+        raw = "    return a + b\n[end of text]"
+
+        completion, metadata = _normalize_evalplus_completion(
+            "evalplus_humaneval",
+            {"entry_point": "add", "prompt": "def add(a, b):\n"},
+            raw,
+        )
+
+        self.assertEqual(completion, "    return a + b")
+        self.assertEqual(metadata["method"], "raw_completion")
+        self.assertIsNone(metadata["error"])
+
+    def test_mbpp_normalization_keeps_fenced_full_function(self):
+        raw = "Explanation.\n```python\ndef add(a, b):\n    return a + b\n```\nMore explanation."
+
+        completion, metadata = _normalize_evalplus_completion(
+            "evalplus_mbpp",
+            {"entry_point": "add"},
+            raw,
+        )
+
+        self.assertEqual(completion, "def add(a, b):\n    return a + b")
+        self.assertEqual(metadata["method"], "python_fence")
+        self.assertIsNone(metadata["error"])
+
+    def test_evalplus_normalization_fails_closed_on_unclosed_fence(self):
+        completion, metadata = _normalize_evalplus_completion(
+            "evalplus_mbpp",
+            {"entry_point": "add"},
+            "```python\ndef add(a, b):\n    return a + b",
+        )
+
+        self.assertEqual(completion, "")
+        self.assertEqual(metadata["method"], "failed_unclosed_code_fence")
+        self.assertIn("unclosed Markdown code fence", metadata["error"])
+
+    def test_evalplus_normalization_fails_closed_on_multiple_fences(self):
+        completion, metadata = _normalize_evalplus_completion(
+            "evalplus_mbpp",
+            {"entry_point": "add", "prompt": '"""Write add."""\n'},
+            "```python\ndef helper():\n    return 1\n```\n```python\ndef add(a, b):\n    return a + b\n```",
+        )
+
+        self.assertEqual(completion, "")
+        self.assertEqual(metadata["method"], "failed_ambiguous_code_fences")
+        self.assertIn("multiple Markdown code fences", metadata["error"])
+
+    def test_evalplus_normalization_fails_closed_on_closed_then_unclosed_fence(self):
+        completion, metadata = _normalize_evalplus_completion(
+            "evalplus_mbpp",
+            {"entry_point": "add", "prompt": '"""Write add."""\n'},
+            "```python\ndef add(a, b):\n    return a + b\n```\n```python\ndef trailing():\n    pass",
+        )
+
+        self.assertEqual(completion, "")
+        self.assertEqual(metadata["method"], "failed_ambiguous_code_fences")
+        self.assertIn("unmatched or additional", metadata["error"])
+
+    def test_humaneval_raw_multiline_string_may_contain_fence_and_entry_point_text(self):
+        raw = '    return """\n```\ndef solve(value):\n    pass\n```\n"""'
+
+        completion, metadata = _normalize_evalplus_completion(
+            "evalplus_humaneval",
+            {"entry_point": "solve", "prompt": "def solve(value):\n"},
+            raw,
+        )
+
+        self.assertEqual(completion, raw)
+        self.assertEqual(metadata["method"], "raw_completion")
+        self.assertIsNone(metadata["error"])
+
+    def test_humaneval_unfenced_full_function_is_converted_despite_complete_prompt(self):
+        prompt = 'def solve(value):\n    """Return the input value."""\n'
+        raw = "def solve(value):\n    return value"
+
+        completion, metadata = _normalize_evalplus_completion(
+            "evalplus_humaneval",
+            {"entry_point": "solve", "prompt": prompt},
+            raw,
+        )
+
+        self.assertEqual(completion, "    return value")
+        self.assertEqual(metadata["method"], "raw_completion_to_function_body")
+        self.assertIsNone(metadata["error"])
 
     def test_resolve_capability_suite_expands_standard_coding_lane(self):
         suite = resolve_capability_suite("agentic_coding", "standard")
@@ -744,7 +952,7 @@ class CapabilityTests(unittest.TestCase):
                 "case_count": 2,
                 "evalplus_revision": "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e",
                 "sample_policy": "humaneval_first_2_from_evalplus_revision",
-                "scoring_policy": "evalplus_pass_at_1_base_plus_v1",
+                "scoring_policy": "evalplus_pass_at_1_normalized_v2",
                 "primary_metric": {"name": "pass_at_1_plus", "value": 0.5},
                 "metrics": {
                     "pass_at_1_base": 1.0,
@@ -792,6 +1000,9 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(artifact["protocol"]["dataset_revision"], "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e")
         self.assertEqual(artifact["protocol"]["sample_policy"], "humaneval_first_2_from_evalplus_revision")
         self.assertEqual(artifact["protocol"]["scorer_type"], "unit_test")
+        self.assertEqual(artifact["protocol"]["prompt_version"], "evalplus_humaneval_prompt_v2")
+        self.assertEqual(artifact["protocol"]["completion_normalization_policy"], "evalplus_code_completion_v1")
+        self.assertEqual(artifact["protocol"]["scoring_policy"], "evalplus_pass_at_1_normalized_v2")
         self.assertEqual(artifact["summary"]["state"], "scored")
         self.assertEqual(artifact["summary"]["score"], 0.5)
         tasks = {task["task_id"]: task for task in artifact["tasks"]}
@@ -842,7 +1053,7 @@ class CapabilityTests(unittest.TestCase):
                 "case_count": 2,
                 "evalplus_revision": "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e",
                 "sample_policy": "mbpp_first_2_from_evalplus_revision",
-                "scoring_policy": "evalplus_pass_at_1_base_plus_v1",
+                "scoring_policy": "evalplus_pass_at_1_normalized_v2",
                 "primary_metric": {"name": "pass_at_1_plus", "value": 0.5},
                 "metrics": {
                     "pass_at_1_base": 0.5,
@@ -890,6 +1101,7 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(artifact["protocol"]["dataset"], "mbpp")
         self.assertEqual(artifact["protocol"]["dataset_revision"], "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e")
         self.assertEqual(artifact["protocol"]["sample_policy"], "mbpp_first_2_from_evalplus_revision")
+        self.assertEqual(artifact["protocol"]["prompt_version"], "evalplus_mbpp_prompt_v2")
         self.assertEqual(artifact["summary"]["state"], "scored")
         self.assertEqual(artifact["summary"]["score"], 0.5)
         tasks = {task["task_id"]: task for task in artifact["tasks"]}
@@ -942,7 +1154,7 @@ class CapabilityTests(unittest.TestCase):
                 "case_count": 5,
                 "evalplus_revision": "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e",
                 "sample_policy": "humaneval_first_5_from_evalplus_revision",
-                "scoring_policy": "evalplus_pass_at_1_base_plus_v1",
+                "scoring_policy": "evalplus_pass_at_1_normalized_v2",
                 "primary_metric": {"name": "pass_at_1_plus", "value": 0.2},
                 "metrics": {"pass_at_1_base": 0.2, "pass_at_1_plus": 0.2, "passed_count": 1, "failed_count": 3},
                 "case_results": [

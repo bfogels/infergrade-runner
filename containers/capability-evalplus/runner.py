@@ -203,7 +203,7 @@ def evaluate(dataset: str, output_dir: str) -> None:
         "case_count": len(results.get("eval", {})),
         "evalplus_revision": EVALPLUS_REVISION,
         "sample_policy": "%s_first_%d_from_evalplus_revision" % (dataset, len(results.get("eval", {}))),
-        "scoring_policy": "evalplus_pass_at_1_base_plus_v1",
+        "scoring_policy": "evalplus_pass_at_1_normalized_v2",
         "primary_metric": {
             "name": "pass_at_1_plus",
             "value": _primary_plus_metric_value(results),
