@@ -57,10 +57,12 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
     if not request.quant_artifact:
         return None
     artifact = request.quant_artifact
+    expected_size_bytes = _expected_artifact_size_bytes(request.quant_artifact_download_size_bytes)
     if _is_local_artifact_reference(artifact):
         local_path = _normalize_local_path(artifact)
         if not os.path.isfile(local_path):
             raise ValueError("Quant artifact does not exist: %s" % artifact)
+        _verify_expected_size(local_path, os.path.getsize(local_path), expected_size_bytes)
         sha256 = compute_file_sha256(local_path)
         _verify_expected_sha256(local_path, sha256, request.quant_artifact_sha256)
         return ResolvedArtifact(
@@ -97,6 +99,7 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
         else None,
     )
     if cached_path:
+        _verify_expected_size(cached_path, os.path.getsize(cached_path), expected_size_bytes)
         cached_sha = compute_file_sha256(cached_path)
         _verify_expected_sha256(cached_path, cached_sha, request.quant_artifact_sha256)
         return ResolvedArtifact(
@@ -111,12 +114,17 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
             size_bytes=os.path.getsize(cached_path),
         )
 
-    ensure_min_free_space(cache_dir, min_artifact_cache_free_bytes(), "artifact cache")
+    required_free_bytes = min_artifact_cache_free_bytes() + (expected_size_bytes or 0)
+    ensure_min_free_space(cache_dir, required_free_bytes, "artifact cache plus authorized artifact")
     tmp_fd, tmp_path = tempfile.mkstemp(prefix="infergrade-artifact-", suffix=".tmp", dir=cache_dir)
     os.close(tmp_fd)
     try:
         try:
-            _download_remote_artifact(download_url, tmp_path)
+            _download_remote_artifact(
+                download_url,
+                tmp_path,
+                **({"expected_size_bytes": expected_size_bytes} if expected_size_bytes is not None else {}),
+            )
         except Exception as exc:
             if _is_huggingface_not_found(exc) and resolved_artifact_uri.startswith("hf://"):
                 canonical_artifact_uri = canonicalize_hf_artifact_reference(resolved_artifact_uri)
@@ -135,15 +143,21 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
                         request.quant_artifact_sha256,
                         revision=cache_revision,
                     )
-                    _download_remote_artifact(download_url, tmp_path)
+                    _download_remote_artifact(
+                        download_url,
+                        tmp_path,
+                        **({"expected_size_bytes": expected_size_bytes} if expected_size_bytes is not None else {}),
+                    )
                 else:
                     raise
             else:
                 raise
         sha256 = compute_file_sha256(tmp_path)
+        _verify_expected_size(tmp_path, os.path.getsize(tmp_path), expected_size_bytes)
         _verify_expected_sha256(tmp_path, sha256, request.quant_artifact_sha256)
         cache_was_installed = _install_cache_file_without_overwrite(tmp_path, cache_path)
         if not cache_was_installed:
+            _verify_expected_size(cache_path, os.path.getsize(cache_path), expected_size_bytes)
             sha256 = compute_file_sha256(cache_path)
             _verify_expected_sha256(cache_path, sha256, request.quant_artifact_sha256)
     except Exception:
@@ -358,16 +372,41 @@ def canonicalize_hf_artifact_reference(uri: str) -> str:
     return "hf://%s/%s" % (repo_id, corrected)
 
 
-def _download_remote_artifact(download_url: str, destination_path: str) -> None:
+def _download_remote_artifact(
+    download_url: str,
+    destination_path: str,
+    expected_size_bytes: Optional[int] = None,
+) -> None:
     """Download a remote artifact, falling back to curl when stdlib transport fails."""
     try:
         with urllib_request.urlopen(_request_for_url(download_url)) as response, open(destination_path, "wb") as handle:
-            shutil.copyfileobj(response, handle)
+            content_length = response.headers.get("Content-Length") if getattr(response, "headers", None) else None
+            if expected_size_bytes is not None and content_length is not None:
+                try:
+                    declared_size = int(content_length)
+                except (TypeError, ValueError):
+                    declared_size = None
+                if declared_size is not None and declared_size != expected_size_bytes:
+                    raise RuntimeError(
+                        "artifact download size header mismatch: expected %d bytes, server declared %d bytes"
+                        % (expected_size_bytes, declared_size)
+                    )
+            copied = 0
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                copied += len(chunk)
+                if expected_size_bytes is not None and copied > expected_size_bytes:
+                    raise RuntimeError(
+                        "artifact download exceeded authorized size: expected %d bytes" % expected_size_bytes
+                    )
+                handle.write(chunk)
         return
     except Exception as exc:
         if not _should_fallback_to_curl(exc):
             raise
-    _download_with_curl(download_url, destination_path)
+    _download_with_curl(download_url, destination_path, expected_size_bytes=expected_size_bytes)
 
 
 def _should_fallback_to_curl(exc: Exception) -> bool:
@@ -385,8 +424,15 @@ def _should_fallback_to_curl(exc: Exception) -> bool:
 _CURL_HTTPS_ONLY = ["--proto", "=https", "--proto-redir", "=https"]
 
 
-def _download_with_curl(download_url: str, destination_path: str) -> None:
+def _download_with_curl(
+    download_url: str,
+    destination_path: str,
+    expected_size_bytes: Optional[int] = None,
+) -> None:
     """Use curl as a pragmatic fallback for artifact downloads."""
+    if expected_size_bytes is not None:
+        _download_with_bounded_curl(download_url, destination_path, expected_size_bytes)
+        return
     header_config = _curl_header_config(_auth_headers(download_url))
     command = ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY
     run_kwargs = {"capture_output": True, "text": True}
@@ -402,6 +448,77 @@ def _download_with_curl(download_url: str, destination_path: str) -> None:
         message = (completed.stderr or completed.stdout or "").strip()
         raise RuntimeError(
             "curl failed while downloading %s: %s" % (download_url, message or "unknown error")
+        )
+
+
+def _download_with_bounded_curl(download_url: str, destination_path: str, expected_size_bytes: int) -> None:
+    """Stream curl output through Runner so the byte cap does not depend on curl version."""
+    header_config = _curl_header_config(_auth_headers(download_url))
+    command = ["curl", "-L", "--fail", "--silent", "--show-error"] + _CURL_HTTPS_ONLY
+    if header_config:
+        command.extend(["-K", "-"])
+    command.append(download_url)
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE if header_config else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if header_config and process.stdin is not None:
+        process.stdin.write(header_config.encode("utf-8"))
+        process.stdin.close()
+        process.stdin = None
+    copied = 0
+    try:
+        with open(destination_path, "wb") as handle:
+            while True:
+                chunk = process.stdout.read(1024 * 1024)
+                if not chunk:
+                    break
+                copied += len(chunk)
+                if copied > expected_size_bytes:
+                    process.terminate()
+                    process.wait(timeout=5.0)
+                    raise RuntimeError(
+                        "artifact curl download exceeded authorized size: expected %d bytes"
+                        % expected_size_bytes
+                    )
+                handle.write(chunk)
+        returncode = process.wait()
+        stderr = process.stderr.read().decode("utf-8", errors="replace").strip()
+        if returncode != 0:
+            raise RuntimeError(
+                "curl failed while downloading %s: %s"
+                % (download_url, stderr or "unknown error")
+            )
+        _verify_expected_size(destination_path, copied, expected_size_bytes)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=2.0)
+
+
+def _expected_artifact_size_bytes(value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("artifact download_size_bytes must be a positive integer")
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("artifact download_size_bytes must be a positive integer") from exc
+    if normalized <= 0 or str(value).strip() != str(normalized):
+        raise ValueError("artifact download_size_bytes must be a positive integer")
+    return normalized
+
+
+def _verify_expected_size(path: str, actual_size: int, expected_size: Optional[int]) -> None:
+    if expected_size is None:
+        return
+    if actual_size != expected_size:
+        raise ValueError(
+            "Quant artifact size mismatch for %s: expected %d bytes, got %d bytes"
+            % (path, expected_size, actual_size)
         )
 
 

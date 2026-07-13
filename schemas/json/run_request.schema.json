@@ -86,7 +86,8 @@
             "uri": { "type": "string" },
             "sha256": { "type": "string" },
             "filename": { "type": "string" },
-            "revision": { "type": "string" }
+            "revision": { "type": "string" },
+            "download_size_bytes": { "type": "integer", "minimum": 1 }
           },
           "additionalProperties": false
         }
