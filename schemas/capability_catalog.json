@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-07-10-local-capability-score-v1",
+  "catalog_version": "2026-07-13-evalplus-normalized-v2",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -258,7 +258,7 @@
       "default_inclusion_status": "coding_default",
       "fixture_or_dataset_revision_status": "pinned_upstream_harness_revision",
       "harness_status": "container_harness_implemented",
-      "scoring_policy_id": "coding_primary_pass_at_1_v1",
+      "scoring_policy_id": "coding_primary_pass_at_1_normalized_v2",
       "sample_policy": "Pinned EvalPlus HumanEval+ revision with canary and full local reference limits.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "container_required_for_generated_code_execution",
@@ -278,7 +278,7 @@
       "default_inclusion_status": "intentional_reference_only",
       "fixture_or_dataset_revision_status": "pinned_upstream_harness_revision",
       "harness_status": "container_harness_implemented",
-      "scoring_policy_id": "coding_primary_pass_at_1_v1",
+      "scoring_policy_id": "coding_primary_pass_at_1_normalized_v2",
       "sample_policy": "Pinned EvalPlus MBPP+ revision with canary, sampled local reference, and full local reference limits.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "container_required_for_generated_code_execution",
@@ -493,9 +493,9 @@
       "score_method": "primary_metric_value_v1"
     },
     {
-      "score_policy_id": "coding_primary_pass_at_1_v1",
-      "display_name": "Coding primary pass@1",
-      "description": "Use EvalPlus pass@1+ as the primary coding score. HumanEval+ is the core decision signal; MBPP+ adds breadth.",
+      "score_policy_id": "coding_primary_pass_at_1_normalized_v2",
+      "display_name": "Coding primary pass@1 with normalized completions",
+      "description": "Use EvalPlus pass@1+ after versioned code-only prompting, unambiguous fence extraction, HumanEval body conversion, and fail-closed scorer validation. HumanEval+ is the core decision signal; MBPP+ adds breadth.",
       "score_method": "primary_metric_value_v1"
     },
     {
@@ -1037,7 +1037,7 @@
       "score_floor": 0.0,
       "primary_score_weight": 0.55,
       "higher_is_better": true,
-      "score_policy_id": "coding_primary_pass_at_1_v1"
+      "score_policy_id": "coding_primary_pass_at_1_normalized_v2"
     },
     {
       "check_id": "evalplus_mbpp",
@@ -1063,7 +1063,7 @@
       "score_floor": 0.0,
       "primary_score_weight": 0.3,
       "higher_is_better": true,
-      "score_policy_id": "coding_primary_pass_at_1_v1"
+      "score_policy_id": "coding_primary_pass_at_1_normalized_v2"
     },
     {
       "check_id": "interactive_chat_v1",

@@ -1,9 +1,11 @@
+import ast
 import json
 import os
 import re
 import subprocess
+import textwrap
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from infergrade import __version__
 from infergrade.benchmark_catalog import (
@@ -23,6 +25,12 @@ CAPABILITY_REGISTRY_VERSION = "2026-04-multiturn-preview"
 CODING_STATIC_REPAIR_FIXTURE_REVISION = "2026-05-coding-static-preview"
 REASONING_EXACT_ANSWER_FIXTURE_REVISION = "2026-05-reasoning-exact-preview"
 _DOMINANT_GENERATION_FAILURE_RATE = 0.5
+_TERMINAL_GENERATION_MARKER = re.compile(r"\s*\[end of text\]\s*$", re.IGNORECASE)
+_CODE_FENCE = re.compile(
+    r"^[ \t]*```[ \t]*([A-Za-z0-9_-]*)[ \t]*\r?\n(.*?)^[ \t]*```[ \t]*$",
+    re.MULTILINE | re.DOTALL,
+)
+_CODE_FENCE_MARKER = re.compile(r"^[ \t]*```", re.MULTILINE)
 
 
 def _released_capability_image(image_name: str) -> str:
@@ -477,6 +485,8 @@ def execute_capability_suite(
             summary = _evaluate_benchmark(spec, benchmark_dir)
             if spec.execution_mode == "container":
                 summary["container_runtime"] = container_image_identity(spec.container_image)
+            if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:
+                summary["completion_normalization"] = _summarize_completion_normalization(predictions)
             summary["task_performance"] = _summarize_task_performance_rows(predictions)
             failure_count = len([item for item in predictions if item.get("generation_status") != "completed"])
             failure_severity = _generation_failure_severity(len(cases), failure_count)
@@ -1301,7 +1311,7 @@ def _write_evalplus_capability_run_artifact(
             error_class = "test_failed" if task_state == "scored" and not passed else (None if task_state == "scored" else failure_class)
             scorer_type = "unit_test" if task_state == "scored" else None
             scoring_policy = (
-                summary.get("scoring_policy") or "evalplus_pass_at_1_base_plus_v1"
+                summary.get("scoring_policy") or "evalplus_pass_at_1_normalized_v2"
             ) if task_state == "scored" else None
         tasks.append(
             {
@@ -1375,7 +1385,7 @@ def _write_evalplus_capability_run_artifact(
         },
         "protocol": {
             "task_family": spec.benchmark_kind,
-            "prompt_version": "%s_prompt_v1" % spec.benchmark_id,
+            "prompt_version": "%s_prompt_v2" % spec.benchmark_id,
             "task_version": spec.benchmark_id,
             "fixture_revision": str(
                 metadata.get("sample_policy")
@@ -1384,11 +1394,12 @@ def _write_evalplus_capability_run_artifact(
             ),
             "dataset_revision": metadata.get("evalplus_revision") or summary.get("evalplus_revision"),
             "scorer_type": "unit_test",
-            "scoring_policy": summary.get("scoring_policy") or "evalplus_pass_at_1_base_plus_v1",
+            "scoring_policy": summary.get("scoring_policy") or "evalplus_pass_at_1_normalized_v2",
             "repetitions": 1,
             "sample_policy": metadata.get("sample_policy") or summary.get("sample_policy"),
             "case_count": metadata.get("case_count") or summary.get("case_count"),
             "dataset": metadata.get("dataset") or summary.get("dataset"),
+            "completion_normalization_policy": "evalplus_code_completion_v1",
         },
         "summary": {
             "state": summary_state,
@@ -1732,15 +1743,24 @@ def _generate_predictions(
     for index, case in enumerate(cases, start=1):
         case_id = case.get("case_id") or case.get("task_id") or stable_hash(case, length=12)
         generated: Dict[str, Any] = {}
+        normalization = None
+        raw_completion = None
         try:
+            generation_prompt = _generation_prompt_for_case(spec, case)
             generated = adapter.generate_text(
                 request=request,
-                prompt=case["prompt"],
+                prompt=generation_prompt,
                 max_tokens=spec.generation_max_tokens,
             )
             text = generated.get("text", "")
             status = generated.get("status", "completed")
             error = generated.get("error")
+            if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"} and status == "completed":
+                raw_completion = str(text or "")
+                text, normalization = _normalize_evalplus_completion(spec.benchmark_id, case, raw_completion)
+                if normalization.get("error"):
+                    status = "failed"
+                    error = normalization["error"]
             performance = _task_performance_fields(generated)
         except Exception as exc:
             text = ""
@@ -1757,6 +1777,10 @@ def _generate_predictions(
         }
         if generated.get("prompt_transform"):
             record["generation_prompt_transform"] = generated["prompt_transform"]
+        if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:
+            record["benchmark_prompt_transform"] = "evalplus_code_only_v1"
+            record["raw_completion"] = raw_completion
+            record["completion_normalization"] = normalization
         if spec.benchmark_kind in {"instruction_following", "multiturn_instruction_retention"}:
             record["prompt"] = case["prompt"]
             record["response"] = text
@@ -1779,6 +1803,214 @@ def _generate_predictions(
     return predictions
 
 
+def _generation_prompt_for_case(spec: CapabilityBenchmarkSpec, case: Dict[str, Any]) -> str:
+    prompt = str(case["prompt"])
+    if spec.benchmark_id not in {"evalplus_humaneval", "evalplus_mbpp"}:
+        return prompt
+    if spec.benchmark_id == "evalplus_humaneval":
+        instruction = (
+            "Complete the Python function below. Return only the indented function body that follows the "
+            "provided prompt. Do not repeat the function signature, use Markdown fences, or add explanation."
+        )
+    else:
+        instruction = (
+            "Solve the Python task below. Return only executable Python code containing the requested function. "
+            "Do not use Markdown fences or add explanation."
+        )
+    return "%s\n\n%s" % (instruction, prompt)
+
+
+def _normalize_evalplus_completion(
+    benchmark_id: str,
+    case: Dict[str, Any],
+    raw_completion: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """Convert chat-style code answers into the completion shape EvalPlus expects."""
+    text = _TERMINAL_GENERATION_MARKER.sub("", str(raw_completion or "")).rstrip()
+    method = "raw_completion"
+    raw_python_valid = _completion_forms_valid_python(case, text)
+    if benchmark_id == "evalplus_humaneval" and _has_top_level_function_definition(
+        text,
+        str(case.get("entry_point") or ""),
+    ):
+        raw_python_valid = False
+    fences = [] if raw_python_valid else list(_CODE_FENCE.finditer(text))
+    if len(fences) > 1:
+        return "", {
+            "method": "failed_ambiguous_code_fences",
+            "changed": True,
+            "error": "EvalPlus completion normalization failed: multiple Markdown code fences are ambiguous.",
+        }
+    if fences:
+        if len(list(_CODE_FENCE_MARKER.finditer(text))) != 2:
+            return "", {
+                "method": "failed_ambiguous_code_fences",
+                "changed": True,
+                "error": "EvalPlus completion normalization failed: unmatched or additional Markdown code fences are ambiguous.",
+            }
+        language = fences[0].group(1).strip().lower()
+        text = fences[0].group(2).strip("\n")
+        method = "python_fence" if language in {"python", "py"} else "code_fence"
+    elif not raw_python_valid and _CODE_FENCE_MARKER.search(text):
+        return "", {
+            "method": "failed_unclosed_code_fence",
+            "changed": True,
+            "error": "EvalPlus completion normalization failed: unclosed Markdown code fence.",
+        }
+
+    if benchmark_id == "evalplus_humaneval" and not raw_python_valid:
+        body = _humaneval_function_body(
+            text,
+            str(case.get("entry_point") or ""),
+            str(case.get("prompt") or ""),
+        )
+        if body is not None:
+            text = body
+            method = "%s_to_function_body" % method
+        elif _contains_function_definition(text, str(case.get("entry_point") or "")):
+            return "", {
+                "method": "failed_function_body_extraction",
+                "changed": True,
+                "error": "EvalPlus HumanEval normalization failed: generated function could not be converted to a body completion.",
+            }
+
+    text = _TERMINAL_GENERATION_MARKER.sub("", text).rstrip()
+    if not text.strip():
+        return "", {
+            "method": "empty_completion",
+            "changed": bool(raw_completion),
+            "error": None,
+        }
+    return text, {
+        "method": method,
+        "changed": text != str(raw_completion or ""),
+        "error": None,
+    }
+
+
+def _completion_forms_valid_python(case: Dict[str, Any], completion: str) -> bool:
+    if not completion.strip():
+        return False
+    try:
+        ast.parse(str(case.get("prompt") or "") + completion)
+        return True
+    except (SyntaxError, ValueError):
+        return False
+
+
+def _has_top_level_function_definition(code: str, entry_point: str) -> bool:
+    if not entry_point:
+        return False
+    try:
+        module = ast.parse(code)
+    except (SyntaxError, ValueError):
+        return False
+    return any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == entry_point
+        for node in module.body
+    )
+
+
+def _humaneval_function_body(code: str, entry_point: str, prompt: str) -> Optional[str]:
+    if not entry_point:
+        return None
+    try:
+        module = ast.parse(code)
+    except (SyntaxError, ValueError):
+        return None
+    function = next(
+        (
+            node
+            for node in module.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == entry_point
+        ),
+        None,
+    )
+    if function is None or not function.body:
+        return None
+    if function.decorator_list:
+        return None
+    external_nodes = [node for node in module.body if node is not function]
+    if any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == entry_point for node in external_nodes):
+        return None
+    providers: Dict[str, List[ast.AST]] = {}
+    for node in external_nodes:
+        for name in _module_node_bound_names(node):
+            providers.setdefault(name, []).append(node)
+    selected = set()
+    needed = _loaded_names(function.body)
+    pending = list(needed)
+    while pending:
+        name = pending.pop()
+        candidates = providers.get(name, [])
+        if not candidates:
+            continue
+        if len(candidates) != 1:
+            return None
+        node = candidates[0]
+        node_id = id(node)
+        if node_id in selected:
+            continue
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+            return None
+        selected.add(node_id)
+        for dependency in _loaded_names([node]):
+            if dependency not in needed:
+                needed.add(dependency)
+                pending.append(dependency)
+    dependency_nodes = [node for node in external_nodes if id(node) in selected]
+    if any(not isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for node in dependency_nodes):
+        return None
+    if any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.decorator_list
+        for node in dependency_nodes
+    ):
+        return None
+    lines = code.splitlines()
+    start = function.body[0].lineno - 1
+    end = function.body[-1].end_lineno or function.body[-1].lineno
+    body = "\n".join(lines[start:end]).rstrip()
+    dependencies = []
+    for node in dependency_nodes:
+        source = ast.get_source_segment(code, node)
+        if not source:
+            return None
+        dependencies.append(textwrap.indent(source, "    "))
+    completion = "\n".join(dependencies + [body]).rstrip()
+    try:
+        ast.parse(prompt + completion)
+    except (SyntaxError, ValueError):
+        return None
+    return completion
+
+
+def _module_node_bound_names(node: ast.AST) -> List[str]:
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return [node.name]
+    if isinstance(node, ast.Import):
+        return [alias.asname or alias.name.split(".", 1)[0] for alias in node.names]
+    if isinstance(node, ast.ImportFrom):
+        return [alias.asname or alias.name for alias in node.names if alias.name != "*"]
+    if isinstance(node, ast.Assign):
+        return [target.id for target in node.targets if isinstance(target, ast.Name)]
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        return [node.target.id]
+    return []
+
+
+def _loaded_names(nodes: List[ast.AST]) -> set:
+    names = set()
+    for node in nodes:
+        names.update(item.id for item in ast.walk(node) if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Load))
+    return names
+
+
+def _contains_function_definition(code: str, entry_point: str) -> bool:
+    if not entry_point:
+        return False
+    return re.search(r"(?m)^\s*(?:async\s+)?def\s+%s\s*\(" % re.escape(entry_point), code) is not None
+
+
 def _task_performance_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "latency_ms": _non_negative_number(payload.get("latency_ms")),
@@ -1787,6 +2019,27 @@ def _task_performance_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
         "input_tokens": _non_negative_integer(payload.get("input_tokens")),
         "output_tokens": _non_negative_integer(payload.get("output_tokens")),
         "measurement_source": str(payload.get("measurement_source") or "") or None,
+    }
+
+
+def _summarize_completion_normalization(predictions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    methods: Dict[str, int] = {}
+    changed_count = 0
+    failed_count = 0
+    for prediction in predictions:
+        normalization = dict(prediction.get("completion_normalization") or {})
+        method = str(normalization.get("method") or "not_reported")
+        methods[method] = methods.get(method, 0) + 1
+        if normalization.get("changed"):
+            changed_count += 1
+        if normalization.get("error"):
+            failed_count += 1
+    return {
+        "policy": "evalplus_code_completion_v1",
+        "total_count": len(predictions),
+        "changed_count": changed_count,
+        "failed_count": failed_count,
+        "method_counts": methods,
     }
 
 
