@@ -277,6 +277,18 @@ class LlamaCppAdapter(BaseAdapter):
             ),
             "decode_tokens_per_second_p50": _percentile([item["decode_tokens_per_second"] for item in measurements], 0.50),
             "decode_tokens_per_second_p95": _percentile([item["decode_tokens_per_second"] for item in measurements], 0.95),
+            "output_tokens_p50": _percentile([item.get("output_tokens") for item in measurements], 0.50),
+            "output_tokens_p95": _percentile([item.get("output_tokens") for item in measurements], 0.95),
+            "natural_stop_rate": round(
+                sum(1 for item in measurements if item.get("natural_stop")) / float(len(measurements)),
+                4,
+            ),
+            "token_budget_exhaustion_rate": round(
+                sum(1 for item in measurements if item.get("token_budget_exhausted")) / float(len(measurements)),
+                4,
+            ),
+            "semantic_task_completion_proof": False,
+            "completion_semantics": "natural_stop_is_not_semantic_correctness; use capability task-time for scored task completion",
             "request_throughput_per_minute": round(60000.0 / max(_percentile([item["latency_ms"] for item in measurements], 0.50), 1.0), 2),
             "peak_vram_mb": _max_or_none([item["peak_vram_mb"] for item in measurements]),
             "peak_memory_mb": _max_or_none([item.get("peak_memory_mb") for item in measurements]),
@@ -1679,14 +1691,11 @@ def _validate_direct_answer_server_completion(
     completion: Dict[str, Any],
     prompt_transform: Optional[Dict[str, str]],
 ) -> None:
-    """Reject incomplete direct-answer deployment samples instead of timing hidden reasoning."""
+    """Reject hidden-output samples while retaining honest fixed-budget throughput measurements."""
     if not prompt_transform:
         return
     if not str(completion.get("text") or "").strip():
         raise RuntimeError("Direct-answer deployment completed without visible answer content")
-    stop_type = str((completion.get("final_payload") or {}).get("stop_type") or "").lower()
-    if stop_type in {"limit", "length", "max_tokens"}:
-        raise RuntimeError("Direct-answer deployment exhausted max_tokens before task completion")
 
 
 def _metrics_from_server_completion(
@@ -1694,7 +1703,7 @@ def _metrics_from_server_completion(
     parsed_timings: Dict[str, float],
     load_time_ms: Optional[float],
     peak_vram_mb: Optional[float],
-) -> Dict[str, Optional[float]]:
+) -> Dict[str, Any]:
     final_payload = completion["final_payload"]
     timings = final_payload.get("timings") or {}
     prompt_ms = _coerce_float(timings.get("prompt_ms")) or parsed_timings.get("prompt_eval_time_ms")
@@ -1715,6 +1724,8 @@ def _metrics_from_server_completion(
     latency_ms = completion.get("elapsed_ms") or compute_total_ms
     if latency_ms is None:
         latency_ms = parsed_timings.get("total_time_ms")
+    stop_type = str(final_payload.get("stop_type") or "").lower()
+    token_budget_exhausted = stop_type in {"limit", "length", "max_tokens"}
     return {
         "ttft_ms": round(ttft_ms, 2) if ttft_ms is not None else None,
         "latency_ms": round(latency_ms, 2) if latency_ms is not None else None,
@@ -1724,6 +1735,10 @@ def _metrics_from_server_completion(
         "peak_vram_mb": peak_vram_mb,
         "prompt_eval_time_ms": round(prompt_ms, 4) if prompt_ms is not None else None,
         "eval_time_ms": round(predicted_ms, 4) if predicted_ms is not None else None,
+        "output_tokens": int(predicted_n) if predicted_n is not None else None,
+        "stop_type": stop_type or None,
+        "natural_stop": bool(stop_type) and not token_budget_exhausted,
+        "token_budget_exhausted": token_budget_exhausted,
     }
 
 

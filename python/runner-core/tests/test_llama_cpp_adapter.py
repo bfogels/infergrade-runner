@@ -554,22 +554,45 @@ class LlamaCppAdapterTests(unittest.TestCase):
         sent = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
         self.assertEqual(sent["chat_template_kwargs"], {"enable_thinking": False})
 
-    def test_direct_answer_deployment_rejects_empty_or_token_limited_output(self):
+    def test_direct_answer_deployment_rejects_empty_but_keeps_visible_fixed_budget_output(self):
         transform = {"id": "qwen_chat_template_disable_thinking_v1"}
         with self.assertRaisesRegex(RuntimeError, "without visible answer"):
             _validate_direct_answer_server_completion(
                 {"text": "", "final_payload": {"stop_type": "stop"}},
                 transform,
             )
-        with self.assertRaisesRegex(RuntimeError, "exhausted max_tokens"):
-            _validate_direct_answer_server_completion(
-                {"text": "partial", "final_payload": {"stop_type": "length"}},
-                transform,
-            )
+        _validate_direct_answer_server_completion(
+            {"text": "visible fixed-budget output", "final_payload": {"stop_type": "length"}},
+            transform,
+        )
         _validate_direct_answer_server_completion(
             {"text": "complete", "final_payload": {"stop_type": "stop"}},
             transform,
         )
+
+    def test_server_metrics_distinguish_natural_stop_from_token_budget_exhaustion(self):
+        base = {
+            "elapsed_ms": 1000.0,
+            "first_token_ms": 100.0,
+            "final_payload": {
+                "timings": {
+                    "prompt_ms": 100.0,
+                    "predicted_ms": 900.0,
+                    "predicted_n": 40,
+                    "prompt_per_second": 100.0,
+                    "predicted_per_second": 44.4,
+                },
+                "stop_type": "length",
+            },
+        }
+        limited = _metrics_from_server_completion(base, {}, 500.0, None)
+        self.assertEqual(limited["output_tokens"], 40)
+        self.assertTrue(limited["token_budget_exhausted"])
+        self.assertFalse(limited["natural_stop"])
+        base["final_payload"]["stop_type"] = "stop"
+        natural = _metrics_from_server_completion(base, {}, 500.0, None)
+        self.assertFalse(natural["token_budget_exhausted"])
+        self.assertTrue(natural["natural_stop"])
 
     def test_default_preset_does_not_change_qwen3_prompt(self):
         request = RunRequest(
@@ -717,6 +740,10 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(execution.metrics["ttft_p50_ms"], 2242.26)
         self.assertEqual(execution.metrics["prompt_tokens_per_second_p50"], 3.65)
         self.assertEqual(execution.metrics["decode_tokens_per_second_p50"], 6.63)
+        self.assertEqual(execution.metrics["output_tokens_p50"], 6.0)
+        self.assertEqual(execution.metrics["token_budget_exhaustion_rate"], 0.0)
+        self.assertFalse(execution.metrics["semantic_task_completion_proof"])
+        self.assertIn("capability task-time", execution.metrics["completion_semantics"])
         self.assertIsNone(execution.metrics["peak_vram_mb"])
         self.assertEqual(len(execution.artifacts["runs"]), 2)
         command = execution.artifacts["runs"][0]["command"]
