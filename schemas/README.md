@@ -8,6 +8,7 @@ Within the overall product, this Runner repo is the authoritative publisher of:
 - the run-request and run-config schemas
 - the bundle and result schemas
 - the capability catalog, benchmark-scope metadata, and ordering semantics
+- the artifact-only GGUF memory-estimation policy and output schema
 - the example payloads that demonstrate the contract
 
 The most important modeling decision in this directory is that InferGrade treats quantized models as an ontology, not a flat label. We explicitly distinguish:

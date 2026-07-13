@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infergrade.local/schemas/artifact_memory_fit_policy.schema.json",
+  "title": "InferGrade GGUF Artifact Memory Fit Policy",
+  "type": "object",
+  "required": [
+    "policy_format_version",
+    "policy_id",
+    "publisher",
+    "artifact_format",
+    "estimator_version",
+    "context_buckets_tokens",
+    "required_gguf_architecture_fields",
+    "accepted_artifact_size_sources",
+    "accepted_architecture_metadata_sources",
+    "deployment_profile_context_buckets",
+    "fit_thresholds",
+    "kv_cache_policy",
+    "fallback_context_ranges",
+    "fallback_network_policy",
+    "runtime_overhead_policy",
+    "aggregation_policy",
+    "assumptions",
+    "claim_boundary"
+  ],
+  "properties": {
+    "policy_format_version": { "const": "1.0" },
+    "policy_id": { "const": "gguf_artifact_memory_fit_v1" },
+    "publisher": { "const": "infergrade-runner" },
+    "artifact_format": { "const": "gguf" },
+    "estimator_version": { "const": "memory_fit_v1" },
+    "context_buckets_tokens": { "const": [2048, 8192, 32768] },
+    "required_gguf_architecture_fields": {
+      "const": ["layer_count", "embedding_length", "attention_head_count", "attention_head_count_kv"]
+    },
+    "accepted_artifact_size_sources": { "const": ["local_file_stat", "repository_metadata"] },
+    "accepted_architecture_metadata_sources": { "const": ["gguf_metadata", "repository_config"] },
+    "deployment_profile_context_buckets": {
+      "type": "object",
+      "required": ["interactive_chat_v1", "batch_generation_v1", "long_context_v1"],
+      "properties": {
+        "interactive_chat_v1": { "const": 2048 },
+        "batch_generation_v1": { "const": 8192 },
+        "long_context_v1": { "const": 32768 }
+      },
+      "additionalProperties": false
+    },
+    "fit_thresholds": {
+      "type": "object",
+      "required": ["ratio_basis", "fits_max_inclusive", "tight_min_exclusive", "tight_max_inclusive", "over_min_exclusive"],
+      "properties": {
+        "ratio_basis": { "const": "estimate_range_high_bytes / available_capacity_bytes" },
+        "fits_max_inclusive": { "const": 0.8 },
+        "tight_min_exclusive": { "const": 0.8 },
+        "tight_max_inclusive": { "const": 1.0 },
+        "over_min_exclusive": { "const": 1.0 }
+      },
+      "additionalProperties": false
+    },
+    "kv_cache_policy": {
+      "type": "object",
+      "required": ["element_bytes", "formula", "source"],
+      "properties": {
+        "element_bytes": { "const": 2 },
+        "formula": { "type": "string", "minLength": 1 },
+        "source": { "const": "architecture_metadata_formula_estimated" }
+      },
+      "additionalProperties": false
+    },
+    "fallback_context_ranges": {
+      "type": "object",
+      "required": ["2048", "8192", "32768"],
+      "properties": {
+        "2048": { "$ref": "#/$defs/fallbackRange" },
+        "8192": { "$ref": "#/$defs/fallbackRange" },
+        "32768": { "$ref": "#/$defs/fallbackRange" }
+      },
+      "additionalProperties": false
+    },
+    "fallback_network_policy": {
+      "type": "object",
+      "required": ["additional_metadata_fetch_required", "basis"],
+      "properties": {
+        "additional_metadata_fetch_required": { "const": false },
+        "basis": { "const": "artifact_size_already_returned_by_the_existing_resolver" }
+      },
+      "additionalProperties": false
+    },
+    "runtime_overhead_policy": {
+      "type": "object",
+      "required": ["low_ratio_of_artifact_size", "high_ratio_of_artifact_size", "low_floor_bytes", "high_floor_bytes", "source"],
+      "properties": {
+        "low_ratio_of_artifact_size": { "type": "number", "minimum": 0 },
+        "high_ratio_of_artifact_size": { "type": "number", "minimum": 0 },
+        "low_floor_bytes": { "type": "integer", "minimum": 1 },
+        "high_floor_bytes": { "type": "integer", "minimum": 1 },
+        "source": { "const": "policy_range_estimated" }
+      },
+      "additionalProperties": false
+    },
+    "aggregation_policy": {
+      "type": "object",
+      "required": ["formula", "memory_domain", "offload_policy"],
+      "properties": {
+        "formula": { "type": "string", "minLength": 1 },
+        "memory_domain": { "const": "unified_or_combined_memory" },
+        "offload_policy": { "const": "unknown" }
+      },
+      "additionalProperties": false
+    },
+    "assumptions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/assumption" }
+    },
+    "claim_boundary": {
+      "type": "object",
+      "required": ["evidence_tier", "can_claim", "cannot_claim", "fit_verdict", "support_proof"],
+      "properties": {
+        "evidence_tier": { "const": "artifact_estimated" },
+        "can_claim": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "cannot_claim": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "fit_verdict": { "const": "not_evaluated" },
+        "support_proof": { "const": false }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "fallbackRange": {
+      "type": "object",
+      "required": ["low_ratio_of_artifact_size", "high_ratio_of_artifact_size", "low_floor_bytes", "high_floor_bytes"],
+      "properties": {
+        "low_ratio_of_artifact_size": { "type": "number", "minimum": 0 },
+        "high_ratio_of_artifact_size": { "type": "number", "minimum": 0 },
+        "low_floor_bytes": { "type": "integer", "minimum": 1 },
+        "high_floor_bytes": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "assumption": {
+      "type": "object",
+      "required": ["id", "statement"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "statement": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

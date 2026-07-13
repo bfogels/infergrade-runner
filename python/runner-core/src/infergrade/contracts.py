@@ -46,6 +46,8 @@ def export_contract_bundle(output_dir: Optional[Path] = None, root: Optional[Pat
         _copy_relative_path(base, bundle_dir, relative_path)
     for relative_path in manifest.get("catalog_files", []):
         _copy_relative_path(base, bundle_dir, relative_path)
+    for relative_path in manifest.get("policy_files", []):
+        _copy_relative_path(base, bundle_dir, relative_path)
     for relative_path in manifest.get("supporting_docs", []):
         _copy_relative_path(base, bundle_dir, relative_path)
 
