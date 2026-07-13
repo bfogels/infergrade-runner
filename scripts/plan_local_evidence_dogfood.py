@@ -26,6 +26,7 @@ if str(PYTHON_SRC) not in sys.path:
 
 from infergrade import __version__  # noqa: E402
 from infergrade.benchmark_catalog import check_index, load_capability_catalog  # noqa: E402
+from infergrade.constants import DEFAULT_GENERATION_PRESET  # noqa: E402
 
 
 DOGFOOD_PLAN_VERSION = "infergrade.local_evidence_dogfood.v1"
@@ -232,7 +233,7 @@ def request_payload(model: Dict[str, Any], provenance: Dict[str, Any], lane: Dic
             "artifact_cache_dir": "~/.cache/infergrade/artifacts",
         },
         "overrides": {
-            "generation_preset": "deterministic_v1",
+            "generation_preset": model.get("generation_preset") or DEFAULT_GENERATION_PRESET,
         },
         "ontology_hints": {
             "family_name": provenance.get("model_family"),

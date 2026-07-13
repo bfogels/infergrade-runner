@@ -18,6 +18,7 @@ TERMINAL_MARKERS = (
     "<|endoftext|>",
     "</s>",
 )
+EMPTY_THINK_PREFIX = re.compile(r"^\s*<think>\s*</think>\s*", re.IGNORECASE)
 
 
 def _write_json(path: str, payload) -> None:
@@ -126,6 +127,7 @@ def _case_from_row(row: dict) -> dict:
 
 def _prediction_letter(completion: str) -> Optional[str]:
     text = _strip_terminal_markers(str(completion or ""))
+    text = EMPTY_THINK_PREFIX.sub("", text, count=1)
     for pattern in ANSWER_PATTERNS:
         match = pattern.search(text)
         if match:
@@ -219,23 +221,38 @@ def evaluate(output_dir: str) -> None:
         for category, total_count in sorted(category_totals.items())
     }
     accuracy = round(correct_count / float(total), 6) if total else None
-    _write_json(
-        os.path.join(output_dir, "summary.json"),
-        {
+    if total and invalid_count == total:
+        status = "failed"
+        primary_value = None
+        error = "MMLU-Pro scorer rejected every generated answer as malformed output"
+    elif invalid_count:
+        status = "partial"
+        primary_value = accuracy
+        error = "%s of %s generated answers were malformed" % (invalid_count, total)
+    else:
+        status = "completed"
+        primary_value = accuracy
+        error = None
+    payload = {
             "benchmark_id": "mmlu_pro_reference_v1",
             "display_name": "MMLU-Pro reference",
-            "status": "completed",
-            "primary_metric": {"name": "accuracy", "value": accuracy},
+            "status": status,
+            "primary_metric": {"name": "accuracy", "value": primary_value},
             "metrics": {
-                "accuracy": accuracy,
+                "accuracy": primary_value,
                 "correct_count": correct_count,
                 "total_count": total,
                 "invalid_count": invalid_count,
             },
             "category_metrics": category_metrics,
             "case_results": case_results,
-            "scoring_policy": "exact_multiple_choice_letter_accuracy_v1",
-        },
+            "scoring_policy": "exact_multiple_choice_letter_accuracy_v2",
+        }
+    if error:
+        payload["error"] = error
+    _write_json(
+        os.path.join(output_dir, "summary.json"),
+        payload,
     )
 
 

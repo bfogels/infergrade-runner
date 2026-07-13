@@ -152,6 +152,28 @@ class LocalEvidenceDogfoodTests(unittest.TestCase):
         self.assertEqual(request["artifacts"]["quantized_weights"]["uri"], "hf://example/tiny-test/missing.gguf")
         self.assertEqual(request["artifacts"]["quantized_weights"]["filename"], "missing.gguf")
 
+    def test_generate_plan_preserves_explicit_generation_policy(self):
+        matrix = {
+            "matrix_id": "direct-answer-policy",
+            "models": [{
+                "slot": "qwen3",
+                "model_family": "Qwen3",
+                "checkpoint": "Qwen3-4B",
+                "source_uri": "hf://Qwen/Qwen3-4B-GGUF/Qwen3-4B-Q4_K_M.gguf",
+                "quantization_scheme": "Q4_K_M",
+                "generation_preset": "deterministic_direct_answer_v1",
+                "include_lanes": ["local_core_decision"],
+            }],
+        }
+        result = self.module.generate_plan(matrix, self.path("policy-plans"), compute_sha256=False)
+        manifest = self.read_json(result["manifest_path"])
+        request_path = os.path.join(
+            os.path.dirname(result["manifest_path"]),
+            manifest["models"][0]["lanes"][0]["request_path"],
+        )
+        request = self.read_json(request_path)
+        self.assertEqual(request["overrides"]["generation_preset"], "deterministic_direct_answer_v1")
+
     def test_placeholder_revision_is_not_emitted_as_provenance(self):
         provenance = self.module.model_provenance(
             {
