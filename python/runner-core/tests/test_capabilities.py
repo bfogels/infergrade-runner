@@ -305,6 +305,7 @@ class CapabilityTests(unittest.TestCase):
             benchmark_check_ids=["multiturn_chat_memory_v1"],
             output_dir=self.tempdir,
             simulate=False,
+            generation_preset="deterministic_direct_answer_v1",
         )
         with mock.patch("infergrade.capabilities._run_capability_container") as container_mock:
             execution = execute_capability_suite(_FailingMemoryAdapter(), request)
@@ -322,6 +323,10 @@ class CapabilityTests(unittest.TestCase):
         self.assertTrue(predictions)
         self.assertEqual({item["generation_status"] for item in predictions}, {"failed"})
         self.assertEqual({item["generation_error"] for item in predictions}, {"native adapter unavailable"})
+        self.assertEqual(
+            {item["generation_preset_id"] for item in predictions},
+            {"deterministic_direct_answer_v1"},
+        )
         capability_run_path = execution.artifacts["multiturn_chat_memory_v1"]["capability_run_path"]
         with open(capability_run_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)

@@ -4,6 +4,9 @@ from typing import Dict, List, Optional
 from infergrade.constants import DEFAULT_GENERATION_PRESET
 
 
+DIRECT_ANSWER_GENERATION_PRESET = "deterministic_direct_answer_v1"
+
+
 @dataclass(frozen=True)
 class DeploymentProfile:
     profile_id: str

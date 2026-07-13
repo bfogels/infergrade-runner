@@ -1027,6 +1027,7 @@ def _write_native_capability_run_artifact(
                 {
                     "model": request.model,
                     "benchmark_id": spec.benchmark_id,
+                    "generation_preset_id": request.generation_preset,
                     "summary": summary,
                 },
                 length=10,
@@ -1175,6 +1176,7 @@ def _write_mmlu_pro_capability_run_artifact(
                     "model": request.model,
                     "benchmark_id": spec.benchmark_id,
                     "dataset_revision": metadata.get("dataset_revision"),
+                    "generation_preset_id": request.generation_preset,
                     "summary": summary,
                 },
                 length=10,
@@ -1221,7 +1223,7 @@ def _write_mmlu_pro_capability_run_artifact(
             "fixture_revision": str(metadata.get("sample_policy") or "mmlu_pro_snapshot"),
             "dataset_revision": metadata.get("dataset_revision"),
             "scorer_type": "multiple_choice",
-            "scoring_policy": summary.get("scoring_policy") or "exact_multiple_choice_letter_accuracy_v1",
+            "scoring_policy": summary.get("scoring_policy") or "exact_multiple_choice_letter_accuracy_v2",
             "repetitions": 1,
             "sample_policy": metadata.get("sample_policy"),
             "category_count": metadata.get("category_count"),
@@ -1331,6 +1333,7 @@ def _write_evalplus_capability_run_artifact(
                     "model": request.model,
                     "benchmark_id": spec.benchmark_id,
                     "evalplus_revision": metadata.get("evalplus_revision") or summary.get("evalplus_revision"),
+                    "generation_preset_id": request.generation_preset,
                     "summary": summary,
                 },
                 length=10,
@@ -1728,6 +1731,7 @@ def _generate_predictions(
     total_cases = len(cases)
     for index, case in enumerate(cases, start=1):
         case_id = case.get("case_id") or case.get("task_id") or stable_hash(case, length=12)
+        generated: Dict[str, Any] = {}
         try:
             generated = adapter.generate_text(
                 request=request,
@@ -1749,7 +1753,10 @@ def _generate_predictions(
             "generation_status": status,
             "generation_error": error,
             **performance,
+            "generation_preset_id": request.generation_preset,
         }
+        if generated.get("prompt_transform"):
+            record["generation_prompt_transform"] = generated["prompt_transform"]
         if spec.benchmark_kind in {"instruction_following", "multiturn_instruction_retention"}:
             record["prompt"] = case["prompt"]
             record["response"] = text

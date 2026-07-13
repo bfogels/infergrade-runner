@@ -15,6 +15,7 @@ class RunRequest:
     quant_artifact_sha256: Optional[str] = None
     quant_artifact_filename: Optional[str] = None
     quant_artifact_revision: Optional[str] = None
+    quant_artifact_download_size_bytes: Optional[int] = None
     quant_artifact_resolved_path: Optional[str] = None
     quant_artifact_cache_dir: Optional[str] = None
     backend_image: Optional[str] = None
@@ -25,6 +26,8 @@ class RunRequest:
     ontology_hints: Dict[str, Any] = field(default_factory=dict)
     use_case: Optional[str] = None
     deployment_profiles: List[str] = field(default_factory=list)
+    deployment_warmup_runs: Optional[int] = None
+    deployment_measured_runs: Optional[int] = None
     execution_mode: str = "local_container"
     output_dir: Optional[str] = None
     resume: bool = False

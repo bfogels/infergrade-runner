@@ -23,6 +23,7 @@ from infergrade.container_runtime import (
 )
 from infergrade.images import install_image
 from infergrade.models import DeploymentExecution, FidelityExecution, RunRequest
+from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
 from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cpp_runtime
 from infergrade.utils import env_value, stable_hash, utcnow_iso
 
@@ -177,8 +178,20 @@ class LlamaCppAdapter(BaseAdapter):
         self._ensure_backend_model_compatibility(request)
         model_path = self._require_local_gguf_artifact(request)
         profile_spec = self._profile_spec(profile_id, request.use_case)
-        warmup_runs = 1 if request.tier == "canary" else 2
-        measured_runs = 1 if request.tier == "canary" else 5
+        warmup_runs = _bounded_deployment_run_count(
+            request.deployment_warmup_runs,
+            default=1 if request.tier == "canary" else 2,
+            minimum=0,
+            maximum=5,
+            field_name="deployment_warmup_runs",
+        )
+        measured_runs = _bounded_deployment_run_count(
+            request.deployment_measured_runs,
+            default=1 if request.tier == "canary" else 5,
+            minimum=1,
+            maximum=20,
+            field_name="deployment_measured_runs",
+        )
         total_iterations = warmup_runs + measured_runs
         measurements = []
         raw_runs = []
@@ -264,6 +277,8 @@ class LlamaCppAdapter(BaseAdapter):
             )
 
         metrics = {
+            "warmup_runs": warmup_runs,
+            "measured_runs": measured_runs,
             "ttft_p50_ms": _percentile([item["ttft_ms"] for item in measurements], 0.50),
             "ttft_p95_ms": _percentile([item["ttft_ms"] for item in measurements], 0.95),
             "latency_p50_ms": _percentile([item["latency_ms"] for item in measurements], 0.50),
@@ -276,6 +291,18 @@ class LlamaCppAdapter(BaseAdapter):
             ),
             "decode_tokens_per_second_p50": _percentile([item["decode_tokens_per_second"] for item in measurements], 0.50),
             "decode_tokens_per_second_p95": _percentile([item["decode_tokens_per_second"] for item in measurements], 0.95),
+            "output_tokens_p50": _percentile([item.get("output_tokens") for item in measurements], 0.50),
+            "output_tokens_p95": _percentile([item.get("output_tokens") for item in measurements], 0.95),
+            "natural_stop_rate": round(
+                sum(1 for item in measurements if item.get("natural_stop")) / float(len(measurements)),
+                4,
+            ),
+            "token_budget_exhaustion_rate": round(
+                sum(1 for item in measurements if item.get("token_budget_exhausted")) / float(len(measurements)),
+                4,
+            ),
+            "semantic_task_completion_proof": False,
+            "completion_semantics": "natural_stop_is_not_semantic_correctness; use capability task-time for scored task completion",
             "request_throughput_per_minute": round(60000.0 / max(_percentile([item["latency_ms"] for item in measurements], 0.50), 1.0), 2),
             "peak_vram_mb": _max_or_none([item["peak_vram_mb"] for item in measurements]),
             "peak_memory_mb": _max_or_none([item.get("peak_memory_mb") for item in measurements]),
@@ -324,12 +351,13 @@ class LlamaCppAdapter(BaseAdapter):
             raise NotImplementedError("Real llama.cpp generation currently supports local_container, local_native, and cloud_container modes.")
         self._ensure_backend_model_compatibility(request)
         model_path = self._require_local_gguf_artifact(request)
+        effective_prompt, prompt_transform = _prepare_llama_prompt(request, prompt)
         if request.execution_mode == "local_native":
             command = [self._native_completion_path(request)]
             command.extend(
                 self._build_llama_cli_command(
                     model_path=model_path,
-                    prompt=prompt,
+                    prompt=effective_prompt,
                     max_tokens=max_tokens,
                     ctx_size=max(4096, min(16384, len(prompt) * 2)),
                     request=request,
@@ -355,7 +383,7 @@ class LlamaCppAdapter(BaseAdapter):
             command.extend(
                 self._build_llama_cli_command(
                     model_path=container_model_path,
-                    prompt=prompt,
+                    prompt=effective_prompt,
                     max_tokens=max_tokens,
                     ctx_size=max(4096, min(16384, len(prompt) * 2)),
                     request=request,
@@ -387,6 +415,7 @@ class LlamaCppAdapter(BaseAdapter):
             "output_tokens": _whole_token_count(parsed.get("eval_tokens")),
             "measurement_source": "llama_cpp_timings",
             "load_time_ms": parsed.get("load_time_ms"),
+            "prompt_transform": prompt_transform,
         }
 
     def run_fidelity(self, request: RunRequest) -> FidelityExecution:
@@ -567,6 +596,8 @@ class LlamaCppAdapter(BaseAdapter):
             )
         )
 
+        effective_prompt = str(profile_spec["prompt"])
+        chat_messages, prompt_transform = _prepare_llama_server_chat(request, effective_prompt)
         monitor = _start_gpu_monitor()
         memory_monitor = None
         started = time.perf_counter()
@@ -585,6 +616,7 @@ class LlamaCppAdapter(BaseAdapter):
                     "duration_seconds": round(time.perf_counter() - started, 4),
                     "peak_vram_mb": _stop_gpu_monitor(monitor),
                     "error": startup_output or "llama.cpp server container failed to start",
+                    "prompt_transform": prompt_transform,
                 }
 
             memory_monitor = _start_container_memory_monitor(container_name)
@@ -595,11 +627,20 @@ class LlamaCppAdapter(BaseAdapter):
                 published_port=published_port,
                 started_at=started,
             )
-            completion = _stream_server_completion(
-                base_url=base_url,
-                prompt=str(profile_spec["prompt"]),
-                max_tokens=int(profile_spec["max_tokens"]),
+            completion = (
+                _stream_server_chat_completion(
+                    base_url=base_url,
+                    messages=chat_messages,
+                    max_tokens=int(profile_spec["max_tokens"]),
+                )
+                if chat_messages is not None
+                else _stream_server_completion(
+                    base_url=base_url,
+                    prompt=effective_prompt,
+                    max_tokens=int(profile_spec["max_tokens"]),
+                )
             )
+            _validate_direct_answer_server_completion(completion, prompt_transform)
             logs_text = _fetch_container_logs(container_name)
             parsed = _parse_llama_timings(logs_text)
             memory_allocations = _parse_llama_memory_allocations(logs_text)
@@ -631,6 +672,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "metrics": metrics,
                 "parsed_timings": parsed,
                 "completion_summary": completion["final_payload"],
+                "prompt_transform": prompt_transform,
                 "log_tail": logs_text.splitlines()[-40:],
             }
         except Exception as exc:
@@ -643,6 +685,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "duration_seconds": round(time.perf_counter() - started, 4),
                 "peak_vram_mb": _stop_gpu_monitor(monitor),
                 "error": str(exc),
+                "prompt_transform": prompt_transform,
                 "log_tail": logs_text.splitlines()[-40:],
             }
         finally:
@@ -673,6 +716,8 @@ class LlamaCppAdapter(BaseAdapter):
                 port=published_port,
             )
         )
+        effective_prompt = str(profile_spec["prompt"])
+        chat_messages, prompt_transform = _prepare_llama_server_chat(request, effective_prompt)
         monitor = _start_gpu_monitor()
         started = time.perf_counter()
         process = None
@@ -687,11 +732,20 @@ class LlamaCppAdapter(BaseAdapter):
                 )
             memory_monitor = _start_process_rss_monitor(process.pid)
             base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
-            completion = _stream_server_completion(
-                base_url=base_url,
-                prompt=str(profile_spec["prompt"]),
-                max_tokens=int(profile_spec["max_tokens"]),
+            completion = (
+                _stream_server_chat_completion(
+                    base_url=base_url,
+                    messages=chat_messages,
+                    max_tokens=int(profile_spec["max_tokens"]),
+                )
+                if chat_messages is not None
+                else _stream_server_completion(
+                    base_url=base_url,
+                    prompt=effective_prompt,
+                    max_tokens=int(profile_spec["max_tokens"]),
+                )
             )
+            _validate_direct_answer_server_completion(completion, prompt_transform)
             logs_text = _read_log_file(log_path)
             parsed = _parse_llama_timings(logs_text)
             peak_vram_mb = _stop_gpu_monitor(monitor)
@@ -719,6 +773,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "metrics": metrics,
                 "parsed_timings": parsed,
                 "completion_summary": completion["final_payload"],
+                "prompt_transform": prompt_transform,
                 "log_tail": logs_text.splitlines()[-40:],
             }
         except Exception as exc:
@@ -732,6 +787,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "peak_vram_mb": _stop_gpu_monitor(monitor),
                 "peak_memory_mb": _stop_process_rss_monitor(memory_monitor),
                 "error": str(exc),
+                "prompt_transform": prompt_transform,
                 "log_tail": logs_text.splitlines()[-40:],
             }
         finally:
@@ -1143,6 +1199,20 @@ def _whole_token_count(value: Any) -> Optional[int]:
     if parsed < 0 or not parsed.is_integer():
         return None
     return int(parsed)
+
+
+def _bounded_deployment_run_count(
+    value: Optional[int],
+    default: int,
+    minimum: int,
+    maximum: int,
+    field_name: str,
+) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum or value > maximum:
+        raise ValueError("%s must be an integer from %d to %d" % (field_name, minimum, maximum))
+    return value
 
 
 def _percentile(values: List[Optional[float]], percentile: float) -> Optional[float]:
@@ -1566,12 +1636,102 @@ def _stream_server_completion(base_url: str, prompt: str, max_tokens: int) -> Di
     }
 
 
+def _stream_server_chat_completion(base_url: str, messages: List[Dict[str, str]], max_tokens: int) -> Dict[str, Any]:
+    """Stream a templated chat completion while retaining llama.cpp timing extensions."""
+    payload = {
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": 0,
+        "top_p": 1,
+        "seed": 0,
+        "stream": True,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    request = urllib_request.Request(
+        "%s/v1/chat/completions" % base_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    started = time.perf_counter()
+    first_token_ms: Optional[float] = None
+    final_payload: Dict[str, Any] = {}
+    content_chunks: List[str] = []
+    finish_reason: Optional[str] = None
+    try:
+        with urllib_request.urlopen(request, timeout=_SERVER_REQUEST_TIMEOUT_SECONDS) as response:
+            while True:
+                line = response.readline()
+                if not line:
+                    break
+                text = line.decode("utf-8", errors="replace").strip()
+                if not text or not text.startswith("data:"):
+                    continue
+                event = text[len("data:") :].strip()
+                if event == "[DONE]":
+                    break
+                try:
+                    chunk_payload = json.loads(event)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError("Malformed llama.cpp chat streaming JSON: %s" % text) from exc
+                if chunk_payload.get("timings"):
+                    final_payload["timings"] = chunk_payload["timings"]
+                if chunk_payload.get("usage"):
+                    final_payload["usage"] = chunk_payload["usage"]
+                choices = list(chunk_payload.get("choices") or [])
+                if not choices:
+                    continue
+                choice = choices[0]
+                delta = dict(choice.get("delta") or {})
+                content = delta.get("content")
+                if content:
+                    if first_token_ms is None:
+                        first_token_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                    content_chunks.append(str(content))
+                if choice.get("finish_reason") is not None:
+                    finish_reason = str(choice.get("finish_reason"))
+    except urllib_error.HTTPError as exc:
+        body = _decode_utf8_lossy(exc.read())
+        raise RuntimeError("llama.cpp chat completion request failed: %s %s" % (exc.code, body))
+    if finish_reason is None:
+        raise RuntimeError("llama.cpp streaming chat completion ended without a finish reason.")
+    timings = dict(final_payload.get("timings") or {})
+    usage = dict(final_payload.get("usage") or {})
+    predicted_n = usage.get("completion_tokens") or timings.get("predicted_n")
+    final_payload.update(
+        {
+            "stop": True,
+            "stop_type": finish_reason,
+            "tokens_predicted": predicted_n,
+            "content": "".join(content_chunks),
+            "protocol": "openai_chat_completions",
+        }
+    )
+    return {
+        "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 2),
+        "first_token_ms": first_token_ms,
+        "text": "".join(content_chunks).strip(),
+        "final_payload": final_payload,
+    }
+
+
+def _validate_direct_answer_server_completion(
+    completion: Dict[str, Any],
+    prompt_transform: Optional[Dict[str, str]],
+) -> None:
+    """Reject hidden-output samples while retaining honest fixed-budget throughput measurements."""
+    if not prompt_transform:
+        return
+    if not str(completion.get("text") or "").strip():
+        raise RuntimeError("Direct-answer deployment completed without visible answer content")
+
+
 def _metrics_from_server_completion(
     completion: Dict[str, Any],
     parsed_timings: Dict[str, float],
     load_time_ms: Optional[float],
     peak_vram_mb: Optional[float],
-) -> Dict[str, Optional[float]]:
+) -> Dict[str, Any]:
     final_payload = completion["final_payload"]
     timings = final_payload.get("timings") or {}
     prompt_ms = _coerce_float(timings.get("prompt_ms")) or parsed_timings.get("prompt_eval_time_ms")
@@ -1592,6 +1752,8 @@ def _metrics_from_server_completion(
     latency_ms = completion.get("elapsed_ms") or compute_total_ms
     if latency_ms is None:
         latency_ms = parsed_timings.get("total_time_ms")
+    stop_type = str(final_payload.get("stop_type") or "").lower()
+    token_budget_exhausted = stop_type in {"limit", "length", "max_tokens"}
     return {
         "ttft_ms": round(ttft_ms, 2) if ttft_ms is not None else None,
         "latency_ms": round(latency_ms, 2) if latency_ms is not None else None,
@@ -1601,6 +1763,10 @@ def _metrics_from_server_completion(
         "peak_vram_mb": peak_vram_mb,
         "prompt_eval_time_ms": round(prompt_ms, 4) if prompt_ms is not None else None,
         "eval_time_ms": round(predicted_ms, 4) if predicted_ms is not None else None,
+        "output_tokens": int(predicted_n) if predicted_n is not None else None,
+        "stop_type": stop_type or None,
+        "natural_stop": bool(stop_type) and not token_budget_exhausted,
+        "token_budget_exhausted": token_budget_exhausted,
     }
 
 
@@ -1715,6 +1881,78 @@ def _normalize_architecture(value: str) -> str:
     return str(value or "").strip().lower().replace("-", "").replace("_", "")
 
 
+def _prepare_llama_prompt(
+    request: RunRequest,
+    prompt: str,
+    placement: str = "append",
+) -> Tuple[str, Optional[Dict[str, str]]]:
+    """Apply an explicit, versioned direct-answer policy to Qwen 3-family prompts."""
+    raw = str(prompt or "")
+    if request.generation_preset != DIRECT_ANSWER_GENERATION_PRESET:
+        return raw, None
+    architecture = _infer_llama_cpp_architecture(request)
+    if not str(architecture or "").startswith("qwen3"):
+        return raw, None
+    if any(line.strip().lower() == "/no_think" for line in raw.splitlines()):
+        return raw, {
+            "id": "qwen_no_think_directive_v1",
+            "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
+            "state": "already_present",
+        }
+    if placement == "final_user_turn":
+        assistant_marker = "\nAssistant:"
+        marker_index = raw.rfind(assistant_marker)
+        if marker_index >= 0:
+            effective = raw[:marker_index].rstrip() + "\n/no_think" + raw[marker_index:]
+            state = "inserted_before_final_assistant_turn"
+        else:
+            effective = raw.rstrip() + "\n/no_think"
+            state = "appended_fallback_no_assistant_turn"
+    elif placement == "append":
+        effective = raw.rstrip() + "\n/no_think"
+        state = "appended"
+    else:
+        raise ValueError("Unsupported llama.cpp prompt transform placement: %s" % placement)
+    return effective, {
+        "id": "qwen_no_think_directive_v1",
+        "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
+        "state": state,
+        "placement": placement,
+    }
+
+
+def _prepare_llama_server_chat(
+    request: RunRequest,
+    prompt: str,
+) -> Tuple[Optional[List[Dict[str, str]]], Optional[Dict[str, str]]]:
+    """Use llama-server chat templating only for the explicit Qwen direct-answer policy."""
+    if request.generation_preset != DIRECT_ANSWER_GENERATION_PRESET:
+        return None, None
+    if not str(_infer_llama_cpp_architecture(request) or "").startswith("qwen3"):
+        return None, None
+    raw = str(prompt or "")
+    assistant_marker = "\nAssistant:"
+    user_marker = "\nUser:"
+    assistant_index = raw.rfind(assistant_marker)
+    user_index = raw.rfind(user_marker, 0, assistant_index if assistant_index >= 0 else len(raw))
+    if user_index < 0 or assistant_index < 0 or user_index >= assistant_index:
+        raise RuntimeError("Direct-answer deployment prompt must contain a final User/Assistant turn")
+    system_content = raw[:user_index].strip()
+    user_content = raw[user_index + len(user_marker) : assistant_index].strip()
+    if not user_content:
+        raise RuntimeError("Direct-answer deployment prompt has an empty final user turn")
+    messages: List[Dict[str, str]] = []
+    if system_content:
+        messages.append({"role": "system", "content": system_content})
+    messages.append({"role": "user", "content": user_content})
+    return messages, {
+        "id": "qwen_chat_template_disable_thinking_v1",
+        "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
+        "state": "chat_template_enable_thinking_false",
+        "placement": "structured_messages",
+    }
+
+
 def _infer_llama_cpp_architecture(request: RunRequest) -> Optional[str]:
     hints = dict(request.ontology_hints or {})
     explicit = (
@@ -1739,7 +1977,11 @@ def _infer_llama_cpp_architecture(request: RunRequest) -> Optional[str]:
         request.quant_artifact,
     ]
     for candidate in candidates:
-        normalized = _normalize_architecture(str(candidate or "").replace(" ", ""))
+        normalized = re.sub(r"[^a-z0-9]+", "", str(candidate or "").lower())
+        if "qwen35" in normalized:
+            return "qwen35"
+        if "qwen3" in normalized:
+            return "qwen3"
         if "gemma4" in normalized:
             return "gemma4"
         if "gemma3" in normalized:

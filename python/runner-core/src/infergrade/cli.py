@@ -714,6 +714,10 @@ def main(argv: Optional[list] = None) -> int:
                 "notes": request.notes,
             },
         }
+        if request.deployment_warmup_runs is not None:
+            request_payload["run"]["deployment_warmup_runs"] = request.deployment_warmup_runs
+        if request.deployment_measured_runs is not None:
+            request_payload["run"]["deployment_measured_runs"] = request.deployment_measured_runs
         if request.quant_artifact:
             request_payload["run"]["quant_artifact"] = request.quant_artifact
             quantized_weights = {"uri": request.quant_artifact}
@@ -723,6 +727,8 @@ def main(argv: Optional[list] = None) -> int:
                 quantized_weights["filename"] = request.quant_artifact_filename
             if request.quant_artifact_revision:
                 quantized_weights["revision"] = request.quant_artifact_revision
+            if request.quant_artifact_download_size_bytes:
+                quantized_weights["download_size_bytes"] = request.quant_artifact_download_size_bytes
             request_payload["artifacts"] = {"quantized_weights": quantized_weights}
         if request.backend_image or request.quant_artifact_cache_dir or request.llama_cpp_cli_path or request.llama_cpp_server_path or request.llama_cpp_perplexity_path:
             runtime_payload = {}

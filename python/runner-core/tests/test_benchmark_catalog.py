@@ -152,11 +152,15 @@ class BenchmarkCatalogTests(unittest.TestCase):
         statuses["multiturn_chat_memory_v1"]["claim_boundary"] = ""
         statuses["multiturn_chat_memory_v1"]["runnable_status"] = ""
         statuses["multiturn_chat_memory_v1"]["scoring_policy_id"] = "typo_policy_v1"
+        next(
+            item for item in mutated["checks"] if item["check_id"] == "multiturn_chat_memory_v1"
+        )["score_policy_id"] = "other_typo_policy_v1"
         statuses["gpqa_reference_v1"]["scoring_policy_id"] = "typo_policy_v1"
         failures = validate_benchmark_legitimacy_metadata(mutated)
         self.assertTrue(any("status field claim_boundary must be non-empty" in item for item in failures))
         self.assertTrue(any("status field runnable_status must be non-empty" in item for item in failures))
         self.assertTrue(any("multiturn_chat_memory_v1" in item and "does not match check" in item for item in failures))
+        self.assertTrue(any("multiturn_chat_memory_v1" in item and "is not declared" in item for item in failures))
         self.assertTrue(any("gpqa_reference_v1" in item and "does not match planned" in item for item in failures))
 
     def test_evidence_lane_index_exposes_claim_boundaries(self):
@@ -450,7 +454,10 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(metadata["benchmark_checks"][0]["evidence_lane_id"], "reference")
         self.assertEqual(metadata["benchmark_checks"][0]["score_dimension"], "broad_reasoning_knowledge")
         self.assertEqual(metadata["benchmark_checks"][0]["primary_score_metric"], "accuracy")
-        self.assertEqual(metadata["score_policies"][0]["score_policy_id"], "multiple_choice_accuracy_v1")
+        self.assertEqual(
+            metadata["score_policies"][0]["score_policy_id"],
+            "exact_multiple_choice_letter_accuracy_v2",
+        )
 
     def test_benchmark_scope_summary_empty_selection_uses_computed_confidence(self):
         summary = benchmark_scope_summary_for_selection([])

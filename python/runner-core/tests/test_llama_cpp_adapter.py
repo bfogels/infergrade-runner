@@ -1,3 +1,4 @@
+import json
 import os
 import struct
 import sys
@@ -18,6 +19,8 @@ from infergrade.adapters.llama_cpp import (
     _parse_llama_memory_allocations,
     _parse_llama_timings,
     _parse_perplexity_output,
+    _prepare_llama_prompt,
+    _prepare_llama_server_chat,
     _read_log_file,
     _read_gguf_architecture,
     _safe_tokens_per_second,
@@ -25,8 +28,11 @@ from infergrade.adapters.llama_cpp import (
     _sample_process_rss_mb,
     _start_container_memory_monitor,
     _stop_container_memory_monitor,
+    _stream_server_chat_completion,
+    _validate_direct_answer_server_completion,
 )
 from infergrade.models import RunRequest
+from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
 from infergrade.runtimes import select_llama_cpp_runtime
 
 
@@ -457,6 +463,161 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(generated["status"], "completed")
         self.assertEqual(run_mock.call_args[0][0][0], "/opt/homebrew/bin/llama-completion")
 
+    def test_qwen3_direct_answer_preset_adds_versioned_directive(self):
+        request = RunRequest(
+            model="Qwen/Qwen3-0.6B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        prompt, transform = _prepare_llama_prompt(request, "Answer only A.")
+        self.assertEqual(prompt, "Answer only A.\n/no_think")
+        self.assertEqual(transform["policy_id"], DIRECT_ANSWER_GENERATION_PRESET)
+        self.assertEqual(transform["state"], "appended")
+
+        server_prompt, server_transform = _prepare_llama_prompt(
+            request,
+            "User: Answer only A.\nAssistant:",
+            placement="final_user_turn",
+        )
+        self.assertEqual(server_prompt, "User: Answer only A.\n/no_think\nAssistant:")
+        self.assertEqual(server_transform["state"], "inserted_before_final_assistant_turn")
+        self.assertEqual(server_transform["placement"], "final_user_turn")
+
+    def test_qwen3_server_prompt_falls_back_when_turn_marker_is_missing(self):
+        request = RunRequest(
+            model="Qwen/Qwen3-0.6B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        prompt, transform = _prepare_llama_prompt(
+            request,
+            "Answer only A.",
+            placement="final_user_turn",
+        )
+        self.assertEqual(prompt, "Answer only A.\n/no_think")
+        self.assertEqual(transform["state"], "appended_fallback_no_assistant_turn")
+
+    def test_qwen3_direct_answer_server_uses_structured_chat_and_disables_thinking(self):
+        request = RunRequest(
+            model="Qwen/Qwen3-4B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        messages, transform = _prepare_llama_server_chat(
+            request,
+            "Benchmark system instruction.\n\nUser: Give five bullets.\nAssistant:",
+        )
+        self.assertEqual(
+            messages,
+            [
+                {"role": "system", "content": "Benchmark system instruction."},
+                {"role": "user", "content": "Give five bullets."},
+            ],
+        )
+        self.assertEqual(transform["id"], "qwen_chat_template_disable_thinking_v1")
+        self.assertEqual(transform["placement"], "structured_messages")
+
+    def test_legacy_server_preset_keeps_raw_completion_protocol(self):
+        request = RunRequest(
+            model="Qwen/Qwen3-4B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            generation_preset="deterministic_v1",
+        )
+        self.assertEqual(_prepare_llama_server_chat(request, "User: A\nAssistant:"), (None, None))
+
+    @mock.patch("infergrade.adapters.llama_cpp.urllib_request.urlopen")
+    def test_stream_chat_completion_collects_content_finish_reason_and_timings(self, urlopen_mock):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.readline.side_effect = [
+            b'data: {"choices":[{"delta":{"content":"Direct"},"finish_reason":null}]}\n',
+            b'data: {"choices":[{"delta":{"content":" answer"},"finish_reason":"stop"}],"timings":{"predicted_n":2,"predicted_per_second":20}}\n',
+            b'data: [DONE]\n',
+        ]
+        urlopen_mock.return_value = response
+        completion = _stream_server_chat_completion(
+            "http://127.0.0.1:8080",
+            [{"role": "user", "content": "Answer directly"}],
+            16,
+        )
+        self.assertEqual(completion["text"], "Direct answer")
+        self.assertEqual(completion["final_payload"]["stop_type"], "stop")
+        self.assertEqual(completion["final_payload"]["tokens_predicted"], 2)
+        sent = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(sent["chat_template_kwargs"], {"enable_thinking": False})
+
+    def test_direct_answer_deployment_rejects_empty_but_keeps_visible_fixed_budget_output(self):
+        transform = {"id": "qwen_chat_template_disable_thinking_v1"}
+        with self.assertRaisesRegex(RuntimeError, "without visible answer"):
+            _validate_direct_answer_server_completion(
+                {"text": "", "final_payload": {"stop_type": "stop"}},
+                transform,
+            )
+        _validate_direct_answer_server_completion(
+            {"text": "visible fixed-budget output", "final_payload": {"stop_type": "length"}},
+            transform,
+        )
+        _validate_direct_answer_server_completion(
+            {"text": "complete", "final_payload": {"stop_type": "stop"}},
+            transform,
+        )
+
+    def test_server_metrics_distinguish_natural_stop_from_token_budget_exhaustion(self):
+        base = {
+            "elapsed_ms": 1000.0,
+            "first_token_ms": 100.0,
+            "final_payload": {
+                "timings": {
+                    "prompt_ms": 100.0,
+                    "predicted_ms": 900.0,
+                    "predicted_n": 40,
+                    "prompt_per_second": 100.0,
+                    "predicted_per_second": 44.4,
+                },
+                "stop_type": "length",
+            },
+        }
+        limited = _metrics_from_server_completion(base, {}, 500.0, None)
+        self.assertEqual(limited["output_tokens"], 40)
+        self.assertTrue(limited["token_budget_exhausted"])
+        self.assertFalse(limited["natural_stop"])
+        base["final_payload"]["stop_type"] = "stop"
+        natural = _metrics_from_server_completion(base, {}, 500.0, None)
+        self.assertFalse(natural["token_budget_exhausted"])
+        self.assertTrue(natural["natural_stop"])
+
+    def test_default_preset_does_not_change_qwen3_prompt(self):
+        request = RunRequest(
+            model="Qwen/Qwen3-0.6B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            generation_preset="deterministic_v1",
+        )
+        self.assertEqual(_prepare_llama_prompt(request, "Answer only A."), ("Answer only A.", None))
+
+    def test_qwen35_directive_detection_requires_standalone_line(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        mentioned, transform = _prepare_llama_prompt(request, "Explain the literal /no_think string.")
+        self.assertTrue(mentioned.endswith("\n/no_think"))
+        present, transform = _prepare_llama_prompt(request, "Answer A.\n/no_think")
+        self.assertEqual(present, "Answer A.\n/no_think")
+        self.assertEqual(transform["state"], "already_present")
+
     @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
     def test_generate_text_local_native_requires_noninteractive_completion_binary(self, run_mock, which_mock):
@@ -571,6 +732,8 @@ class LlamaCppAdapterTests(unittest.TestCase):
             backend="llama.cpp",
             tier="canary",
             use_case="general_assistant",
+            deployment_warmup_runs=0,
+            deployment_measured_runs=2,
             simulate=False,
         )
         execution = adapter.run_deployment_profile(request, "interactive_chat_v1")
@@ -579,6 +742,12 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(execution.metrics["ttft_p50_ms"], 2242.26)
         self.assertEqual(execution.metrics["prompt_tokens_per_second_p50"], 3.65)
         self.assertEqual(execution.metrics["decode_tokens_per_second_p50"], 6.63)
+        self.assertEqual(execution.metrics["warmup_runs"], 0)
+        self.assertEqual(execution.metrics["measured_runs"], 2)
+        self.assertEqual(execution.metrics["output_tokens_p50"], 6.0)
+        self.assertEqual(execution.metrics["token_budget_exhaustion_rate"], 0.0)
+        self.assertFalse(execution.metrics["semantic_task_completion_proof"])
+        self.assertIn("capability task-time", execution.metrics["completion_semantics"])
         self.assertIsNone(execution.metrics["peak_vram_mb"])
         self.assertEqual(len(execution.artifacts["runs"]), 2)
         command = execution.artifacts["runs"][0]["command"]
