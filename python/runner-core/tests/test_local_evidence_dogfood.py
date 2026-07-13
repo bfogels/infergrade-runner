@@ -44,6 +44,33 @@ class LocalEvidenceDogfoodTests(unittest.TestCase):
         self.assertIn("evalplus_humaneval", lane_check_ids)
         self.assertIn("evalplus_mbpp", lane_check_ids)
         self.assertIn("perplexity_reference_v1", lane_check_ids)
+        self.assertIn("interactive_chat_v1", lane_check_ids)
+
+    def test_deployment_measurement_lane_skips_duplicate_capability_work(self):
+        matrix = {
+            "matrix_id": "deployment-only",
+            "models": [{
+                "slot": "qwen3",
+                "model_family": "Qwen3",
+                "checkpoint": "Qwen3-4B",
+                "source_uri": "hf://Qwen/Qwen3-4B-GGUF/Qwen3-4B-Q4_K_M.gguf",
+                "source_revision": "pinned-revision",
+                "quantization_scheme": "Q4_K_M",
+                "generation_preset": "deterministic_direct_answer_v1",
+                "include_lanes": ["deployment_interactive_measurement"],
+            }],
+        }
+        result = self.module.generate_plan(matrix, self.path("deployment-plans"), compute_sha256=False)
+        manifest = self.read_json(result["manifest_path"])
+        request_path = os.path.join(
+            os.path.dirname(result["manifest_path"]),
+            manifest["models"][0]["lanes"][0]["request_path"],
+        )
+        request = self.read_json(request_path)
+        self.assertEqual(request["run"]["benchmark_check_ids"], ["interactive_chat_v1"])
+        self.assertEqual(request["run"]["capability_suite_ids"], [])
+        self.assertEqual(request["run"]["capability"], "none")
+        self.assertIn("not semantic correctness", request["metadata"]["notes"])
 
     def test_generate_plan_writes_distinct_requests_and_token_free_commands(self):
         model_path = os.path.join(self.tempdir, "tiny-model.Q4_K_M.gguf")

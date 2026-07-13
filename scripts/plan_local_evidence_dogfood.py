@@ -34,6 +34,15 @@ DEFAULT_OUTPUT_ROOT = ROOT_DIR / "runs" / "local_evidence_dogfood"
 
 LANE_PLANS = [
     {
+        "lane_id": "deployment_interactive_measurement",
+        "label": "Interactive deployment speed, output length, and stop semantics",
+        "use_case": None,
+        "capability": "none",
+        "capability_suite_ids": [],
+        "benchmark_check_ids": ["interactive_chat_v1"],
+        "claim_boundary": "Fixed-prompt deployment throughput and output-length evidence; natural stopping is not semantic correctness or scored task completion.",
+    },
+    {
         "lane_id": "local_core_decision",
         "label": "Deployment plus thin local assistant/coding/reasoning samples",
         "use_case": "general_assistant",
@@ -209,7 +218,7 @@ def request_payload(model: Dict[str, Any], provenance: Dict[str, Any], lane: Dic
         "model": model.get("model") or provenance.get("checkpoint") or provenance.get("model_family") or "local-gguf",
         "backend": "llama.cpp",
         "tier": "standard",
-        "capability": "auto",
+        "capability": lane.get("capability", "auto"),
         "capability_suite_ids": list(lane["capability_suite_ids"]),
         "benchmark_check_ids": list(lane["benchmark_check_ids"]),
         "execution_mode": "local_native",
