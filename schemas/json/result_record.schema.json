@@ -198,6 +198,14 @@
       "properties": {
         "deployment_profile_id": { "type": "string", "enum": ["interactive_chat_v1", "batch_generation_v1", "long_context_v1"] },
         "deployment_status": { "type": "string" },
+        "warmup_runs": { "type": "integer", "minimum": 0 },
+        "measured_runs": { "type": "integer", "minimum": 1 },
+        "output_tokens_p50": { "type": ["number", "null"], "minimum": 0 },
+        "output_tokens_p95": { "type": ["number", "null"], "minimum": 0 },
+        "natural_stop_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "token_budget_exhaustion_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "semantic_task_completion_proof": { "type": "boolean" },
+        "completion_semantics": { "type": ["string", "null"] },
         "peak_memory_mb": { "type": ["number", "null"], "minimum": 0 },
         "peak_memory_measurement_method": {
           "type": ["string", "null"],

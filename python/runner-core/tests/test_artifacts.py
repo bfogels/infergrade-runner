@@ -1,4 +1,5 @@
 import hashlib
+import io
 import os
 import sys
 import tempfile
@@ -9,6 +10,8 @@ from unittest import mock
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.artifacts import (
+    _download_remote_artifact,
+    _download_with_bounded_curl,
     _install_cache_file_without_overwrite,
     artifact_cache_status,
     artifact_to_download_url,
@@ -55,6 +58,129 @@ class ArtifactResolutionTests(unittest.TestCase):
             quant_artifact_sha256="deadbeef",
         )
         with self.assertRaises(ValueError):
+            resolve_quant_artifact(request)
+
+    def test_local_artifact_resolution_enforces_authorized_size(self):
+        matching = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact=self.local_model,
+            quant_artifact_download_size_bytes=os.path.getsize(self.local_model),
+        )
+        self.assertEqual(resolve_quant_artifact(matching).size_bytes, os.path.getsize(self.local_model))
+        matching.quant_artifact_download_size_bytes += 1
+        with self.assertRaisesRegex(ValueError, "size mismatch"):
+            resolve_quant_artifact(matching)
+
+    @mock.patch("infergrade.artifacts._download_remote_artifact")
+    def test_remote_artifact_enforces_authorized_size_and_reserves_disk(self, download_mock):
+        payload = b"authorized-remote-gguf"
+
+        def write_download(_url, path, expected_size_bytes=None):
+            self.assertEqual(expected_size_bytes, len(payload))
+            with open(path, "wb") as handle:
+                handle.write(payload)
+
+        download_mock.side_effect = write_download
+        request = RunRequest(
+            model="example/model",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://example/model-GGUF/model.gguf",
+            quant_artifact_revision="pinned-commit",
+            quant_artifact_sha256=hashlib.sha256(payload).hexdigest(),
+            quant_artifact_download_size_bytes=len(payload),
+            quant_artifact_cache_dir=self.cache_dir,
+        )
+        with mock.patch("infergrade.artifacts.min_artifact_cache_free_bytes", return_value=500):
+            with mock.patch("infergrade.artifacts.ensure_min_free_space") as free_space_mock:
+                resolved = resolve_quant_artifact(request)
+        self.assertEqual(resolved.size_bytes, len(payload))
+        self.assertEqual(
+            free_space_mock.call_args.args[1],
+            len(payload) + 500,
+        )
+
+    @mock.patch("infergrade.artifacts._download_remote_artifact")
+    def test_remote_artifact_rejects_download_smaller_than_authorized_size(self, download_mock):
+        def write_short(_url, path, expected_size_bytes=None):
+            with open(path, "wb") as handle:
+                handle.write(b"short")
+
+        download_mock.side_effect = write_short
+        request = RunRequest(
+            model="example/model",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://example/model-GGUF/model.gguf",
+            quant_artifact_revision="pinned-commit",
+            quant_artifact_sha256=hashlib.sha256(b"short").hexdigest(),
+            quant_artifact_download_size_bytes=100,
+            quant_artifact_cache_dir=self.cache_dir,
+        )
+        with self.assertRaisesRegex(ValueError, "size mismatch"):
+            resolve_quant_artifact(request)
+        self.assertFalse(any(name.endswith("model.gguf") for name in os.listdir(self.cache_dir)))
+
+    @mock.patch("infergrade.artifacts.urllib_request.urlopen")
+    def test_remote_transport_rejects_oversize_content_length_before_copy(self, urlopen_mock):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.headers = {"Content-Length": "4"}
+        urlopen_mock.return_value = response
+        destination = os.path.join(self.tempdir.name, "bounded.tmp")
+        with self.assertRaisesRegex(RuntimeError, "size header mismatch"):
+            _download_remote_artifact(
+                "https://example.test/model.gguf",
+                destination,
+                expected_size_bytes=3,
+            )
+        response.read.assert_not_called()
+
+    @mock.patch("infergrade.artifacts.subprocess.Popen")
+    def test_curl_fallback_stream_is_bounded_by_runner(self, popen_mock):
+        process = mock.MagicMock()
+        process.stdin = None
+        process.stdout = io.BytesIO(b"four")
+        process.stderr = io.BytesIO(b"")
+        process.poll.return_value = 0
+        popen_mock.return_value = process
+        destination = os.path.join(self.tempdir.name, "bounded-curl.tmp")
+        with self.assertRaisesRegex(RuntimeError, "exceeded authorized size"):
+            _download_with_bounded_curl(
+                "https://example.test/model.gguf",
+                destination,
+                expected_size_bytes=3,
+            )
+        process.terminate.assert_called_once_with()
+
+    @mock.patch("infergrade.artifacts._install_cache_file_without_overwrite")
+    @mock.patch("infergrade.artifacts._download_remote_artifact")
+    def test_concurrent_cache_winner_must_match_authorized_size(self, download_mock, install_mock):
+        expected = b"small"
+
+        def write_download(_url, path, expected_size_bytes=None):
+            with open(path, "wb") as handle:
+                handle.write(expected)
+
+        def publish_larger_winner(tmp_path, cache_path):
+            with open(cache_path, "wb") as handle:
+                handle.write(b"larger-race-winner")
+            return False
+
+        download_mock.side_effect = write_download
+        install_mock.side_effect = publish_larger_winner
+        request = RunRequest(
+            model="example/model",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://example/model-GGUF/model.gguf",
+            quant_artifact_revision="pinned-commit",
+            quant_artifact_download_size_bytes=len(expected),
+            quant_artifact_cache_dir=self.cache_dir,
+        )
+        with self.assertRaisesRegex(ValueError, "size mismatch"):
             resolve_quant_artifact(request)
 
     @mock.patch("infergrade.artifacts.urllib_request.urlopen")

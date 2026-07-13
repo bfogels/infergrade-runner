@@ -159,7 +159,7 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
             failures.append(f"{check_id}: status scoring_policy_id does not match check score_policy_id")
         if planned_candidate and status_policy != str(planned_candidate.get("planned_score_policy_id") or "").strip():
             failures.append(f"{check_id}: status scoring_policy_id does not match planned_score_policy_id")
-        if not declared_check and not planned_candidate and status_policy not in score_policy_ids:
+        if (declared_check or not planned_candidate) and status_policy not in score_policy_ids:
             failures.append(f"{check_id}: scoring_policy_id is not declared")
         if not isinstance(status.get("promotion_blockers"), list) or not status.get("promotion_blockers"):
             failures.append(f"{check_id}: promotion_blockers must be a non-empty list")

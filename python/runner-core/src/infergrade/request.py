@@ -179,6 +179,7 @@ def request_from_dict(data: Dict[str, Any], simulate: bool = True, run_config_so
         quant_artifact_sha256=quantized_weights.get("sha256"),
         quant_artifact_filename=quantized_weights.get("filename"),
         quant_artifact_revision=quantized_weights.get("revision"),
+        quant_artifact_download_size_bytes=quantized_weights.get("download_size_bytes"),
         quant_artifact_cache_dir=runtime.get("artifact_cache_dir"),
         backend_image=runtime.get("backend_image"),
         llama_cpp_cli_path=runtime.get("llama_cpp_cli_path") or runtime.get("llama_cpp_cli"),
@@ -188,6 +189,8 @@ def request_from_dict(data: Dict[str, Any], simulate: bool = True, run_config_so
         ontology_hints=dict(ontology_hints or {}),
         use_case=run.get("use_case"),
         deployment_profiles=list(run.get("deployment_profiles", [])),
+        deployment_warmup_runs=run.get("deployment_warmup_runs"),
+        deployment_measured_runs=run.get("deployment_measured_runs"),
         execution_mode=run.get("execution_mode", "local_container"),
         output_dir=run.get("output_dir"),
         resume=bool(run.get("resume", False)),
@@ -212,7 +215,7 @@ def request_from_dict(data: Dict[str, Any], simulate: bool = True, run_config_so
 
 def request_to_dict(request: RunRequest) -> Dict[str, Any]:
     """Serialize a RunRequest into a stable dictionary for hashing and logging."""
-    return {
+    payload = {
         "model": request.model,
         "backend": request.backend,
         "tier": request.tier,
@@ -252,3 +255,13 @@ def request_to_dict(request: RunRequest) -> Dict[str, Any]:
         "run_config_source": request.run_config_source,
         "simulate": request.simulate,
     }
+    # Keep the historical default request shape stable so an upgrade does not
+    # invalidate an in-progress bundle. Explicit overrides remain part of the
+    # fingerprint and therefore cannot be silently resumed with other counts.
+    if request.deployment_warmup_runs is not None:
+        payload["deployment_warmup_runs"] = request.deployment_warmup_runs
+    if request.deployment_measured_runs is not None:
+        payload["deployment_measured_runs"] = request.deployment_measured_runs
+    if request.quant_artifact_download_size_bytes is not None:
+        payload["quant_artifact_download_size_bytes"] = request.quant_artifact_download_size_bytes
+    return payload

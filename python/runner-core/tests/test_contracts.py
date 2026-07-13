@@ -98,8 +98,30 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.9")
+        self.assertEqual(manifest["contract_version"], "0.3.10")
         self.assertEqual("infergrade-runner", manifest["publisher"])
+
+    def test_run_request_contract_accepts_authorized_artifact_download_size(self):
+        schema = json.loads(
+            (repo_root() / "schemas" / "json" / "run_request.schema.json").read_text(encoding="utf-8")
+        )
+        request = {
+            "spec_version": "0.1-draft",
+            "run": {
+                "model": "example/model",
+                "backend": "llama.cpp",
+                "tier": "canary",
+            },
+            "artifacts": {
+                "quantized_weights": {
+                    "uri": "hf://example/model-GGUF/model.gguf",
+                    "revision": "0123456789abcdef",
+                    "sha256": "a" * 64,
+                    "download_size_bytes": 123456,
+                }
+            },
+        }
+        _validate_schema_subset(request, schema)
 
     def test_export_contract_bundle_copies_declared_files(self):
         with tempfile.TemporaryDirectory() as tempdir:

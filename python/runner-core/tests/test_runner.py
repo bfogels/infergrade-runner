@@ -20,6 +20,24 @@ class RunnerTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tempdir)
 
+    def test_simulated_deployment_preserves_explicit_iteration_counts(self):
+        output_dir = os.path.join(self.tempdir, "explicit-counts")
+        run_infergrade(
+            RunRequest(
+                model="Qwen/Qwen2.5-7B-Instruct",
+                backend="llama.cpp",
+                tier="canary",
+                output_dir=output_dir,
+                simulate=True,
+                deployment_warmup_runs=0,
+                deployment_measured_runs=3,
+            )
+        )
+        with open(os.path.join(output_dir, "results", "interactive_chat_v1.json"), "r", encoding="utf-8") as handle:
+            result = json.load(handle)
+        self.assertEqual(result["deployment"]["warmup_runs"], 0)
+        self.assertEqual(result["deployment"]["measured_runs"], 3)
+
     def test_runtime_kv_without_reported_context_is_not_assigned_to_fallback_context(self):
         payload = _memory_fit_payload(
             {"kv_cache_bytes": 123456, "kv_cache_context_tokens": None},
@@ -101,6 +119,27 @@ class RunnerTests(unittest.TestCase):
             progress = json.load(handle)
         self.assertEqual(progress["status"], "completed")
         self.assertEqual(progress["deployment_profiles"]["interactive_chat_v1"]["status"], "completed")
+
+    def test_generation_policy_changes_normalized_configuration_identity(self):
+        ids = []
+        for index, preset in enumerate(("deterministic_v1", "deterministic_direct_answer_v1")):
+            output_dir = os.path.join(self.tempdir, "policy-%d" % index)
+            run_infergrade(
+                RunRequest(
+                    model="Qwen/Qwen3-4B",
+                    backend="llama.cpp",
+                    tier="canary",
+                    use_case="general_assistant",
+                    output_dir=output_dir,
+                    generation_preset=preset,
+                    simulate=True,
+                )
+            )
+            with open(os.path.join(output_dir, "results", "interactive_chat_v1.json"), "r", encoding="utf-8") as handle:
+                result = json.load(handle)
+            ids.append(result["configuration"]["configuration_id"])
+            self.assertEqual(result["configuration"]["generation_preset_id"], preset)
+        self.assertNotEqual(ids[0], ids[1])
 
     def test_standalone_agent_dogfood_is_attributed_and_never_official_eligible(self):
         output_dir = os.path.join(self.tempdir, "agent-dogfood-bundle")

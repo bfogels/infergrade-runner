@@ -26,12 +26,24 @@ if str(PYTHON_SRC) not in sys.path:
 
 from infergrade import __version__  # noqa: E402
 from infergrade.benchmark_catalog import check_index, load_capability_catalog  # noqa: E402
+from infergrade.constants import DEFAULT_GENERATION_PRESET  # noqa: E402
 
 
 DOGFOOD_PLAN_VERSION = "infergrade.local_evidence_dogfood.v1"
 DEFAULT_OUTPUT_ROOT = ROOT_DIR / "runs" / "local_evidence_dogfood"
 
 LANE_PLANS = [
+    {
+        "lane_id": "deployment_interactive_measurement",
+        "label": "Interactive deployment speed, output length, and stop semantics",
+        "use_case": None,
+        "capability": "none",
+        "deployment_warmup_runs": 2,
+        "deployment_measured_runs": 5,
+        "capability_suite_ids": [],
+        "benchmark_check_ids": ["interactive_chat_v1"],
+        "claim_boundary": "Fixed-prompt deployment throughput and output-length evidence; natural stopping is not semantic correctness or scored task completion.",
+    },
     {
         "lane_id": "local_core_decision",
         "label": "Deployment plus thin local assistant/coding/reasoning samples",
@@ -208,7 +220,7 @@ def request_payload(model: Dict[str, Any], provenance: Dict[str, Any], lane: Dic
         "model": model.get("model") or provenance.get("checkpoint") or provenance.get("model_family") or "local-gguf",
         "backend": "llama.cpp",
         "tier": "standard",
-        "capability": "auto",
+        "capability": lane.get("capability", "auto"),
         "capability_suite_ids": list(lane["capability_suite_ids"]),
         "benchmark_check_ids": list(lane["benchmark_check_ids"]),
         "execution_mode": "local_native",
@@ -216,6 +228,10 @@ def request_payload(model: Dict[str, Any], provenance: Dict[str, Any], lane: Dic
     }
     if lane.get("use_case"):
         run_payload["use_case"] = lane["use_case"]
+    if lane.get("deployment_warmup_runs") is not None:
+        run_payload["deployment_warmup_runs"] = lane["deployment_warmup_runs"]
+    if lane.get("deployment_measured_runs") is not None:
+        run_payload["deployment_measured_runs"] = lane["deployment_measured_runs"]
     artifacts = {
         "quantized_weights": {
             "uri": provenance["artifact_uri_for_request"],
@@ -232,7 +248,7 @@ def request_payload(model: Dict[str, Any], provenance: Dict[str, Any], lane: Dic
             "artifact_cache_dir": "~/.cache/infergrade/artifacts",
         },
         "overrides": {
-            "generation_preset": "deterministic_v1",
+            "generation_preset": model.get("generation_preset") or DEFAULT_GENERATION_PRESET,
         },
         "ontology_hints": {
             "family_name": provenance.get("model_family"),
