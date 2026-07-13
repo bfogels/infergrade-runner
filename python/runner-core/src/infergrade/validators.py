@@ -65,6 +65,12 @@ def validate_request(request: RunRequest) -> None:
     bad_profiles = [p for p in request.deployment_profiles if p not in SUPPORTED_DEPLOYMENT_PROFILES]
     if bad_profiles:
         errors.append("Unsupported deployment profiles: %s" % ", ".join(sorted(bad_profiles)))
+    for field_name, value, minimum, maximum in (
+        ("deployment_warmup_runs", request.deployment_warmup_runs, 0, 5),
+        ("deployment_measured_runs", request.deployment_measured_runs, 1, 20),
+    ):
+        if value is not None and (type(value) is not int or value < minimum or value > maximum):
+            errors.append("%s must be an integer between %d and %d." % (field_name, minimum, maximum))
     if request.tier in ("standard", "gold") and not request.use_case and request.capability != "none":
         errors.append("standard and gold runs require --use-case unless capability is disabled.")
     if errors:

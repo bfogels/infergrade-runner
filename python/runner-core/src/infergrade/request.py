@@ -215,7 +215,7 @@ def request_from_dict(data: Dict[str, Any], simulate: bool = True, run_config_so
 
 def request_to_dict(request: RunRequest) -> Dict[str, Any]:
     """Serialize a RunRequest into a stable dictionary for hashing and logging."""
-    return {
+    payload = {
         "model": request.model,
         "backend": request.backend,
         "tier": request.tier,
@@ -237,8 +237,6 @@ def request_to_dict(request: RunRequest) -> Dict[str, Any]:
         "ontology_hints": request.ontology_hints,
         "use_case": request.use_case,
         "deployment_profiles": request.deployment_profiles,
-        "deployment_warmup_runs": request.deployment_warmup_runs,
-        "deployment_measured_runs": request.deployment_measured_runs,
         "execution_mode": request.execution_mode,
         "output_dir": request.output_dir,
         "resume": request.resume,
@@ -258,3 +256,11 @@ def request_to_dict(request: RunRequest) -> Dict[str, Any]:
         "run_config_source": request.run_config_source,
         "simulate": request.simulate,
     }
+    # Keep the historical default request shape stable so an upgrade does not
+    # invalidate an in-progress bundle. Explicit overrides remain part of the
+    # fingerprint and therefore cannot be silently resumed with other counts.
+    if request.deployment_warmup_runs is not None:
+        payload["deployment_warmup_runs"] = request.deployment_warmup_runs
+    if request.deployment_measured_runs is not None:
+        payload["deployment_measured_runs"] = request.deployment_measured_runs
+    return payload

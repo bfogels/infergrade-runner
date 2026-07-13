@@ -20,6 +20,24 @@ class RunnerTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tempdir)
 
+    def test_simulated_deployment_preserves_explicit_iteration_counts(self):
+        output_dir = os.path.join(self.tempdir, "explicit-counts")
+        run_infergrade(
+            RunRequest(
+                model="Qwen/Qwen2.5-7B-Instruct",
+                backend="llama.cpp",
+                tier="canary",
+                output_dir=output_dir,
+                simulate=True,
+                deployment_warmup_runs=0,
+                deployment_measured_runs=3,
+            )
+        )
+        with open(os.path.join(output_dir, "results", "interactive_chat_v1.json"), "r", encoding="utf-8") as handle:
+            result = json.load(handle)
+        self.assertEqual(result["deployment"]["warmup_runs"], 0)
+        self.assertEqual(result["deployment"]["measured_runs"], 3)
+
     def test_runtime_kv_without_reported_context_is_not_assigned_to_fallback_context(self):
         payload = _memory_fit_payload(
             {"kv_cache_bytes": 123456, "kv_cache_context_tokens": None},

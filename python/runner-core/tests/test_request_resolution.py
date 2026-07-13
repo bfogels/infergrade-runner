@@ -5,12 +5,42 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.models import RunRequest
 from infergrade.profiles import resolve_capability_behavior, resolve_deployment_profiles
-from infergrade.request import request_from_dict
+from infergrade.request import request_from_dict, request_to_dict
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.validators import RequestValidationError, validate_request
 
 
 class RequestResolutionTests(unittest.TestCase):
+    def test_default_deployment_counts_do_not_change_legacy_request_shape(self):
+        payload = request_to_dict(RunRequest(model="model", backend="llama.cpp", tier="canary"))
+        self.assertNotIn("deployment_warmup_runs", payload)
+        self.assertNotIn("deployment_measured_runs", payload)
+
+    def test_explicit_deployment_counts_are_fingerprinted(self):
+        payload = request_to_dict(
+            RunRequest(
+                model="model",
+                backend="llama.cpp",
+                tier="canary",
+                deployment_warmup_runs=0,
+                deployment_measured_runs=3,
+            )
+        )
+        self.assertEqual(payload["deployment_warmup_runs"], 0)
+        self.assertEqual(payload["deployment_measured_runs"], 3)
+
+    def test_deployment_count_bounds_are_enforced_by_shared_validator(self):
+        for field_name, invalid_values in (
+            ("deployment_warmup_runs", (-1, 6, 1.0, True, "1")),
+            ("deployment_measured_runs", (0, 21, 1.0, True, "1")),
+        ):
+            for invalid in invalid_values:
+                request = RunRequest(model="model", backend="llama.cpp", tier="canary")
+                setattr(request, field_name, invalid)
+                with self.subTest(field_name=field_name, invalid=invalid):
+                    with self.assertRaises(RequestValidationError):
+                        validate_request(request)
+
     def test_reasoning_use_case_is_valid_and_gets_interactive_defaults(self):
         request = RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",

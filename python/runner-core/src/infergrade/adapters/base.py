@@ -28,9 +28,20 @@ class BaseAdapter(object):
     ) -> DeploymentExecution:
         if not request.simulate:
             raise NotImplementedError("Real backend execution is not implemented yet.")
+        metrics = self._simulate_metrics(request, profile_id)
+        metrics["warmup_runs"] = (
+            request.deployment_warmup_runs
+            if request.deployment_warmup_runs is not None
+            else (1 if request.tier == "canary" else 2)
+        )
+        metrics["measured_runs"] = (
+            request.deployment_measured_runs
+            if request.deployment_measured_runs is not None
+            else (1 if request.tier == "canary" else 5)
+        )
         return DeploymentExecution(
             profile_id=profile_id,
-            metrics=self._simulate_metrics(request, profile_id),
+            metrics=metrics,
             status="simulated",
             artifacts={},
         )
