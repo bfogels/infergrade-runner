@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infergrade.local/schemas/artifact_memory_fit.schema.json",
+  "title": "InferGrade GGUF Artifact Memory Fit Estimate",
+  "type": "object",
+  "required": [
+    "artifact_type",
+    "artifact_version",
+    "policy_id",
+    "estimator_version",
+    "status",
+    "source",
+    "architecture_metadata",
+    "context_estimates",
+    "assumptions",
+    "claim_boundary"
+  ],
+  "properties": {
+    "artifact_type": { "const": "gguf_artifact_memory_fit" },
+    "artifact_version": { "const": "1.0" },
+    "policy_id": { "const": "gguf_artifact_memory_fit_v1" },
+    "estimator_version": { "const": "memory_fit_v1" },
+    "status": { "const": "estimated" },
+    "source": {
+      "type": "object",
+      "required": ["artifact_format", "artifact_size_bytes", "artifact_size_source", "architecture_metadata_source", "runtime_measurements_used"],
+      "properties": {
+        "artifact_format": { "const": "gguf" },
+        "artifact_size_bytes": { "type": "integer", "minimum": 1 },
+        "artifact_size_source": { "enum": ["local_file_stat", "repository_metadata"] },
+        "architecture_metadata_source": { "enum": ["gguf_metadata", "repository_config", "unknown"] },
+        "runtime_measurements_used": { "const": false }
+      },
+      "additionalProperties": false
+    },
+    "architecture_metadata": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["layer_count", "embedding_length", "attention_head_count", "attention_head_count_kv", "kv_cache_element_bytes"],
+          "properties": {
+            "layer_count": { "type": "integer", "minimum": 1 },
+            "embedding_length": { "type": "integer", "minimum": 1 },
+            "attention_head_count": { "type": "integer", "minimum": 1 },
+            "attention_head_count_kv": { "type": "integer", "minimum": 1 },
+            "kv_cache_element_bytes": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        { "type": "null" }
+      ]
+    },
+    "context_estimates": {
+      "type": "object",
+      "required": ["2048", "8192", "32768"],
+      "properties": {
+        "2048": { "$ref": "#/$defs/contextEstimate" },
+        "8192": { "$ref": "#/$defs/contextEstimate" },
+        "32768": { "$ref": "#/$defs/contextEstimate" }
+      },
+      "additionalProperties": false
+    },
+    "assumptions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "statement"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "statement": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "claim_boundary": {
+      "type": "object",
+      "required": ["evidence_tier", "can_claim", "cannot_claim", "fit_verdict", "support_proof", "memory_domain", "offload_policy", "guaranteed_bounds"],
+      "properties": {
+        "evidence_tier": { "const": "artifact_estimated" },
+        "can_claim": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "cannot_claim": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "fit_verdict": { "const": "not_evaluated" },
+        "support_proof": { "const": false },
+        "memory_domain": { "const": "unified_or_combined_memory" },
+        "offload_policy": { "const": "unknown" },
+        "guaranteed_bounds": { "const": false }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "contextEstimate": {
+      "type": "object",
+      "required": ["context_tokens", "estimate_range_low_bytes", "estimate_range_high_bytes", "lower_bound_bytes", "upper_bound_bytes", "components", "method", "source", "memory_domain", "fit_verdict"],
+      "properties": {
+        "context_tokens": { "enum": [2048, 8192, 32768] },
+        "estimate_range_low_bytes": { "type": "integer", "minimum": 1 },
+        "estimate_range_high_bytes": { "type": "integer", "minimum": 1 },
+        "lower_bound_bytes": { "type": "null" },
+        "upper_bound_bytes": { "type": "null" },
+        "components": {
+          "type": "object",
+          "required": ["artifact_size_proxy_bytes", "kv_cache_estimate_bytes", "kv_cache_range_low_bytes", "kv_cache_range_high_bytes", "runtime_overhead_range_low_bytes", "runtime_overhead_range_high_bytes"],
+          "properties": {
+            "artifact_size_proxy_bytes": { "type": "integer", "minimum": 1 },
+            "kv_cache_estimate_bytes": { "type": ["integer", "null"], "minimum": 1 },
+            "kv_cache_range_low_bytes": { "type": "integer", "minimum": 1 },
+            "kv_cache_range_high_bytes": { "type": "integer", "minimum": 1 },
+            "runtime_overhead_range_low_bytes": { "type": "integer", "minimum": 1 },
+            "runtime_overhead_range_high_bytes": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "method": { "enum": ["architecture_formula", "artifact_size_fallback_range"] },
+        "source": { "enum": ["architecture_formula_estimated", "artifact_size_fallback_estimated"] },
+        "memory_domain": { "const": "unified_or_combined_memory" },
+        "fit_verdict": { "const": "not_evaluated" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
