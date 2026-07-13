@@ -227,7 +227,6 @@ def request_to_dict(request: RunRequest) -> Dict[str, Any]:
         "quant_artifact_sha256": request.quant_artifact_sha256,
         "quant_artifact_filename": request.quant_artifact_filename,
         "quant_artifact_revision": request.quant_artifact_revision,
-        "quant_artifact_download_size_bytes": request.quant_artifact_download_size_bytes,
         "backend_image": request.backend_image,
         "llama_cpp_cli_path": request.llama_cpp_cli_path,
         "llama_cpp_server_path": request.llama_cpp_server_path,
@@ -263,4 +262,6 @@ def request_to_dict(request: RunRequest) -> Dict[str, Any]:
         payload["deployment_warmup_runs"] = request.deployment_warmup_runs
     if request.deployment_measured_runs is not None:
         payload["deployment_measured_runs"] = request.deployment_measured_runs
+    if request.quant_artifact_download_size_bytes is not None:
+        payload["quant_artifact_download_size_bytes"] = request.quant_artifact_download_size_bytes
     return payload

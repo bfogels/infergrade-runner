@@ -15,6 +15,7 @@ class RequestResolutionTests(unittest.TestCase):
         payload = request_to_dict(RunRequest(model="model", backend="llama.cpp", tier="canary"))
         self.assertNotIn("deployment_warmup_runs", payload)
         self.assertNotIn("deployment_measured_runs", payload)
+        self.assertNotIn("quant_artifact_download_size_bytes", payload)
 
     def test_explicit_deployment_counts_are_fingerprinted(self):
         payload = request_to_dict(
