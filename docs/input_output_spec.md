@@ -638,6 +638,7 @@ Required if present:
 
 - `use_case`
 - `capability_suite_id`
+- `benchmark_protocol_identity` records whether every scored benchmark has a Runner-authored exact protocol identity. A complete identity contains one SHA-256 fingerprint per scored check plus an aggregate fingerprint derived from the exact input case or corpus identity, scoring policy and scorer/runtime identity, generation contract, and capability registry version. Hub may use this to prove repeat equivalence; missing identity must not be inferred from benchmark names or case counts.
 - `benchmark_tier`
 - `benchmark_components`
 - `capability_status`

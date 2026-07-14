@@ -198,6 +198,21 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["primary_metric"], {"name": "structured_task_accuracy", "value": 1.0})
         self.assertEqual(result["metrics"]["correct_count"], 4)
+        protocol_identity = result["protocol_identity"]
+        self.assertEqual(protocol_identity["identity_version"], "benchmark_protocol_identity_v1")
+        self.assertEqual(protocol_identity["benchmark_id"], "assistant_compositional_instruction_v2")
+        self.assertEqual(len(protocol_identity["input_identity_sha256"]), 64)
+        self.assertEqual(len(protocol_identity["scoring_identity_sha256"]), 64)
+        self.assertEqual(len(protocol_identity["generation_identity_sha256"]), 64)
+        self.assertEqual(len(protocol_identity["fingerprint_sha256"]), 64)
+        capability = summarize_capability_execution(request, execution)
+        aggregate_identity = capability["benchmark_protocol_identity"]
+        self.assertEqual(aggregate_identity["status"], "complete")
+        self.assertEqual(
+            aggregate_identity["check_fingerprints"]["assistant_compositional_instruction_v2"],
+            protocol_identity["fingerprint_sha256"],
+        )
+        self.assertEqual(len(aggregate_identity["fingerprint_sha256"]), 64)
         artifact_path = execution.artifacts["assistant_compositional_instruction_v2"]["capability_run_path"]
         with open(artifact_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)
@@ -1618,6 +1633,12 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(len(summary["capability_component_reports"]), 2)
         self.assertEqual(summary["capability_suite_ids"], ["coding_code_editing", "quant_fidelity"])
         self.assertIn("evalplus_humaneval", summary["selected_benchmark_check_ids"])
+        self.assertEqual(summary["benchmark_protocol_identity"]["status"], "incomplete")
+        self.assertEqual(
+            summary["benchmark_protocol_identity"]["missing_benchmark_ids"],
+            ["evalplus_humaneval"],
+        )
+        self.assertIsNone(summary["benchmark_protocol_identity"]["fingerprint_sha256"])
 
     def test_summarize_capability_execution_keeps_failed_state_distinct_from_missing(self):
         request = RunRequest(
