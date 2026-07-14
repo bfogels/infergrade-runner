@@ -11,6 +11,7 @@ sys.path.insert(0, "python/runner-core/src")
 from infergrade import __version__
 from infergrade.adapters.llama_cpp import (
     LlamaCppAdapter,
+    _DEFAULT_IMAGE,
     _compute_ttft_ms,
     _decode_utf8_lossy,
     _fetch_container_logs,
@@ -369,6 +370,22 @@ class LlamaCppAdapterTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "stable container runtime"):
             adapter.resolve_version(simulate=False, request=request)
+        run_mock.assert_not_called()
+
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_explicit_canonical_image_is_still_stable_not_candidate(self, run_mock):
+        request = RunRequest(
+            model="google/gemma-4-E4B-it",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            backend_image=_DEFAULT_IMAGE,
+            tier="canary",
+            execution_mode="local_container",
+            ontology_hints={"architecture": "gemma4"},
+            simulate=False,
+        )
+        with self.assertRaisesRegex(RuntimeError, "stable container runtime"):
+            LlamaCppAdapter().resolve_version(simulate=False, request=request)
         run_mock.assert_not_called()
 
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")

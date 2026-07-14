@@ -643,7 +643,8 @@ class LlamaCppAdapter(BaseAdapter):
         # The release-default container remains on the stable pin. Explicit
         # native runtimes and custom images are deliberate candidate lanes and
         # may attempt the load while preserving their exact version and failure.
-        if request.execution_mode == "local_native" or request.backend_image:
+        selected_image = self._image_name(request)
+        if request.execution_mode == "local_native" or selected_image != _DEFAULT_IMAGE:
             return None
         raise RuntimeError(
             "llama.cpp backend compatibility check failed: GGUF architecture '%s' is not supported by "
