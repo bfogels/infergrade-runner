@@ -29,6 +29,7 @@ from infergrade.adapters.llama_cpp import (
     _sample_process_rss_mb,
     _start_container_memory_monitor,
     _stop_container_memory_monitor,
+    _stream_server_completion,
     _stream_server_chat_completion,
     _validate_direct_answer_server_completion,
 )
@@ -680,6 +681,24 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(_prepare_llama_server_chat(request, "User: A\nAssistant:"), (None, None))
 
     @mock.patch("infergrade.adapters.llama_cpp.urllib_request.urlopen")
+    def test_stream_completion_disables_cross_case_prompt_cache(self, urlopen_mock):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.readline.side_effect = [
+            b'data: {"content":"A","tokens_predicted":1,"stop":false}\n',
+            b'data: {"content":"","tokens_predicted":1,"tokens_evaluated":4,"stop":true,"stop_type":"stop","timings":{"prompt_n":4,"predicted_n":1}}\n',
+            b'',
+        ]
+        urlopen_mock.return_value = response
+
+        completion = _stream_server_completion("http://127.0.0.1:8080", "Answer only A.", 16)
+
+        self.assertEqual(completion["text"], "A")
+        sent = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
+        self.assertFalse(sent["cache_prompt"])
+        self.assertEqual(sent["prompt"], "Answer only A.")
+
+    @mock.patch("infergrade.adapters.llama_cpp.urllib_request.urlopen")
     def test_stream_chat_completion_collects_content_finish_reason_and_timings(self, urlopen_mock):
         response = mock.MagicMock()
         response.__enter__.return_value = response
@@ -698,6 +717,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(completion["final_payload"]["stop_type"], "stop")
         self.assertEqual(completion["final_payload"]["tokens_predicted"], 2)
         sent = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
+        self.assertFalse(sent["cache_prompt"])
         self.assertEqual(sent["chat_template_kwargs"], {"enable_thinking": False})
 
     def test_direct_answer_deployment_rejects_empty_but_keeps_visible_fixed_budget_output(self):
@@ -791,6 +811,37 @@ class LlamaCppAdapterTests(unittest.TestCase):
             model_path=self.model_path,
             prompt="User: What saved setup did I pick?\nAssistant:",
             max_tokens=96,
+        )
+
+    @mock.patch.object(LlamaCppAdapter, "_generate_native_completion_server_text")
+    def test_capability_suite_routes_raw_prompt_generation_through_reused_server(self, server_generate_mock):
+        server_generate_mock.return_value = {"text": "A", "status": "completed"}
+        request = RunRequest(
+            model="Qwen/Qwen3-8B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        adapter = LlamaCppAdapter()
+        adapter._capability_server_reuse_enabled = True
+
+        generated = adapter.generate_text(request, "Answer only A.", 32)
+
+        self.assertEqual(generated["text"], "A")
+        server_generate_mock.assert_called_once_with(
+            request=request,
+            model_path=self.model_path,
+            prompt="Answer only A.\n/no_think",
+            prompt_transform={
+                "id": "qwen_no_think_directive_v1",
+                "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
+                "state": "appended",
+                "placement": "append",
+            },
+            max_tokens=32,
         )
 
     @mock.patch.object(LlamaCppAdapter, "_generate_native_server_text")
@@ -946,6 +997,70 @@ class LlamaCppAdapterTests(unittest.TestCase):
         wait_mock.assert_called_once()
         stop_mock.assert_called_once_with(popen_mock.return_value)
 
+    @mock.patch("infergrade.adapters.llama_cpp._stream_server_completion")
+    def test_capability_suite_reuses_raw_completion_server_without_prompt_cache_state(self, stream_mock):
+        stream_mock.return_value = {
+            "elapsed_ms": 400.0,
+            "first_token_ms": 100.0,
+            "text": "A",
+            "final_payload": {
+                "stop": True,
+                "stop_type": "stop",
+                "tokens_evaluated": 8,
+                "tokens_predicted": 1,
+                "timings": {
+                    "prompt_n": 8,
+                    "prompt_ms": 100.0,
+                    "predicted_n": 1,
+                    "predicted_ms": 50.0,
+                    "predicted_per_second": 20.0,
+                },
+            },
+        }
+        process = mock.MagicMock()
+        process.poll.return_value = None
+        session = {
+            "base_url": "http://127.0.0.1:8123",
+            "load_time_ms": 321.0,
+            "load_time_reported": False,
+            "process": process,
+        }
+        request = RunRequest(
+            model="Qwen/Qwen3-8B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        adapter = LlamaCppAdapter()
+        with mock.patch.object(adapter, "_ensure_capability_server_session", return_value=session):
+            first = adapter._generate_native_completion_server_text(
+                request,
+                self.model_path,
+                "Answer only A.\n/no_think",
+                {"id": "qwen_no_think_directive_v1"},
+                32,
+            )
+            second = adapter._generate_native_completion_server_text(
+                request,
+                self.model_path,
+                "Answer only A again.\n/no_think",
+                {"id": "qwen_no_think_directive_v1"},
+                32,
+            )
+
+        self.assertEqual(first["load_time_ms"], 321.0)
+        self.assertIsNone(second["load_time_ms"])
+        self.assertEqual(first["input_tokens"], 8)
+        self.assertEqual(first["output_tokens"], 1)
+        self.assertEqual(first["measurement_source"], "llama_cpp_server_completion_timings")
+        self.assertEqual(
+            [call.kwargs["prompt"] for call in stream_mock.call_args_list],
+            ["Answer only A.\n/no_think", "Answer only A again.\n/no_think"],
+        )
+
     def test_capability_suite_always_disables_reuse_and_cleans_up(self):
         request = RunRequest(
             model="Qwen/Qwen3.5-9B",
@@ -969,6 +1084,30 @@ class LlamaCppAdapterTests(unittest.TestCase):
 
         self.assertFalse(adapter._capability_server_reuse_enabled)
         stop_mock.assert_called_once_with()
+
+    def test_raw_capability_keeps_one_shot_fallback_when_server_binary_is_missing(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+        )
+        adapter = LlamaCppAdapter()
+        with mock.patch.object(adapter, "_ensure_backend_model_compatibility"), mock.patch.object(
+            adapter,
+            "_native_server_path",
+            side_effect=RuntimeError("server unavailable"),
+        ), mock.patch(
+            "infergrade.adapters.base.BaseAdapter.run_capability",
+            return_value="legacy-one-shot-result",
+        ) as base_run_mock:
+            result = adapter.run_capability(request)
+
+        self.assertEqual(result, "legacy-one-shot-result")
+        self.assertFalse(adapter._capability_server_reuse_enabled)
+        base_run_mock.assert_called_once()
 
     @mock.patch("infergrade.adapters.llama_cpp._stop_process")
     @mock.patch("infergrade.adapters.llama_cpp._wait_for_native_server_ready", return_value=("http://127.0.0.1:8123", 100.0))

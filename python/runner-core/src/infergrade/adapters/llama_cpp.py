@@ -345,6 +345,15 @@ class LlamaCppAdapter(BaseAdapter):
         if not request.simulate:
             self._ensure_backend_model_compatibility(request)
         reuse_native_server = _uses_native_direct_answer_server(request)
+        if not reuse_native_server and _can_reuse_native_capability_server(request):
+            try:
+                self._native_server_path(request)
+            except RuntimeError:
+                # A raw completion setup that predates the managed three-binary
+                # runtime remains supported through its existing one-shot path.
+                reuse_native_server = False
+            else:
+                reuse_native_server = True
         if not reuse_native_server:
             return super().run_capability(request, progress_callback=progress_callback)
         self._capability_server_reuse_enabled = True
@@ -395,6 +404,14 @@ class LlamaCppAdapter(BaseAdapter):
             )
         effective_prompt, prompt_transform = _prepare_llama_prompt(request, prompt)
         if request.execution_mode == "local_native":
+            if self._capability_server_reuse_enabled:
+                return self._generate_native_completion_server_text(
+                    request=request,
+                    model_path=model_path,
+                    prompt=effective_prompt,
+                    prompt_transform=prompt_transform,
+                    max_tokens=max_tokens,
+                )
             command = [self._native_completion_path(request)]
             command.extend(
                 self._build_llama_cli_command(
@@ -617,6 +634,63 @@ class LlamaCppAdapter(BaseAdapter):
         }
         self._capability_server_session = session
         return session
+
+    def _generate_native_completion_server_text(
+        self,
+        request: RunRequest,
+        model_path: str,
+        prompt: str,
+        prompt_transform: Optional[Dict[str, str]],
+        max_tokens: int,
+    ) -> Dict[str, object]:
+        ctx_size = max(4096, min(16384, len(prompt) * 2))
+        session = self._ensure_capability_server_session(request, model_path, ctx_size)
+        try:
+            completion = _stream_server_completion(
+                base_url=str(session["base_url"]),
+                prompt=prompt,
+                max_tokens=max_tokens,
+            )
+            final_payload = dict(completion.get("final_payload") or {})
+            timings = dict(final_payload.get("timings") or {})
+            output_tokens = _whole_token_count(
+                final_payload.get("tokens_predicted") or timings.get("predicted_n")
+            )
+            protocol_error = _llama_generation_protocol_error(
+                str(completion.get("text") or ""),
+                max_tokens=max_tokens,
+                output_tokens=output_tokens,
+            )
+            if protocol_error:
+                raise RuntimeError(protocol_error)
+            report_load_time = not bool(session.get("load_time_reported"))
+            metrics = _metrics_from_server_completion(
+                completion=completion,
+                parsed_timings={},
+                load_time_ms=session.get("load_time_ms") if report_load_time else None,
+                peak_vram_mb=None,
+            )
+            session["load_time_reported"] = True
+            return {
+                "text": completion["text"],
+                "status": "completed",
+                "error": None,
+                "latency_ms": metrics.get("latency_ms"),
+                "time_to_first_token_ms": metrics.get("ttft_ms"),
+                "tokens_per_second": metrics.get("decode_tokens_per_second"),
+                "input_tokens": _whole_token_count(
+                    final_payload.get("tokens_evaluated") or timings.get("prompt_n")
+                ),
+                "output_tokens": metrics.get("output_tokens"),
+                "measurement_source": "llama_cpp_server_completion_timings",
+                "load_time_ms": metrics.get("load_time_ms"),
+                "prompt_transform": prompt_transform,
+            }
+        except Exception:
+            process = session.get("process")
+            if process is None or process.poll() is not None:
+                self._stop_capability_server_session()
+            raise
 
     def _complete_native_server_text(
         self,
@@ -1850,6 +1924,7 @@ def _stream_server_completion(base_url: str, prompt: str, max_tokens: int) -> Di
         "top_p": 1,
         "seed": 0,
         "stream": True,
+        "cache_prompt": False,
     }
     request = urllib_request.Request(
         "%s/completion" % base_url,
@@ -1906,6 +1981,7 @@ def _stream_server_chat_completion(base_url: str, messages: List[Dict[str, str]]
         "top_p": 1,
         "seed": 0,
         "stream": True,
+        "cache_prompt": False,
         "chat_template_kwargs": {"enable_thinking": False},
     }
     request = urllib_request.Request(
@@ -2278,6 +2354,10 @@ def _uses_native_direct_answer_server(request: RunRequest) -> bool:
             or architecture == "gemma4"
         )
     )
+
+
+def _can_reuse_native_capability_server(request: RunRequest) -> bool:
+    return not request.simulate and request.execution_mode == "local_native"
 
 
 def _is_qwen36_request(request: RunRequest) -> bool:
