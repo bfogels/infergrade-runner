@@ -109,6 +109,26 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(qwen35["target_quants"], ["q4_k_m"])
         self.assertEqual(qwen35["generation_preset_id"], "deterministic_direct_answer_v1")
         self.assertEqual(qwen35["status"], "needs_first_real_run")
+        qwen_sub1b = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_qwen3_sub1b_calibration_band"
+        )
+        self.assertEqual(qwen_sub1b["model_id"], "Qwen/Qwen3-0.6B")
+        self.assertEqual(qwen_sub1b["parameter_scale"], "0.6B")
+        self.assertEqual(qwen_sub1b["target_quants"], ["q8_0"])
+        self.assertEqual(qwen_sub1b["generation_preset_id"], "deterministic_direct_answer_v1")
+        ministral = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_ministral3_assistant_calibration_family"
+        )
+        self.assertEqual(ministral["model_family"], "Ministral-3")
+        self.assertEqual(ministral["parameter_scale"], "3B")
+        gemma4 = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_gemma4_assistant_calibration_family"
+        )
+        self.assertEqual(gemma4["target_quants"], ["q4_0"])
+        self.assertEqual(gemma4["parameter_scale"], "E4B")
         cuda = next(item for item in priorities if item["priority_id"] == "windows_nvidia_cuda_beta_gate")
         self.assertEqual(cuda["status"], "hardware_blocked")
         self.assertIn("full loop", cuda["why"])

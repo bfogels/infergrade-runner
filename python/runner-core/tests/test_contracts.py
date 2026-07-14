@@ -98,7 +98,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.17")
+        self.assertEqual(manifest["contract_version"], "0.3.18")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_run_request_contract_accepts_authorized_artifact_download_size(self):
