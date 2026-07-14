@@ -170,6 +170,23 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertTrue(any("multiturn_chat_memory_v1" in item and "is not declared" in item for item in failures))
         self.assertTrue(any("gpqa_reference_v1" in item and "does not match planned" in item for item in failures))
 
+    def test_catalog_legitimacy_validation_rejects_unknown_coverage_generation_preset(self):
+        mutated = deepcopy(load_capability_catalog())
+        priority = next(
+            item
+            for item in mutated["coverage_expansion_priorities"]
+            if item["priority_id"] == "apple_silicon_qwen3_assistant_baseline"
+        )
+        priority["generation_preset_id"] = "typo_direct_answer_v1"
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "apple_silicon_qwen3_assistant_baseline: unsupported coverage generation_preset_id "
+            "'typo_direct_answer_v1'",
+            failures,
+        )
+
     def test_evidence_lane_index_exposes_claim_boundaries(self):
         lanes = evidence_lane_index()
         self.assertEqual(lanes["smoke"]["claim_strength"], "execution_smoke")

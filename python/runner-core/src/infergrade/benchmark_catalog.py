@@ -6,12 +6,14 @@ from typing import Any, Dict, List, Optional
 
 from infergrade.models import RunRequest
 from infergrade.paths import runner_root
+from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
 
 FALLBACK_METADATA_ORDERING = {
     "effort_level": ["short", "low", "balanced", "medium", "deep", "high"],
     "expected_duration_band": ["1-5 min", "5-15 min", "10-25 min", "10-30 min", "15-45 min", "25-60 min"],
     "token_volume_band": ["tiny", "small", "medium", "large"],
 }
+SUPPORTED_COVERAGE_GENERATION_PRESETS = {DIRECT_ANSWER_GENERATION_PRESET}
 
 
 def repo_root() -> Path:
@@ -182,6 +184,12 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
                 failures.append(f"{priority_id or '<missing>'}: coverage priority field {field} must be non-empty")
         if not isinstance(item.get("target_quants"), list) or not item.get("target_quants"):
             failures.append(f"{priority_id or '<missing>'}: target_quants must be a non-empty list")
+        generation_preset_id = str(item.get("generation_preset_id") or "").strip()
+        if generation_preset_id and generation_preset_id not in SUPPORTED_COVERAGE_GENERATION_PRESETS:
+            failures.append(
+                f"{priority_id or '<missing>'}: unsupported coverage generation_preset_id "
+                f"{generation_preset_id!r}"
+            )
         check_ids = item.get("benchmark_check_ids")
         if not isinstance(check_ids, list) or not check_ids:
             failures.append(f"{priority_id or '<missing>'}: benchmark_check_ids must be a non-empty list")
