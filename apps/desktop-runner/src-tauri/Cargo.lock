@@ -1582,7 +1582,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_desktop_runner"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "infergrade_runner_engine",
  "keyring",
@@ -1597,7 +1597,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_runner_engine"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "serde_json",
  "url",
