@@ -10,24 +10,34 @@ class CapabilityScoringTests(unittest.TestCase):
     def test_assistant_score_uses_versioned_runner_weights(self):
         details = score_for_use_case(
             "general_assistant",
-            {"ifeval": 0.28281, "multiturn_chat_memory_v1": 1.0},
+            {
+                "ifeval": 0.28281,
+                "assistant_compositional_instruction_v1": 0.75,
+                "multiturn_chat_memory_v1": 1.0,
+            },
+            benchmark_tier="standard",
         )
 
         self.assertTrue(details["score_ready"])
-        self.assertEqual(details["score_version"], "local_assistant_score_v2")
-        self.assertEqual(details["score_method"], "weighted_primary_metric_v2")
-        self.assertEqual(details["score"], 0.462108)
+        self.assertEqual(details["score_version"], "local_assistant_score_v3")
+        self.assertEqual(details["score_method"], "weighted_benchmark_attainment_v3")
+        self.assertEqual(details["score"], 0.446326)
         self.assertEqual(details["coverage"]["coverage_fraction"], 1.0)
         self.assertEqual(
             {item["benchmark_id"]: item["weight"] for item in details["components"]},
-            {"ifeval": 0.75, "multiturn_chat_memory_v1": 0.25},
+            {"ifeval": 0.65, "assistant_compositional_instruction_v1": 0.35},
         )
+        self.assertEqual(details["scale_interpretation"], "benchmark_attainment_index")
+        self.assertFalse(details["ceiling"]["reached"])
+        self.assertEqual(details["diagnostic_components"][0]["benchmark_id"], "multiturn_chat_memory_v1")
+        self.assertEqual(details["diagnostic_components"][0]["score"], 1.0)
+        self.assertEqual(details["diagnostic_components"][0]["discrimination_status"], "empirically_saturated")
         self.assertEqual(details["failed_gates"], [])
-        self.assertTrue(details["robustness"]["dominant_component"])
-        self.assertEqual(details["robustness"]["dominant_benchmark_ids"], ["ifeval"])
-        self.assertEqual(details["robustness"]["max_absolute_delta"], 0.537892)
+        self.assertFalse(details["robustness"]["dominant_component"])
+        self.assertEqual(details["robustness"]["dominant_benchmark_ids"], [])
+        self.assertEqual(details["robustness"]["max_absolute_delta"], 0.303674)
         self.assertEqual(details["confidence_basis"]["calibration_status"], "not_psychometrically_calibrated")
-        self.assertEqual(details["confidence_basis"]["label"], "multi_component_dominant")
+        self.assertEqual(details["confidence_basis"]["label"], "multi_component_complete_coverage")
 
     def test_thin_microcheck_is_observed_but_not_headline_ready(self):
         details = score_for_use_case(
@@ -37,12 +47,38 @@ class CapabilityScoringTests(unittest.TestCase):
 
         self.assertFalse(details["score_ready"])
         self.assertEqual(details["score"], None)
-        self.assertEqual(details["observed_weighted_score"], 1.0)
-        self.assertEqual(details["reason"], "insufficient_weighted_coverage")
+        self.assertEqual(details["observed_weighted_score"], None)
+        self.assertEqual(details["reason"], "no_scored_components")
         self.assertIn("insufficient_scored_components", details["failed_gates"])
         self.assertIn("insufficient_score_dimensions", details["failed_gates"])
-        self.assertIn("component_influence_above_limit", details["failed_gates"])
-        self.assertEqual(details["coverage"]["coverage_fraction"], 0.25)
+        self.assertEqual(details["coverage"]["coverage_fraction"], 0.0)
+        self.assertEqual(details["diagnostic_components"][0]["score"], 1.0)
+
+    def test_suite_ceiling_is_labeled_as_attainment_not_perfect_capability(self):
+        details = score_for_use_case(
+            "general_assistant",
+            {"ifeval": 1.0, "assistant_compositional_instruction_v1": 1.0},
+            benchmark_tier="standard",
+        )
+
+        self.assertTrue(details["score_ready"])
+        self.assertEqual(details["score"], 1.0)
+        self.assertTrue(details["ceiling"]["reached"])
+        self.assertEqual(details["ceiling"]["label"], "Suite ceiling reached")
+        self.assertIn("not proof of perfect model capability", details["ceiling"]["interpretation"])
+
+    def test_assistant_canary_depth_cannot_publish_a_headline_index(self):
+        details = score_for_use_case(
+            "general_assistant",
+            {"ifeval": 1.0, "assistant_compositional_instruction_v1": 1.0},
+            benchmark_tier="canary",
+        )
+
+        self.assertFalse(details["score_ready"])
+        self.assertIsNone(details["score"])
+        self.assertIn("insufficient_benchmark_depth", details["failed_gates"])
+        self.assertEqual(details["eligibility"]["minimum_benchmark_tier"], "standard")
+        self.assertFalse(details["eligibility"]["benchmark_depth_ready"])
 
     def test_auxiliary_reasoning_check_does_not_become_assistant_score(self):
         details = score_for_use_case(
