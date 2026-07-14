@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "policy_version": "2026-07-14",
+  "upstream": {
+    "repository": "ggml-org/llama.cpp",
+    "latest_release_api": "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
+    "release_page": "https://github.com/ggml-org/llama.cpp/releases"
+  },
+  "intake": {
+    "check_cadence": "daily",
+    "coalesce_window_hours": 24,
+    "stable_pin_review_after_days": 30,
+    "automatic_candidate_discovery": true,
+    "automatic_stable_promotion": false,
+    "runner_release_required": false,
+    "claim_boundary": "A newer upstream release is a candidate, not an InferGrade-supported runtime, until the compatibility gates pass."
+  },
+  "pins": [
+    {
+      "id": "container_linux_cpu",
+      "channel": "infergrade_stable",
+      "kind": "commit",
+      "value": "14d3ba45f",
+      "upstream_published_at": "2026-07-14T05:29:11Z",
+      "locations": [
+        {
+          "path": "containers/llama-cpp/Dockerfile",
+          "needle": "ARG LLAMA_CPP_REF=14d3ba45f"
+        },
+        {
+          "path": "python/runner-core/src/infergrade/adapters/llama_cpp.py",
+          "needle": "_PINNED_LLAMA_CPP_REF = \"14d3ba45f\""
+        }
+      ]
+    },
+    {
+      "id": "macos_arm64_metal",
+      "channel": "infergrade_stable",
+      "kind": "release_tag",
+      "value": "b9994",
+      "upstream_published_at": "2026-07-14T05:29:11Z",
+      "locations": [
+        {
+          "path": "crates/runner-engine/src/lib.rs",
+          "needle": "const MANAGED_LLAMA_CPP_MACOS_METAL_TAG: &str = \"b9994\";"
+        }
+      ]
+    },
+    {
+      "id": "windows_x64_cuda_preview",
+      "channel": "preview",
+      "kind": "release_tag",
+      "value": "b9371",
+      "upstream_published_at": "2026-05-27T23:45:52Z",
+      "locations": [
+        {
+          "path": "python/runner-core/src/infergrade/runtimes.py",
+          "needle": "WINDOWS_CUDA_CANDIDATE_TAG = \"b9371\""
+        }
+      ]
+    }
+  ],
+  "compatibility_gates": [
+    "source_or_asset_digest_pinned",
+    "expected_binaries_present",
+    "version_smoke",
+    "legacy_control_model_loads",
+    "recent_architecture_model_loads",
+    "direct_answer_protocol_completes",
+    "thinking_protocol_is_classified",
+    "multi_turn_cache_behavior_is_usable",
+    "memory_and_latency_metrics_parse",
+    "bundle_validation_passes",
+    "performance_regressions_are_reviewed",
+    "rollback_candidate_remains_available"
+  ],
+  "model_canaries": [
+    {
+      "id": "legacy_control",
+      "family": "TinyLlama",
+      "purpose": "Detect broad load and generation regressions independently of new architecture support.",
+      "hardware_scope": "ci_or_owned_hardware"
+    },
+    {
+      "id": "qwen35_protocol",
+      "family": "Qwen3.5",
+      "purpose": "Verify direct-answer and thinking-mode protocol behavior through the chat API.",
+      "hardware_scope": "owned_apple_silicon"
+    },
+    {
+      "id": "gemma4_consumer",
+      "family": "Gemma 4",
+      "artifact": "hf://google/gemma-4-E4B-it-qat-q4_0-gguf/gemma-4-E4B_q4_0-it.gguf",
+      "revision": "7edc6763a77bbca236126a361613b834c5ea0f7a",
+      "sha256": "e8b6a059ba86947a44ace84d6e5679795bc41862c25c30513142588f0e9dba1d",
+      "size_bytes": 5154939136,
+      "purpose": "Exercise the newest Gemma architecture with Google's consumer-sized exact QAT GGUF.",
+      "hardware_scope": "owned_apple_silicon"
+    },
+    {
+      "id": "qwen36_large",
+      "family": "Qwen3.6",
+      "artifact": "hf://unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf",
+      "revision": "a483e9e6cbd595906af30beda3187c2663a1118c",
+      "sha256": "96b9c0af5c77a4ecaabe3983175112b5ece763261c1ece12b2494b692a70dad7",
+      "size_bytes": 12290628576,
+      "purpose": "Exercise Qwen3.6 load, direct-answer, thinking, and recurrent-cache behavior.",
+      "hardware_scope": "24gb_or_larger_memory_qualified_host",
+      "required_for_owned_16gb_gate": false
+    }
+  ]
+}

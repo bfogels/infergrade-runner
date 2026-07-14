@@ -59,10 +59,11 @@ infergrade-runner runtime install
 - No legacy install or upgrade happens unless `--execute` is passed.
 - No Rust managed install happens unless `infergrade-runner runtime install` is run explicitly.
 - Runtime channel changes and updates are manual. The shared engine exposes `infergrade_stable`, `previous_release`, `upstream_release`, `local_binary`, and `experimental` channel policy so Desktop and CLI can render the same safety model.
+- Upstream discovery is automated but promotion is not. The daily runtime-intake workflow reports new llama.cpp candidates and pin age without silently changing a user's selected runtime.
 - Managed selections are stored under `~/.cache/infergrade/runtimes/llama.cpp/selected_runtime.json`.
 - Explicit CLI paths and `INFERGRADE_LLAMA_CPP_*` environment variables override managed selection.
 - Doctor reports whether native binaries came from `custom_path`, `environment_path`, `managed_runtime`, or `system_path`.
-- The v0.2.2 Rust manifest includes a macOS Apple Silicon `llama.cpp` GitHub release asset with a pinned SHA-256 digest, expected binaries, compatibility notes, and rollback metadata.
+- The Rust manifest includes a macOS Apple Silicon `llama.cpp` GitHub release asset with a pinned SHA-256 digest, expected binaries, compatibility notes, and rollback metadata. The current stable is b9994; b9050 remains available as the explicit previous-release rollback.
 - Rust managed runtime install is explicit: it downloads only after a user command/action, verifies SHA-256, extracts into the InferGrade runtime cache, checks expected binaries, runs a version smoke, and writes the selected runtime record.
 - The upstream GitHub release asset digest is useful, but it is not an independent signature. Do not describe the runtime as independently signed until a signature lane exists.
 - The existing selected-runtime path remains available as the advanced/local-binary fallback.

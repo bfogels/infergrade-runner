@@ -356,7 +356,8 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(run_mock.call_args[0][0], ["/managed/llama-cli", "--version"])
 
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
-    def test_resolve_version_rejects_unsupported_gemma4_architecture_early(self, run_mock):
+    def test_resolve_version_allows_gemma4_on_current_pinned_container(self, run_mock):
+        run_mock.return_value = mock.Mock(returncode=0, stdout="version: 9994 (pinned)\n", stderr="")
         adapter = LlamaCppAdapter()
         request = RunRequest(
             model="google/gemma-4-27b-it",
@@ -367,12 +368,15 @@ class LlamaCppAdapterTests(unittest.TestCase):
             ontology_hints={"architecture": "gemma4", "family_name": "Gemma 4"},
             simulate=False,
         )
-        with self.assertRaisesRegex(RuntimeError, "GGUF architecture 'gemma4'"):
+        with mock.patch.object(adapter, "_ensure_docker"), mock.patch(
+            "infergrade.adapters.llama_cpp.install_image"
+        ):
             adapter.resolve_version(simulate=False, request=request)
-        run_mock.assert_not_called()
+        run_mock.assert_called_once()
 
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
-    def test_resolve_version_rejects_unsupported_architecture_from_gguf_metadata(self, run_mock):
+    def test_resolve_version_allows_gemma4_detected_from_gguf_metadata(self, run_mock):
+        run_mock.return_value = mock.Mock(returncode=0, stdout="version: 9994 (pinned)\n", stderr="")
         gguf_path = os.path.join(self.tempdir.name, "gemma4.gguf")
 
         def gguf_string(value):
@@ -397,9 +401,49 @@ class LlamaCppAdapterTests(unittest.TestCase):
             execution_mode="local_container",
             simulate=False,
         )
-        with self.assertRaisesRegex(RuntimeError, "GGUF architecture 'gemma4'"):
+        with mock.patch.object(adapter, "_ensure_docker"), mock.patch(
+            "infergrade.adapters.llama_cpp.install_image"
+        ):
             adapter.resolve_version(simulate=False, request=request)
-        run_mock.assert_not_called()
+        run_mock.assert_called_once()
+
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_explicit_native_runtime_can_attempt_gemma4_candidate(self, run_mock):
+        run_mock.return_value = mock.Mock(returncode=0, stdout="version: 9994 (candidate)\n", stderr="")
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="google/gemma-4-E4B-it",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            llama_cpp_cli_path="/candidate/llama-cli",
+            ontology_hints={"architecture": "gemma4", "family_name": "Gemma 4"},
+            simulate=False,
+        )
+        with mock.patch.object(adapter, "_native_command_path", return_value="/candidate/llama-cli"):
+            version = adapter.resolve_version(simulate=False, request=request)
+        self.assertEqual(version, "version: 9994 (candidate)")
+
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
+    def test_custom_container_can_attempt_gemma4_candidate(self, run_mock):
+        run_mock.return_value = mock.Mock(returncode=0, stdout="version: 9994 (candidate)\n", stderr="")
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="google/gemma-4-E4B-it",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            backend_image="example/llama-cpp-gemma4-candidate:9994",
+            tier="canary",
+            execution_mode="local_container",
+            ontology_hints={"architecture": "gemma4", "family_name": "Gemma 4"},
+            simulate=False,
+        )
+        with mock.patch.object(adapter, "_ensure_docker"), mock.patch(
+            "infergrade.adapters.llama_cpp.install_image"
+        ):
+            version = adapter.resolve_version(simulate=False, request=request)
+        self.assertEqual(version, "version: 9994 (candidate)")
 
     @mock.patch("infergrade.adapters.llama_cpp.install_image")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
@@ -523,6 +567,62 @@ class LlamaCppAdapterTests(unittest.TestCase):
         )
         self.assertEqual(transform["id"], "qwen_chat_template_disable_thinking_v1")
         self.assertEqual(transform["placement"], "structured_messages")
+
+    def test_server_command_requests_runtime_memory_telemetry(self):
+        request = RunRequest(
+            model="google/gemma-4-E4B-it",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+        )
+        command = LlamaCppAdapter()._build_llama_server_command(
+            model_path=self.model_path,
+            ctx_size=4096,
+            request=request,
+            host="127.0.0.1",
+            port=8123,
+        )
+        verbosity_index = command.index("--log-verbosity")
+        self.assertEqual(command[verbosity_index + 1], "4")
+
+    def test_gemma4_direct_answer_server_uses_structured_chat(self):
+        request = RunRequest(
+            model="google/gemma-4-E4B-it",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+            ontology_hints={"architecture": "gemma4"},
+        )
+        messages, transform = _prepare_llama_server_chat(
+            request,
+            "Benchmark system instruction.\n\nUser: Reply exactly READY.\nAssistant:",
+        )
+        self.assertEqual(
+            messages,
+            [
+                {"role": "system", "content": "Benchmark system instruction."},
+                {"role": "user", "content": "Reply exactly READY."},
+            ],
+        )
+        self.assertEqual(transform["id"], "gemma4_chat_template_disable_thinking_v1")
+
+    @mock.patch.object(LlamaCppAdapter, "_generate_native_server_text")
+    def test_gemma4_direct_answer_capability_uses_native_chat_server(self, server_generate_mock):
+        server_generate_mock.return_value = {"text": "READY", "status": "completed"}
+        request = RunRequest(
+            model="google/gemma-4-E4B-it",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+            ontology_hints={"architecture": "gemma4"},
+        )
+        generated = LlamaCppAdapter().generate_text(request, "Reply exactly READY.", 32)
+        self.assertEqual(generated["text"], "READY")
+        server_generate_mock.assert_called_once()
 
     def test_qwen35_direct_answer_server_wraps_plain_reasoning_and_coding_prompts(self):
         request = RunRequest(
@@ -681,6 +781,37 @@ class LlamaCppAdapterTests(unittest.TestCase):
             prompt="User: What saved setup did I pick?\nAssistant:",
             max_tokens=96,
         )
+
+    @mock.patch.object(LlamaCppAdapter, "_generate_native_server_text")
+    def test_qwen36_direct_answer_uses_native_chat_template_parameter(self, server_generate_mock):
+        server_generate_mock.return_value = {"text": "A", "status": "completed"}
+        request = RunRequest(
+            model="Qwen/Qwen3.6-27B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+            ontology_hints={"architecture": "qwen35"},
+        )
+        generated = LlamaCppAdapter().generate_text(request, "Answer only A.", 32)
+        self.assertEqual(generated["text"], "A")
+        server_generate_mock.assert_called_once()
+
+    def test_qwen36_direct_answer_fails_closed_outside_native_chat_path(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.6-27B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_container",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+            ontology_hints={"architecture": "qwen35"},
+        )
+        with self.assertRaisesRegex(RuntimeError, "requires the local_native llama-server chat path"):
+            LlamaCppAdapter().generate_text(request, "Answer only A.", 32)
 
     @mock.patch("infergrade.adapters.llama_cpp._stop_process")
     @mock.patch("infergrade.adapters.llama_cpp._read_log_file", return_value="")

@@ -55,10 +55,7 @@ _DEFAULT_SERVER_PORT = 8080
 _SERVER_READY_TIMEOUT_SECONDS = 180.0
 _SERVER_REQUEST_TIMEOUT_SECONDS = 300.0
 _CONTAINER_MEMORY_SAMPLE_INTERVAL_SECONDS = 0.25
-_PINNED_LLAMA_CPP_REF = "9f102a140"
-_UNSUPPORTED_ARCHITECTURES = {
-    "gemma4": "the pinned llama.cpp runtime predates Gemma 4 GGUF support",
-}
+_PINNED_LLAMA_CPP_REF = "14d3ba45f"
 _PERPLEXITY_CORPUS_ID = "infergrade_quantfidelity_v1"
 _PERPLEXITY_CORPUS_REVISION = "sha256:ca86babd3cb6e69ca5db20f7625723da6951f98bcaab98f12291db36deef3512"
 _PERPLEXITY_PROTOCOL_ID = "infergrade_perplexity_v1"
@@ -352,9 +349,22 @@ class LlamaCppAdapter(BaseAdapter):
         self._ensure_backend_model_compatibility(request)
         model_path = self._require_local_gguf_artifact(request)
         if (
+            request.generation_preset == DIRECT_ANSWER_GENERATION_PRESET
+            and _is_qwen36_request(request)
+            and request.execution_mode != "local_native"
+        ):
+            raise RuntimeError(
+                "Qwen3.6 direct-answer generation requires the local_native llama-server chat path so "
+                "InferGrade can pass chat_template_kwargs.enable_thinking=false. The /no_think prompt "
+                "switch used by older Qwen models is not valid evidence for Qwen3.6."
+            )
+        if (
             request.execution_mode == "local_native"
             and request.generation_preset == DIRECT_ANSWER_GENERATION_PRESET
-            and str(_infer_llama_cpp_architecture(request) or "").startswith("qwen35")
+            and (
+                str(_infer_llama_cpp_architecture(request) or "").startswith("qwen35")
+                or _infer_llama_cpp_architecture(request) == "gemma4"
+            )
         ):
             return self._generate_native_server_text(
                 request=request,
@@ -442,10 +452,12 @@ class LlamaCppAdapter(BaseAdapter):
         directive through ``llama-completion``. The server chat API accepts the
         same explicit ``enable_thinking=false`` policy already used by deployment
         profiles, so direct-answer capability tasks use that protocol as well.
+        Gemma 4 also requires its Jinja chat template; recent llama-completion
+        builds abort when asked to infer that template from a preformatted prompt.
         """
         messages, prompt_transform = _prepare_llama_server_chat(request, prompt)
         if messages is None:
-            raise RuntimeError("Qwen3.5 direct-answer generation requires structured chat messages")
+            raise RuntimeError("Direct-answer generation requires structured chat messages")
         published_port = _find_free_local_port()
         command = [self._native_server_path(request)]
         command.extend(
@@ -611,19 +623,12 @@ class LlamaCppAdapter(BaseAdapter):
         return env_value("INFERGRADE_LLAMA_CPP_IMAGE", "QUANTBENCH_LLAMA_CPP_IMAGE", _DEFAULT_IMAGE)
 
     def _ensure_backend_model_compatibility(self, request: RunRequest) -> None:
-        architecture = _infer_llama_cpp_architecture(request)
-        if architecture not in _UNSUPPORTED_ARCHITECTURES:
-            return
-        raise RuntimeError(
-            "llama.cpp backend compatibility check failed: GGUF architecture '%s' is not supported by the pinned llama.cpp runtime (%s) because %s. "
-            "Model '%s' should use a newer llama.cpp image/runtime or another supported backend lane."
-            % (
-                architecture,
-                _PINNED_LLAMA_CPP_REF,
-                _UNSUPPORTED_ARCHITECTURES[architecture],
-                request.model,
-            )
-        )
+        # Compatibility is established by the pinned-runtime canary matrix.
+        # Do not maintain a second architecture denylist here: it becomes stale
+        # when the runtime advances and can reject models the pinned binary has
+        # already proven it can execute. Unknown architectures should reach the
+        # selected runtime so its exact load failure and version remain evidence.
+        return None
 
     def _require_local_gguf_artifact(self, request: RunRequest) -> str:
         artifact = request.quant_artifact_resolved_path or request.quant_artifact
@@ -961,6 +966,8 @@ class LlamaCppAdapter(BaseAdapter):
             str(port),
             "--perf",
             "--no-warmup",
+            "--log-verbosity",
+            "4",
             "-np",
             "1",
         ]
@@ -2017,11 +2024,17 @@ def _prepare_llama_server_chat(
     request: RunRequest,
     prompt: str,
 ) -> Tuple[Optional[List[Dict[str, str]]], Optional[Dict[str, str]]]:
-    """Use llama-server chat templating only for the explicit Qwen direct-answer policy."""
+    """Use llama-server chat templating for explicit direct-answer protocols."""
     if request.generation_preset != DIRECT_ANSWER_GENERATION_PRESET:
         return None, None
-    if not str(_infer_llama_cpp_architecture(request) or "").startswith("qwen3"):
+    architecture = str(_infer_llama_cpp_architecture(request) or "")
+    if not (architecture.startswith("qwen3") or architecture == "gemma4"):
         return None, None
+    transform_id = (
+        "gemma4_chat_template_disable_thinking_v1"
+        if architecture == "gemma4"
+        else "qwen_chat_template_disable_thinking_v1"
+    )
     raw = str(prompt or "")
     assistant_marker = "\nAssistant:"
     user_marker = "\nUser:"
@@ -2031,7 +2044,7 @@ def _prepare_llama_server_chat(
         if not raw.strip():
             raise RuntimeError("Direct-answer prompt is empty")
         return [{"role": "user", "content": raw.strip()}], {
-            "id": "qwen_chat_template_disable_thinking_v1",
+            "id": transform_id,
             "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
             "state": "chat_template_enable_thinking_false_single_user_prompt",
             "placement": "structured_messages",
@@ -2045,7 +2058,7 @@ def _prepare_llama_server_chat(
         messages.append({"role": "system", "content": system_content})
     messages.append({"role": "user", "content": user_content})
     return messages, {
-        "id": "qwen_chat_template_disable_thinking_v1",
+        "id": transform_id,
         "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
         "state": "chat_template_enable_thinking_false",
         "placement": "structured_messages",
@@ -2088,6 +2101,18 @@ def _infer_llama_cpp_architecture(request: RunRequest) -> Optional[str]:
         if "gemma2" in normalized:
             return "gemma2"
     return None
+
+
+def _is_qwen36_request(request: RunRequest) -> bool:
+    hints = request.ontology_hints or {}
+    candidates = [
+        request.model,
+        request.quant_artifact,
+        request.quant_artifact_filename,
+        hints.get("family_name"),
+        hints.get("checkpoint_name"),
+    ]
+    return any("qwen36" in re.sub(r"[^a-z0-9]+", "", str(value or "").lower()) for value in candidates)
 
 
 def _coerce_float(value: Any) -> Optional[float]:

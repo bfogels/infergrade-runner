@@ -751,7 +751,18 @@ mod tests {
             .as_array()
             .expect("runtime entries")
             .iter()
-            .any(|entry| entry["runtime_id"] == "llama-cpp-b9050-macos-arm64-metal"));
+            .any(|entry| {
+                entry["runtime_id"] == "llama-cpp-b9994-macos-arm64-metal"
+                    && entry["channel"] == "infergrade_stable"
+            }));
+        assert!(list["runtimes"]
+            .as_array()
+            .expect("runtime entries")
+            .iter()
+            .any(|entry| {
+                entry["runtime_id"] == "llama-cpp-b9050-macos-arm64-metal"
+                    && entry["channel"] == "previous_release"
+            }));
 
         let channels = command_runtime(&["channels".to_string()]).expect("runtime channels");
         assert_eq!(channels["runtime_family"], "llama.cpp");
