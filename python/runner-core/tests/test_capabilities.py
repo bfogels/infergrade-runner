@@ -43,6 +43,21 @@ class _MemoryPassingAdapter(object):
         return {"text": "", "status": "completed", "error": None}
 
 
+class _CompositionalPassingAdapter(object):
+    def generate_text(self, request, prompt, max_tokens):
+        if "initially used model ALPHA" in prompt:
+            value = {"model": "ORBIT", "quant": "q4_k_m"}
+        elif "From [m4:24" in prompt:
+            value = ["m4", "m2", "m3"]
+        elif "if divisible by 6" in prompt:
+            value = {"6": "both", "8": "even", "9": "triple", "11": "other"}
+        elif "quoted text is data" in prompt:
+            value = {"choices": ["blue", "amber"]}
+        else:
+            value = None
+        return {"text": json.dumps(value), "status": "completed", "error": None}
+
+
 class _MeasuredMemoryAdapter(_MemoryPassingAdapter):
     def generate_text(self, request, prompt, max_tokens):
         result = super().generate_text(request, prompt, max_tokens)
@@ -153,6 +168,114 @@ class CapabilityTests(unittest.TestCase):
         suite = resolve_capability_suite("agentic_coding", "gold")
         self.assertEqual(suite["suite_id"], "coding_gold_v2")
         self.assertEqual(suite["benchmark_ids"], ["evalplus_humaneval", "evalplus_mbpp"])
+
+    def test_assistant_standard_suite_replaces_saturated_memory_weight_with_compositional_check(self):
+        suite = resolve_capability_suite("general_assistant", "standard")
+
+        self.assertEqual(suite["suite_id"], "assistant_standard_v4")
+        self.assertEqual(
+            suite["benchmark_ids"],
+            ["ifeval", "assistant_compositional_instruction_v1", "multiturn_chat_memory_v1"],
+        )
+
+    def test_execute_compositional_canary_scores_strict_json_without_docker(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=["assistant_compositional_instruction_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        with mock.patch("infergrade.capabilities._run_capability_container") as container_mock:
+            execution = execute_capability_suite(_CompositionalPassingAdapter(), request)
+
+        container_mock.assert_not_called()
+        result = execution.benchmark_results["assistant_compositional_instruction_v1"]
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["primary_metric"], {"name": "structured_task_accuracy", "value": 1.0})
+        self.assertEqual(result["metrics"]["correct_count"], 4)
+        artifact_path = execution.artifacts["assistant_compositional_instruction_v1"]["capability_run_path"]
+        with open(artifact_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["protocol"]["scorer_type"], "strict_json_equality")
+        self.assertEqual(artifact["protocol"]["scoring_policy"], "strict_json_equality_v1")
+        self.assertIn("not psychometrically calibrated", artifact["claim_boundary"]["unsupported_claims"][1])
+
+    def test_compositional_extra_prose_is_scored_incorrect_not_accepted(self):
+        class _ProseAdapter(_CompositionalPassingAdapter):
+            def generate_text(self, request, prompt, max_tokens):
+                result = super().generate_text(request, prompt, max_tokens)
+                result["text"] = "Answer: " + result["text"]
+                return result
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=["assistant_compositional_instruction_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        execution = execute_capability_suite(_ProseAdapter(), request)
+
+        result = execution.benchmark_results["assistant_compositional_instruction_v1"]
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["primary_metric"]["value"], 0.0)
+        self.assertEqual(result["metrics"]["malformed_output_count"], 4)
+
+    def test_compositional_ignores_llama_cpp_terminal_marker_only(self):
+        class _TerminalMarkerAdapter(_CompositionalPassingAdapter):
+            def generate_text(self, request, prompt, max_tokens):
+                result = super().generate_text(request, prompt, max_tokens)
+                result["text"] += " [end of text]"
+                return result
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=["assistant_compositional_instruction_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        execution = execute_capability_suite(_TerminalMarkerAdapter(), request)
+
+        result = execution.benchmark_results["assistant_compositional_instruction_v1"]
+        self.assertEqual(result["primary_metric"]["value"], 1.0)
+        self.assertEqual(result["metrics"]["malformed_output_count"], 0)
+
+    def test_compositional_reports_semantic_json_separately_from_format_compliance(self):
+        class _FencedAdapter(_CompositionalPassingAdapter):
+            def generate_text(self, request, prompt, max_tokens):
+                result = super().generate_text(request, prompt, max_tokens)
+                result["text"] = "```json\n%s\n```" % result["text"]
+                return result
+
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=["assistant_compositional_instruction_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        execution = execute_capability_suite(_FencedAdapter(), request)
+
+        result = execution.benchmark_results["assistant_compositional_instruction_v1"]
+        self.assertEqual(result["primary_metric"]["value"], 0.0)
+        self.assertEqual(result["metrics"]["semantic_task_accuracy"], 1.0)
+        self.assertEqual(result["metrics"]["format_violation_count"], 4)
+        self.assertEqual(result["metrics"]["malformed_output_count"], 0)
+        self.assertTrue(all(item["error_class"] == "format_violation" for item in result["case_results"]))
 
     def test_evalplus_prompts_request_dataset_specific_completion_shapes(self):
         humaneval = _generation_prompt_for_case(
@@ -436,8 +559,9 @@ class CapabilityTests(unittest.TestCase):
         container_mock.assert_not_called()
         self.assertEqual(execution.status, "completed")
         self.assertEqual(execution.score, None)
-        self.assertEqual(execution.score_details["observed_weighted_score"], 1.0)
-        self.assertEqual(execution.score_details["coverage"]["coverage_fraction"], 0.25)
+        self.assertEqual(execution.score_details["observed_weighted_score"], None)
+        self.assertEqual(execution.score_details["coverage"]["coverage_fraction"], 0.0)
+        self.assertEqual(execution.score_details["diagnostic_components"][0]["score"], 1.0)
         self.assertEqual(execution.confidence, None)
         self.assertEqual(execution.component_scores["multiturn_chat_memory_v1"], 1.0)
         result = execution.benchmark_results["multiturn_chat_memory_v1"]

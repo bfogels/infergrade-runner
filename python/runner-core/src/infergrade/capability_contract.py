@@ -1,6 +1,7 @@
 """Validation helpers for Runner-owned capability artifacts."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +33,7 @@ SCORER_TYPES = (
     "exact_match",
     "regex",
     "json_schema",
+    "strict_json_equality",
     "unit_test",
     "static_check",
     "multiple_choice",
@@ -207,8 +209,8 @@ def validate_capability_summary_artifact(artifact: Dict[str, Any]) -> List[str]:
                     errors.append(prefix + "score is required when score_ready is true")
                 if surface.get("score_ready") is False and surface.get("score") is not None:
                     errors.append(prefix + "score must be null when score_ready is false")
-                if str(surface.get("score_version") or "").endswith("_v2"):
-                    _validate_v2_score_diagnostics(surface, prefix, errors)
+                if re.search(r"_v(?:2|3)$", str(surface.get("score_version") or "")):
+                    _validate_versioned_score_diagnostics(surface, prefix, errors)
             if not isinstance(surface.get("capability_artifacts"), list):
                 errors.append(prefix + "capability_artifacts must be an array")
             if not _confidence_allowed_for_lane(surface.get("lane"), surface.get("confidence_label")):
@@ -246,19 +248,19 @@ def validate_capability_summary_artifact(artifact: Dict[str, Any]) -> List[str]:
     return errors
 
 
-def _validate_v2_score_diagnostics(surface: Dict[str, Any], prefix: str, errors: List[str]) -> None:
+def _validate_versioned_score_diagnostics(surface: Dict[str, Any], prefix: str, errors: List[str]) -> None:
     failed_gates = surface.get("score_failed_gates")
     if not isinstance(failed_gates, list) or not all(isinstance(item, str) and item.strip() for item in failed_gates):
-        errors.append(prefix + "v2 score requires score_failed_gates as a string array")
+        errors.append(prefix + "versioned score requires score_failed_gates as a string array")
         failed_gates = []
     if surface.get("score_ready") is True and failed_gates:
-        errors.append(prefix + "v2 ready score cannot have failed gates")
+        errors.append(prefix + "ready versioned score cannot have failed gates")
     if surface.get("score_ready") is False and not failed_gates:
-        errors.append(prefix + "v2 unready score requires at least one failed gate")
+        errors.append(prefix + "unready versioned score requires at least one failed gate")
 
     eligibility = surface.get("score_eligibility")
     if not isinstance(eligibility, dict):
-        errors.append(prefix + "v2 score requires score_eligibility")
+        errors.append(prefix + "versioned score requires score_eligibility")
     else:
         for key in ("minimum_scored_components", "observed_scored_components", "minimum_score_dimensions"):
             value = eligibility.get(key)
@@ -276,7 +278,7 @@ def _validate_v2_score_diagnostics(surface: Dict[str, Any], prefix: str, errors:
 
     robustness = surface.get("score_robustness")
     if not isinstance(robustness, dict):
-        errors.append(prefix + "v2 score requires score_robustness")
+        errors.append(prefix + "versioned score requires score_robustness")
     else:
         if robustness.get("method") != "leave_one_component_out_v1":
             errors.append(prefix + "score_robustness.method must be leave_one_component_out_v1")
@@ -289,7 +291,7 @@ def _validate_v2_score_diagnostics(surface: Dict[str, Any], prefix: str, errors:
 
     basis = surface.get("score_confidence_basis")
     if not isinstance(basis, dict):
-        errors.append(prefix + "v2 score requires score_confidence_basis")
+        errors.append(prefix + "versioned score requires score_confidence_basis")
     else:
         if basis.get("kind") != "inspectable_evidence_basis_v1":
             errors.append(prefix + "score_confidence_basis.kind must be inspectable_evidence_basis_v1")

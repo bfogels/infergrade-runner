@@ -93,6 +93,10 @@ The currently implemented first-user catalog is:
 
 - group: `instruction_following`
   - check: `ifeval`
+- group: `assistant_compositional`
+  - check: `assistant_compositional_instruction_v1`
+- group: `chat_memory`
+  - check: `multiturn_chat_memory_v1` (diagnostic only; zero headline-score weight)
 - group: `chat_memory`
   - check: `multiturn_chat_memory_v1`
 - group: `reasoning_exact_answer`
@@ -165,7 +169,7 @@ The current supported suites should report capability truthfully rather than sof
 
 The currently supported first-user benchmark surfaces are:
 
-- assistant surface: `chat_instruction_following` via `ifeval`, `multiturn_chat_memory_v1`, and explicit sampled `mmlu_pro_reference_v1`
+- assistant surface: `chat_instruction_following` via `ifeval` and `assistant_compositional_instruction_v1`, with `multiturn_chat_memory_v1` retained as diagnostic smoke evidence
 - coding surface: `coding_code_editing` via `evalplus_humaneval` and `evalplus_mbpp`
 - reasoning surface: `mmlu_pro_reference_v1` when selected intentionally as reference evidence
 - quant-fidelity surface: `perplexity_reference_v1`
@@ -180,6 +184,20 @@ Those are the lanes we expect to keep locally regression-tested and operationall
 The schema is `schemas/json/capability_run.schema.json`; the methodology is [Local Benchmark Methodology](local_benchmark_methodology.md).
 
 The first local assistant artifact path is `multiturn_chat_memory_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. This is a thin local sample and remains experimental decision evidence.
+
+The memory fixture no longer contributes headline assistant-score weight. A 2026-07-14 audit of the latest 300 public result briefs found 37 scored memory runs and 35 exact suite-ceiling results across models ranging from hundreds of millions to billions of parameters. That roughly 95% ceiling rate means the fixture can still prove that a setup cleared five basic retention cases, but it cannot separate stronger models. Restoring score weight requires a new cross-model discrimination audit.
+
+`assistant_compositional_instruction_v1` is the replacement local decision component. It runs twelve pinned synthetic tasks (four in canary) that combine corrections, filtering, ordering, conditional rules, and strict JSON output. Entire structured answers are scored by JSON equality; extra prose and malformed JSON score zero. The artifact separately reports semantic JSON accuracy and format-violation counts when a fenced JSON value is otherwise correct, so users can distinguish task errors from machine-readable-output failures without relaxing the headline contract. It is deliberately provisional and must be calibrated across diverse models before stronger claims. It is not preference quality, factual knowledge, psychometric calibration, global intelligence, or leaderboard evidence.
+
+The first local calibration on 2026-07-14 used three GGUF setups on Apple M1 Pro with deterministic direct-answer generation:
+
+| Setup | Strict compositional | Semantic JSON | Memory diagnostic |
+| --- | ---: | ---: | ---: |
+| Qwen3-0.6B Q8_0 | 0/12 | 0/12 | 1/8 constraints |
+| Qwen2.5-7B-Instruct Q4_K_M | 2/12 | 7/12 | 8/8 constraints |
+| Qwen3.5-9B Q4_K_M | 7/12 | 7/12 | 8/8 constraints |
+
+The older 7B setup's remaining misses included genuine filtering, deduplication, transform, and state-update errors; five otherwise-correct answers violated the strict JSON-only contract with Markdown fences. The current 9B setup retained clear headroom rather than reaching the suite ceiling. A control run with thinking left enabled exhausted every Qwen3-0.6B task budget inside unfinished thinking and correctly remained failed evidence rather than becoming a zero score. This initial ladder confirms that the new fixture separates these three setups where the memory microcheck does not. It still does not establish cross-family discrimination, psychometric difficulty calibration, or readiness for a public leaderboard, so the fixture remains provisional pending a broader distribution.
 
 The first local coding artifact path is `coding_static_repair_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. It checks fenced Python outputs against deterministic static constraints. It does not execute generated code, run unit tests, sandbox a repository, or support SWE-bench/LiveCodeBench-style claims.
 
@@ -205,11 +223,15 @@ The summary lists the capability artifacts produced in the bundle, keeps each su
 
 The summary may recommend actions such as running a missing assistant/coding/reasoning decision lane, retrying a failed or partial lane, or repeating local capability checks after all thin samples are present. It must not combine assistant, coding, reasoning, quant fidelity, and deployment fitness into a global intelligence score.
 
-### Local Capability Score v2
+### Local Capability Scores v2 and v3
 
 Assistant, coding, and reasoning scores are separate, versioned task scores. A v2 score is headline-ready only when the selected surface has at least 50% of its configured benchmark weight, two scored components, two distinct score dimensions, and no component above 80% of the observed normalized weight. The Runner keeps an observed weighted score when a gate fails, but publishes the task score as `null` and names every failed gate.
 
 Every v2 score includes configured component weights, coverage, leave-one-component-out sensitivity, dominant-component flags, and an inspectable confidence basis. That basis describes evidence coverage and sensitivity; it is not a probability, confidence interval, psychometric calibration, or global intelligence claim. Composite confidence conservatively uses the weakest evidence label on the capability surface, and consumers must not compare scores across score versions.
+
+Assistant score v3 changes the mix and the meaning. IFEval carries 65% weight, compositional instruction following carries 35%, and the saturated memory microcheck carries zero. Both weighted components and both dimensions must score, so assistant v3 requires 100% configured coverage. The value is a **benchmark-attainment index**, not a percentile, probability, IQ-like quantity, or percent of perfect general capability.
+
+When every weighted component reaches its maximum, Runner records `suite_ceiling_reached`. Consumers should display that phrase instead of presenting the model as “100/100 perfect.” The result means the current suite cannot distinguish additional capability; the remedy is a harder or broader benchmark mix and a new score version, not an arbitrary point penalty.
 
 ## Container Contract
 

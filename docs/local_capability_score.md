@@ -1,6 +1,6 @@
-# Local Capability Score Contract
+# Local Capability Benchmark Index Contract
 
-InferGrade reports task-scoped local capability scores, not a global intelligence score. Deployment speed, latency, memory, model size, cost, and quant fidelity remain separate decision axes.
+InferGrade reports task-scoped benchmark-attainment indexes, not grades of a model and not a global intelligence score. Deployment speed, latency, memory, model size, cost, and quant fidelity remain separate decision axes.
 
 ## Score families
 
@@ -8,25 +8,32 @@ The Runner currently owns three versioned score families:
 
 | Score | Version | Intended question |
 | --- | --- | --- |
-| Local assistant score | `local_assistant_score_v1` | How well did this setup perform on the pinned assistant benchmark mix? |
-| Local coding score | `local_coding_score_v1` | How well did this setup perform on the pinned coding benchmark mix? |
-| Local reasoning score | `local_reasoning_score_v1` | How well did this setup perform on the pinned reasoning benchmark mix? |
+| Local assistant benchmark index | `local_assistant_score_v3` | What fraction of the current weighted assistant suite did this setup attain? |
+| Local coding score | `local_coding_score_v2` | How well did this setup perform on the pinned coding benchmark mix? |
+| Local reasoning score | `local_reasoning_score_v2` | How well did this setup perform on the pinned reasoning benchmark mix? |
 
-Scores use a `0..1` contract value and may be displayed as `0..100`. Comparisons are valid only within the same score version and surface.
+Scores use a `0..1` contract value. Hub displays this as benchmark points, not `x/100`: a value of `0.72` is `72 benchmark points`. A value of `1.0` must be labeled `suite ceiling reached`, never `perfect`, because it means only that every scored check in that version passed. Comparisons are valid only within the same score version and surface.
 
-## Version 1 benchmark weights
+## Current assistant benchmark weights
 
 Weights live in `schemas/capability_catalog.json` as `primary_score_weight` values. They sum to one within each scored surface.
 
-- Assistant: IFEval `0.75`; multi-turn chat memory `0.25`.
+- Assistant v3: IFEval `0.65`; compositional instruction following `0.35`.
+- Multi-turn chat memory remains visible as a zero-weight diagnostic component.
 - Coding: EvalPlus HumanEval+ `0.55`; EvalPlus MBPP+ `0.30`; static repair `0.15`.
 - Reasoning: MMLU-Pro reference `0.80`; exact-answer decision sample `0.20`.
 
-The weights deliberately keep tiny synthetic checks from carrying the same headline influence as broader decision or reference benchmarks. Changing a weight or benchmark mix requires a new score version.
+The weights deliberately keep tiny synthetic checks from carrying the same headline influence as broader decision or reference benchmarks. Changing a weight or benchmark mix requires a new score version. The compositional fixture is provisional until it has a cross-model score distribution; IFEval remains its established companion component.
+
+## Saturation policy
+
+The memory microcheck was removed from assistant headline weight after a 2026-07-14 audit of the latest 300 public result briefs found 35 of 37 scored results at its ceiling, including sub-billion-parameter models. Its result still proves whether a setup cleared that exact fixture, but it no longer distinguishes assistant capability.
+
+Every weighted component needs a periodic distribution audit across diverse model families and sizes. If its ceiling rate exceeds the documented threshold, InferGrade must demote it to diagnostic evidence, expand or replace it, and increment the score version. A saturated component must not be rescued by arbitrary penalties or model-age priors.
 
 ## Coverage gate
 
-A surface needs at least `0.50` of its declared benchmark weight before the aggregate becomes headline-ready. Below that threshold InferGrade preserves:
+Assistant v3 needs all declared benchmark weight (`1.00`), at least two scored components, at least two score dimensions, and `standard` or deeper sample depth before the aggregate becomes headline-ready. A canary can guide setup and expose failures, but it cannot publish the headline index even if all of its sampled cases pass. Coding and reasoning v2 retain their declared gates. Below a gate InferGrade preserves:
 
 - the component result;
 - its observed weighted score;
@@ -34,7 +41,7 @@ A surface needs at least `0.50` of its declared benchmark weight before the aggr
 - missing benchmark IDs;
 - and the next useful benchmark action.
 
-But `capability_score` remains `null`. This prevents a perfect result on a three- or five-case microcheck from appearing as a broad `100/100` capability claim.
+But `capability_score` remains `null`. This prevents a ceiling result on a tiny diagnostic from appearing as a broad capability claim.
 
 The legacy numeric `capability_confidence` also remains `null` until the score clears the same coverage gate. Evidence state, component results, and coverage still show that the benchmark itself completed.
 
@@ -55,4 +62,4 @@ Runner does not infer decode throughput from end-to-end task latency, and it doe
 
 ## Claim boundary
 
-These scores help choose a local model, quant, runtime, and hardware setup for a named task surface. They do not establish universal model quality, production readiness, safety, expert reasoning, repository-editing ability, or leaderboard-grade standing.
+These indexes help choose a local model, quant, runtime, and hardware setup for a named task surface. They do not establish universal model quality, production readiness, safety, expert reasoning, repository-editing ability, or leaderboard-grade standing. A suite ceiling describes the benchmark's inability to distinguish further performance; it is not evidence of model perfection.

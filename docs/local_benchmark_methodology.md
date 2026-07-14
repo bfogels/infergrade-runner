@@ -85,6 +85,8 @@ Runner catalog maturity levels are:
 
 The maturity status is declared in `schemas/capability_catalog.json` and explained in [Benchmark Legitimacy Program](benchmark_legitimacy_program.md). A thin local sample stays thin even if the score is high. A reference or gold claim requires the corresponding fixture, harness, scoring, artifact, sandbox, access, and review gates.
 
+Reaching every available point means the benchmark ceiling was reached, not that the model is perfect. A component that repeatedly saturates across materially different models must be demoted to diagnostic-only evidence or replaced. Its raw completion result may remain visible, but it must not keep headline-score weight merely for continuity.
+
 ## Local-First Protocol
 
 Every runnable check should capture:
