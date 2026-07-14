@@ -55,6 +55,21 @@ class ReleaseCiTests(unittest.TestCase):
 
         self.assertIn("python3 ./scripts/sync_versions.py --check", workflow)
         self.assertIn("python3 ./scripts/check_versions.py", workflow)
+        self.assertIn("python3 ./scripts/check_llama_cpp_runtime_policy.py", workflow)
+
+    def test_llama_cpp_intake_is_read_only_advisory_automation(self):
+        workflow = (ROOT / ".github" / "workflows" / "llama-cpp-runtime-intake.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('cron: "17 9 * * *"', workflow)
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn("repos/ggml-org/llama.cpp/releases/latest", workflow)
+        self.assertIn("scripts/check_llama_cpp_runtime_policy.py", workflow)
+        self.assertIn("actions/upload-artifact@v4", workflow)
+        self.assertNotIn("contents: write", workflow)
+        self.assertNotIn("pull-requests: write", workflow)
+        self.assertNotIn("issues: write", workflow)
 
     def test_publish_container_workflow_defaults_to_version_file_at_runtime(self):
         workflow = (ROOT / ".github" / "workflows" / "publish-containers.yml").read_text(encoding="utf-8")

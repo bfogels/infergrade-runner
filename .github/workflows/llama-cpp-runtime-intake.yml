@@ -1,0 +1,53 @@
+name: llama.cpp Runtime Intake
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: llama-cpp-runtime-intake
+  cancel-in-progress: true
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Fetch official latest-release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p runtime-intake
+          curl --fail --show-error --silent --location \
+            --retry 3 \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
+            > runtime-intake/latest-release.json
+
+      - name: Validate pins and build advisory intake report
+        run: |
+          python3 scripts/check_llama_cpp_runtime_policy.py \
+            --latest-release-json runtime-intake/latest-release.json \
+            --report-json runtime-intake/report.json \
+            --report-markdown runtime-intake/report.md
+          cat runtime-intake/report.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload intake report
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-cpp-runtime-intake-${{ github.run_id }}
+          path: runtime-intake/
+          retention-days: 30
