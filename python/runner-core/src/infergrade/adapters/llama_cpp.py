@@ -103,6 +103,13 @@ def _llama_cpp_version_label(output: str) -> Optional[str]:
 class LlamaCppAdapter(BaseAdapter):
     backend_name = "llama.cpp"
 
+    def __init__(self):
+        # Direct-answer capability suites can contain hundreds of cases. Keep a
+        # native chat server alive only while one suite is executing; individual
+        # generate_text calls outside that boundary retain the one-shot path.
+        self._capability_server_reuse_enabled = False
+        self._capability_server_session = None
+
     def default_backend_flags(self):
         return ["--n-gpu-layers=99"] if shutil.which("nvidia-smi") is not None else []
 
@@ -337,7 +344,15 @@ class LlamaCppAdapter(BaseAdapter):
     ):
         if not request.simulate:
             self._ensure_backend_model_compatibility(request)
-        return super().run_capability(request, progress_callback=progress_callback)
+        reuse_native_server = _uses_native_direct_answer_server(request)
+        if not reuse_native_server:
+            return super().run_capability(request, progress_callback=progress_callback)
+        self._capability_server_reuse_enabled = True
+        try:
+            return super().run_capability(request, progress_callback=progress_callback)
+        finally:
+            self._stop_capability_server_session()
+            self._capability_server_reuse_enabled = False
 
     def generate_text(
         self,
@@ -371,15 +386,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "Runner container capability generation still uses llama-completion, which cannot safely apply "
                 "Gemma 4's Jinja chat template."
             )
-        if (
-            request.execution_mode == "local_native"
-            and request.generation_preset == DIRECT_ANSWER_GENERATION_PRESET
-            and (
-                str(_infer_llama_cpp_architecture(request) or "").startswith("qwen35")
-                or _is_qwen36_request(request)
-                or _infer_llama_cpp_architecture(request) == "gemma4"
-            )
-        ):
+        if _uses_native_direct_answer_server(request):
             return self._generate_native_server_text(
                 request=request,
                 model_path=model_path,
@@ -472,12 +479,33 @@ class LlamaCppAdapter(BaseAdapter):
         messages, prompt_transform = _prepare_llama_server_chat(request, prompt)
         if messages is None:
             raise RuntimeError("Direct-answer generation requires structured chat messages")
+        ctx_size = max(4096, min(16384, len(prompt) * 2))
+        if self._capability_server_reuse_enabled:
+            session = self._ensure_capability_server_session(request, model_path, ctx_size)
+            try:
+                return self._complete_native_server_text(
+                    session=session,
+                    messages=messages,
+                    prompt_transform=prompt_transform,
+                    max_tokens=max_tokens,
+                    reuse_session=True,
+                )
+            except Exception:
+                # Invalid model output is a case-level benchmark failure, not a
+                # reason to reload the model. Discard only a server process that
+                # actually exited; a live stateless endpoint can serve the next
+                # independent case safely.
+                process = session.get("process")
+                if process is None or process.poll() is not None:
+                    self._stop_capability_server_session()
+                raise
+
         published_port = _find_free_local_port()
         command = [self._native_server_path(request)]
         command.extend(
             self._build_llama_server_command(
                 model_path=model_path,
-                ctx_size=max(4096, min(16384, len(prompt) * 2)),
+                ctx_size=ctx_size,
                 request=request,
                 host="127.0.0.1",
                 port=published_port,
@@ -492,37 +520,18 @@ class LlamaCppAdapter(BaseAdapter):
             with open(log_path, "wb") as log_file:
                 process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
             base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
-            completion = _stream_server_chat_completion(
-                base_url=base_url,
+            return self._complete_native_server_text(
+                session={
+                    "base_url": base_url,
+                    "load_time_ms": load_time_ms,
+                    "load_time_reported": False,
+                    "log_path": log_path,
+                },
                 messages=messages,
+                prompt_transform=prompt_transform,
                 max_tokens=max_tokens,
+                reuse_session=False,
             )
-            _validate_direct_answer_server_completion(completion, prompt_transform)
-            parsed = _parse_llama_timings(_read_log_file(log_path))
-            metrics = _metrics_from_server_completion(
-                completion=completion,
-                parsed_timings=parsed,
-                load_time_ms=load_time_ms,
-                peak_vram_mb=None,
-            )
-            final_payload = dict(completion.get("final_payload") or {})
-            usage = dict(final_payload.get("usage") or {})
-            timings = dict(final_payload.get("timings") or {})
-            return {
-                "text": completion["text"],
-                "status": "completed",
-                "error": None,
-                "latency_ms": metrics.get("latency_ms"),
-                "time_to_first_token_ms": metrics.get("ttft_ms"),
-                "tokens_per_second": metrics.get("decode_tokens_per_second"),
-                "input_tokens": _whole_token_count(
-                    usage.get("prompt_tokens") or timings.get("prompt_n") or parsed.get("prompt_eval_tokens")
-                ),
-                "output_tokens": metrics.get("output_tokens"),
-                "measurement_source": "llama_cpp_server_chat_timings",
-                "load_time_ms": metrics.get("load_time_ms"),
-                "prompt_transform": prompt_transform,
-            }
         except Exception as exc:
             logs_text = _read_log_file(log_path)
             detail = str(exc)
@@ -535,6 +544,132 @@ class LlamaCppAdapter(BaseAdapter):
                 os.unlink(log_path)
             except OSError:
                 pass
+
+    def _ensure_capability_server_session(
+        self,
+        request: RunRequest,
+        model_path: str,
+        ctx_size: int,
+    ) -> Dict[str, object]:
+        # Bucket growth so a suite can restart at most twice after its initial
+        # 4K server rather than once for every new prompt-length high water mark.
+        ctx_size = 4096 if ctx_size <= 4096 else 8192 if ctx_size <= 8192 else 16384
+        session = self._capability_server_session
+        request_key = (
+            os.path.abspath(model_path),
+            self._native_server_path(request),
+            tuple(request.backend_flags),
+        )
+        if (
+            session
+            and session.get("request_key") == request_key
+            and int(session.get("ctx_size") or 0) >= ctx_size
+            and session.get("process") is not None
+            and session["process"].poll() is None
+        ):
+            return session
+
+        self._stop_capability_server_session()
+        published_port = _find_free_local_port()
+        command = [request_key[1]]
+        command.extend(
+            self._build_llama_server_command(
+                model_path=model_path,
+                ctx_size=ctx_size,
+                request=request,
+                host="127.0.0.1",
+                port=published_port,
+            )
+        )
+        log_handle = tempfile.NamedTemporaryFile(
+            prefix="infergrade-llama-capability-suite-",
+            suffix=".log",
+            delete=False,
+        )
+        log_path = log_handle.name
+        log_handle.close()
+        process = None
+        started = time.perf_counter()
+        try:
+            with open(log_path, "wb") as log_file:
+                process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
+            base_url, load_time_ms = _wait_for_native_server_ready(
+                process,
+                published_port,
+                started,
+                log_path,
+            )
+        except Exception:
+            _stop_process(process)
+            try:
+                os.unlink(log_path)
+            except OSError:
+                pass
+            raise
+        session = {
+            "base_url": base_url,
+            "ctx_size": ctx_size,
+            "load_time_ms": load_time_ms,
+            "load_time_reported": False,
+            "log_path": log_path,
+            "process": process,
+            "request_key": request_key,
+        }
+        self._capability_server_session = session
+        return session
+
+    def _complete_native_server_text(
+        self,
+        session: Dict[str, object],
+        messages: List[Dict[str, str]],
+        prompt_transform: Optional[Dict[str, str]],
+        max_tokens: int,
+        reuse_session: bool,
+    ) -> Dict[str, object]:
+        completion = _stream_server_chat_completion(
+            base_url=str(session["base_url"]),
+            messages=messages,
+            max_tokens=max_tokens,
+        )
+        _validate_direct_answer_server_completion(completion, prompt_transform)
+        parsed = {} if reuse_session else _parse_llama_timings(_read_log_file(str(session["log_path"])))
+        report_load_time = not bool(session.get("load_time_reported"))
+        metrics = _metrics_from_server_completion(
+            completion=completion,
+            parsed_timings=parsed,
+            load_time_ms=session.get("load_time_ms") if report_load_time else None,
+            peak_vram_mb=None,
+        )
+        session["load_time_reported"] = True
+        final_payload = dict(completion.get("final_payload") or {})
+        usage = dict(final_payload.get("usage") or {})
+        timings = dict(final_payload.get("timings") or {})
+        return {
+            "text": completion["text"],
+            "status": "completed",
+            "error": None,
+            "latency_ms": metrics.get("latency_ms"),
+            "time_to_first_token_ms": metrics.get("ttft_ms"),
+            "tokens_per_second": metrics.get("decode_tokens_per_second"),
+            "input_tokens": _whole_token_count(
+                usage.get("prompt_tokens") or timings.get("prompt_n") or parsed.get("prompt_eval_tokens")
+            ),
+            "output_tokens": metrics.get("output_tokens"),
+            "measurement_source": "llama_cpp_server_chat_timings",
+            "load_time_ms": metrics.get("load_time_ms"),
+            "prompt_transform": prompt_transform,
+        }
+
+    def _stop_capability_server_session(self) -> None:
+        session = self._capability_server_session
+        self._capability_server_session = None
+        if not session:
+            return
+        _stop_process(session.get("process"))
+        try:
+            os.unlink(str(session.get("log_path") or ""))
+        except OSError:
+            pass
 
     def run_fidelity(self, request: RunRequest) -> FidelityExecution:
         if request.simulate:
@@ -2128,6 +2263,21 @@ def _infer_llama_cpp_architecture(request: RunRequest) -> Optional[str]:
         if "gemma2" in normalized:
             return "gemma2"
     return None
+
+
+def _uses_native_direct_answer_server(request: RunRequest) -> bool:
+    if request.simulate:
+        return False
+    architecture = str(_infer_llama_cpp_architecture(request) or "")
+    return (
+        request.execution_mode == "local_native"
+        and request.generation_preset == DIRECT_ANSWER_GENERATION_PRESET
+        and (
+            architecture.startswith("qwen35")
+            or _is_qwen36_request(request)
+            or architecture == "gemma4"
+        )
+    )
 
 
 def _is_qwen36_request(request: RunRequest) -> bool:

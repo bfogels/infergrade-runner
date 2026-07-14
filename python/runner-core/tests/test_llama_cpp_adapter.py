@@ -890,6 +890,131 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(sent_messages[-1], {"role": "user", "content": "What saved setup did I pick?"})
         stop_mock.assert_called_once_with(popen_mock.return_value)
 
+    @mock.patch("infergrade.adapters.llama_cpp._stop_process")
+    @mock.patch("infergrade.adapters.llama_cpp._stream_server_chat_completion")
+    @mock.patch("infergrade.adapters.llama_cpp._wait_for_native_server_ready", return_value=("http://127.0.0.1:8123", 321.0))
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.Popen")
+    @mock.patch.object(LlamaCppAdapter, "_native_server_path", return_value="/opt/homebrew/bin/llama-server")
+    def test_capability_suite_reuses_one_native_chat_server_across_cases(
+        self,
+        native_server_mock,
+        popen_mock,
+        wait_mock,
+        stream_mock,
+        stop_mock,
+    ):
+        popen_mock.return_value.poll.return_value = None
+        stream_mock.return_value = {
+            "elapsed_ms": 720.0,
+            "first_token_ms": 180.0,
+            "text": "READY",
+            "final_payload": {
+                "stop_type": "stop",
+                "usage": {"prompt_tokens": 12, "completion_tokens": 1},
+                "timings": {"prompt_n": 12, "predicted_n": 1, "predicted_per_second": 20.0},
+            },
+        }
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        adapter = LlamaCppAdapter()
+        adapter._capability_server_reuse_enabled = True
+
+        first = adapter._generate_native_server_text(request, self.model_path, "Reply READY.", 32)
+        second = adapter._generate_native_server_text(request, self.model_path, "Reply READY again.", 32)
+        stream_mock.return_value = {
+            "elapsed_ms": 100.0,
+            "first_token_ms": None,
+            "text": "",
+            "final_payload": {"stop_type": "stop", "timings": {}},
+        }
+        with self.assertRaisesRegex(RuntimeError, "without visible answer"):
+            adapter._generate_native_server_text(request, self.model_path, "Fail visibly.", 32)
+        self.assertIsNotNone(adapter._capability_server_session)
+        adapter._stop_capability_server_session()
+
+        self.assertEqual(first["load_time_ms"], 321.0)
+        self.assertIsNone(second["load_time_ms"])
+        self.assertEqual(stream_mock.call_count, 3)
+        popen_mock.assert_called_once()
+        wait_mock.assert_called_once()
+        stop_mock.assert_called_once_with(popen_mock.return_value)
+
+    def test_capability_suite_always_disables_reuse_and_cleans_up(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        adapter = LlamaCppAdapter()
+        with mock.patch.object(adapter, "_ensure_backend_model_compatibility"), mock.patch.object(
+            adapter,
+            "_stop_capability_server_session",
+        ) as stop_mock, mock.patch(
+            "infergrade.adapters.base.BaseAdapter.run_capability",
+            side_effect=RuntimeError("suite failed"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "suite failed"):
+                adapter.run_capability(request)
+
+        self.assertFalse(adapter._capability_server_reuse_enabled)
+        stop_mock.assert_called_once_with()
+
+    @mock.patch("infergrade.adapters.llama_cpp._stop_process")
+    @mock.patch("infergrade.adapters.llama_cpp._wait_for_native_server_ready", return_value=("http://127.0.0.1:8123", 100.0))
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.Popen")
+    @mock.patch.object(LlamaCppAdapter, "_native_server_path", return_value="/opt/homebrew/bin/llama-server")
+    def test_capability_server_restarts_only_for_context_growth_or_process_exit(
+        self,
+        native_server_mock,
+        popen_mock,
+        wait_mock,
+        stop_mock,
+    ):
+        processes = [mock.MagicMock(), mock.MagicMock(), mock.MagicMock()]
+        for process in processes:
+            process.poll.return_value = None
+        popen_mock.side_effect = processes
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        adapter = LlamaCppAdapter()
+
+        first = adapter._ensure_capability_server_session(request, self.model_path, 5000)
+        same = adapter._ensure_capability_server_session(request, self.model_path, 7000)
+        grown = adapter._ensure_capability_server_session(request, self.model_path, 9000)
+        processes[1].poll.return_value = 1
+        recovered = adapter._ensure_capability_server_session(request, self.model_path, 12000)
+        adapter._stop_capability_server_session()
+
+        self.assertIs(first, same)
+        self.assertEqual(first["ctx_size"], 8192)
+        self.assertIsNot(first, grown)
+        self.assertEqual(grown["ctx_size"], 16384)
+        self.assertIsNot(grown, recovered)
+        self.assertEqual(popen_mock.call_count, 3)
+        self.assertEqual(wait_mock.call_count, 3)
+        self.assertEqual(
+            [call.args[0] for call in stop_mock.call_args_list],
+            processes,
+        )
+
     @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
     def test_generate_text_local_native_requires_noninteractive_completion_binary(self, run_mock, which_mock):
