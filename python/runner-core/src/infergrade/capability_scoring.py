@@ -154,6 +154,7 @@ def score_capability_surface(
         "scale_interpretation": policy.get("scale_interpretation") or "benchmark_attainment_index",
         "ceiling_display_policy": policy.get("ceiling_display_policy") or "label_suite_ceiling_not_perfection",
         "score": observed_score if score_ready else None,
+        "raw_attainment": observed_score,
         "observed_weighted_score": observed_score,
         "score_ready": score_ready,
         "reason": reason,
@@ -203,6 +204,13 @@ def score_capability_surface(
             "repeat_measurements_included": False,
             "explanation": (
                 "This basis describes benchmark coverage and component sensitivity; it is not a calibrated probability that the score is correct."
+            ),
+        },
+        "calibration": {
+            "status": str(policy.get("distribution_calibration_status") or "provisional_pending_distribution_audit"),
+            "policy": dict(policy.get("calibration_policy") or {}),
+            "interpretation": (
+                "Raw benchmark attainment is published without cosmetic rescaling. Calibration readiness is a corpus-level property and must pass the declared distribution audit."
             ),
         },
         "claim_boundary": policy.get("claim_boundary"),

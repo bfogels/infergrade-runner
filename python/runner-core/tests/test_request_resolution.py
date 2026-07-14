@@ -175,7 +175,7 @@ class RequestResolutionTests(unittest.TestCase):
         }
         request = request_from_dict(payload)
         self.assertEqual(request.use_case, "agentic_coding")
-        self.assertEqual(request.tier, "standard")
+        self.assertEqual(request.tier, "canary")
         self.assertEqual(request.deployment_profiles, ["long_context_v1"])
         self.assertEqual(request.capability, "auto")
         self.assertIn("quant_fidelity", request.capability_suite_ids)
@@ -200,6 +200,21 @@ class RequestResolutionTests(unittest.TestCase):
         self.assertEqual(request.use_case, "agentic_coding")
         self.assertEqual(request.deployment_profiles, ["long_context_v1"])
         self.assertEqual(request.capability, "auto")
+
+    def test_request_from_dict_preserves_explicit_sample_tier_for_one_check(self):
+        request = request_from_dict(
+            {
+                "run": {
+                    "model": "Qwen/Qwen3.5-9B",
+                    "backend": "llama.cpp",
+                    "tier": "standard",
+                    "benchmark_check_ids": ["assistant_compositional_instruction_v2"],
+                }
+            }
+        )
+
+        self.assertEqual(request.tier, "standard")
+        self.assertTrue(request.tier_was_explicit)
 
 
 if __name__ == "__main__":

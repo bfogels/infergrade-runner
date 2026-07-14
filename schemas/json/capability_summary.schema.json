@@ -121,6 +121,8 @@
         "state": { "$ref": "#/$defs/state" },
         "score": { "type": ["number", "null"] },
         "score_observed": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "score_raw_attainment": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "score_calibration": { "type": ["object", "null"], "additionalProperties": true },
         "score_label": { "type": ["string", "null"] },
         "score_version": { "type": ["string", "null"] },
         "score_method": { "type": ["string", "null"] },

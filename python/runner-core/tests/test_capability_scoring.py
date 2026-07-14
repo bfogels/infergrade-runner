@@ -12,20 +12,20 @@ class CapabilityScoringTests(unittest.TestCase):
             "general_assistant",
             {
                 "ifeval": 0.28281,
-                "assistant_compositional_instruction_v1": 0.75,
+                "assistant_compositional_instruction_v2": 0.75,
                 "multiturn_chat_memory_v1": 1.0,
             },
             benchmark_tier="standard",
         )
 
         self.assertTrue(details["score_ready"])
-        self.assertEqual(details["score_version"], "local_assistant_score_v3")
-        self.assertEqual(details["score_method"], "weighted_benchmark_attainment_v3")
-        self.assertEqual(details["score"], 0.446326)
+        self.assertEqual(details["score_version"], "local_assistant_score_v4")
+        self.assertEqual(details["score_method"], "weighted_benchmark_attainment_v4")
+        self.assertEqual(details["score"], 0.539764)
         self.assertEqual(details["coverage"]["coverage_fraction"], 1.0)
         self.assertEqual(
             {item["benchmark_id"]: item["weight"] for item in details["components"]},
-            {"ifeval": 0.65, "assistant_compositional_instruction_v1": 0.35},
+            {"ifeval": 0.45, "assistant_compositional_instruction_v2": 0.55},
         )
         self.assertEqual(details["scale_interpretation"], "benchmark_attainment_index")
         self.assertFalse(details["ceiling"]["reached"])
@@ -35,7 +35,7 @@ class CapabilityScoringTests(unittest.TestCase):
         self.assertEqual(details["failed_gates"], [])
         self.assertFalse(details["robustness"]["dominant_component"])
         self.assertEqual(details["robustness"]["dominant_benchmark_ids"], [])
-        self.assertEqual(details["robustness"]["max_absolute_delta"], 0.303674)
+        self.assertEqual(details["robustness"]["max_absolute_delta"], 0.256954)
         self.assertEqual(details["confidence_basis"]["calibration_status"], "not_psychometrically_calibrated")
         self.assertEqual(details["confidence_basis"]["label"], "multi_component_complete_coverage")
 
@@ -57,7 +57,7 @@ class CapabilityScoringTests(unittest.TestCase):
     def test_suite_ceiling_is_labeled_as_attainment_not_perfect_capability(self):
         details = score_for_use_case(
             "general_assistant",
-            {"ifeval": 1.0, "assistant_compositional_instruction_v1": 1.0},
+            {"ifeval": 1.0, "assistant_compositional_instruction_v2": 1.0},
             benchmark_tier="standard",
         )
 
@@ -70,7 +70,7 @@ class CapabilityScoringTests(unittest.TestCase):
     def test_assistant_canary_depth_cannot_publish_a_headline_index(self):
         details = score_for_use_case(
             "general_assistant",
-            {"ifeval": 1.0, "assistant_compositional_instruction_v1": 1.0},
+            {"ifeval": 1.0, "assistant_compositional_instruction_v2": 1.0},
             benchmark_tier="canary",
         )
 
