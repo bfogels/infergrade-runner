@@ -86,6 +86,18 @@
       "status": "needs_real_repeats"
     },
     {
+      "priority_id": "apple_silicon_qwen3_assistant_baseline",
+      "rank": 15,
+      "hardware_class": "apple_silicon",
+      "model_family": "Qwen3",
+      "target_quants": ["q4_k_m"],
+      "use_case": "general_assistant",
+      "benchmark_check_ids": ["interactive_chat_v1", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
+      "why": "A reviewed Qwen3 baseline adds a current cross-generation assistant comparison on common Apple Silicon memory budgets.",
+      "what_it_would_change": "Let recommendations compare observed Qwen3 speed, memory, and assistant retention with Qwen2.5 while recording Qwen3 perplexity only for future same-family quant comparisons.",
+      "status": "needs_first_real_run"
+    },
+    {
       "priority_id": "apple_silicon_coding_reference_ladder",
       "rank": 20,
       "hardware_class": "apple_silicon",
