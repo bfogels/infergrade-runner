@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-07-13-evalplus-normalized-v2",
+  "catalog_version": "2026-07-14-qwen35-reviewed-v1",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -96,6 +96,19 @@
       "benchmark_check_ids": ["interactive_chat_v1", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
       "why": "A reviewed Qwen3 baseline adds a current cross-generation assistant comparison on common Apple Silicon memory budgets.",
       "what_it_would_change": "Let recommendations compare observed Qwen3 speed, memory, and assistant retention with Qwen2.5 while recording Qwen3 perplexity only for future same-family quant comparisons.",
+      "status": "needs_first_real_run"
+    },
+    {
+      "priority_id": "apple_silicon_qwen35_assistant_baseline",
+      "rank": 17,
+      "hardware_class": "apple_silicon",
+      "model_family": "Qwen3.5",
+      "target_quants": ["q4_k_m"],
+      "use_case": "general_assistant",
+      "generation_preset_id": "deterministic_direct_answer_v1",
+      "benchmark_check_ids": ["interactive_chat_v1", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
+      "why": "A reviewed Qwen3.5 baseline adds a recent-model assistant comparison on Apple Silicon after exact artifact and local llama.cpp compatibility verification.",
+      "what_it_would_change": "Let recommendations compare observed Qwen3.5 speed, memory, task time, and assistant retention with Qwen3 and Qwen2.5 while keeping perplexity comparisons within each model family.",
       "status": "needs_first_real_run"
     },
     {
