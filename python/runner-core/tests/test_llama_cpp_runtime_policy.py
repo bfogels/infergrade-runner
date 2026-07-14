@@ -34,6 +34,12 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
         failures = self.module.validate_policy(policy, root=ROOT)
         self.assertTrue(any("source pin does not match" in item for item in failures))
 
+    def test_short_commit_pin_is_rejected(self):
+        policy = copy.deepcopy(self.policy)
+        policy["pins"][0]["value"] = "14d3ba45f"
+        failures = self.module.validate_policy(policy, root=ROOT)
+        self.assertTrue(any("full 40-character" in item for item in failures))
+
     def test_new_upstream_release_is_advisory_candidate(self):
         latest = {
             "tag_name": "b10001",
@@ -47,8 +53,17 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
         )
         self.assertTrue(report["candidate_available"])
         self.assertFalse(report["stable_promotion_automatic"])
-        self.assertFalse(report["runner_release_required"])
-        self.assertFalse(any(pin["review_due"] for pin in report["pins"] if pin["channel"] == "infergrade_stable"))
+        self.assertTrue(report["runner_release_required"])
+        self.assertTrue(any(pin["review_due"] for pin in report["pins"] if pin["channel"] == "infergrade_stable"))
+
+    def test_tracked_reviewed_candidate_is_not_reported_as_new(self):
+        latest = {
+            "tag_name": "b9994",
+            "published_at": "2026-07-14T05:29:11Z",
+            "html_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b9994",
+        }
+        report = self.module.build_report(self.policy, latest_release=latest)
+        self.assertFalse(report["candidate_available"])
 
     def test_stable_pin_age_triggers_review_without_forcing_latest(self):
         report = self.module.build_report(

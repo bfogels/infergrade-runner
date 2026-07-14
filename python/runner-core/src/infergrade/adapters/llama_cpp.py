@@ -55,7 +55,7 @@ _DEFAULT_SERVER_PORT = 8080
 _SERVER_READY_TIMEOUT_SECONDS = 180.0
 _SERVER_REQUEST_TIMEOUT_SECONDS = 300.0
 _CONTAINER_MEMORY_SAMPLE_INTERVAL_SECONDS = 0.25
-_PINNED_LLAMA_CPP_REF = "14d3ba45f"
+_PINNED_LLAMA_CPP_REF = "14d3ba45f3369e75a308212399cfada5d349883b"
 _PERPLEXITY_CORPUS_ID = "infergrade_quantfidelity_v1"
 _PERPLEXITY_CORPUS_REVISION = "sha256:ca86babd3cb6e69ca5db20f7625723da6951f98bcaab98f12291db36deef3512"
 _PERPLEXITY_PROTOCOL_ID = "infergrade_perplexity_v1"
@@ -359,10 +359,21 @@ class LlamaCppAdapter(BaseAdapter):
                 "switch used by older Qwen models is not valid evidence for Qwen3.6."
             )
         if (
+            request.generation_preset == DIRECT_ANSWER_GENERATION_PRESET
+            and _infer_llama_cpp_architecture(request) == "gemma4"
+            and request.execution_mode != "local_native"
+        ):
+            raise RuntimeError(
+                "Gemma 4 direct-answer generation requires the local_native llama-server chat path. "
+                "Runner container capability generation still uses llama-completion, which cannot safely apply "
+                "Gemma 4's Jinja chat template."
+            )
+        if (
             request.execution_mode == "local_native"
             and request.generation_preset == DIRECT_ANSWER_GENERATION_PRESET
             and (
                 str(_infer_llama_cpp_architecture(request) or "").startswith("qwen35")
+                or _is_qwen36_request(request)
                 or _infer_llama_cpp_architecture(request) == "gemma4"
             )
         ):

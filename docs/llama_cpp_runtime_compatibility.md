@@ -20,7 +20,7 @@ Custom native paths are explicit user runtime choices. The selector requires a r
 
 Runner records the selected runtime before deployment and capability phases. It uses ontology hints when present and can read `general.architecture` from local GGUF metadata when practical. Architecture support is established by the pinned-runtime canary matrix rather than a second hard-coded denylist that can become stale; a real load failure preserves the exact runtime version and error instead of being reclassified as compatible.
 
-This compatibility check does not install or upgrade `llama.cpp`. Managed installation remains explicit and inspectable; signed/checksummed runtime downloads remain planned.
+This compatibility check does not install or upgrade `llama.cpp`. Managed installation remains explicit and inspectable. Managed release assets are SHA-256 verified; independent signature verification is not yet available.
 
 ## Upstream Intake and Freshness
 
@@ -44,16 +44,20 @@ The safe flow is:
 5. promote the runtime manifest only after review, preserving the previous
    runtime for rollback.
 
-Runtime promotion does not inherently require a Runner or contract release.
-Those releases are required only when Runner code, packaging, or schemas change.
-This keeps upstream runtime churn separate from InferGrade product semver.
+The managed-runtime manifest is currently compiled into Runner, so delivering a
+new managed pin requires a Runner release. A future remotely delivered,
+signed/checksummed manifest could decouple safe runtime promotion from Runner
+product semver, but the intake report must not claim that separation today.
 
-The current macOS managed runtime and Linux CPU container are pinned to b9994
-commit `14d3ba45f`. An exact Google Gemma 4 E4B QAT Q4_0 artifact passed native
-Metal and container load/direct-answer canaries; the full native Runner bundle
+The current stable macOS managed runtime remains b9050. The reviewed b9994
+candidate and Linux CPU candidate container are pinned to full commit
+`14d3ba45f3369e75a308212399cfada5d349883b`. An exact Google Gemma 4 E4B QAT
+Q4_0 artifact passed native Metal direct-answer and Linux container load/server
+protocol canaries; the full native Runner bundle
 `qb_20260714_055652_9eb6de27` also validated. That proves this artifact and
 protocol on the tested M1 Pro lane, not every Gemma 4 size, quant, backend, or
-hardware class. The previous b9050 macOS runtime remains available for rollback.
+hardware class. It does not prove Runner's container capability path, which
+fails closed until structured container chat generation is implemented.
 
 An explicit native runtime or custom container image remains the escape hatch
 for architectures newer than InferGrade's stable pin: Runner permits the real

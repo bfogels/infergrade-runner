@@ -12,37 +12,50 @@
     "stable_pin_review_after_days": 30,
     "automatic_candidate_discovery": true,
     "automatic_stable_promotion": false,
-    "runner_release_required": false,
+    "runner_release_required": true,
     "claim_boundary": "A newer upstream release is a candidate, not an InferGrade-supported runtime, until the compatibility gates pass."
   },
   "pins": [
     {
-      "id": "container_linux_cpu",
-      "channel": "infergrade_stable",
+      "id": "container_linux_cpu_candidate",
+      "channel": "reviewed_candidate",
       "kind": "commit",
-      "value": "14d3ba45f",
+      "value": "14d3ba45f3369e75a308212399cfada5d349883b",
       "upstream_published_at": "2026-07-14T05:29:11Z",
       "locations": [
         {
           "path": "containers/llama-cpp/Dockerfile",
-          "needle": "ARG LLAMA_CPP_REF=14d3ba45f"
+          "needle": "ARG LLAMA_CPP_REF=14d3ba45f3369e75a308212399cfada5d349883b"
         },
         {
           "path": "python/runner-core/src/infergrade/adapters/llama_cpp.py",
-          "needle": "_PINNED_LLAMA_CPP_REF = \"14d3ba45f\""
+          "needle": "_PINNED_LLAMA_CPP_REF = \"14d3ba45f3369e75a308212399cfada5d349883b\""
         }
       ]
     },
     {
-      "id": "macos_arm64_metal",
-      "channel": "infergrade_stable",
+      "id": "macos_arm64_metal_candidate",
+      "channel": "reviewed_candidate",
       "kind": "release_tag",
       "value": "b9994",
       "upstream_published_at": "2026-07-14T05:29:11Z",
       "locations": [
         {
           "path": "crates/runner-engine/src/lib.rs",
-          "needle": "const MANAGED_LLAMA_CPP_MACOS_METAL_TAG: &str = \"b9994\";"
+          "needle": "const CANDIDATE_LLAMA_CPP_MACOS_METAL_TAG: &str = \"b9994\";"
+        }
+      ]
+    },
+    {
+      "id": "macos_arm64_metal_stable",
+      "channel": "infergrade_stable",
+      "kind": "release_tag",
+      "value": "b9050",
+      "upstream_published_at": "2026-05-07T07:34:00Z",
+      "locations": [
+        {
+          "path": "crates/runner-engine/src/lib.rs",
+          "needle": "const MANAGED_LLAMA_CPP_MACOS_METAL_TAG: &str = \"b9050\";"
         }
       ]
     },

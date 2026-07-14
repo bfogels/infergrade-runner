@@ -793,11 +793,24 @@ class LlamaCppAdapterTests(unittest.TestCase):
             execution_mode="local_native",
             simulate=False,
             generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
-            ontology_hints={"architecture": "qwen35"},
         )
         generated = LlamaCppAdapter().generate_text(request, "Answer only A.", 32)
         self.assertEqual(generated["text"], "A")
         server_generate_mock.assert_called_once()
+
+    def test_gemma4_direct_answer_fails_closed_outside_native_chat_path(self):
+        request = RunRequest(
+            model="google/gemma-4-E4B-it",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_container",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+            ontology_hints={"architecture": "gemma4"},
+        )
+        with self.assertRaisesRegex(RuntimeError, "requires the local_native llama-server chat path"):
+            LlamaCppAdapter().generate_text(request, "Answer only A.", 32)
 
     def test_qwen36_direct_answer_fails_closed_outside_native_chat_path(self):
         request = RunRequest(

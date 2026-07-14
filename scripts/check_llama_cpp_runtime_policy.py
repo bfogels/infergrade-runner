@@ -53,6 +53,10 @@ def validate_policy(policy: Dict[str, Any], root: pathlib.Path = ROOT) -> List[s
         seen_ids.add(pin_id)
         if not value:
             failures.append(f"{pin_id}: pin value is missing")
+        if pin.get("kind") == "commit" and (
+            len(value) != 40 or not all(character in "0123456789abcdefABCDEF" for character in value)
+        ):
+            failures.append(f"{pin_id}: commit pins must use the full 40-character hexadecimal SHA")
         try:
             _parse_timestamp(str(pin.get("upstream_published_at") or ""))
         except (TypeError, ValueError):
@@ -115,9 +119,7 @@ def build_report(
             "latest_release_published_at": latest_published_at,
             "latest_release_url": latest_url,
         },
-        "candidate_available": bool(latest_tag) and not any(
-            item["channel"] == "infergrade_stable" and item["matches_latest_release"] for item in pins
-        ),
+        "candidate_available": bool(latest_tag) and not any(item["matches_latest_release"] for item in pins),
         "stable_promotion_automatic": bool(policy["intake"]["automatic_stable_promotion"]),
         "runner_release_required": bool(policy["intake"]["runner_release_required"]),
         "pins": pins,
@@ -135,6 +137,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"Latest upstream release: `{upstream['latest_release_tag'] or 'not queried'}`",
         f"Candidate available: `{'yes' if report['candidate_available'] else 'no'}`",
         f"Automatic stable promotion: `{'yes' if report['stable_promotion_automatic'] else 'no'}`",
+        f"Runner release required for delivery: `{'yes' if report['runner_release_required'] else 'no'}`",
         "",
         "| Lane | Channel | Pin | Age | Review due |",
         "| --- | --- | --- | ---: | --- |",
@@ -189,7 +192,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(markdown)
 
     if args.require_current and latest and report["candidate_available"]:
-        print("No stable release-tag lane matches the latest upstream release.", file=sys.stderr)
+        print("No tracked runtime lane matches the latest upstream release.", file=sys.stderr)
         return 2
     return 0
 
