@@ -75,6 +75,7 @@ class CapabilityCalibrationTests(unittest.TestCase):
                     "fixture_revision": "2026-07-assistant-compositional-v2",
                 },
                 "summary": {"score": 0.458333, "state": "scored"},
+                "tasks": [{} for _ in range(24)],
                 "subject": {"model": {"model": "Qwen/Qwen3.5-9B"}},
                 "evidence": {"surface": "local_assistant_capability"},
             }],
@@ -82,6 +83,7 @@ class CapabilityCalibrationTests(unittest.TestCase):
         )
 
         self.assertEqual(observations[0]["benchmark_id"], "assistant_compositional_instruction_v2")
+        self.assertEqual(observations[0]["task_count"], 24)
         self.assertEqual(observations[0]["score_version"], "benchmark:assistant_compositional_instruction_v2:2026-07-assistant-compositional-v2")
 
 

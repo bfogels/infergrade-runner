@@ -1032,6 +1032,10 @@
       "primary_score_weight": 0.55,
       "score_role": "headline_component",
       "discrimination_status": "provisional_needs_corpus_calibration",
+      "calibration_policy": {
+        "policy_id": "capability_headroom_gate_v1",
+        "minimum_task_count": 24
+      },
       "higher_is_better": true,
       "score_policy_id": "structured_compositional_accuracy_v1",
       "score_breakdown_fields": [

@@ -12,7 +12,7 @@ from collections import Counter
 from statistics import mean, median
 from typing import Any, Dict, Iterable, List, Optional
 
-from infergrade.benchmark_catalog import load_capability_catalog, surface_score_policy_index
+from infergrade.benchmark_catalog import check_index, load_capability_catalog, surface_score_policy_index
 
 
 DEFAULT_POLICY = {
@@ -160,6 +160,7 @@ def _component_observation(document: Dict[str, Any], source: str) -> Optional[Di
         "benchmark_id": benchmark_id,
         "surface_id": _nested(document, "evidence", "surface"),
         "score": score,
+        "task_count": len(list(document.get("tasks") or [])),
         "model_family": _family_name(subject_model),
         "parameter_band": _parameter_band(subject_model),
         "source": source,
@@ -171,7 +172,9 @@ def audit_capability_observations(
     score_version: str,
     policy: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    selected = [item for item in observations if item.get("score_version") == score_version and _number(item.get("score")) is not None]
+    matching = [item for item in observations if item.get("score_version") == score_version and _number(item.get("score")) is not None]
+    minimum_task_count = int((policy or {}).get("minimum_task_count") or 0)
+    selected = [item for item in matching if int(item.get("task_count") or 0) >= minimum_task_count]
     scores = [float(item["score"]) for item in selected]
     families = Counter(str(item.get("model_family") or "unknown") for item in selected)
     bands = Counter(str(item.get("parameter_band") or "unknown") for item in selected)
@@ -183,6 +186,7 @@ def audit_capability_observations(
     distinct_scores = len(set(round(value, 6) for value in scores))
     metrics = {
         "observation_count": count,
+        "excluded_below_minimum_task_count": len(matching) - len(selected),
         "model_family_count": len([name for name in families if name != "unknown"]),
         "parameter_band_count": len([name for name in bands if name != "unknown"]),
         "distinct_score_count": distinct_scores,
@@ -226,6 +230,11 @@ def policy_for_score_version(score_version: str, catalog: Optional[Dict[str, Any
         if policy.get("score_version") == score_version:
             return dict(policy.get("calibration_policy") or {})
     return {}
+
+
+def policy_for_benchmark_id(benchmark_id: str, catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    check = check_index(catalog or load_capability_catalog()).get(benchmark_id) or {}
+    return dict(check.get("calibration_policy") or {})
 
 
 def _minimum_gate(blockers: List[str], metrics: Dict[str, Any], policy: Dict[str, Any], metric: str, threshold: str) -> None:

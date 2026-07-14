@@ -10,6 +10,7 @@ from infergrade.capability_calibration import (
     extract_calibration_observations,
     load_json_documents,
     policy_for_score_version,
+    policy_for_benchmark_id,
 )
 
 
@@ -34,7 +35,11 @@ def main() -> int:
     report = audit_capability_observations(
         observations,
         target_id,
-        policy=policy_for_score_version(args.score_version) if args.score_version else None,
+        policy=(
+            policy_for_score_version(args.score_version)
+            if args.score_version
+            else policy_for_benchmark_id(args.benchmark_id)
+        ),
     )
     if args.benchmark_id:
         report["benchmark_id"] = args.benchmark_id
