@@ -1,5 +1,5 @@
 {
-  "contract_version": "0.3.16",
+  "contract_version": "0.3.17",
   "publisher": "infergrade-runner",
   "ontology_source": "schemas/json/model_ontology.schema.json",
   "schema_files": [

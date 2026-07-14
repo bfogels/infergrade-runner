@@ -80,6 +80,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertTrue(catalog["planned_benchmark_candidates"])
         score_policies = surface_score_policy_index(catalog)
         self.assertEqual(score_policies["local_assistant_capability"]["score_version"], "local_assistant_score_v4")
+        self.assertEqual(score_policies["local_assistant_capability"]["protocol_version"], "3.1")
+        self.assertEqual(score_policies["local_assistant_capability"]["protocol_label"], "Capability protocol v3.1")
         self.assertEqual(score_policies["local_assistant_capability"]["scale_interpretation"], "benchmark_attainment_index")
         self.assertEqual(score_policies["local_coding_capability"]["minimum_coverage_fraction"], 0.5)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_scored_components"], 2)
@@ -191,6 +193,27 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn(
             "apple_silicon_qwen3_assistant_baseline: unsupported coverage generation_preset_id "
             "'typo_direct_answer_v1'",
+            failures,
+        )
+
+    def test_catalog_protocol_name_requires_a_versioned_label_pair(self):
+        mutated = deepcopy(load_capability_catalog())
+        policy = next(
+            item
+            for item in mutated["surface_score_policies"]
+            if item["surface_id"] == "local_assistant_capability"
+        )
+        policy.pop("protocol_label")
+        policy["protocol_version"] = "3"
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "local_assistant_capability: protocol_version and protocol_label must be declared together",
+            failures,
+        )
+        self.assertIn(
+            "local_assistant_capability: protocol_version must use major.minor notation",
             failures,
         )
 

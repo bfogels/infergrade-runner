@@ -110,6 +110,8 @@
             "score_label": { "type": ["string", "null"] },
             "score_version": { "type": ["string", "null"] },
             "score_method": { "type": ["string", "null"] },
+            "protocol_version": { "type": ["string", "null"], "pattern": "^[0-9]+\\.[0-9]+$" },
+            "protocol_label": { "type": ["string", "null"] },
             "scale_interpretation": { "type": ["string", "null"] },
             "ceiling_display_policy": { "type": ["string", "null"] },
             "score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },

@@ -21,7 +21,7 @@ from infergrade.images import container_image_identity, install_image
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcnow_iso, write_json
 
-CAPABILITY_REGISTRY_VERSION = "2026-07-capability-headroom-v4"
+CAPABILITY_REGISTRY_VERSION = "2026-07-capability-protocol-3.1"
 MULTITURN_MEMORY_FIXTURE_REVISION = "2026-04-multiturn-preview"
 ASSISTANT_COMPOSITIONAL_FIXTURE_REVISION = "2026-07-assistant-compositional-v2"
 CODING_STATIC_REPAIR_FIXTURE_REVISION = "2026-05-coding-static-preview"
