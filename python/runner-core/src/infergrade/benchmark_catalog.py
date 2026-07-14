@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from infergrade.constants import DEFAULT_GENERATION_PRESET
 from infergrade.models import RunRequest
 from infergrade.paths import runner_root
 from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
@@ -13,7 +14,10 @@ FALLBACK_METADATA_ORDERING = {
     "expected_duration_band": ["1-5 min", "5-15 min", "10-25 min", "10-30 min", "15-45 min", "25-60 min"],
     "token_volume_band": ["tiny", "small", "medium", "large"],
 }
-SUPPORTED_COVERAGE_GENERATION_PRESETS = {DIRECT_ANSWER_GENERATION_PRESET}
+SUPPORTED_COVERAGE_GENERATION_PRESETS = {
+    DEFAULT_GENERATION_PRESET,
+    DIRECT_ANSWER_GENERATION_PRESET,
+}
 
 
 def repo_root() -> Path:

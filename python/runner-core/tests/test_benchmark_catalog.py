@@ -187,6 +187,17 @@ class BenchmarkCatalogTests(unittest.TestCase):
             failures,
         )
 
+    def test_catalog_legitimacy_validation_accepts_explicit_default_generation_preset(self):
+        mutated = deepcopy(load_capability_catalog())
+        priority = next(
+            item
+            for item in mutated["coverage_expansion_priorities"]
+            if item["priority_id"] == "apple_silicon_qwen3_assistant_baseline"
+        )
+        priority["generation_preset_id"] = "deterministic_v1"
+
+        self.assertEqual(validate_benchmark_legitimacy_metadata(mutated), [])
+
     def test_evidence_lane_index_exposes_claim_boundaries(self):
         lanes = evidence_lane_index()
         self.assertEqual(lanes["smoke"]["claim_strength"], "execution_smoke")
