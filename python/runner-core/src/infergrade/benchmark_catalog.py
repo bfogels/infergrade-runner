@@ -1,6 +1,7 @@
 """Runner-owned capability suite and benchmark selection helpers."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -208,6 +209,12 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         for field in ("display_name", "score_version", "score_method", "claim_boundary"):
             if not str(policy.get(field) or "").strip():
                 failures.append(f"{surface_id}: surface score policy field {field} must be non-empty")
+        protocol_version = str(policy.get("protocol_version") or "").strip()
+        protocol_label = str(policy.get("protocol_label") or "").strip()
+        if bool(protocol_version) != bool(protocol_label):
+            failures.append(f"{surface_id}: protocol_version and protocol_label must be declared together")
+        if protocol_version and not re.match(r"^[0-9]+\.[0-9]+$", protocol_version):
+            failures.append(f"{surface_id}: protocol_version must use major.minor notation")
         minimum_coverage = policy.get("minimum_coverage_fraction")
         if not isinstance(minimum_coverage, (int, float)) or not 0 <= float(minimum_coverage) <= 1:
             failures.append(f"{surface_id}: minimum_coverage_fraction must be between 0 and 1")

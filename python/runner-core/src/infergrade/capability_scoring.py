@@ -150,6 +150,8 @@ def score_capability_surface(
         "score_label": policy.get("display_name"),
         "score_version": policy.get("score_version"),
         "score_method": policy.get("score_method"),
+        "protocol_version": policy.get("protocol_version"),
+        "protocol_label": policy.get("protocol_label"),
         "score_unit": "fraction_0_to_1",
         "scale_interpretation": policy.get("scale_interpretation") or "benchmark_attainment_index",
         "ceiling_display_policy": policy.get("ceiling_display_policy") or "label_suite_ceiling_not_perfection",

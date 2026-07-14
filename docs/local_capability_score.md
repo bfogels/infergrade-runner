@@ -8,7 +8,7 @@ The Runner currently owns three versioned score families:
 
 | Score | Version | Intended question |
 | --- | --- | --- |
-| Local assistant benchmark index | `local_assistant_score_v4` | What fraction of the current weighted assistant suite did this setup attain? |
+| Local assistant benchmark index | Capability protocol v3.1 | What fraction of the current weighted assistant suite did this setup attain? |
 | Local coding score | `local_coding_score_v2` | How well did this setup perform on the pinned coding benchmark mix? |
 | Local reasoning score | `local_reasoning_score_v2` | How well did this setup perform on the pinned reasoning benchmark mix? |
 
@@ -18,12 +18,12 @@ Scores use a `0..1` contract value. Hub displays this as benchmark points, not `
 
 Weights live in `schemas/capability_catalog.json` as `primary_score_weight` values. They sum to one within each scored surface.
 
-- Assistant v4: IFEval `0.45`; the 24-case compositional instruction fixture `0.55`.
+- Capability protocol v3.1: IFEval `0.45`; the 24-case compositional instruction fixture `0.55`.
 - Multi-turn chat memory remains visible as a zero-weight diagnostic component.
 - Coding: EvalPlus HumanEval+ `0.55`; EvalPlus MBPP+ `0.30`; static repair `0.15`.
 - Reasoning: MMLU-Pro reference `0.80`; exact-answer decision sample `0.20`.
 
-Changing a weight or benchmark mix requires a new score version. The expanded compositional fixture is provisional until it passes the declared cross-model distribution audit; IFEval remains its established companion component.
+Changing a weight or benchmark mix requires a new protocol revision. The expanded compositional fixture is provisional until it passes the declared cross-model distribution audit; IFEval remains its established companion component.
 
 ## Saturation policy
 
@@ -33,9 +33,13 @@ Every weighted component needs a periodic distribution audit across diverse mode
 
 ## Coverage gate
 
-Assistant v4 needs all declared benchmark weight (`1.00`), at least two scored components, at least two score dimensions, and `standard` or deeper sample depth before an individual aggregate can publish. A canary can guide setup and expose failures, but it cannot publish the index even if all sampled cases pass. Corpus-level calibration is separate: the score version remains provisional until at least 20 observations across five families and three parameter bands retain six distinct values, no more than 20% of observations hit the suite ceiling, and no family exceeds 40% of the audit corpus. Coding and reasoning v2 retain their declared gates. Below a gate InferGrade preserves:
+Capability protocol v3.1 needs all declared benchmark weight (`1.00`), at least two scored components, at least two score dimensions, and `standard` or deeper sample depth before an individual aggregate can publish. A canary can guide setup and expose failures, but it cannot publish the index even if all sampled cases pass. Corpus-level calibration is separate: the protocol remains provisional until at least 20 observations across five families and three parameter bands retain six distinct values, no more than 20% of observations hit the suite ceiling, and no family exceeds 40% of the audit corpus. Coding and reasoning v2 retain their declared gates.
 
-The audit never curves, caps, or compresses a score. Raw attainment remains inspectable. If the distribution saturates, InferGrade must expand or replace the benchmark and issue a new score version.
+The audit never curves, caps, or compresses a score. Raw attainment remains inspectable. If the distribution saturates, InferGrade must expand or replace the benchmark and issue a new protocol revision.
+
+The compatibility identifier `local_assistant_score_v4` remains in result bundles so already-produced evidence stays in one comparable cohort. It is an internal score-contract identifier, not the public protocol name.
+
+Below a gate InferGrade preserves:
 
 - the component result;
 - its observed weighted score;

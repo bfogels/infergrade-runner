@@ -21,6 +21,8 @@ class CapabilityScoringTests(unittest.TestCase):
         self.assertTrue(details["score_ready"])
         self.assertEqual(details["score_version"], "local_assistant_score_v4")
         self.assertEqual(details["score_method"], "weighted_benchmark_attainment_v4")
+        self.assertEqual(details["protocol_version"], "3.1")
+        self.assertEqual(details["protocol_label"], "Capability protocol v3.1")
         self.assertEqual(details["score"], 0.539764)
         self.assertEqual(details["coverage"]["coverage_fraction"], 1.0)
         self.assertEqual(
