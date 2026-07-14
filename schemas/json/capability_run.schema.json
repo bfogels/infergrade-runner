@@ -90,7 +90,7 @@
         "fixture_revision": { "type": "string", "minLength": 1 },
         "dataset_revision": { "type": ["string", "null"] },
         "scorer_type": {
-          "enum": ["exact_match", "regex", "json_schema", "unit_test", "static_check", "multiple_choice", "perplexity", "metric_only", "manual_review"]
+          "enum": ["exact_match", "regex", "json_schema", "strict_json_equality", "unit_test", "static_check", "multiple_choice", "perplexity", "metric_only", "manual_review"]
         },
         "scoring_policy": { "type": "string", "minLength": 1 },
         "repetitions": { "type": "integer", "minimum": 1 }

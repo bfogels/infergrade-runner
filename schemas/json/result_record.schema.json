@@ -110,6 +110,8 @@
             "score_label": { "type": ["string", "null"] },
             "score_version": { "type": ["string", "null"] },
             "score_method": { "type": ["string", "null"] },
+            "scale_interpretation": { "type": ["string", "null"] },
+            "ceiling_display_policy": { "type": ["string", "null"] },
             "score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
             "observed_weighted_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
             "score_ready": { "type": "boolean" },
@@ -117,6 +119,17 @@
             "failed_gates": { "type": "array", "items": { "type": "string", "minLength": 1 } },
             "coverage": { "type": ["object", "null"], "additionalProperties": true },
             "components": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+            "diagnostic_components": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+            "ceiling": {
+              "type": "object",
+              "properties": {
+                "reached": { "type": "boolean" },
+                "status": { "enum": ["suite_ceiling_reached", "below_suite_ceiling"] },
+                "label": { "type": "string", "minLength": 1 },
+                "interpretation": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": true
+            },
             "eligibility": {
               "type": "object",
               "required": ["minimum_scored_components", "observed_scored_components", "minimum_score_dimensions", "observed_score_dimensions", "coverage_ready", "diversity_ready", "maximum_component_weight_fraction", "influence_ready"],
@@ -128,7 +141,10 @@
                 "coverage_ready": { "type": "boolean" },
                 "diversity_ready": { "type": "boolean" },
                 "maximum_component_weight_fraction": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
-                "influence_ready": { "type": "boolean" }
+                "influence_ready": { "type": "boolean" },
+                "minimum_benchmark_tier": { "type": ["string", "null"], "enum": ["standard", "gold", null] },
+                "observed_benchmark_tier": { "type": ["string", "null"], "enum": ["canary", "standard", "gold", null] },
+                "benchmark_depth_ready": { "type": "boolean" }
               },
               "additionalProperties": false
             },

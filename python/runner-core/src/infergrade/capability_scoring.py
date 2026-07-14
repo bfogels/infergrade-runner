@@ -39,6 +39,7 @@ def score_capability_surface(
     surface_id: Optional[str],
     component_scores: Dict[str, float],
     catalog: Optional[Dict[str, Any]] = None,
+    benchmark_tier: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return a conservative score and inspectable coverage metadata."""
     payload = catalog or load_capability_catalog()
@@ -55,11 +56,14 @@ def score_capability_surface(
         }
 
     profile_checks = []
+    diagnostic_checks = []
     for benchmark_id, check in checks.items():
         if check.get("surface_id") != surface_id or check.get("evidence_kind") != "capability":
             continue
         weight = _positive_float(check.get("primary_score_weight"))
         if weight is None:
+            if check.get("score_role") == "diagnostic_only":
+                diagnostic_checks.append((benchmark_id, check))
             continue
         profile_checks.append((benchmark_id, check, weight))
 
@@ -80,6 +84,8 @@ def score_capability_surface(
                 "benchmark_id": benchmark_id,
                 "display_name": check.get("display_name"),
                 "score_dimension": check.get("score_dimension"),
+                "score_role": check.get("score_role") or "headline_component",
+                "discrimination_status": check.get("discrimination_status"),
                 "score": value,
                 "weight": round(weight, 6),
                 "weighted_contribution": round(value * weight, 6) if value is not None else None,
@@ -99,6 +105,12 @@ def score_capability_surface(
     robustness = _robustness_payload(observed_components, observed_score, policy)
     maximum_influence = _bounded_fraction(policy.get("maximum_component_weight_fraction"), default=0.8)
     influence_ready = robustness.get("maximum_observed_weight_fraction") is None or robustness["maximum_observed_weight_fraction"] <= maximum_influence
+    minimum_benchmark_tier = str(policy.get("minimum_benchmark_tier") or "").strip() or None
+    tier_ranks = {"canary": 1, "standard": 2, "gold": 3}
+    benchmark_depth_ready = (
+        minimum_benchmark_tier is None
+        or tier_ranks.get(str(benchmark_tier or ""), 0) >= tier_ranks.get(minimum_benchmark_tier, 0)
+    )
     failed_gates = []
     if observed_score is None:
         failed_gates.append("no_scored_components")
@@ -110,14 +122,37 @@ def score_capability_surface(
         failed_gates.append("insufficient_score_dimensions")
     if not influence_ready:
         failed_gates.append("component_influence_above_limit")
+    if not benchmark_depth_ready:
+        failed_gates.append("insufficient_benchmark_depth")
     score_ready = not failed_gates
     reason = "score_ready" if score_ready else failed_gates[0]
+    diagnostic_components = []
+    for benchmark_id, check in diagnostic_checks:
+        value = _score_value(component_scores.get(benchmark_id))
+        diagnostic_components.append(
+            {
+                "benchmark_id": benchmark_id,
+                "display_name": check.get("display_name"),
+                "score_dimension": check.get("score_dimension"),
+                "score": value,
+                "observed": value is not None,
+                "score_role": "diagnostic_only",
+                "discrimination_status": check.get("discrimination_status"),
+                "saturation_evidence": dict(check.get("saturation_evidence") or {}),
+                "claim_boundary": (
+                    "This diagnostic may prove the fixture was cleared, but it contributes no headline score weight and cannot establish perfect capability."
+                ),
+            }
+        )
+    ceiling_reached = observed_score is not None and observed_score >= 1.0
     return {
         "surface_id": surface_id,
         "score_label": policy.get("display_name"),
         "score_version": policy.get("score_version"),
         "score_method": policy.get("score_method"),
         "score_unit": "fraction_0_to_1",
+        "scale_interpretation": policy.get("scale_interpretation") or "benchmark_attainment_index",
+        "ceiling_display_policy": policy.get("ceiling_display_policy") or "label_suite_ceiling_not_perfection",
         "score": observed_score if score_ready else None,
         "observed_weighted_score": observed_score,
         "score_ready": score_ready,
@@ -140,8 +175,22 @@ def score_capability_surface(
             "diversity_ready": diversity_ready,
             "maximum_component_weight_fraction": maximum_influence,
             "influence_ready": influence_ready,
+            "minimum_benchmark_tier": minimum_benchmark_tier,
+            "observed_benchmark_tier": benchmark_tier,
+            "benchmark_depth_ready": benchmark_depth_ready,
         },
         "components": components,
+        "diagnostic_components": diagnostic_components,
+        "ceiling": {
+            "reached": ceiling_reached,
+            "status": "suite_ceiling_reached" if ceiling_reached else "below_suite_ceiling",
+            "label": "Suite ceiling reached" if ceiling_reached else "Below suite ceiling",
+            "interpretation": (
+                "Every observed headline component reached its benchmark maximum; this is a lower-bound ceiling signal, not proof of perfect model capability."
+                if ceiling_reached
+                else "The benchmark mix retained numeric headroom for this result."
+            ),
+        },
         "robustness": robustness,
         "confidence_basis": {
             "kind": "inspectable_evidence_basis_v1",
@@ -164,10 +213,11 @@ def score_for_use_case(
     use_case: Optional[str],
     component_scores: Dict[str, float],
     catalog: Optional[Dict[str, Any]] = None,
+    benchmark_tier: Optional[str] = None,
 ) -> Dict[str, Any]:
     payload = catalog or load_capability_catalog()
     surface_id = primary_surface_for_use_case(use_case) or infer_surface_from_components(component_scores, payload)
-    return score_capability_surface(surface_id, component_scores, payload)
+    return score_capability_surface(surface_id, component_scores, payload, benchmark_tier=benchmark_tier)
 
 
 def _score_value(value: Any) -> Optional[float]:

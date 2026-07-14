@@ -366,10 +366,10 @@ class CapabilityContractTests(unittest.TestCase):
 
         errors = validate_capability_summary_artifact(artifact)
 
-        self.assertIn("surfaces[0].v2 score requires score_failed_gates as a string array", errors)
-        self.assertIn("surfaces[0].v2 score requires score_eligibility", errors)
-        self.assertIn("surfaces[0].v2 score requires score_robustness", errors)
-        self.assertIn("surfaces[0].v2 score requires score_confidence_basis", errors)
+        self.assertIn("surfaces[0].versioned score requires score_failed_gates as a string array", errors)
+        self.assertIn("surfaces[0].versioned score requires score_eligibility", errors)
+        self.assertIn("surfaces[0].versioned score requires score_robustness", errors)
+        self.assertIn("surfaces[0].versioned score requires score_confidence_basis", errors)
 
 
 if __name__ == "__main__":
