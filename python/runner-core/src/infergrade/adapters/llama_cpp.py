@@ -351,6 +351,17 @@ class LlamaCppAdapter(BaseAdapter):
             raise NotImplementedError("Real llama.cpp generation currently supports local_container, local_native, and cloud_container modes.")
         self._ensure_backend_model_compatibility(request)
         model_path = self._require_local_gguf_artifact(request)
+        if (
+            request.execution_mode == "local_native"
+            and request.generation_preset == DIRECT_ANSWER_GENERATION_PRESET
+            and str(_infer_llama_cpp_architecture(request) or "").startswith("qwen35")
+        ):
+            return self._generate_native_server_text(
+                request=request,
+                model_path=model_path,
+                prompt=prompt,
+                max_tokens=max_tokens,
+            )
         effective_prompt, prompt_transform = _prepare_llama_prompt(request, prompt)
         if request.execution_mode == "local_native":
             command = [self._native_completion_path(request)]
@@ -417,6 +428,87 @@ class LlamaCppAdapter(BaseAdapter):
             "load_time_ms": parsed.get("load_time_ms"),
             "prompt_transform": prompt_transform,
         }
+
+    def _generate_native_server_text(
+        self,
+        request: RunRequest,
+        model_path: str,
+        prompt: str,
+        max_tokens: int,
+    ) -> Dict[str, object]:
+        """Generate one capability answer through llama-server's chat template.
+
+        Qwen3.5's embedded template does not honor the legacy ``/no_think``
+        directive through ``llama-completion``. The server chat API accepts the
+        same explicit ``enable_thinking=false`` policy already used by deployment
+        profiles, so direct-answer capability tasks use that protocol as well.
+        """
+        messages, prompt_transform = _prepare_llama_server_chat(request, prompt)
+        if messages is None:
+            raise RuntimeError("Qwen3.5 direct-answer generation requires structured chat messages")
+        published_port = _find_free_local_port()
+        command = [self._native_server_path(request)]
+        command.extend(
+            self._build_llama_server_command(
+                model_path=model_path,
+                ctx_size=max(4096, min(16384, len(prompt) * 2)),
+                request=request,
+                host="127.0.0.1",
+                port=published_port,
+            )
+        )
+        log_handle = tempfile.NamedTemporaryFile(prefix="infergrade-llama-capability-", suffix=".log", delete=False)
+        log_path = log_handle.name
+        log_handle.close()
+        process = None
+        started = time.perf_counter()
+        try:
+            with open(log_path, "wb") as log_file:
+                process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
+            base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
+            completion = _stream_server_chat_completion(
+                base_url=base_url,
+                messages=messages,
+                max_tokens=max_tokens,
+            )
+            _validate_direct_answer_server_completion(completion, prompt_transform)
+            parsed = _parse_llama_timings(_read_log_file(log_path))
+            metrics = _metrics_from_server_completion(
+                completion=completion,
+                parsed_timings=parsed,
+                load_time_ms=load_time_ms,
+                peak_vram_mb=None,
+            )
+            final_payload = dict(completion.get("final_payload") or {})
+            usage = dict(final_payload.get("usage") or {})
+            timings = dict(final_payload.get("timings") or {})
+            return {
+                "text": completion["text"],
+                "status": "completed",
+                "error": None,
+                "latency_ms": metrics.get("latency_ms"),
+                "time_to_first_token_ms": metrics.get("ttft_ms"),
+                "tokens_per_second": metrics.get("decode_tokens_per_second"),
+                "input_tokens": _whole_token_count(
+                    usage.get("prompt_tokens") or timings.get("prompt_n") or parsed.get("prompt_eval_tokens")
+                ),
+                "output_tokens": metrics.get("output_tokens"),
+                "measurement_source": "llama_cpp_server_chat_timings",
+                "load_time_ms": metrics.get("load_time_ms"),
+                "prompt_transform": prompt_transform,
+            }
+        except Exception as exc:
+            logs_text = _read_log_file(log_path)
+            detail = str(exc)
+            if logs_text and not detail:
+                detail = logs_text.splitlines()[-1]
+            raise RuntimeError(detail or "llama.cpp Qwen3.5 chat generation failed") from exc
+        finally:
+            _stop_process(process)
+            try:
+                os.unlink(log_path)
+            except OSError:
+                pass
 
     def run_fidelity(self, request: RunRequest) -> FidelityExecution:
         if request.simulate:
@@ -1936,7 +2028,14 @@ def _prepare_llama_server_chat(
     assistant_index = raw.rfind(assistant_marker)
     user_index = raw.rfind(user_marker, 0, assistant_index if assistant_index >= 0 else len(raw))
     if user_index < 0 or assistant_index < 0 or user_index >= assistant_index:
-        raise RuntimeError("Direct-answer deployment prompt must contain a final User/Assistant turn")
+        if not raw.strip():
+            raise RuntimeError("Direct-answer prompt is empty")
+        return [{"role": "user", "content": raw.strip()}], {
+            "id": "qwen_chat_template_disable_thinking_v1",
+            "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
+            "state": "chat_template_enable_thinking_false_single_user_prompt",
+            "placement": "structured_messages",
+        }
     system_content = raw[:user_index].strip()
     user_content = raw[user_index + len(user_marker) : assistant_index].strip()
     if not user_content:
