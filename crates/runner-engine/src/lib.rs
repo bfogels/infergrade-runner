@@ -47,8 +47,9 @@ use tar::Archive;
 use url::Url;
 
 pub const LLAMA_CPP_RUNTIME_ID: &str = "llama-cpp-homebrew-stable-2026-04";
-pub const RUNTIME_MANIFEST_VERSION: &str = "2026-04-22";
+pub const RUNTIME_MANIFEST_VERSION: &str = "2026-07-14";
 pub const MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID: &str = "llama-cpp-b9050-macos-arm64-metal";
+pub const CANDIDATE_LLAMA_CPP_MACOS_METAL_RUNTIME_ID: &str = "llama-cpp-b9994-macos-arm64-metal";
 pub const WINDOWS_CUDA_PREVIEW_RUNTIME_ID: &str = "llama-cpp-windows-cuda-cli-preview-2026-05";
 pub const WINDOWS_CUDA_BINARY_SET: &str = "llama_cpp_windows_cuda_x86_64";
 pub const WINDOWS_CUDA_CLAIM_BOUNDARY: &str =
@@ -58,6 +59,11 @@ const MANAGED_LLAMA_CPP_MACOS_METAL_ARCHIVE_URL: &str =
     "https://github.com/ggml-org/llama.cpp/releases/download/b9050/llama-b9050-bin-macos-arm64.tar.gz";
 const MANAGED_LLAMA_CPP_MACOS_METAL_SHA256: &str =
     "d334fa44e42a143ec6e49924f9630136c0b5fedc5a615508636ba9c8d08eb5d3";
+const CANDIDATE_LLAMA_CPP_MACOS_METAL_TAG: &str = "b9994";
+const CANDIDATE_LLAMA_CPP_MACOS_METAL_ARCHIVE_URL: &str =
+    "https://github.com/ggml-org/llama.cpp/releases/download/b9994/llama-b9994-bin-macos-arm64.tar.gz";
+const CANDIDATE_LLAMA_CPP_MACOS_METAL_SHA256: &str =
+    "39aeba4d7cd04803ea15760f01af6990c35487b8a83446fa0e7bb394b5c5f3c5";
 
 fn is_local_http_host(host: &str) -> bool {
     if host == "localhost" {
@@ -168,6 +174,59 @@ pub fn managed_llama_cpp_runtime_manifest() -> Value {
         "channels": managed_llama_cpp_runtime_channels(),
         "runtimes": [
             {
+                "runtime_id": CANDIDATE_LLAMA_CPP_MACOS_METAL_RUNTIME_ID,
+                "channel": "reviewed_candidate",
+                "backend": "llama.cpp",
+                "accelerator": "metal",
+                "version_label": "llama.cpp b9994 macOS arm64",
+                "upstream": {
+                    "project": "ggml-org/llama.cpp",
+                    "tag": CANDIDATE_LLAMA_CPP_MACOS_METAL_TAG,
+                    "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b9994",
+                },
+                "platform": {
+                    "system": "macos",
+                    "arch": "aarch64",
+                    "human": "macOS Apple Silicon",
+                },
+                "archive": {
+                    "url": CANDIDATE_LLAMA_CPP_MACOS_METAL_ARCHIVE_URL,
+                    "sha256": CANDIDATE_LLAMA_CPP_MACOS_METAL_SHA256,
+                    "size_bytes": 10751774_u64,
+                    "format": "tar.gz",
+                    "checksum_source": "github_release_asset_digest",
+                    "signature_url": Value::Null,
+                },
+                "verification": {
+                    "sha256": true,
+                    "expected_binaries": true,
+                    "version_smoke": true,
+                    "independent_signature": false,
+                    "notes": [
+                        "The GitHub release asset exposes a SHA-256 digest, but no independent signature asset was found during v0.2.2 planning.",
+                        "Do not describe this runtime as independently signed until a signature lane exists.",
+                    ],
+                },
+                "download": {
+                    "enabled": true,
+                    "requires_explicit_user_action": true,
+                    "message": "Download only runs after explicit user action. InferGrade verifies SHA-256, expected binaries, and version smoke before selecting this runtime.",
+                },
+                "expected_binaries": ["llama-cli", "llama-server", "llama-perplexity"],
+                "binary_names": {
+                    "cli": "llama-cli",
+                    "server": "llama-server",
+                    "perplexity": "llama-perplexity",
+                },
+                "rollback_runtime_id": MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID,
+                "compatibility_notes": [
+                    "Reviewed candidate for explicit Gemma 4 canary work; not InferGrade Stable.",
+                    "Windows and Linux remain preview/partial until separate runtime lanes are validated.",
+                    "Native first-run evidence remains experimental/informational.",
+                ],
+                "provenance": "Upstream ggml-org/llama.cpp GitHub release asset with pinned SHA-256 digest; Gemma 4 E4B behavior canary completed on Apple M1 Pro; no independent signature verified.",
+            },
+            {
                 "runtime_id": MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID,
                 "channel": "infergrade_stable",
                 "backend": "llama.cpp",
@@ -197,14 +256,14 @@ pub fn managed_llama_cpp_runtime_manifest() -> Value {
                     "version_smoke": true,
                     "independent_signature": false,
                     "notes": [
-                        "The GitHub release asset exposes a SHA-256 digest, but no independent signature asset was found during v0.2.2 planning.",
-                        "Do not describe this runtime as independently signed until a signature lane exists.",
+                        "Retained as InferGrade Stable while the b9994 compatibility matrix is incomplete.",
+                        "This runtime predates Gemma 4 support and should not be used for Gemma 4 evidence.",
                     ],
                 },
                 "download": {
                     "enabled": true,
                     "requires_explicit_user_action": true,
-                    "message": "Download only runs after explicit user action. InferGrade verifies SHA-256, expected binaries, and version smoke before selecting this runtime.",
+                    "message": "Stable install remains explicit. InferGrade verifies SHA-256, expected binaries, and version smoke before selecting this runtime.",
                 },
                 "expected_binaries": ["llama-cli", "llama-server", "llama-perplexity"],
                 "binary_names": {
@@ -214,11 +273,10 @@ pub fn managed_llama_cpp_runtime_manifest() -> Value {
                 },
                 "rollback_runtime_id": LLAMA_CPP_RUNTIME_ID,
                 "compatibility_notes": [
-                    "Recommended only for macOS Apple Silicon native first-run.",
-                    "Windows and Linux remain preview/partial until separate runtime lanes are validated.",
-                    "Native first-run evidence remains experimental/informational.",
+                    "Current stable macOS Apple Silicon runtime.",
+                    "Does not support Gemma 4 GGUF artifacts.",
                 ],
-                "provenance": "Upstream ggml-org/llama.cpp GitHub release asset with pinned SHA-256 digest; no independent signature verified.",
+                "provenance": "Stable upstream ggml-org/llama.cpp release asset with pinned SHA-256 digest; no independent signature verified.",
             }
         ],
     })
@@ -239,6 +297,17 @@ pub fn managed_llama_cpp_runtime_channels() -> Value {
                 "update_policy": "manual_only",
                 "provenance_expectation": "Pinned manifest entry with SHA-256 verification. Independent signature verification is not yet available.",
                 "evidence_note": "Recommended for native first-run evidence, which remains experimental/informational until stronger trust gates exist.",
+            },
+            {
+                "channel": "reviewed_candidate",
+                "label": "Reviewed Candidate",
+                "audience": "advanced",
+                "default": false,
+                "managed_by_infergrade": true,
+                "install_policy": "explicit_only",
+                "update_policy": "manual_promotion_only",
+                "provenance_expectation": "Pinned release asset with SHA-256 verification and named canary evidence; the complete stable gate matrix is not yet satisfied.",
+                "evidence_note": "Use for targeted compatibility and dogfood runs. Do not present as InferGrade Stable.",
             },
             {
                 "channel": "previous_release",
@@ -563,16 +632,14 @@ pub fn container_runtime_readiness() -> Value {
 
 pub fn verified_runtime_download_policy() -> Value {
     let manifest = managed_llama_cpp_runtime_manifest();
-    let verifier_status = if manifest["runtimes"]
-        .as_array()
-        .and_then(|entries| entries.first())
-        .map(verify_runtime_download_manifest)
-        .transpose()
-        .is_ok()
-    {
-        "ready"
-    } else {
-        "unavailable"
+    let stable_entry = manifest["runtimes"].as_array().and_then(|entries| {
+        entries
+            .iter()
+            .find(|entry| entry["channel"] == "infergrade_stable")
+    });
+    let verifier_status = match stable_entry {
+        Some(entry) if verify_runtime_download_manifest(entry).is_ok() => "ready",
+        _ => "unavailable",
     };
     json!({
         "status": "configured",
@@ -594,7 +661,15 @@ pub fn verified_runtime_download_policy() -> Value {
 
 pub fn recommended_llama_cpp_runtime() -> Value {
     if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-        managed_llama_cpp_runtime_manifest()["runtimes"][0].clone()
+        managed_llama_cpp_runtime_manifest()["runtimes"]
+            .as_array()
+            .and_then(|runtimes| {
+                runtimes
+                    .iter()
+                    .find(|entry| entry["channel"] == "infergrade_stable")
+            })
+            .cloned()
+            .unwrap_or(Value::Null)
     } else {
         json!({
             "runtime_id": "llama-cpp-native-manual",
@@ -2234,37 +2309,52 @@ mod tests {
         assert_eq!(manifest["manifest_version"], RUNTIME_MANIFEST_VERSION);
         assert_eq!(manifest["channels"]["runtime_family"], "llama.cpp");
         let runtimes = manifest["runtimes"].as_array().expect("runtime entries");
-        let macos = runtimes
+        let candidate = runtimes
+            .iter()
+            .find(|entry| entry["runtime_id"] == "llama-cpp-b9994-macos-arm64-metal")
+            .expect("macOS Metal candidate entry");
+        assert_eq!(candidate["channel"], "reviewed_candidate");
+        assert_eq!(candidate["backend"], "llama.cpp");
+        assert_eq!(candidate["accelerator"], "metal");
+        assert_eq!(candidate["platform"]["system"], "macos");
+        assert_eq!(candidate["platform"]["arch"], "aarch64");
+        assert_eq!(candidate["upstream"]["tag"], "b9994");
+        assert_eq!(
+            candidate["archive"]["url"],
+            "https://github.com/ggml-org/llama.cpp/releases/download/b9994/llama-b9994-bin-macos-arm64.tar.gz"
+        );
+        assert_eq!(
+            candidate["archive"]["sha256"],
+            "39aeba4d7cd04803ea15760f01af6990c35487b8a83446fa0e7bb394b5c5f3c5"
+        );
+        let stable = manifest["runtimes"]
+            .as_array()
+            .expect("runtimes")
             .iter()
             .find(|entry| entry["runtime_id"] == "llama-cpp-b9050-macos-arm64-metal")
-            .expect("macOS Metal entry");
-        assert_eq!(macos["channel"], "infergrade_stable");
-        assert_eq!(macos["backend"], "llama.cpp");
-        assert_eq!(macos["accelerator"], "metal");
-        assert_eq!(macos["platform"]["system"], "macos");
-        assert_eq!(macos["platform"]["arch"], "aarch64");
-        assert_eq!(macos["upstream"]["tag"], "b9050");
-        assert_eq!(
-            macos["archive"]["url"],
-            "https://github.com/ggml-org/llama.cpp/releases/download/b9050/llama-b9050-bin-macos-arm64.tar.gz"
-        );
-        assert_eq!(
-            macos["archive"]["sha256"],
-            "d334fa44e42a143ec6e49924f9630136c0b5fedc5a615508636ba9c8d08eb5d3"
-        );
-        assert_eq!(macos["download"]["enabled"], true);
-        assert_eq!(macos["download"]["requires_explicit_user_action"], true);
-        assert!(macos["download"]["message"]
+            .expect("stable macOS runtime");
+        assert_eq!(stable["channel"], "infergrade_stable");
+        assert_eq!(candidate["rollback_runtime_id"], stable["runtime_id"]);
+        assert_eq!(candidate["download"]["enabled"], true);
+        assert_eq!(candidate["download"]["requires_explicit_user_action"], true);
+        assert!(candidate["download"]["message"]
             .as_str()
             .unwrap_or("")
             .contains("explicit user action"));
-        assert_eq!(macos["verification"]["independent_signature"], false);
-        assert_eq!(macos["expected_binaries"][0], "llama-cli");
+        assert_eq!(candidate["verification"]["independent_signature"], false);
+        assert_eq!(candidate["expected_binaries"][0], "llama-cli");
+        assert!(verify_runtime_download_manifest(candidate).is_ok());
+        assert!(verify_runtime_download_manifest(stable).is_ok());
         assert_eq!(
-            macos["rollback_runtime_id"],
-            "llama-cpp-homebrew-stable-2026-04"
+            verified_runtime_download_policy()["manifest_verifier"],
+            "ready"
         );
-        assert!(verify_runtime_download_manifest(macos).is_ok());
+        if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+            assert_eq!(
+                recommended_llama_cpp_runtime()["runtime_id"],
+                "llama-cpp-b9050-macos-arm64-metal"
+            );
+        }
     }
 
     #[test]

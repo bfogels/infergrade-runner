@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-RUNTIME_MANIFEST_VERSION = "2026-04-22"
+RUNTIME_MANIFEST_VERSION = "2026-07-14"
 LLAMA_CPP_RUNTIME_ID = "llama-cpp-homebrew-stable-2026-04"
 WINDOWS_CUDA_RUNTIME_ID = "llama-cpp-windows-cuda-cli-preview-2026-05"
 WINDOWS_CUDA_BINARY_SET = "llama_cpp_windows_cuda_x86_64"
