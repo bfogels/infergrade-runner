@@ -7,6 +7,7 @@ class RunRequest:
     model: str
     backend: str
     tier: str
+    tier_was_explicit: bool = False
     capability_suite_ids: List[str] = field(default_factory=list)
     benchmark_group_ids: List[str] = field(default_factory=list)
     benchmark_check_ids: List[str] = field(default_factory=list)

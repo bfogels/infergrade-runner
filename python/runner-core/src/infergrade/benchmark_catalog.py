@@ -364,7 +364,7 @@ def normalize_request_selection(request: RunRequest, catalog: Optional[Dict[str,
     request.benchmark_group_ids = group_ids
     request.benchmark_check_ids = check_ids
 
-    if check_ids:
+    if check_ids and not request.tier_was_explicit:
         request.tier = derive_tier_from_selection(check_ids, group_ids=group_ids, suite_ids=suite_ids, catalog=payload)
 
     if not request.use_case:

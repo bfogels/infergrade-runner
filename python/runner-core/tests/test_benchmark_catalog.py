@@ -57,7 +57,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         check_ids = {item["check_id"] for item in catalog["checks"]}
         planned_ids = {item["check_id"] for item in catalog["planned_benchmark_candidates"]}
         self.assertIn("multiturn_chat_memory_v1", check_ids)
-        self.assertIn("assistant_compositional_instruction_v1", check_ids)
+        self.assertIn("assistant_compositional_instruction_v2", check_ids)
         self.assertIn("coding_static_repair_v1", check_ids)
         self.assertIn("reasoning_exact_answer_v1", check_ids)
         self.assertIn("mmlu_pro_reference_v1", check_ids)
@@ -79,7 +79,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.assertTrue(check["score_policy_id"])
         self.assertTrue(catalog["planned_benchmark_candidates"])
         score_policies = surface_score_policy_index(catalog)
-        self.assertEqual(score_policies["local_assistant_capability"]["score_version"], "local_assistant_score_v3")
+        self.assertEqual(score_policies["local_assistant_capability"]["score_version"], "local_assistant_score_v4")
         self.assertEqual(score_policies["local_assistant_capability"]["scale_interpretation"], "benchmark_attainment_index")
         self.assertEqual(score_policies["local_coding_capability"]["minimum_coverage_fraction"], 0.5)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_scored_components"], 2)
@@ -291,7 +291,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(selection["group_ids"], ["instruction_following", "chat_memory", "assistant_compositional", "deployment_chat"])
         self.assertEqual(
             selection["check_ids"],
-            ["ifeval", "multiturn_chat_memory_v1", "assistant_compositional_instruction_v1", "interactive_chat_v1"],
+            ["ifeval", "multiturn_chat_memory_v1", "assistant_compositional_instruction_v2", "interactive_chat_v1"],
         )
 
     def test_assistant_reference_shortcut_adds_mmlu_pro_intentionally(self):

@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-07-14-capability-ceiling-v3",
+  "catalog_version": "2026-07-14-capability-headroom-v4",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -35,8 +35,8 @@
     {
       "surface_id": "local_assistant_capability",
       "display_name": "Local assistant benchmark index",
-      "score_version": "local_assistant_score_v3",
-      "score_method": "weighted_benchmark_attainment_v3",
+      "score_version": "local_assistant_score_v4",
+      "score_method": "weighted_benchmark_attainment_v4",
       "scale_interpretation": "benchmark_attainment_index",
       "ceiling_display_policy": "label_suite_ceiling_not_perfection",
       "minimum_coverage_fraction": 1.0,
@@ -46,6 +46,16 @@
       "maximum_component_weight_fraction": 0.8,
       "dominant_component_weight_fraction": 0.67,
       "calibration_status": "not_psychometrically_calibrated",
+      "distribution_calibration_status": "provisional_pending_distribution_audit",
+      "calibration_policy": {
+        "policy_id": "capability_headroom_gate_v1",
+        "minimum_observations": 20,
+        "minimum_model_families": 5,
+        "minimum_parameter_bands": 3,
+        "minimum_distinct_scores": 6,
+        "maximum_suite_ceiling_fraction": 0.2,
+        "maximum_largest_family_fraction": 0.4
+      },
       "claim_boundary": "Task-scoped benchmark attainment from IFEval and the compositional instruction fixture. A value at the suite ceiling means every scored check passed; it does not mean the model is perfect or establish a global intelligence rank."
     },
     {
@@ -83,7 +93,7 @@
       "model_family": "Qwen2.5",
       "target_quants": ["q4_k_m", "q5_k_m", "q6_k"],
       "use_case": "general_assistant",
-      "benchmark_check_ids": ["interactive_chat_v1", "ifeval", "assistant_compositional_instruction_v1", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
+      "benchmark_check_ids": ["interactive_chat_v1", "ifeval", "assistant_compositional_instruction_v2", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
       "why": "This is the highest-leverage answer loop for fast assistant recommendations under common Mac memory budgets.",
       "what_it_would_change": "Replace static duration and quant-fidelity caveats with observed speed, memory, and same-family quality-retention evidence.",
       "status": "needs_real_repeats"
@@ -96,7 +106,7 @@
       "target_quants": ["q4_k_m"],
       "use_case": "general_assistant",
       "generation_preset_id": "deterministic_direct_answer_v1",
-      "benchmark_check_ids": ["interactive_chat_v1", "ifeval", "assistant_compositional_instruction_v1", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
+      "benchmark_check_ids": ["interactive_chat_v1", "ifeval", "assistant_compositional_instruction_v2", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
       "why": "A reviewed Qwen3 baseline adds a current cross-generation assistant comparison on common Apple Silicon memory budgets.",
       "what_it_would_change": "Let recommendations compare observed Qwen3 speed, memory, and assistant retention with Qwen2.5 while recording Qwen3 perplexity only for future same-family quant comparisons.",
       "status": "needs_first_real_run"
@@ -109,7 +119,7 @@
       "target_quants": ["q4_k_m"],
       "use_case": "general_assistant",
       "generation_preset_id": "deterministic_direct_answer_v1",
-      "benchmark_check_ids": ["interactive_chat_v1", "ifeval", "assistant_compositional_instruction_v1", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
+      "benchmark_check_ids": ["interactive_chat_v1", "ifeval", "assistant_compositional_instruction_v2", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
       "why": "A reviewed Qwen3.5 baseline adds a recent-model assistant comparison on Apple Silicon after exact artifact and local llama.cpp compatibility verification.",
       "what_it_would_change": "Let recommendations compare observed Qwen3.5 speed, memory, task time, and assistant retention with Qwen3 and Qwen2.5 while keeping perplexity comparisons within each model family.",
       "status": "needs_first_real_run"
@@ -221,7 +231,7 @@
       ]
     },
     {
-      "check_id": "assistant_compositional_instruction_v1",
+      "check_id": "assistant_compositional_instruction_v2",
       "surface_id": "local_assistant_capability",
       "evidence_lane_id": "decision",
       "maturity": "thin_local_sample",
@@ -230,7 +240,7 @@
       "fixture_or_dataset_revision_status": "pinned_runner_fixture",
       "harness_status": "native_harness_implemented",
       "scoring_policy_id": "structured_compositional_accuracy_v1",
-      "sample_policy": "Twelve pinned synthetic compositional tasks scored by strict JSON equality; canary runs the first four.",
+      "sample_policy": "Twenty-four pinned synthetic compositional tasks scored by strict JSON equality; canary runs the first four.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "none_native_generation_only",
       "claim_boundary": "Provisional local instruction-following evidence only. It is not psychometrically calibrated, preference quality, factual knowledge, global intelligence, or leaderboard evidence.",
@@ -768,7 +778,7 @@
       "evidence_kind": "capability",
       "surface_id": "local_assistant_capability",
       "default_check_ids": [
-        "assistant_compositional_instruction_v1"
+        "assistant_compositional_instruction_v2"
       ],
       "effort_hint": "short",
       "suite_scope": "decision",
@@ -948,7 +958,7 @@
       "score_dimension": "instruction_following",
       "primary_score_metric": "prompt_strict_accuracy",
       "score_floor": 0.0,
-      "primary_score_weight": 0.65,
+      "primary_score_weight": 0.45,
       "score_role": "headline_component",
       "discrimination_status": "established_benchmark",
       "higher_is_better": true,
@@ -997,13 +1007,13 @@
       ]
     },
     {
-      "check_id": "assistant_compositional_instruction_v1",
+      "check_id": "assistant_compositional_instruction_v2",
       "display_name": "Compositional instruction following",
       "description": "Pinned synthetic assistant tasks that combine state corrections, filtering, ordering, conditional rules, and strict JSON output.",
       "evidence_kind": "capability",
       "group_id": "assistant_compositional",
       "surface_id": "local_assistant_capability",
-      "runner_target": "assistant_compositional_instruction_v1",
+      "runner_target": "assistant_compositional_instruction_v2",
       "supported_backends": [
         "llama.cpp",
         "vllm"
@@ -1019,9 +1029,13 @@
       "score_dimension": "compositional_instruction_following",
       "primary_score_metric": "structured_task_accuracy",
       "score_floor": 0.0,
-      "primary_score_weight": 0.35,
+      "primary_score_weight": 0.55,
       "score_role": "headline_component",
       "discrimination_status": "provisional_needs_corpus_calibration",
+      "calibration_policy": {
+        "policy_id": "capability_headroom_gate_v1",
+        "minimum_task_count": 24
+      },
       "higher_is_better": true,
       "score_policy_id": "structured_compositional_accuracy_v1",
       "score_breakdown_fields": [
@@ -1325,7 +1339,7 @@
       "check_ids": [
         "ifeval",
         "multiturn_chat_memory_v1",
-        "assistant_compositional_instruction_v1",
+        "assistant_compositional_instruction_v2",
         "interactive_chat_v1"
       ]
     },
