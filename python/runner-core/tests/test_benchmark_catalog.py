@@ -97,6 +97,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(qwen3["model_family"], "Qwen3")
         self.assertEqual(qwen3["target_quants"], ["q4_k_m"])
         self.assertEqual(qwen3["use_case"], "general_assistant")
+        self.assertEqual(qwen3["generation_preset_id"], "deterministic_direct_answer_v1")
         self.assertEqual(qwen3["status"], "needs_first_real_run")
         self.assertIn("multiturn_chat_memory_v1", qwen3["benchmark_check_ids"])
         cuda = next(item for item in priorities if item["priority_id"] == "windows_nvidia_cuda_beta_gate")
@@ -168,6 +169,34 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertTrue(any("multiturn_chat_memory_v1" in item and "does not match check" in item for item in failures))
         self.assertTrue(any("multiturn_chat_memory_v1" in item and "is not declared" in item for item in failures))
         self.assertTrue(any("gpqa_reference_v1" in item and "does not match planned" in item for item in failures))
+
+    def test_catalog_legitimacy_validation_rejects_unknown_coverage_generation_preset(self):
+        mutated = deepcopy(load_capability_catalog())
+        priority = next(
+            item
+            for item in mutated["coverage_expansion_priorities"]
+            if item["priority_id"] == "apple_silicon_qwen3_assistant_baseline"
+        )
+        priority["generation_preset_id"] = "typo_direct_answer_v1"
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "apple_silicon_qwen3_assistant_baseline: unsupported coverage generation_preset_id "
+            "'typo_direct_answer_v1'",
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_accepts_explicit_default_generation_preset(self):
+        mutated = deepcopy(load_capability_catalog())
+        priority = next(
+            item
+            for item in mutated["coverage_expansion_priorities"]
+            if item["priority_id"] == "apple_silicon_qwen3_assistant_baseline"
+        )
+        priority["generation_preset_id"] = "deterministic_v1"
+
+        self.assertEqual(validate_benchmark_legitimacy_metadata(mutated), [])
 
     def test_evidence_lane_index_exposes_claim_boundaries(self):
         lanes = evidence_lane_index()

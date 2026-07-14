@@ -16,7 +16,7 @@ Expand coverage only where it improves a setup answer:
 The machine-readable priorities live in `schemas/capability_catalog.json` under `coverage_expansion_priorities`.
 
 1. Apple Silicon assistant quant ladder for Qwen2.5 Q4/Q5/Q6 with deployment, chat-memory, and quant-fidelity evidence.
-2. Apple Silicon Qwen3 Q4 assistant baseline with deployment, chat-memory, and same-family quant-fidelity evidence.
+2. Apple Silicon Qwen3 Q4 assistant baseline with the explicit deterministic direct-answer preset, deployment, chat-memory, and same-family quant-fidelity evidence.
 3. Apple Silicon coding ladder for Qwen2.5-Coder with deployment, HumanEval+, and MBPP+ evidence.
 4. Apple Silicon reasoning sample for Qwen2.5 with exact-answer and sampled MMLU-Pro evidence.
 5. Windows/NVIDIA CUDA beta gate for one known-good Qwen2.5 Q4 path after hardware is available.
