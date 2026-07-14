@@ -1,5 +1,6 @@
 import sys
 import unittest
+from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
@@ -9,6 +10,14 @@ from infergrade.images import container_image_identity, docker_image_exists, ins
 
 
 class ImageInstallTests(unittest.TestCase):
+    def test_runner_core_image_includes_runner_owned_contract_resources(self):
+        dockerfile = (
+            Path(__file__).resolve().parents[3] / "containers" / "runner-core" / "Dockerfile"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("COPY python/runner-core/src /app/src", dockerfile)
+        self.assertIn("COPY schemas /app/schemas", dockerfile)
+
     @mock.patch("infergrade.images.subprocess.run", side_effect=FileNotFoundError("docker"))
     def test_docker_image_exists_returns_false_when_docker_cli_is_missing(self, _run_mock):
         self.assertFalse(docker_image_exists("infergrade-llama-cpp:local"))
