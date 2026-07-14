@@ -97,6 +97,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(qwen3["model_family"], "Qwen3")
         self.assertEqual(qwen3["target_quants"], ["q4_k_m"])
         self.assertEqual(qwen3["use_case"], "general_assistant")
+        self.assertEqual(qwen3["generation_preset_id"], "deterministic_direct_answer_v1")
         self.assertEqual(qwen3["status"], "needs_first_real_run")
         self.assertIn("multiturn_chat_memory_v1", qwen3["benchmark_check_ids"])
         cuda = next(item for item in priorities if item["priority_id"] == "windows_nvidia_cuda_beta_gate")
