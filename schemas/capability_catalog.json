@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-07-14-capability-protocol-3.1",
+  "catalog_version": "2026-07-14-capability-protocol-3.1-calibration-bands",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -125,6 +125,52 @@
       "why": "A reviewed Qwen3.5 baseline adds a recent-model assistant comparison on Apple Silicon after exact artifact and local llama.cpp compatibility verification.",
       "what_it_would_change": "Let recommendations compare observed Qwen3.5 speed, memory, task time, and assistant retention with Qwen3 and Qwen2.5 while keeping perplexity comparisons within each model family.",
       "status": "needs_first_real_run"
+    },
+    {
+      "priority_id": "apple_silicon_qwen3_sub1b_calibration_band",
+      "rank": 18,
+      "hardware_class": "apple_silicon",
+      "model_family": "Qwen3",
+      "model_id": "Qwen/Qwen3-0.6B",
+      "checkpoint_name": "Qwen3-0.6B",
+      "parameter_scale": "0.6B",
+      "target_quants": ["q8_0"],
+      "use_case": "general_assistant",
+      "generation_preset_id": "deterministic_direct_answer_v1",
+      "benchmark_check_ids": ["interactive_chat_v1", "ifeval", "assistant_compositional_instruction_v2", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
+      "why": "A reviewed sub-1B run fills the under-3B calibration band and tests whether Capability protocol v3.1 retains useful lower-tail discrimination.",
+      "what_it_would_change": "Add the missing under-3B distribution band without requiring new hardware, while exposing the speed and task-time tradeoff of a very small local model.",
+      "status": "needs_protocol_v3_1_run"
+    },
+    {
+      "priority_id": "apple_silicon_ministral3_assistant_calibration_family",
+      "rank": 19,
+      "hardware_class": "apple_silicon",
+      "model_family": "Ministral-3",
+      "model_id": "mistralai/Ministral-3-3B-Instruct-2512",
+      "checkpoint_name": "Ministral-3-3B-Instruct-2512",
+      "parameter_scale": "3B",
+      "target_quants": ["q4_k_m"],
+      "use_case": "general_assistant",
+      "benchmark_check_ids": ["interactive_chat_v1", "ifeval", "assistant_compositional_instruction_v2", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
+      "why": "A reviewed Ministral run adds a non-Qwen family to the provisional protocol distribution on hardware already available for dogfood.",
+      "what_it_would_change": "Reduce family concentration and add a compact current-model comparison with measured speed, memory, task time, and task-scoped capability.",
+      "status": "needs_protocol_v3_1_run"
+    },
+    {
+      "priority_id": "apple_silicon_gemma4_assistant_calibration_family",
+      "rank": 20,
+      "hardware_class": "apple_silicon",
+      "model_family": "Gemma-4",
+      "model_id": "google/gemma-4-E4B-it-qat-q4_0-unquantized",
+      "checkpoint_name": "gemma-4-E4B-it-qat-q4_0-unquantized",
+      "parameter_scale": "E4B",
+      "target_quants": ["q4_0"],
+      "use_case": "general_assistant",
+      "benchmark_check_ids": ["interactive_chat_v1", "ifeval", "assistant_compositional_instruction_v2", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
+      "why": "The already reviewed Gemma 4 artifact adds another non-Qwen family to the protocol distribution without buying or renting hardware.",
+      "what_it_would_change": "Reduce family concentration and compare a current official-publisher GGUF against Qwen-family setups under the same task-scoped protocol.",
+      "status": "needs_protocol_v3_1_run"
     },
     {
       "priority_id": "apple_silicon_coding_reference_ladder",
