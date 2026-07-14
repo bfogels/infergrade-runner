@@ -16,4 +16,4 @@ Runner 0.3.22 introduced the saturation-resistant assistant scoring contract tha
 
 ## Evidence boundary
 
-The v4 assistant index remains provisional until publication-ready IFEval plus compositional results pass the declared cross-model distribution gate. Existing legacy and v1 scores are not comparable with v4.
+Capability protocol v3.1 remains provisional until publication-ready IFEval plus compositional results pass the declared cross-model distribution gate. Existing legacy and v1 scores are not comparable with protocol v3.1.
