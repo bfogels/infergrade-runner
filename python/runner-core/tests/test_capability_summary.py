@@ -50,6 +50,8 @@ class CapabilitySummaryTests(unittest.TestCase):
         self.assertEqual(by_surface["local_assistant_capability"]["score"], None)
         self.assertEqual(by_surface["local_assistant_capability"]["score_observed"], None)
         self.assertFalse(by_surface["local_assistant_capability"]["score_ready"])
+        self.assertEqual(by_surface["local_assistant_capability"]["score_protocol_version"], "3.1")
+        self.assertEqual(by_surface["local_assistant_capability"]["score_protocol_label"], "Capability protocol v3.1")
         self.assertEqual(by_surface["local_assistant_capability"]["score_coverage"]["coverage_fraction"], 0.0)
         self.assertEqual(by_surface["local_assistant_capability"]["score_diagnostic_components"][0]["score"], 1.0)
         self.assertEqual(

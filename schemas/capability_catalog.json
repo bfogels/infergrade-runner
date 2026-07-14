@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-07-14-capability-headroom-v4",
+  "catalog_version": "2026-07-14-capability-protocol-3.1",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -37,6 +37,8 @@
       "display_name": "Local assistant benchmark index",
       "score_version": "local_assistant_score_v4",
       "score_method": "weighted_benchmark_attainment_v4",
+      "protocol_version": "3.1",
+      "protocol_label": "Capability protocol v3.1",
       "scale_interpretation": "benchmark_attainment_index",
       "ceiling_display_policy": "label_suite_ceiling_not_perfection",
       "minimum_coverage_fraction": 1.0,

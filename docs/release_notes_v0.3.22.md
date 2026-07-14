@@ -1,6 +1,6 @@
 # InferGrade Runner 0.3.22
 
-Runner 0.3.22 introduces the saturation-resistant local assistant score v4 and publishes contract `0.3.16`.
+Runner 0.3.22 introduced the saturation-resistant assistant scoring contract that is now publicly named Capability protocol v3.1. Its internal compatibility identifier remains `local_assistant_score_v4`, and this historical release published contract `0.3.16`.
 
 ## Capability headroom
 
