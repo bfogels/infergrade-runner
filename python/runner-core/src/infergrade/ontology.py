@@ -9,6 +9,10 @@ from infergrade.utils import slugify, stable_hash
 
 _PARAMETER_SCALE_RE = re.compile(r"-(\d+(?:\.\d+)?)b(?:-|$)", re.IGNORECASE)
 _WEIGHT_PRECISION_RE = re.compile(r"q(\d+(?:\.\d+)?)", re.IGNORECASE)
+_GGUF_QUANTIZATION_SCHEME_RE = re.compile(
+    r"(?<![a-z0-9])((?:iq|tq|q)\d+(?:_[a-z0-9]+)*)(?![a-z0-9])",
+    re.IGNORECASE,
+)
 
 
 def resolve_quant_format(artifact: str, backend: str) -> Optional[str]:
@@ -106,9 +110,9 @@ def _infer_quantization_scheme(quant_label: Optional[str], quant_format: Optiona
             return "awq"
         if "gptq" in lowered:
             return "gptq"
-        for token in re.split(r"[-_.]+", lowered):
-            if token.startswith("q") and len(token) > 1:
-                return token
+        match = _GGUF_QUANTIZATION_SCHEME_RE.search(lowered)
+        if match:
+            return match.group(1)
     return quant_format
 
 
