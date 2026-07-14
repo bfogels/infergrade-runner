@@ -34,6 +34,7 @@ from infergrade.adapters.llama_cpp import (
 from infergrade.models import RunRequest
 from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
 from infergrade.runtimes import select_llama_cpp_runtime
+from infergrade.capabilities import _coding_static_repair_cases, _reasoning_exact_answer_cases
 
 
 _FAKE_TIMING_LOG = """
@@ -523,6 +524,40 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(transform["id"], "qwen_chat_template_disable_thinking_v1")
         self.assertEqual(transform["placement"], "structured_messages")
 
+    def test_qwen35_direct_answer_server_wraps_plain_reasoning_and_coding_prompts(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        for case in (_reasoning_exact_answer_cases()[0], _coding_static_repair_cases()[0]):
+            messages, transform = _prepare_llama_server_chat(request, case["prompt"])
+            self.assertEqual(messages, [{"role": "user", "content": case["prompt"].strip()}])
+            self.assertEqual(transform["state"], "chat_template_enable_thinking_false_single_user_prompt")
+
+    @mock.patch("infergrade.adapters.llama_cpp.tempfile.NamedTemporaryFile")
+    @mock.patch.object(LlamaCppAdapter, "_native_server_path", side_effect=RuntimeError("server unavailable"))
+    def test_qwen35_server_resolution_failure_does_not_create_temp_log(self, server_path_mock, temp_mock):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        with self.assertRaisesRegex(RuntimeError, "server unavailable"):
+            LlamaCppAdapter()._generate_native_server_text(
+                request=request,
+                model_path=self.model_path,
+                prompt="Plain reasoning prompt",
+                max_tokens=32,
+            )
+        temp_mock.assert_not_called()
+
     def test_legacy_server_preset_keeps_raw_completion_protocol(self):
         request = RunRequest(
             model="Qwen/Qwen3-4B",
@@ -617,6 +652,87 @@ class LlamaCppAdapterTests(unittest.TestCase):
         present, transform = _prepare_llama_prompt(request, "Answer A.\n/no_think")
         self.assertEqual(present, "Answer A.\n/no_think")
         self.assertEqual(transform["state"], "already_present")
+
+    @mock.patch.object(LlamaCppAdapter, "_generate_native_server_text")
+    def test_qwen35_direct_answer_capability_uses_native_chat_server(self, server_generate_mock):
+        server_generate_mock.return_value = {
+            "text": "HARBOR-17 uses q4_k_m.",
+            "status": "completed",
+        }
+        adapter = LlamaCppAdapter()
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        generated = adapter.generate_text(
+            request,
+            "User: What saved setup did I pick?\nAssistant:",
+            96,
+        )
+        self.assertEqual(generated["text"], "HARBOR-17 uses q4_k_m.")
+        server_generate_mock.assert_called_once_with(
+            request=request,
+            model_path=self.model_path,
+            prompt="User: What saved setup did I pick?\nAssistant:",
+            max_tokens=96,
+        )
+
+    @mock.patch("infergrade.adapters.llama_cpp._stop_process")
+    @mock.patch("infergrade.adapters.llama_cpp._read_log_file", return_value="")
+    @mock.patch("infergrade.adapters.llama_cpp._stream_server_chat_completion")
+    @mock.patch("infergrade.adapters.llama_cpp._wait_for_native_server_ready", return_value=("http://127.0.0.1:8123", 321.0))
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.Popen")
+    @mock.patch.object(LlamaCppAdapter, "_native_server_path", return_value="/opt/homebrew/bin/llama-server")
+    def test_qwen35_native_chat_server_preserves_task_timings(
+        self,
+        native_server_mock,
+        popen_mock,
+        wait_mock,
+        stream_mock,
+        read_log_mock,
+        stop_mock,
+    ):
+        stream_mock.return_value = {
+            "elapsed_ms": 720.0,
+            "first_token_ms": 180.0,
+            "text": "HARBOR-17 uses q4_k_m.",
+            "final_payload": {
+                "stop": True,
+                "stop_type": "stop",
+                "tokens_predicted": 8,
+                "usage": {"prompt_tokens": 42, "completion_tokens": 8},
+                "timings": {"predicted_n": 8, "predicted_per_second": 20.0},
+            },
+        }
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        generated = LlamaCppAdapter()._generate_native_server_text(
+            request=request,
+            model_path=self.model_path,
+            prompt="Replay the saved conversation.\n\nUser: What saved setup did I pick?\nAssistant:",
+            max_tokens=96,
+        )
+        self.assertEqual(generated["status"], "completed")
+        self.assertEqual(generated["input_tokens"], 42)
+        self.assertEqual(generated["output_tokens"], 8)
+        self.assertEqual(generated["tokens_per_second"], 20.0)
+        self.assertEqual(generated["time_to_first_token_ms"], 180.0)
+        self.assertEqual(generated["measurement_source"], "llama_cpp_server_chat_timings")
+        sent_messages = stream_mock.call_args.kwargs["messages"]
+        self.assertEqual(sent_messages[-1], {"role": "user", "content": "What saved setup did I pick?"})
+        stop_mock.assert_called_once_with(popen_mock.return_value)
 
     @mock.patch("infergrade.adapters.llama_cpp.shutil.which")
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
