@@ -92,6 +92,7 @@
       "model_family": "Qwen3",
       "target_quants": ["q4_k_m"],
       "use_case": "general_assistant",
+      "generation_preset_id": "deterministic_direct_answer_v1",
       "benchmark_check_ids": ["interactive_chat_v1", "multiturn_chat_memory_v1", "perplexity_reference_v1"],
       "why": "A reviewed Qwen3 baseline adds a current cross-generation assistant comparison on common Apple Silicon memory budgets.",
       "what_it_would_change": "Let recommendations compare observed Qwen3 speed, memory, and assistant retention with Qwen2.5 while recording Qwen3 perplexity only for future same-family quant comparisons.",
