@@ -269,7 +269,7 @@ class DoctorTests(unittest.TestCase):
 
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.shutil.which")
-    def test_doctor_accepts_gemma4_on_current_pinned_runtime(self, which_mock, capture_environment_mock):
+    def test_doctor_rejects_gemma4_on_stable_container(self, which_mock, capture_environment_mock):
         capture_environment_mock.return_value = {
             "environment_class": "local_workstation",
             "hardware_class": "nvidia_gpu",
@@ -290,8 +290,8 @@ class DoctorTests(unittest.TestCase):
         )
         report = run_doctor(request=request)
         checks = {item["id"]: item for item in report["checks"]}
-        self.assertEqual(checks["llama_cpp_model_compatibility"]["status"], "ok")
-        self.assertIn("No known", checks["llama_cpp_model_compatibility"]["message"])
+        self.assertEqual(checks["llama_cpp_model_compatibility"]["status"], "error")
+        self.assertIn("stable container runtime", checks["llama_cpp_model_compatibility"]["message"])
 
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.shutil.which")

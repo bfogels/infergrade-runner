@@ -356,8 +356,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(run_mock.call_args[0][0], ["/managed/llama-cli", "--version"])
 
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
-    def test_resolve_version_allows_gemma4_on_current_pinned_container(self, run_mock):
-        run_mock.return_value = mock.Mock(returncode=0, stdout="version: 9994 (pinned)\n", stderr="")
+    def test_resolve_version_rejects_gemma4_on_stable_container(self, run_mock):
         adapter = LlamaCppAdapter()
         request = RunRequest(
             model="google/gemma-4-27b-it",
@@ -368,15 +367,12 @@ class LlamaCppAdapterTests(unittest.TestCase):
             ontology_hints={"architecture": "gemma4", "family_name": "Gemma 4"},
             simulate=False,
         )
-        with mock.patch.object(adapter, "_ensure_docker"), mock.patch(
-            "infergrade.adapters.llama_cpp.install_image"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "stable container runtime"):
             adapter.resolve_version(simulate=False, request=request)
-        run_mock.assert_called_once()
+        run_mock.assert_not_called()
 
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
-    def test_resolve_version_allows_gemma4_detected_from_gguf_metadata(self, run_mock):
-        run_mock.return_value = mock.Mock(returncode=0, stdout="version: 9994 (pinned)\n", stderr="")
+    def test_resolve_version_rejects_gemma4_detected_from_gguf_metadata(self, run_mock):
         gguf_path = os.path.join(self.tempdir.name, "gemma4.gguf")
 
         def gguf_string(value):
@@ -401,11 +397,9 @@ class LlamaCppAdapterTests(unittest.TestCase):
             execution_mode="local_container",
             simulate=False,
         )
-        with mock.patch.object(adapter, "_ensure_docker"), mock.patch(
-            "infergrade.adapters.llama_cpp.install_image"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "stable container runtime"):
             adapter.resolve_version(simulate=False, request=request)
-        run_mock.assert_called_once()
+        run_mock.assert_not_called()
 
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
     def test_explicit_native_runtime_can_attempt_gemma4_candidate(self, run_mock):
@@ -803,6 +797,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
             model="google/gemma-4-E4B-it",
             quant_artifact=self.model_path,
             backend="llama.cpp",
+            backend_image="example/llama-cpp-gemma4-candidate:9994",
             tier="canary",
             execution_mode="local_container",
             simulate=False,

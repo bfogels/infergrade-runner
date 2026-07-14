@@ -40,6 +40,15 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
         failures = self.module.validate_policy(policy, root=ROOT)
         self.assertTrue(any("full 40-character" in item for item in failures))
 
+    def test_release_default_and_candidate_containers_are_separate_lanes(self):
+        pins = {item["id"]: item for item in self.policy["pins"]}
+        stable = pins["container_linux_cpu_stable"]
+        candidate = pins["container_linux_cpu_candidate"]
+        self.assertEqual(stable["channel"], "infergrade_stable")
+        self.assertEqual(candidate["channel"], "reviewed_candidate")
+        self.assertEqual(stable["locations"][0]["path"], "containers/llama-cpp/Dockerfile")
+        self.assertEqual(candidate["locations"][0]["path"], "containers/llama-cpp-candidate/Dockerfile")
+
     def test_new_upstream_release_is_advisory_candidate(self):
         latest = {
             "tag_name": "b10001",

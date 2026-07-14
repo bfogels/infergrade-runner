@@ -55,7 +55,10 @@ _DEFAULT_SERVER_PORT = 8080
 _SERVER_READY_TIMEOUT_SECONDS = 180.0
 _SERVER_REQUEST_TIMEOUT_SECONDS = 300.0
 _CONTAINER_MEMORY_SAMPLE_INTERVAL_SECONDS = 0.25
-_PINNED_LLAMA_CPP_REF = "14d3ba45f3369e75a308212399cfada5d349883b"
+_PINNED_LLAMA_CPP_REF = "9f102a1407ed5d73b8c954f32edab50f8dfa3f58"
+_UNSUPPORTED_STABLE_CONTAINER_ARCHITECTURES = {
+    "gemma4": "the stable llama.cpp container predates Gemma 4 GGUF support",
+}
 _PERPLEXITY_CORPUS_ID = "infergrade_quantfidelity_v1"
 _PERPLEXITY_CORPUS_REVISION = "sha256:ca86babd3cb6e69ca5db20f7625723da6951f98bcaab98f12291db36deef3512"
 _PERPLEXITY_PROTOCOL_ID = "infergrade_perplexity_v1"
@@ -634,12 +637,24 @@ class LlamaCppAdapter(BaseAdapter):
         return env_value("INFERGRADE_LLAMA_CPP_IMAGE", "QUANTBENCH_LLAMA_CPP_IMAGE", _DEFAULT_IMAGE)
 
     def _ensure_backend_model_compatibility(self, request: RunRequest) -> None:
-        # Compatibility is established by the pinned-runtime canary matrix.
-        # Do not maintain a second architecture denylist here: it becomes stale
-        # when the runtime advances and can reject models the pinned binary has
-        # already proven it can execute. Unknown architectures should reach the
-        # selected runtime so its exact load failure and version remain evidence.
-        return None
+        architecture = _infer_llama_cpp_architecture(request)
+        if architecture not in _UNSUPPORTED_STABLE_CONTAINER_ARCHITECTURES:
+            return None
+        # The release-default container remains on the stable pin. Explicit
+        # native runtimes and custom images are deliberate candidate lanes and
+        # may attempt the load while preserving their exact version and failure.
+        if request.execution_mode == "local_native" or request.backend_image:
+            return None
+        raise RuntimeError(
+            "llama.cpp backend compatibility check failed: GGUF architecture '%s' is not supported by "
+            "the stable container runtime (%s) because %s. Use an explicit reviewed candidate runtime "
+            "or custom image to collect candidate-lane evidence."
+            % (
+                architecture,
+                _PINNED_LLAMA_CPP_REF,
+                _UNSUPPORTED_STABLE_CONTAINER_ARCHITECTURES[architecture],
+            )
+        )
 
     def _require_local_gguf_artifact(self, request: RunRequest) -> str:
         artifact = request.quant_artifact_resolved_path or request.quant_artifact

@@ -24,12 +24,25 @@
       "upstream_published_at": "2026-07-14T05:29:11Z",
       "locations": [
         {
-          "path": "containers/llama-cpp/Dockerfile",
+          "path": "containers/llama-cpp-candidate/Dockerfile",
           "needle": "ARG LLAMA_CPP_REF=14d3ba45f3369e75a308212399cfada5d349883b"
+        }
+      ]
+    },
+    {
+      "id": "container_linux_cpu_stable",
+      "channel": "infergrade_stable",
+      "kind": "commit",
+      "value": "9f102a1407ed5d73b8c954f32edab50f8dfa3f58",
+      "upstream_published_at": "2026-03-24T15:00:30Z",
+      "locations": [
+        {
+          "path": "containers/llama-cpp/Dockerfile",
+          "needle": "ARG LLAMA_CPP_REF=9f102a1407ed5d73b8c954f32edab50f8dfa3f58"
         },
         {
           "path": "python/runner-core/src/infergrade/adapters/llama_cpp.py",
-          "needle": "_PINNED_LLAMA_CPP_REF = \"14d3ba45f3369e75a308212399cfada5d349883b\""
+          "needle": "_PINNED_LLAMA_CPP_REF = \"9f102a1407ed5d73b8c954f32edab50f8dfa3f58\""
         }
       ]
     },

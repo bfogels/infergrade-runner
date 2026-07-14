@@ -18,7 +18,7 @@ Custom native paths are explicit user runtime choices. The selector requires a r
 
 ## Compatibility Preflight
 
-Runner records the selected runtime before deployment and capability phases. It uses ontology hints when present and can read `general.architecture` from local GGUF metadata when practical. Architecture support is established by the pinned-runtime canary matrix rather than a second hard-coded denylist that can become stale; a real load failure preserves the exact runtime version and error instead of being reclassified as compatible.
+Runner records the selected runtime before deployment and capability phases. It uses ontology hints when present and can read `general.architecture` from local GGUF metadata when practical. Known incompatibilities on the release-default stable container fail before model loading. Explicit native runtimes and custom images remain candidate lanes, where a real load failure preserves the exact runtime version and error instead of being reclassified as compatible.
 
 This compatibility check does not install or upgrade `llama.cpp`. Managed installation remains explicit and inspectable. Managed release assets are SHA-256 verified; independent signature verification is not yet available.
 
@@ -49,9 +49,11 @@ new managed pin requires a Runner release. A future remotely delivered,
 signed/checksummed manifest could decouple safe runtime promotion from Runner
 product semver, but the intake report must not claim that separation today.
 
-The current stable macOS managed runtime remains b9050. The reviewed b9994
-candidate and Linux CPU candidate container are pinned to full commit
-`14d3ba45f3369e75a308212399cfada5d349883b`. An exact Google Gemma 4 E4B QAT
+The current stable macOS managed runtime remains b9050, and the release-default
+Linux container remains pinned to stable commit
+`9f102a1407ed5d73b8c954f32edab50f8dfa3f58`. The reviewed b9994 macOS candidate
+and the separate, non-release-default candidate Dockerfile are pinned to full
+commit `14d3ba45f3369e75a308212399cfada5d349883b`. An exact Google Gemma 4 E4B QAT
 Q4_0 artifact passed native Metal direct-answer and Linux container load/server
 protocol canaries; the full native Runner bundle
 `qb_20260714_055652_9eb6de27` also validated. That proves this artifact and

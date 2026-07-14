@@ -2,7 +2,7 @@ FROM ubuntu:22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
-ARG LLAMA_CPP_REF=9f102a1407ed5d73b8c954f32edab50f8dfa3f58
+ARG LLAMA_CPP_REF=14d3ba45f3369e75a308212399cfada5d349883b
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \

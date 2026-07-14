@@ -632,16 +632,14 @@ pub fn container_runtime_readiness() -> Value {
 
 pub fn verified_runtime_download_policy() -> Value {
     let manifest = managed_llama_cpp_runtime_manifest();
-    let verifier_status = if manifest["runtimes"]
-        .as_array()
-        .and_then(|entries| entries.first())
-        .map(verify_runtime_download_manifest)
-        .transpose()
-        .is_ok()
-    {
-        "ready"
-    } else {
-        "unavailable"
+    let stable_entry = manifest["runtimes"].as_array().and_then(|entries| {
+        entries
+            .iter()
+            .find(|entry| entry["channel"] == "infergrade_stable")
+    });
+    let verifier_status = match stable_entry {
+        Some(entry) if verify_runtime_download_manifest(entry).is_ok() => "ready",
+        _ => "unavailable",
     };
     json!({
         "status": "configured",
@@ -2347,6 +2345,16 @@ mod tests {
         assert_eq!(candidate["expected_binaries"][0], "llama-cli");
         assert!(verify_runtime_download_manifest(candidate).is_ok());
         assert!(verify_runtime_download_manifest(stable).is_ok());
+        assert_eq!(
+            verified_runtime_download_policy()["manifest_verifier"],
+            "ready"
+        );
+        if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+            assert_eq!(
+                recommended_llama_cpp_runtime()["runtime_id"],
+                "llama-cpp-b9050-macos-arm64-metal"
+            );
+        }
     }
 
     #[test]
