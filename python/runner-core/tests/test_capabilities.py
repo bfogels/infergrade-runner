@@ -14,6 +14,7 @@ from infergrade.capabilities import (
     _generation_prompt_for_case,
     _host_mount_path,
     _normalize_evalplus_completion,
+    _native_benchmark_cases,
     _run_capability_container,
     capability_images_for_request,
     execute_capability_suite,
@@ -175,7 +176,7 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(suite["suite_id"], "assistant_standard_v4")
         self.assertEqual(
             suite["benchmark_ids"],
-            ["ifeval", "assistant_compositional_instruction_v1", "multiturn_chat_memory_v1"],
+            ["ifeval", "assistant_compositional_instruction_v2", "multiturn_chat_memory_v1"],
         )
 
     def test_execute_compositional_canary_scores_strict_json_without_docker(self):
@@ -184,7 +185,7 @@ class CapabilityTests(unittest.TestCase):
             backend="llama.cpp",
             tier="canary",
             use_case="general_assistant",
-            benchmark_check_ids=["assistant_compositional_instruction_v1"],
+            benchmark_check_ids=["assistant_compositional_instruction_v2"],
             output_dir=self.tempdir,
             simulate=False,
         )
@@ -193,16 +194,24 @@ class CapabilityTests(unittest.TestCase):
             execution = execute_capability_suite(_CompositionalPassingAdapter(), request)
 
         container_mock.assert_not_called()
-        result = execution.benchmark_results["assistant_compositional_instruction_v1"]
+        result = execution.benchmark_results["assistant_compositional_instruction_v2"]
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["primary_metric"], {"name": "structured_task_accuracy", "value": 1.0})
         self.assertEqual(result["metrics"]["correct_count"], 4)
-        artifact_path = execution.artifacts["assistant_compositional_instruction_v1"]["capability_run_path"]
+        artifact_path = execution.artifacts["assistant_compositional_instruction_v2"]["capability_run_path"]
         with open(artifact_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)
         self.assertEqual(artifact["protocol"]["scorer_type"], "strict_json_equality")
         self.assertEqual(artifact["protocol"]["scoring_policy"], "strict_json_equality_v1")
         self.assertIn("not psychometrically calibrated", artifact["claim_boundary"]["unsupported_claims"][1])
+
+    def test_compositional_standard_fixture_retains_twenty_four_pinned_cases(self):
+        cases = _native_benchmark_cases(CAPABILITY_BENCHMARKS["assistant_compositional_instruction_v2"])
+
+        self.assertEqual(len(cases), 24)
+        self.assertEqual(len({item["case_id"] for item in cases}), 24)
+        self.assertEqual(cases[-1]["case_id"], "assistant-compose-reconcile-sources")
+        self.assertEqual(cases[-1]["expected_json"]["checksum"], 13)
 
     def test_compositional_extra_prose_is_scored_incorrect_not_accepted(self):
         class _ProseAdapter(_CompositionalPassingAdapter):
@@ -216,14 +225,14 @@ class CapabilityTests(unittest.TestCase):
             backend="llama.cpp",
             tier="canary",
             use_case="general_assistant",
-            benchmark_check_ids=["assistant_compositional_instruction_v1"],
+            benchmark_check_ids=["assistant_compositional_instruction_v2"],
             output_dir=self.tempdir,
             simulate=False,
         )
 
         execution = execute_capability_suite(_ProseAdapter(), request)
 
-        result = execution.benchmark_results["assistant_compositional_instruction_v1"]
+        result = execution.benchmark_results["assistant_compositional_instruction_v2"]
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["primary_metric"]["value"], 0.0)
         self.assertEqual(result["metrics"]["malformed_output_count"], 4)
@@ -240,14 +249,14 @@ class CapabilityTests(unittest.TestCase):
             backend="llama.cpp",
             tier="canary",
             use_case="general_assistant",
-            benchmark_check_ids=["assistant_compositional_instruction_v1"],
+            benchmark_check_ids=["assistant_compositional_instruction_v2"],
             output_dir=self.tempdir,
             simulate=False,
         )
 
         execution = execute_capability_suite(_TerminalMarkerAdapter(), request)
 
-        result = execution.benchmark_results["assistant_compositional_instruction_v1"]
+        result = execution.benchmark_results["assistant_compositional_instruction_v2"]
         self.assertEqual(result["primary_metric"]["value"], 1.0)
         self.assertEqual(result["metrics"]["malformed_output_count"], 0)
 
@@ -263,14 +272,14 @@ class CapabilityTests(unittest.TestCase):
             backend="llama.cpp",
             tier="canary",
             use_case="general_assistant",
-            benchmark_check_ids=["assistant_compositional_instruction_v1"],
+            benchmark_check_ids=["assistant_compositional_instruction_v2"],
             output_dir=self.tempdir,
             simulate=False,
         )
 
         execution = execute_capability_suite(_FencedAdapter(), request)
 
-        result = execution.benchmark_results["assistant_compositional_instruction_v1"]
+        result = execution.benchmark_results["assistant_compositional_instruction_v2"]
         self.assertEqual(result["primary_metric"]["value"], 0.0)
         self.assertEqual(result["metrics"]["semantic_task_accuracy"], 1.0)
         self.assertEqual(result["metrics"]["format_violation_count"], 4)

@@ -114,6 +114,8 @@
             "ceiling_display_policy": { "type": ["string", "null"] },
             "score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
             "observed_weighted_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+            "raw_attainment": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+            "calibration": { "type": ["object", "null"], "additionalProperties": true },
             "score_ready": { "type": "boolean" },
             "reason": { "type": "string" },
             "failed_gates": { "type": "array", "items": { "type": "string", "minLength": 1 } },

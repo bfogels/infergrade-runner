@@ -209,7 +209,7 @@ def validate_capability_summary_artifact(artifact: Dict[str, Any]) -> List[str]:
                     errors.append(prefix + "score is required when score_ready is true")
                 if surface.get("score_ready") is False and surface.get("score") is not None:
                     errors.append(prefix + "score must be null when score_ready is false")
-                if re.search(r"_v(?:2|3)$", str(surface.get("score_version") or "")):
+                if re.search(r"_v[2-9]\d*$", str(surface.get("score_version") or "")):
                     _validate_versioned_score_diagnostics(surface, prefix, errors)
             if not isinstance(surface.get("capability_artifacts"), list):
                 errors.append(prefix + "capability_artifacts must be an array")
