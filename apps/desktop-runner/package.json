@@ -1,6 +1,6 @@
 {
   "name": "infergrade-desktop-runner",
-  "version": "0.3.25",
+  "version": "0.3.26",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
