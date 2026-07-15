@@ -294,6 +294,29 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
                 [{"task_id": "HumanEval/0"}, {"task_id": "HumanEval/1"}],
             )
 
+    def test_evalplus_applies_mbpp_subset_override_to_imported_dataset_module(self):
+        fake_mbpp = types.SimpleNamespace(MBPP_OVERRIDE_PATH=None, mbpp_serialize_inputs=lambda _task_id, inputs: inputs)
+        fake_evalplus_data = types.SimpleNamespace(
+            get_human_eval_plus=lambda: {},
+            get_mbpp_plus=lambda: {},
+            write_jsonl=lambda *args, **kwargs: None,
+        )
+        fake_evalplus_evaluate = types.SimpleNamespace(evaluate=lambda *args, **kwargs: None)
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-evalplus", "runner.py")
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "evalplus": types.SimpleNamespace(),
+                "evalplus.data": fake_evalplus_data,
+                "evalplus.data.mbpp": fake_mbpp,
+                "evalplus.evaluate": fake_evalplus_evaluate,
+            },
+        ):
+            module = _load_module("evalplus_runner_mbpp_override_test_module", module_path)
+            module._configure_dataset_override("mbpp", "/work/mbpp_override.jsonl")
+
+        self.assertEqual(fake_mbpp.MBPP_OVERRIDE_PATH, "/work/mbpp_override.jsonl")
+
     def test_evalplus_dockerfile_pins_upstream_revision(self):
         dockerfile_path = os.path.join(ROOT_DIR, "containers", "capability-evalplus", "Dockerfile")
         with open(dockerfile_path, "r", encoding="utf-8") as handle:
