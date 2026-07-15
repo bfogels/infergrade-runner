@@ -83,6 +83,12 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(score_policies["local_assistant_capability"]["protocol_version"], "3.1")
         self.assertEqual(score_policies["local_assistant_capability"]["protocol_label"], "Capability protocol v3.1")
         self.assertEqual(score_policies["local_assistant_capability"]["scale_interpretation"], "benchmark_attainment_index")
+        calibration_policy = score_policies["local_assistant_capability"]["calibration_policy"]
+        self.assertEqual(calibration_policy["policy_id"], "capability_headroom_gate_v2")
+        self.assertEqual(calibration_policy["minimum_unique_setups"], 8)
+        self.assertEqual(calibration_policy["minimum_replicated_setups"], 4)
+        self.assertEqual(calibration_policy["minimum_current_generation_fraction"], 0.75)
+        self.assertEqual(calibration_policy["maximum_single_setup_fraction"], 0.25)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_coverage_fraction"], 0.5)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_scored_components"], 2)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_score_dimensions"], 2)
@@ -94,21 +100,26 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(len(priorities), 4)
         self.assertEqual([item["rank"] for item in priorities], sorted(item["rank"] for item in priorities))
         first = priorities[0]
-        self.assertEqual(first["priority_id"], "apple_silicon_assistant_quant_ladder")
+        self.assertEqual(first["priority_id"], "apple_silicon_qwen35_9b_assistant_repeat")
+        self.assertEqual(first["model_id"], "Qwen/Qwen3.5-9B")
         self.assertEqual(first["use_case"], "general_assistant")
+        self.assertEqual(first["model_freshness"], "current_generation")
+        self.assertEqual(first["campaign_role"], "current_anchor")
+        self.assertEqual(first["target_observations"], 2)
         self.assertIn("perplexity_reference_v1", first["benchmark_check_ids"])
-        qwen3 = next(item for item in priorities if item["priority_id"] == "apple_silicon_qwen3_assistant_baseline")
+        qwen3 = next(item for item in priorities if item["priority_id"] == "apple_silicon_qwen3_8b_assistant_repeat")
         self.assertEqual(qwen3["model_family"], "Qwen3")
+        self.assertEqual(qwen3["model_id"], "Qwen/Qwen3-8B")
         self.assertEqual(qwen3["target_quants"], ["q4_k_m"])
         self.assertEqual(qwen3["use_case"], "general_assistant")
         self.assertEqual(qwen3["generation_preset_id"], "deterministic_direct_answer_v1")
-        self.assertEqual(qwen3["status"], "needs_first_real_run")
+        self.assertEqual(qwen3["status"], "needs_exact_repeat")
         self.assertIn("multiturn_chat_memory_v1", qwen3["benchmark_check_ids"])
-        qwen35 = next(item for item in priorities if item["priority_id"] == "apple_silicon_qwen35_assistant_baseline")
+        qwen35 = first
         self.assertEqual(qwen35["model_family"], "Qwen3.5")
         self.assertEqual(qwen35["target_quants"], ["q4_k_m"])
         self.assertEqual(qwen35["generation_preset_id"], "deterministic_direct_answer_v1")
-        self.assertEqual(qwen35["status"], "needs_first_real_run")
+        self.assertEqual(qwen35["status"], "needs_exact_repeat")
         qwen_sub1b = next(
             item for item in priorities
             if item["priority_id"] == "apple_silicon_qwen3_sub1b_calibration_band"
@@ -119,16 +130,36 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(qwen_sub1b["generation_preset_id"], "deterministic_direct_answer_v1")
         ministral = next(
             item for item in priorities
-            if item["priority_id"] == "apple_silicon_ministral3_assistant_calibration_family"
+            if item["priority_id"] == "apple_silicon_ministral3_3b_assistant_repeat"
         )
         self.assertEqual(ministral["model_family"], "Ministral-3")
         self.assertEqual(ministral["parameter_scale"], "3B")
         gemma4 = next(
             item for item in priorities
-            if item["priority_id"] == "apple_silicon_gemma4_assistant_calibration_family"
+            if item["priority_id"] == "apple_silicon_gemma4_e4b_assistant_repeat"
         )
         self.assertEqual(gemma4["target_quants"], ["q4_0"])
         self.assertEqual(gemma4["parameter_scale"], "E4B")
+        qwen36 = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_qwen36_27b_assistant_canary"
+        )
+        self.assertEqual(qwen36["model_freshness"], "current_generation")
+        self.assertEqual(qwen36["campaign_availability"], "blocked_pending_canary")
+        self.assertIn("24gb", qwen36["blocked_reason"])
+        historical = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_qwen25_historical_quant_control"
+        )
+        self.assertEqual(historical["queue_policy"], "demand_only")
+        self.assertFalse(historical["calibration_campaign_eligible"])
+        self.assertEqual(historical["model_freshness"], "historical_control")
+        for priority in priorities:
+            self.assertIn(priority["queue_policy"], {"campaign", "demand_only", "platform_gate"})
+            self.assertIn(
+                priority["campaign_availability"],
+                {"reviewed_runnable", "blocked_pending_canary"},
+            )
         cuda = next(item for item in priorities if item["priority_id"] == "windows_nvidia_cuda_beta_gate")
         self.assertEqual(cuda["status"], "hardware_blocked")
         self.assertIn("full loop", cuda["why"])
@@ -204,14 +235,14 @@ class BenchmarkCatalogTests(unittest.TestCase):
         priority = next(
             item
             for item in mutated["coverage_expansion_priorities"]
-            if item["priority_id"] == "apple_silicon_qwen3_assistant_baseline"
+            if item["priority_id"] == "apple_silicon_qwen3_8b_assistant_repeat"
         )
         priority["generation_preset_id"] = "typo_direct_answer_v1"
 
         failures = validate_benchmark_legitimacy_metadata(mutated)
 
         self.assertIn(
-            "apple_silicon_qwen3_assistant_baseline: unsupported coverage generation_preset_id "
+            "apple_silicon_qwen3_8b_assistant_repeat: unsupported coverage generation_preset_id "
             "'typo_direct_answer_v1'",
             failures,
         )
@@ -242,7 +273,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         priority = next(
             item
             for item in mutated["coverage_expansion_priorities"]
-            if item["priority_id"] == "apple_silicon_qwen3_assistant_baseline"
+            if item["priority_id"] == "apple_silicon_qwen3_8b_assistant_repeat"
         )
         priority["generation_preset_id"] = "deterministic_v1"
 

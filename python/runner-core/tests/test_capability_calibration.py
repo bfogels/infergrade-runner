@@ -1,6 +1,11 @@
 import unittest
 
-from infergrade.capability_calibration import audit_capability_observations, extract_calibration_observations
+from infergrade.capability_calibration import (
+    audit_capability_observations,
+    extract_calibration_observations,
+    policy_for_score_version,
+)
+from infergrade.benchmark_catalog import load_capability_catalog
 
 
 class CapabilityCalibrationTests(unittest.TestCase):
@@ -42,11 +47,47 @@ class CapabilityCalibrationTests(unittest.TestCase):
                     "raw_attainment": 0.625,
                     "score_ready": True,
                 }},
-                "ontology": {"model_family": {"family_name": "Qwen3.5", "parameter_scale": "9B"}},
+                "model_id": "Qwen/Qwen3.5-9B",
+                "ontology": {
+                    "model_family": {"family_name": "Qwen3.5", "parameter_scale": "9B"},
+                    "checkpoint": {"checkpoint_name": "Qwen3.5-9B"},
+                    "quantization": {"quantization_scheme": "q4_k_m"},
+                },
             }]
         )
         self.assertEqual(observations[0]["score"], 0.625)
         self.assertEqual(observations[0]["parameter_band"], "8b_to_under_20b")
+        self.assertIn("qwen359b", observations[0]["model_identities"])
+        self.assertEqual(observations[0]["quantization_scheme"], "q4_k_m")
+
+    def test_runner_policy_blocks_legacy_repeat_farming(self):
+        catalog = load_capability_catalog()
+        observations = [
+            {
+                "score_version": "local_assistant_score_v4",
+                "score": 0.1 + index / 100.0,
+                "model_family": "Qwen2.5",
+                "parameter_band": "3b_to_under_8b",
+                "model_identities": ["qwen257binstruct"],
+                "quantization_scheme": "q4_k_m",
+            }
+            for index in range(20)
+        ]
+
+        report = audit_capability_observations(
+            observations,
+            "local_assistant_score_v4",
+            policy=policy_for_score_version("local_assistant_score_v4", catalog=catalog),
+            catalog=catalog,
+        )
+
+        self.assertEqual(report["metrics"]["unique_setup_count"], 1)
+        self.assertEqual(report["metrics"]["replicated_setup_count"], 1)
+        self.assertEqual(report["metrics"]["current_generation_fraction"], 0.0)
+        self.assertIn("insufficient_unique_setup_count", report["blockers"])
+        self.assertIn("insufficient_replicated_setup_count", report["blockers"])
+        self.assertIn("insufficient_current_generation_fraction", report["blockers"])
+        self.assertIn("single_setup_fraction_above_limit", report["blockers"])
 
     def test_export_file_keeps_multiple_result_ids(self):
         documents = []
@@ -64,6 +105,23 @@ class CapabilityCalibrationTests(unittest.TestCase):
         observations = extract_calibration_observations(documents, score_version="local_assistant_score_v4")
 
         self.assertEqual([item["score"] for item in observations], [0.25, 0.5])
+
+    def test_extracts_flat_normalized_result_brief(self):
+        observations = extract_calibration_observations([{
+            "result_id": "brief-1",
+            "capability_score_version": "local_assistant_score_v4",
+            "capability_score": 0.42,
+            "capability_score_ready": True,
+            "model_id": "Qwen/Qwen3.5-9B",
+            "model_family": "Qwen3.5",
+            "parameter_scale": "9B",
+            "checkpoint_name": "Qwen3.5-9B",
+            "quantization_scheme": "q4_k_m",
+        }])
+
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0]["score"], 0.42)
+        self.assertEqual(observations[0]["quantization_scheme"], "q4_k_m")
 
     def test_extracts_component_observation_without_mislabeling_it_as_full_score(self):
         observations = extract_calibration_observations(

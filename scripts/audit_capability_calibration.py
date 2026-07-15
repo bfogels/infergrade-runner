@@ -12,6 +12,7 @@ from infergrade.capability_calibration import (
     policy_for_score_version,
     policy_for_benchmark_id,
 )
+from infergrade.benchmark_catalog import load_capability_catalog
 
 
 def main() -> int:
@@ -32,13 +33,15 @@ def main() -> int:
         (item.get("score_version") for item in observations if item.get("benchmark_id") == args.benchmark_id),
         "benchmark:%s:unknown" % args.benchmark_id,
     )
+    catalog = load_capability_catalog()
     report = audit_capability_observations(
         observations,
         target_id,
+        catalog=catalog,
         policy=(
-            policy_for_score_version(args.score_version)
+            policy_for_score_version(args.score_version, catalog=catalog)
             if args.score_version
-            else policy_for_benchmark_id(args.benchmark_id)
+            else policy_for_benchmark_id(args.benchmark_id, catalog=catalog)
         ),
     )
     if args.benchmark_id:
