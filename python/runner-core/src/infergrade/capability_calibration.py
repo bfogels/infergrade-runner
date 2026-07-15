@@ -79,7 +79,7 @@ def extract_calibration_observations(
             continue
         capability = document.get("capability") if isinstance(document.get("capability"), dict) else {}
         details = capability.get("capability_score_details") if isinstance(capability.get("capability_score_details"), dict) else {}
-        version = str(details.get("score_version") or "")
+        version = str(details.get("score_version") or document.get("capability_score_version") or "")
         score = _number(details.get("raw_attainment"))
         if score is None:
             score = _number(details.get("observed_weighted_score"))
@@ -87,7 +87,10 @@ def extract_calibration_observations(
             score = _number(details.get("score"))
         if score is None:
             score = _number(capability.get("capability_score"))
-        if not version or score is None or details.get("score_ready") is not True:
+        if score is None:
+            score = _number(document.get("capability_score"))
+        score_ready = details.get("score_ready") if "score_ready" in details else document.get("capability_score_ready")
+        if not version or score is None or score_ready is not True:
             continue
         observation_id = str(document.get("result_id") or document.get("bundle_id") or source)
         key = (observation_id, version)
@@ -96,14 +99,21 @@ def extract_calibration_observations(
         seen.add(key)
         family = _nested(document, "ontology", "model_family", "family_name") or document.get("model_family")
         scale = _nested(document, "ontology", "model_family", "parameter_scale") or document.get("parameter_scale")
+        checkpoint_name = _nested(document, "ontology", "checkpoint", "checkpoint_name") or document.get("checkpoint_name")
         observations.append(
             {
                 "observation_id": observation_id,
                 "score_version": version,
-                "surface_id": details.get("surface_id"),
+                "surface_id": details.get("surface_id") or document.get("capability_score_surface_id"),
                 "score": score,
                 "model_family": str(family or "unknown"),
-                "parameter_band": _parameter_band(scale or document.get("checkpoint_name")),
+                "parameter_band": _parameter_band(scale or checkpoint_name),
+                "model_identities": sorted(_model_identities(document.get("model_id"), document.get("model"), checkpoint_name)),
+                "quantization_scheme": str(
+                    _nested(document, "ontology", "quantization", "quantization_scheme")
+                    or document.get("quantization_scheme")
+                    or ""
+                ).lower(),
                 "source": source,
             }
         )
@@ -142,6 +152,8 @@ def _surface_observation(surface: Dict[str, Any], document: Dict[str, Any], sour
         "score": score,
         "model_family": _family_name(subject_model),
         "parameter_band": _parameter_band(subject_model),
+        "model_identities": sorted(_model_identities(subject_model)),
+        "quantization_scheme": "",
         "source": source,
     }
 
@@ -163,6 +175,8 @@ def _component_observation(document: Dict[str, Any], source: str) -> Optional[Di
         "task_count": len(list(document.get("tasks") or [])),
         "model_family": _family_name(subject_model),
         "parameter_band": _parameter_band(subject_model),
+        "model_identities": sorted(_model_identities(subject_model)),
+        "quantization_scheme": "",
         "source": source,
     }
 
@@ -171,10 +185,23 @@ def audit_capability_observations(
     observations: Iterable[Dict[str, Any]],
     score_version: str,
     policy: Optional[Dict[str, Any]] = None,
+    catalog: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     matching = [item for item in observations if item.get("score_version") == score_version and _number(item.get("score")) is not None]
     minimum_task_count = int((policy or {}).get("minimum_task_count") or 0)
     selected = [item for item in matching if int(item.get("task_count") or 0) >= minimum_task_count]
+    current_targets = [
+        item
+        for item in list((catalog or {}).get("coverage_expansion_priorities") or [])
+        if item.get("calibration_campaign_eligible") is True
+        and item.get("model_freshness") in {"current_generation", "recent_generation"}
+    ]
+    selected = [dict(item) for item in selected]
+    for observation in selected:
+        observation["current_generation"] = any(
+            _observation_matches_priority_target(observation, priority)
+            for priority in current_targets
+        )
     scores = [float(item["score"]) for item in selected]
     families = Counter(str(item.get("model_family") or "unknown") for item in selected)
     bands = Counter(str(item.get("parameter_band") or "unknown") for item in selected)
@@ -183,6 +210,10 @@ def audit_capability_observations(
     count = len(scores)
     ceiling_count = sum(1 for value in scores if math.isclose(value, 1.0, abs_tol=1e-9))
     largest_family_count = max(families.values()) if families else 0
+    setup_counts = Counter(_observation_setup_key(item) for item in selected)
+    replicated_setup_count = sum(1 for setup_count in setup_counts.values() if setup_count >= 2)
+    largest_setup_count = max(setup_counts.values()) if setup_counts else 0
+    current_generation_count = sum(1 for item in selected if item.get("current_generation"))
     distinct_scores = len(set(round(value, 6) for value in scores))
     metrics = {
         "observation_count": count,
@@ -190,6 +221,10 @@ def audit_capability_observations(
         "model_family_count": len([name for name in families if name != "unknown"]),
         "parameter_band_count": len([name for name in bands if name != "unknown"]),
         "distinct_score_count": distinct_scores,
+        "unique_setup_count": len(setup_counts),
+        "replicated_setup_count": replicated_setup_count,
+        "current_generation_count": current_generation_count,
+        "current_generation_fraction": round(current_generation_count / float(count), 6) if count else None,
         "minimum": min(scores) if scores else None,
         "median": median(scores) if scores else None,
         "mean": mean(scores) if scores else None,
@@ -198,6 +233,7 @@ def audit_capability_observations(
         "suite_ceiling_count": ceiling_count,
         "suite_ceiling_fraction": round(ceiling_count / float(count), 6) if count else None,
         "largest_family_fraction": round(largest_family_count / float(count), 6) if count else None,
+        "largest_setup_fraction": round(largest_setup_count / float(count), 6) if count else None,
         "family_counts": dict(sorted(families.items())),
         "parameter_band_counts": dict(sorted(bands.items())),
     }
@@ -206,10 +242,26 @@ def audit_capability_observations(
     _minimum_gate(blockers, metrics, effective_policy, "model_family_count", "minimum_model_families")
     _minimum_gate(blockers, metrics, effective_policy, "parameter_band_count", "minimum_parameter_bands")
     _minimum_gate(blockers, metrics, effective_policy, "distinct_score_count", "minimum_distinct_scores")
+    if "minimum_unique_setups" in effective_policy:
+        _minimum_gate(blockers, metrics, effective_policy, "unique_setup_count", "minimum_unique_setups")
+    if "minimum_replicated_setups" in effective_policy:
+        _minimum_gate(blockers, metrics, effective_policy, "replicated_setup_count", "minimum_replicated_setups")
+    if (
+        "minimum_current_generation_fraction" in effective_policy
+        and metrics["current_generation_fraction"] is not None
+        and metrics["current_generation_fraction"] < float(effective_policy["minimum_current_generation_fraction"])
+    ):
+        blockers.append("insufficient_current_generation_fraction")
     if metrics["suite_ceiling_fraction"] is not None and metrics["suite_ceiling_fraction"] > float(effective_policy["maximum_suite_ceiling_fraction"]):
         blockers.append("suite_ceiling_fraction_above_limit")
     if metrics["largest_family_fraction"] is not None and metrics["largest_family_fraction"] > float(effective_policy["maximum_largest_family_fraction"]):
         blockers.append("largest_family_fraction_above_limit")
+    if (
+        "maximum_single_setup_fraction" in effective_policy
+        and metrics["largest_setup_fraction"] is not None
+        and metrics["largest_setup_fraction"] > float(effective_policy["maximum_single_setup_fraction"])
+    ):
+        blockers.append("single_setup_fraction_above_limit")
     insufficient = any(item.startswith("insufficient_") for item in blockers)
     status = "insufficient_calibration" if insufficient else ("saturation_or_concentration_risk" if blockers else "calibrated_headroom")
     return {
@@ -296,3 +348,42 @@ def _family_name(value: Any) -> str:
     text = str(value or "").split("/")[-1]
     match = re.match(r"(.+?)-\d+(?:\.\d+)?B(?:-|$)", text, flags=re.IGNORECASE)
     return match.group(1) if match else (text or "unknown")
+
+
+def _observation_matches_priority_target(observation: Dict[str, Any], priority: Dict[str, Any]) -> bool:
+    target_identities = _model_identities(priority.get("model_id"), priority.get("checkpoint_name"))
+    observed_identities = set(observation.get("model_identities") or [])
+    if target_identities:
+        if not target_identities.intersection(observed_identities):
+            return False
+    elif _normalize_family(priority.get("model_family")) != _normalize_family(observation.get("model_family")):
+        return False
+    target_band = _parameter_band(priority.get("parameter_scale") or priority.get("checkpoint_name"))
+    if target_band != "unknown" and target_band != observation.get("parameter_band"):
+        return False
+    target_quant = str((priority.get("target_quants") or [""])[0]).lower()
+    return not target_quant or target_quant == str(observation.get("quantization_scheme") or "").lower()
+
+
+def _observation_setup_key(observation: Dict[str, Any]) -> tuple:
+    identities = tuple(sorted(set(observation.get("model_identities") or [])))
+    if not identities:
+        identities = (_normalize_family(observation.get("model_family")) or "unknown",)
+    return identities + (str(observation.get("quantization_scheme") or "unknown"),)
+
+
+def _model_identities(*values: Any) -> set:
+    return {
+        normalized
+        for value in values
+        for normalized in (_normalize_model_identity(value),)
+        if normalized
+    }
+
+
+def _normalize_model_identity(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").split("/")[-1].lower())
+
+
+def _normalize_family(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
