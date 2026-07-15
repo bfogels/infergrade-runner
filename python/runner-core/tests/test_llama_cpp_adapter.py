@@ -221,6 +221,93 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(_decode_utf8_lossy("already text"), "already text")
         self.assertEqual(_decode_utf8_lossy(None), "")
 
+    @mock.patch("infergrade.adapters.llama_cpp._stop_process")
+    @mock.patch(
+        "infergrade.adapters.llama_cpp._wait_for_native_server_ready",
+        return_value=("http://127.0.0.1:8123", 321.0),
+    )
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.Popen")
+    @mock.patch.object(LlamaCppAdapter, "_native_server_path", return_value="/opt/homebrew/bin/llama-server")
+    def test_native_model_preflight_loads_exact_artifact_before_benchmarking(
+        self,
+        _server_path_mock,
+        popen_mock,
+        wait_mock,
+        stop_mock,
+    ):
+        process = mock.Mock()
+        popen_mock.return_value = process
+        request = RunRequest(
+            model="google/gemma-4-E4B-it",
+            backend="llama.cpp",
+            tier="standard",
+            execution_mode="local_native",
+            quant_artifact=self.model_path,
+            simulate=False,
+        )
+
+        LlamaCppAdapter().preflight_model(request)
+
+        command = popen_mock.call_args[0][0]
+        self.assertEqual(command[0], "/opt/homebrew/bin/llama-server")
+        self.assertIn(self.model_path, command)
+        self.assertIn("512", command)
+        wait_mock.assert_called_once()
+        stop_mock.assert_called_once_with(process)
+
+    @mock.patch("infergrade.adapters.llama_cpp._read_log_file")
+    @mock.patch("infergrade.adapters.llama_cpp._stop_process")
+    @mock.patch(
+        "infergrade.adapters.llama_cpp._wait_for_native_server_ready",
+        side_effect=RuntimeError("server exited"),
+    )
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.Popen")
+    @mock.patch.object(LlamaCppAdapter, "_native_server_path", return_value="/opt/homebrew/bin/llama-server")
+    def test_native_model_preflight_fails_fast_with_bounded_runtime_tail(
+        self,
+        _server_path_mock,
+        popen_mock,
+        _wait_mock,
+        stop_mock,
+        read_log_mock,
+    ):
+        process = mock.Mock()
+        popen_mock.return_value = process
+        read_log_mock.return_value = "\n".join(
+            ["old metadata line %d" % index for index in range(50)]
+            + ["llama_model_load: unknown model architecture: 'gemma4'"]
+        )
+        request = RunRequest(
+            model="google/gemma-4-E4B-it",
+            backend="llama.cpp",
+            tier="standard",
+            execution_mode="local_native",
+            quant_artifact=self.model_path,
+            simulate=False,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "failed before capability execution") as raised:
+            LlamaCppAdapter().preflight_model(request)
+
+        self.assertIn("unknown model architecture: 'gemma4'", str(raised.exception))
+        self.assertNotIn("old metadata line 0", str(raised.exception))
+        stop_mock.assert_called_once_with(process)
+
+    @mock.patch("infergrade.adapters.llama_cpp.subprocess.Popen")
+    def test_model_preflight_is_noop_outside_native_real_execution(self, popen_mock):
+        adapter = LlamaCppAdapter()
+        for execution_mode, simulate in (("local_container", False), ("local_native", True)):
+            request = RunRequest(
+                model="Qwen/Qwen3.5-9B",
+                backend="llama.cpp",
+                tier="canary",
+                execution_mode=execution_mode,
+                quant_artifact=self.model_path,
+                simulate=simulate,
+            )
+            adapter.preflight_model(request)
+        popen_mock.assert_not_called()
+
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
     def test_fetch_container_logs_decodes_invalid_bytes(self, run_mock):
         run_mock.return_value = mock.Mock(

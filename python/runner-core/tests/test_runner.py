@@ -201,6 +201,39 @@ class RunnerTests(unittest.TestCase):
         validation = self.read_json(os.path.join(output_dir, "validation.json"))
         self.assertEqual(validation["comparison_grade"], "comparable")
 
+    def test_model_preflight_failure_aborts_before_capability_cases(self):
+        output_dir = os.path.join(self.tempdir, "preflight-failure")
+        request = RunRequest(
+            model="google/gemma-4-E4B-it",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="general_assistant",
+            output_dir=output_dir,
+            execution_mode="local_native",
+            simulate=False,
+        )
+        with mock.patch("infergrade.runner.get_adapter") as get_adapter_mock, mock.patch(
+            "infergrade.runner.capture_environment",
+            return_value={"accelerator_type": "metal", "accelerator_count": 1},
+        ):
+            adapter = get_adapter_mock.return_value
+            adapter.default_backend_flags.return_value = []
+            adapter.resolve_version.return_value = "version: 8590"
+            adapter.runtime_metadata.return_value = {"native_binary": "/opt/homebrew/bin/llama-cli"}
+            adapter.preflight_model.side_effect = RuntimeError(
+                "Native llama.cpp model compatibility preflight failed before capability execution. "
+                "unknown model architecture: 'gemma4'"
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "unknown model architecture"):
+                run_infergrade(request)
+
+        adapter.run_capability.assert_not_called()
+        progress = self.read_json(os.path.join(output_dir, "progress.json"))
+        self.assertEqual(progress["status"], "failed")
+        self.assertEqual(progress["current_stage"], "backend_resolution")
+        self.assertEqual(progress["errors"][-1]["stage"], "backend_resolution")
+
     def read_json(self, path):
         with open(path, "r", encoding="utf-8") as handle:
             return json.load(handle)
