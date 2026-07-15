@@ -147,6 +147,27 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(qwen36["model_freshness"], "current_generation")
         self.assertEqual(qwen36["campaign_availability"], "blocked_pending_canary")
         self.assertIn("24gb", qwen36["blocked_reason"])
+        coding_anchor = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_qwen35_9b_coding_anchor"
+        )
+        reasoning_anchor = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_qwen35_9b_reasoning_anchor"
+        )
+        self.assertEqual(coding_anchor["model_id"], "Qwen/Qwen3.5-9B")
+        self.assertEqual(coding_anchor["use_case"], "agentic_coding")
+        self.assertEqual(
+            coding_anchor["benchmark_check_ids"],
+            ["interactive_chat_v1", "evalplus_humaneval", "evalplus_mbpp"],
+        )
+        self.assertEqual(reasoning_anchor["use_case"], "reasoning")
+        self.assertEqual(
+            reasoning_anchor["benchmark_check_ids"],
+            ["reasoning_exact_answer_v1", "mmlu_pro_reference_v1"],
+        )
+        self.assertTrue(coding_anchor["calibration_campaign_eligible"])
+        self.assertTrue(reasoning_anchor["calibration_campaign_eligible"])
         historical = next(
             item for item in priorities
             if item["priority_id"] == "apple_silicon_qwen25_historical_quant_control"
