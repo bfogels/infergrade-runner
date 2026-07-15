@@ -172,6 +172,59 @@ class LlamaCppAdapter(BaseAdapter):
         output = (stdout or stderr or "").strip()
         return _llama_cpp_version_label(output) or self._image_name(request)
 
+    def preflight_model(self, request: RunRequest) -> None:
+        """Prove a selected native llama-server can load the exact GGUF.
+
+        Capability scoring treats individual generation failures as case-level
+        evidence. Without this probe, a runtime that cannot load a newly released
+        architecture can waste an entire suite repeating the same startup failure
+        before deployment finally aborts. A short server health check makes that
+        incompatibility fatal before any benchmark case runs.
+        """
+        if request.simulate or request.execution_mode != "local_native":
+            return None
+        self._ensure_backend_model_compatibility(request)
+        model_path = self._require_local_gguf_artifact(request)
+        published_port = _find_free_local_port()
+        command = [self._native_server_path(request)]
+        command.extend(
+            self._build_llama_server_command(
+                model_path=model_path,
+                ctx_size=512,
+                request=request,
+                host="127.0.0.1",
+                port=published_port,
+            )
+        )
+        log_handle = tempfile.NamedTemporaryFile(
+            prefix="infergrade-llama-preflight-",
+            suffix=".log",
+            delete=False,
+        )
+        log_path = log_handle.name
+        log_handle.close()
+        process = None
+        started = time.perf_counter()
+        try:
+            with open(log_path, "wb") as log_file:
+                process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
+            _wait_for_native_server_ready(process, published_port, started, log_path)
+        except Exception as exc:
+            logs = _read_log_file(log_path)
+            tail = "\n".join(logs.splitlines()[-40:]).strip()
+            detail = tail or str(exc) or "unknown model-load failure"
+            raise RuntimeError(
+                "Native llama.cpp model compatibility preflight failed before capability execution. %s"
+                % detail
+            ) from exc
+        finally:
+            _stop_process(process)
+            try:
+                os.unlink(log_path)
+            except OSError:
+                pass
+        return None
+
     def run_deployment_profile(
         self,
         request: RunRequest,
