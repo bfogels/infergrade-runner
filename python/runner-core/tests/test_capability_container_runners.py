@@ -210,6 +210,113 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertEqual(module._rounded_metric_or_zero(results, "base", "pass@1"), 1.0)
         self.assertEqual(module._rounded_metric_or_zero(results, "plus", "pass@1"), 0.0)
 
+    def test_evalplus_evaluate_applies_subset_override_to_imported_dataset_module(self):
+        calls = []
+        fake_humaneval = types.SimpleNamespace(HUMANEVAL_OVERRIDE_PATH=None)
+
+        def fake_write_jsonl(path, rows, drop_builtin=False):
+            with open(path, "w", encoding="utf-8") as handle:
+                for row in rows:
+                    handle.write(json.dumps(row) + "\n")
+
+        def fake_evaluate(**kwargs):
+            calls.append(kwargs)
+            self.assertEqual(fake_humaneval.HUMANEVAL_OVERRIDE_PATH, os.path.join(kwargs["samples"].rsplit("/", 1)[0], "humaneval_override.jsonl"))
+            with open(kwargs["output_file"], "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "eval": {"HumanEval/0": [{"base_status": "pass", "plus_status": "pass"}]},
+                        "pass_at_k": {"base": {"pass@1": 1.0}, "plus": {"pass@1": 1.0}},
+                    },
+                    handle,
+                )
+
+        fake_evalplus_data = types.SimpleNamespace(
+            get_human_eval_plus=lambda: {},
+            get_mbpp_plus=lambda: {},
+            write_jsonl=fake_write_jsonl,
+        )
+        fake_mbpp = types.SimpleNamespace(MBPP_OVERRIDE_PATH=None, mbpp_serialize_inputs=lambda _task_id, inputs: inputs)
+        fake_evalplus_evaluate = types.SimpleNamespace(evaluate=fake_evaluate)
+        fake_evalplus = types.ModuleType("evalplus")
+        fake_data_package = types.ModuleType("evalplus.data")
+        fake_data_package.get_human_eval_plus = fake_evalplus_data.get_human_eval_plus
+        fake_data_package.get_mbpp_plus = fake_evalplus_data.get_mbpp_plus
+        fake_data_package.write_jsonl = fake_write_jsonl
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-evalplus", "runner.py")
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "evalplus": fake_evalplus,
+                "evalplus.data": fake_data_package,
+                "evalplus.data.humaneval": fake_humaneval,
+                "evalplus.data.mbpp": fake_mbpp,
+                "evalplus.evaluate": fake_evalplus_evaluate,
+            },
+        ):
+            module = _load_module("evalplus_runner_subset_override_test_module", module_path)
+            with tempfile.TemporaryDirectory() as tempdir:
+                fake_write_jsonl(
+                    os.path.join(tempdir, "humaneval_override.jsonl"),
+                    [{"task_id": "HumanEval/0", "prompt": "def f():\n", "entry_point": "f"}],
+                )
+                fake_write_jsonl(
+                    os.path.join(tempdir, "predictions.jsonl"),
+                    [{"task_id": "HumanEval/0", "completion": "    return 1"}],
+                )
+                module.evaluate("humaneval", tempdir)
+
+        self.assertEqual(len(calls), 1)
+
+    def test_evalplus_rejects_incomplete_subset_predictions_before_scoring(self):
+        with self.assertRaisesRegex(ValueError, "missing=HumanEval/1"):
+            # This validation is intentionally independent of EvalPlus imports.
+            fake_evalplus_data = types.SimpleNamespace(
+                get_human_eval_plus=lambda: {},
+                get_mbpp_plus=lambda: {},
+                write_jsonl=lambda *args, **kwargs: None,
+            )
+            fake_mbpp = types.SimpleNamespace(mbpp_serialize_inputs=lambda _task_id, inputs: inputs)
+            fake_evalplus_evaluate = types.SimpleNamespace(evaluate=lambda *args, **kwargs: None)
+            module_path = os.path.join(ROOT_DIR, "containers", "capability-evalplus", "runner.py")
+            with mock.patch.dict(
+                sys.modules,
+                {
+                    "evalplus": types.SimpleNamespace(),
+                    "evalplus.data": fake_evalplus_data,
+                    "evalplus.data.mbpp": fake_mbpp,
+                    "evalplus.evaluate": fake_evalplus_evaluate,
+                },
+            ):
+                module = _load_module("evalplus_runner_coverage_test_module", module_path)
+            module._validate_prediction_coverage(
+                [{"task_id": "HumanEval/0"}],
+                [{"task_id": "HumanEval/0"}, {"task_id": "HumanEval/1"}],
+            )
+
+    def test_evalplus_applies_mbpp_subset_override_to_imported_dataset_module(self):
+        fake_mbpp = types.SimpleNamespace(MBPP_OVERRIDE_PATH=None, mbpp_serialize_inputs=lambda _task_id, inputs: inputs)
+        fake_evalplus_data = types.SimpleNamespace(
+            get_human_eval_plus=lambda: {},
+            get_mbpp_plus=lambda: {},
+            write_jsonl=lambda *args, **kwargs: None,
+        )
+        fake_evalplus_evaluate = types.SimpleNamespace(evaluate=lambda *args, **kwargs: None)
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-evalplus", "runner.py")
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "evalplus": types.SimpleNamespace(),
+                "evalplus.data": fake_evalplus_data,
+                "evalplus.data.mbpp": fake_mbpp,
+                "evalplus.evaluate": fake_evalplus_evaluate,
+            },
+        ):
+            module = _load_module("evalplus_runner_mbpp_override_test_module", module_path)
+            module._configure_dataset_override("mbpp", "/work/mbpp_override.jsonl")
+
+        self.assertEqual(fake_mbpp.MBPP_OVERRIDE_PATH, "/work/mbpp_override.jsonl")
+
     def test_evalplus_dockerfile_pins_upstream_revision(self):
         dockerfile_path = os.path.join(ROOT_DIR, "containers", "capability-evalplus", "Dockerfile")
         with open(dockerfile_path, "r", encoding="utf-8") as handle:
