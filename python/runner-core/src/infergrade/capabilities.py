@@ -22,6 +22,7 @@ from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcnow_iso, write_json
 
 CAPABILITY_REGISTRY_VERSION = "2026-07-capability-protocol-3.1"
+BENCHMARK_PROTOCOL_IDENTITY_VERSION = "benchmark_protocol_identity_v1"
 MULTITURN_MEMORY_FIXTURE_REVISION = "2026-04-multiturn-preview"
 ASSISTANT_COMPOSITIONAL_FIXTURE_REVISION = "2026-07-assistant-compositional-v2"
 CODING_STATIC_REPAIR_FIXTURE_REVISION = "2026-05-coding-static-preview"
@@ -227,6 +228,108 @@ def _capability_registry_for_benchmark_ids(benchmark_ids: List[str]) -> List[Dic
     return registry
 
 
+def _benchmark_selection_check(selection: Dict[str, Any], benchmark_id: str) -> Dict[str, Any]:
+    return next(
+        (
+            dict(item)
+            for item in list(selection.get("benchmark_checks") or [])
+            if isinstance(item, dict) and item.get("check_id") == benchmark_id
+        ),
+        {},
+    )
+
+
+def _benchmark_protocol_identity(
+    benchmark_id: str,
+    *,
+    input_identity: Dict[str, Any],
+    scoring_identity: Dict[str, Any],
+    generation_identity: Dict[str, Any],
+) -> Dict[str, Any]:
+    identity = {
+        "identity_version": BENCHMARK_PROTOCOL_IDENTITY_VERSION,
+        "benchmark_id": benchmark_id,
+        "registry_version": CAPABILITY_REGISTRY_VERSION,
+        "input_identity_sha256": stable_hash(input_identity, length=64),
+        "scoring_identity_sha256": stable_hash(scoring_identity, length=64),
+        "generation_identity_sha256": stable_hash(generation_identity, length=64),
+    }
+    identity["fingerprint_sha256"] = stable_hash(identity, length=64)
+    return identity
+
+
+def _case_benchmark_protocol_identity(
+    spec: CapabilityBenchmarkSpec,
+    cases: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+    selection_check: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    container_runtime = dict(summary.get("container_runtime") or {})
+    score_policy_id = str(selection_check.get("score_policy_id") or "").strip()
+    execution_pattern = str(selection_check.get("execution_pattern") or "").strip()
+    scoring_policy = str(summary.get("scoring_policy") or "").strip()
+    container_identity = container_runtime.get("container_image_id") or container_runtime.get("container_repo_digests")
+    if not cases or not score_policy_id or not execution_pattern:
+        return None
+    if spec.execution_mode == "container" and not container_identity:
+        return None
+    if spec.execution_mode == "native" and not scoring_policy:
+        return None
+    scorer_identity = {
+        "score_policy_id": score_policy_id,
+        "scoring_policy": scoring_policy or None,
+        "execution_mode": spec.execution_mode,
+        "container_image_id": container_runtime.get("container_image_id"),
+        "container_repo_digests": sorted(container_runtime.get("container_repo_digests") or []),
+        "runner_version": __version__ if spec.execution_mode == "native" else None,
+    }
+    generation_identity = {
+        "generation_max_tokens": spec.generation_max_tokens,
+        "benchmark_kind": spec.benchmark_kind,
+        "primary_metric_name": spec.primary_metric_name,
+        "execution_pattern": execution_pattern,
+    }
+    return _benchmark_protocol_identity(
+        spec.benchmark_id,
+        input_identity={
+            "cases": cases,
+            "generation_prompts": [
+                {
+                    "case_id": case.get("case_id") or case.get("task_id") or stable_hash(case, length=12),
+                    "prompt": _generation_prompt_for_case(spec, case),
+                }
+                for case in cases
+            ],
+        },
+        scoring_identity=scorer_identity,
+        generation_identity=generation_identity,
+    )
+
+
+def _capability_protocol_identity(
+    benchmark_results: Dict[str, Any],
+    scored_benchmark_ids: List[str],
+) -> Dict[str, Any]:
+    check_fingerprints = {}
+    missing_benchmark_ids = []
+    for benchmark_id in scored_benchmark_ids:
+        protocol_identity = dict((benchmark_results.get(benchmark_id) or {}).get("protocol_identity") or {})
+        fingerprint = str(protocol_identity.get("fingerprint_sha256") or "").strip()
+        if fingerprint:
+            check_fingerprints[benchmark_id] = fingerprint
+        else:
+            missing_benchmark_ids.append(benchmark_id)
+    complete = bool(scored_benchmark_ids) and not missing_benchmark_ids
+    aggregate = {
+        "identity_version": BENCHMARK_PROTOCOL_IDENTITY_VERSION,
+        "status": "complete" if complete else "incomplete",
+        "check_fingerprints": dict(sorted(check_fingerprints.items())),
+        "missing_benchmark_ids": sorted(missing_benchmark_ids),
+    }
+    aggregate["fingerprint_sha256"] = stable_hash(aggregate, length=64) if complete else None
+    return aggregate
+
+
 def summarize_capability_execution(
     request: RunRequest,
     execution: CapabilityExecution,
@@ -271,6 +374,7 @@ def summarize_capability_execution(
         "benchmark_registry_version": CAPABILITY_REGISTRY_VERSION,
         "benchmark_registry": benchmark_registry,
         "benchmark_results": benchmark_results,
+        "benchmark_protocol_identity": _capability_protocol_identity(benchmark_results, scored_benchmark_ids),
         "capability_score": execution.score,
         "capability_score_method": execution.score_method,
         "capability_score_details": dict(execution.score_details or {}),
@@ -440,6 +544,7 @@ def execute_capability_suite(
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> CapabilityExecution:
     selection = resolve_request_selection(request)
+    selection_metadata = selection_metadata_for_request(request)
     benchmark_ids = capability_benchmark_ids_for_request(request)
     suite_ids = list(selection.get("suite_ids") or [])
     group_ids = list(selection.get("group_ids") or [])
@@ -506,6 +611,14 @@ def execute_capability_suite(
             summary["generation_failure_severity"] = failure_severity
             summary["completed_cases"] = len(cases) - failure_count
             summary["total_cases"] = len(cases)
+            protocol_identity = _case_benchmark_protocol_identity(
+                spec,
+                cases,
+                summary,
+                _benchmark_selection_check(selection_metadata, benchmark_id),
+            )
+            if protocol_identity:
+                summary["protocol_identity"] = protocol_identity
             if failure_severity == "all_failed":
                 summary["status"] = "failed"
                 summary["error"] = (
@@ -701,6 +814,34 @@ def attach_quant_fidelity_capability_artifact(
     )
     summary_payload = _quant_fidelity_summary_payload(fidelity)
     summary_payload["comparability_key"] = final_comparability_key
+    selection_check = _benchmark_selection_check(selection_metadata_for_request(request), "perplexity_reference_v1")
+    if all(
+        (
+            summary_payload.get("corpus_id"),
+            summary_payload.get("corpus_revision"),
+            summary_payload.get("protocol_id"),
+            summary_payload.get("protocol_parameters"),
+            selection_check.get("score_policy_id"),
+            selection_check.get("execution_pattern"),
+        )
+    ):
+        summary_payload["protocol_identity"] = _benchmark_protocol_identity(
+            "perplexity_reference_v1",
+            input_identity={
+                "corpus_id": summary_payload.get("corpus_id"),
+                "corpus_revision": summary_payload.get("corpus_revision"),
+            },
+            scoring_identity={
+                "score_policy_id": selection_check.get("score_policy_id"),
+                "protocol_id": summary_payload.get("protocol_id"),
+                "protocol_parameters": summary_payload.get("protocol_parameters"),
+                "runner_version": __version__,
+            },
+            generation_identity={
+                "execution_pattern": selection_check.get("execution_pattern"),
+                "comparability_key": final_comparability_key,
+            },
+        )
     write_json(scoring_path, summary_payload)
     capability_run_path = _write_quant_fidelity_capability_run_artifact(
         request=request,

@@ -103,6 +103,21 @@
         "benchmark_tier": { "type": ["string", "null"] },
         "capability_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
         "capability_score_method": { "type": ["string", "null"] },
+        "benchmark_protocol_identity": {
+          "type": "object",
+          "required": ["identity_version", "status", "check_fingerprints", "missing_benchmark_ids", "fingerprint_sha256"],
+          "properties": {
+            "identity_version": { "const": "benchmark_protocol_identity_v1" },
+            "status": { "enum": ["complete", "incomplete"] },
+            "check_fingerprints": {
+              "type": "object",
+              "additionalProperties": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            },
+            "missing_benchmark_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "fingerprint_sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+          },
+          "additionalProperties": false
+        },
         "capability_score_details": {
           "type": "object",
           "properties": {

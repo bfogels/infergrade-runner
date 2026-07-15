@@ -179,9 +179,17 @@ That updates the Hub snapshot to include:
 At minimum, verify:
 
 1. Runner tests pass.
-2. Hub tests pass after importing the release.
-3. The Hub exposes the pinned release through `/releases/current` and `/client-config`.
-4. The generated local listener command defaults to the pinned release image instead of `:local`.
+2. A real, non-simulated capability canary produced by the release candidate has complete benchmark coverage and exact Runner-authored protocol identity:
+
+   ```bash
+   PYTHONPATH=python/runner-core/src \
+     python3 scripts/verify_benchmark_protocol_identity.py /path/to/canary/bundle
+   ```
+
+   The verifier recomputes every per-check fingerprint and the aggregate fingerprint. It fails closed on missing identity, partial coverage, non-completed checks, a bundle without capability evidence, or any mismatch between the manifest's result files and their scored benchmark identities. A passing check proves the bundle is internally bound to its exact benchmark inputs, scoring policy, generation contract, and Runner registry version; it does not prove benchmark quality, model capability, cross-hardware equivalence, or repeatability.
+3. Hub tests pass after importing the release.
+4. The Hub exposes the pinned release through `/releases/current` and `/client-config`.
+5. The generated local listener command defaults to the pinned release image instead of `:local`.
 
 ## Notes
 
