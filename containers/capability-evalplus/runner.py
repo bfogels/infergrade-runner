@@ -1,6 +1,8 @@
 import argparse
+import importlib
 import json
 import os
+from collections import Counter
 
 from evalplus.data import get_human_eval_plus, get_mbpp_plus, write_jsonl
 from evalplus.data.mbpp import mbpp_serialize_inputs
@@ -23,6 +25,45 @@ def _read_jsonl(path: str):
             if line:
                 rows.append(json.loads(line))
     return rows
+
+
+def _configure_dataset_override(dataset: str, override_path: str) -> None:
+    """Point EvalPlus at InferGrade's pinned subset before evaluation.
+
+    EvalPlus reads its override environment variables into module-level constants
+    at import time. This runner imports EvalPlus helpers at process start, so
+    setting only os.environ here would leave the evaluator using the full upstream
+    dataset and make valid subset runs fail with ``Missing problems in samples``.
+    Updating both the environment and the owning module keeps the public evaluator
+    API while making the selected fixture explicit and deterministic.
+    """
+    if dataset == "humaneval":
+        variable = "HUMANEVAL_OVERRIDE_PATH"
+        module_name = "evalplus.data.humaneval"
+    elif dataset == "mbpp":
+        variable = "MBPP_OVERRIDE_PATH"
+        module_name = "evalplus.data.mbpp"
+    else:
+        raise ValueError("Unsupported EvalPlus dataset: %s" % dataset)
+    os.environ[variable] = override_path
+    setattr(importlib.import_module(module_name), variable, override_path)
+
+
+def _validate_prediction_coverage(predictions, expected_tasks) -> None:
+    expected_ids = [str(task["task_id"]) for task in expected_tasks]
+    prediction_ids = [str(row.get("task_id") or "") for row in predictions]
+    duplicate_ids = sorted(task_id for task_id, count in Counter(prediction_ids).items() if count > 1)
+    missing_ids = sorted(set(expected_ids) - set(prediction_ids))
+    unexpected_ids = sorted(set(prediction_ids) - set(expected_ids))
+    if duplicate_ids or missing_ids or unexpected_ids:
+        details = []
+        if missing_ids:
+            details.append("missing=%s" % ",".join(missing_ids[:10]))
+        if unexpected_ids:
+            details.append("unexpected=%s" % ",".join(unexpected_ids[:10]))
+        if duplicate_ids:
+            details.append("duplicates=%s" % ",".join(duplicate_ids[:10]))
+        raise ValueError("EvalPlus prediction coverage does not match the pinned subset: %s" % "; ".join(details))
 
 
 def _dataset_problems(dataset: str):
@@ -166,6 +207,8 @@ def evaluate(dataset: str, output_dir: str) -> None:
     summary_path = os.path.join(output_dir, "summary.json")
 
     predictions = _read_jsonl(predictions_path)
+    expected_tasks = _read_jsonl(override_path)
+    _validate_prediction_coverage(predictions, expected_tasks)
     write_jsonl(
         samples_path,
         [
@@ -178,10 +221,7 @@ def evaluate(dataset: str, output_dir: str) -> None:
         drop_builtin=False,
     )
 
-    if dataset == "humaneval":
-        os.environ["HUMANEVAL_OVERRIDE_PATH"] = override_path
-    elif dataset == "mbpp":
-        os.environ["MBPP_OVERRIDE_PATH"] = override_path
+    _configure_dataset_override(dataset, override_path)
 
     evalplus_evaluate(
         dataset=dataset,
@@ -190,7 +230,8 @@ def evaluate(dataset: str, output_dir: str) -> None:
         parallel=max(1, os.cpu_count() or 1),
         i_just_wanna_run=True,
     )
-    results = json.load(open(results_path, "r", encoding="utf-8"))
+    with open(results_path, "r", encoding="utf-8") as handle:
+        results = json.load(handle)
     case_results = [
         _case_result_for_task(task_id, payload)
         for task_id, payload in sorted((results.get("eval") or {}).items())

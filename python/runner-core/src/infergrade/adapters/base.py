@@ -20,6 +20,15 @@ class BaseAdapter(object):
             return "simulated-%s" % self.backend_name.replace(".", "-")
         raise NotImplementedError("Real backend execution is not implemented yet.")
 
+    def preflight_model(self, request: RunRequest) -> None:
+        """Fail before benchmark execution when a runtime cannot load the model.
+
+        Backends that can cheaply and definitively probe model compatibility may
+        override this hook. The default remains a no-op so existing adapters do
+        not gain an implied compatibility claim.
+        """
+        return None
+
     def run_deployment_profile(
         self,
         request: RunRequest,

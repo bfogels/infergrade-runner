@@ -575,6 +575,10 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         _emit_progress(emit_progress, "Resolving backend runtime...")
         adapter_version = adapter.resolve_version(simulate=request.simulate, request=request)
         runtime_metadata = adapter.runtime_metadata(request)
+        preflight_model = getattr(adapter, "preflight_model", None)
+        if callable(preflight_model):
+            _emit_progress(emit_progress, "Checking model/runtime compatibility...")
+            preflight_model(request)
         mark_stage_completed(output_dir, progress, current_stage, metadata={"backend_version": adapter_version})
 
         current_stage = "ontology_build"
