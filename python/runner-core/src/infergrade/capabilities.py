@@ -468,7 +468,7 @@ def _component_report_for_benchmark(
         "generation_failure_severity": benchmark_result.get("generation_failure_severity"),
     }
     metrics = benchmark_result.get("metrics") or {}
-    if isinstance(metrics, dict):
+    if benchmark_id == "mmlu_pro_reference_v1" and isinstance(metrics, dict):
         malformed_output_count = metrics.get("malformed_output_count", metrics.get("invalid_count"))
         if isinstance(malformed_output_count, int) and not isinstance(malformed_output_count, bool):
             report["malformed_output_count"] = malformed_output_count
