@@ -185,6 +185,12 @@ def evaluate(output_dir: str) -> None:
     invalid_count = 0
 
     for prediction in predictions:
+        generation_status = str(prediction.get("generation_status") or "completed")
+        if generation_status != "completed":
+            # Execution failures are not model answers. Runner Core preserves
+            # them as failed task rows and marks the benchmark partial after
+            # scoring the generations that did complete.
+            continue
         task_id = str(prediction.get("task_id") or prediction.get("case_id") or "")
         case = cases.get(task_id)
         if not case:
@@ -221,18 +227,9 @@ def evaluate(output_dir: str) -> None:
         for category, total_count in sorted(category_totals.items())
     }
     accuracy = round(correct_count / float(total), 6) if total else None
-    if total and invalid_count == total:
-        status = "failed"
-        primary_value = None
-        error = "MMLU-Pro scorer rejected every generated answer as malformed output"
-    elif invalid_count:
-        status = "partial"
-        primary_value = accuracy
-        error = "%s of %s generated answers were malformed" % (invalid_count, total)
-    else:
-        status = "completed"
-        primary_value = accuracy
-        error = None
+    status = "completed" if total else "failed"
+    primary_value = accuracy
+    error = None if total else "MMLU-Pro scorer received no completed generations"
     payload = {
             "benchmark_id": "mmlu_pro_reference_v1",
             "display_name": "MMLU-Pro reference",
@@ -243,10 +240,11 @@ def evaluate(output_dir: str) -> None:
                 "correct_count": correct_count,
                 "total_count": total,
                 "invalid_count": invalid_count,
+                "malformed_output_count": invalid_count,
             },
             "category_metrics": category_metrics,
             "case_results": case_results,
-            "scoring_policy": "exact_multiple_choice_letter_accuracy_v2",
+            "scoring_policy": "exact_multiple_choice_letter_accuracy_v3",
         }
     if error:
         payload["error"] = error

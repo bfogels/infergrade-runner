@@ -1404,7 +1404,7 @@ class CapabilityTests(unittest.TestCase):
                     "other": {"accuracy": 0.0, "correct_count": 0, "total_count": 1},
                 },
                 "case_results": case_results,
-                "scoring_policy": "exact_multiple_choice_letter_accuracy_v1",
+                "scoring_policy": "exact_multiple_choice_letter_accuracy_v3",
             }
 
         request = RunRequest(
@@ -1553,9 +1553,11 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(tasks["mmlu_pro/1"]["state"], "scored")
         self.assertEqual(tasks["mmlu_pro/1"]["score"], 0.0)
         self.assertIsNone(tasks["mmlu_pro/1"]["error_class"])
-        self.assertEqual(tasks["mmlu_pro/2"]["state"], "failed")
-        self.assertIsNone(tasks["mmlu_pro/2"]["score"])
-        self.assertEqual(tasks["mmlu_pro/2"]["error_class"], "malformed_output")
+        self.assertEqual(tasks["mmlu_pro/2"]["state"], "scored")
+        self.assertEqual(tasks["mmlu_pro/2"]["score"], 0.0)
+        self.assertIsNone(tasks["mmlu_pro/2"]["error_class"])
+        self.assertFalse(tasks["mmlu_pro/2"]["format_valid"])
+        self.assertEqual(tasks["mmlu_pro/2"]["format_violation"], "malformed_output")
         self.assertEqual(tasks["mmlu_pro/3"]["state"], "failed")
         self.assertIsNone(tasks["mmlu_pro/3"]["score"])
         self.assertEqual(tasks["mmlu_pro/3"]["error_class"], "generation_failed")
@@ -1639,6 +1641,45 @@ class CapabilityTests(unittest.TestCase):
             ["evalplus_humaneval"],
         )
         self.assertIsNone(summary["benchmark_protocol_identity"]["fingerprint_sha256"])
+
+    def test_explicit_reasoning_checks_do_not_claim_suite_is_unavailable(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="reasoning",
+            benchmark_check_ids=["reasoning_exact_answer_v1", "mmlu_pro_reference_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        execution = CapabilityExecution(
+            use_case="reasoning",
+            suite_id=None,
+            suite_ids=[],
+            benchmark_tier="canary",
+            benchmark_group_ids=[],
+            benchmark_check_ids=["reasoning_exact_answer_v1", "mmlu_pro_reference_v1"],
+            components=["Reasoning exact answer", "MMLU-Pro reference"],
+            score=0.68,
+            score_method="weighted_primary_metric_v2",
+            component_scores={"reasoning_exact_answer_v1": 1.0, "mmlu_pro_reference_v1": 0.6},
+            confidence=0.5,
+            status="completed",
+            benchmark_results={
+                benchmark_id: {
+                    "benchmark_id": benchmark_id,
+                    "status": "completed",
+                    "primary_metric": {"name": "accuracy", "value": score},
+                }
+                for benchmark_id, score in (
+                    ("reasoning_exact_answer_v1", 1.0),
+                    ("mmlu_pro_reference_v1", 0.6),
+                )
+            },
+        )
+        summary = summarize_capability_execution(request, execution)
+        self.assertNotIn("suite_unavailable_for_use_case", summary["capability_reason_codes"])
+        self.assertIn("benchmark_suite_scored", summary["capability_reason_codes"])
 
     def test_summarize_capability_execution_keeps_failed_state_distinct_from_missing(self):
         request = RunRequest(
