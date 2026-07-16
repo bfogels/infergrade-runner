@@ -10,7 +10,7 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.models import DeploymentExecution
 from infergrade.models import RunRequest
-from infergrade.runner import _memory_fit_payload, run_infergrade
+from infergrade.runner import _memory_fit_payload, _recorded_elapsed_seconds, run_infergrade
 
 
 class RunnerTests(unittest.TestCase):
@@ -19,6 +19,21 @@ class RunnerTests(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.tempdir)
+
+    def test_result_runtime_uses_recorded_wall_clock_interval(self):
+        self.assertEqual(
+            _recorded_elapsed_seconds("2026-07-16T20:22:40Z", "2026-07-16T20:50:01Z"),
+            1641,
+        )
+        self.assertEqual(
+            _recorded_elapsed_seconds("2026-07-16T20:50:01Z", "2026-07-16T20:22:40Z"),
+            0,
+        )
+        self.assertEqual(
+            _recorded_elapsed_seconds("2026-07-16T20:22:40", "2026-07-16T20:50:01Z"),
+            0,
+        )
+        self.assertEqual(_recorded_elapsed_seconds("not-a-time", "2026-07-16T20:50:01Z"), 0)
 
     def test_simulated_deployment_preserves_explicit_iteration_counts(self):
         output_dir = os.path.join(self.tempdir, "explicit-counts")
