@@ -1681,6 +1681,47 @@ class CapabilityTests(unittest.TestCase):
         self.assertNotIn("suite_unavailable_for_use_case", summary["capability_reason_codes"])
         self.assertIn("benchmark_suite_scored", summary["capability_reason_codes"])
 
+    def test_reasoning_component_report_preserves_compact_format_miss_diagnostic(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="reasoning",
+            benchmark_check_ids=["mmlu_pro_reference_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        execution = CapabilityExecution(
+            use_case="reasoning",
+            suite_id=None,
+            suite_ids=[],
+            benchmark_tier="canary",
+            benchmark_group_ids=[],
+            benchmark_check_ids=["mmlu_pro_reference_v1"],
+            components=["MMLU-Pro reference"],
+            score=None,
+            score_method="weighted_primary_metric_v2",
+            component_scores={"mmlu_pro_reference_v1": 0.6},
+            confidence=0.5,
+            status="completed",
+            benchmark_results={
+                "mmlu_pro_reference_v1": {
+                    "benchmark_id": "mmlu_pro_reference_v1",
+                    "status": "completed",
+                    "primary_metric": {"name": "accuracy", "value": 0.6},
+                    "metrics": {
+                        "accuracy": 0.6,
+                        "correct_count": 15,
+                        "total_count": 25,
+                        "invalid_count": 1,
+                        "malformed_output_count": 1,
+                    },
+                }
+            },
+        )
+        summary = summarize_capability_execution(request, execution)
+        self.assertEqual(summary["capability_component_reports"][0]["malformed_output_count"], 1)
+
     def test_summarize_capability_execution_keeps_failed_state_distinct_from_missing(self):
         request = RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",
