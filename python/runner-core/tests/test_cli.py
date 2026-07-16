@@ -368,6 +368,35 @@ class CliTests(unittest.TestCase):
             emit_progress=mock.ANY,
         )
 
+    def test_start_autopilot_runs_only_bounded_agent_work(self):
+        output = io.StringIO()
+        with mock.patch(
+            "infergrade.cli.run_agent_work_loop",
+            return_value={"worker_id": "runner-agent", "mode": "bounded_agent_work", "processed_jobs": 1},
+        ) as autopilot_mock, mock.patch(
+            "infergrade.cli.resolve_runner_execution_mode", return_value="local_native"
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_id", return_value="runner-agent"
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_api_token", return_value="secret"
+        ):
+            with redirect_stdout(output):
+                exit_code = main([
+                    "start", "--api-url", "https://infergrade.com", "--autopilot", "--max-jobs", "2"
+                ])
+
+        self.assertEqual(exit_code, 0)
+        autopilot_mock.assert_called_once_with(
+            api_url="https://infergrade.com",
+            worker_id="runner-agent",
+            hostname=None,
+            api_token="secret",
+            simulate=False,
+            max_jobs=2,
+            emit_progress=mock.ANY,
+        )
+        self.assertIn('"mode": "bounded_agent_work"', output.getvalue())
+
     def test_start_command_refuses_remote_http_profile_url(self):
         with mock.patch("infergrade.cli.run_worker_once") as run_once_mock, mock.patch(
             "infergrade.cli.resolve_runner_api_url",

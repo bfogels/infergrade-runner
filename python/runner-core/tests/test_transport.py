@@ -11,6 +11,8 @@ from infergrade.transport import (
     _request_headers,
     _resolve_api_token,
     _resolve_run_token,
+    fetch_agent_work_plan,
+    materialize_agent_work_candidate,
     require_secure_api_url,
 )
 
@@ -59,3 +61,46 @@ class TransportTests(unittest.TestCase):
                 _json_request("http://hub.example.com", "/run-configs", api_token="secret-token")
 
         urlopen_mock.assert_not_called()
+
+    def test_fetch_agent_work_plan_requires_success(self):
+        with mock.patch("infergrade.transport._json_request", return_value=(200, {"candidates": []})):
+            self.assertEqual(fetch_agent_work_plan("https://infergrade.com", api_token="token"), {"candidates": []})
+        with mock.patch(
+            "infergrade.transport._json_request",
+            return_value=(403, {"error": {"code": "work_grant_required", "message": "bounded grant required"}}),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "bounded grant required"):
+                fetch_agent_work_plan("https://infergrade.com", api_token="token")
+
+    def test_materialize_agent_work_retries_busy_with_one_idempotency_key(self):
+        responses = [
+            (503, {"error": {"code": "work_materialization_busy", "message": "retry", "retryable": True}}),
+            (200, {"created": True, "run": {"run_id": "run-1"}}),
+        ]
+        with mock.patch("infergrade.transport._json_request", side_effect=responses) as request_mock:
+            with mock.patch("infergrade.transport.time.sleep") as sleep_mock:
+                result = materialize_agent_work_candidate(
+                    "https://infergrade.com",
+                    candidate_id="candidate/1",
+                    grant_id="grant-1",
+                    api_token="token",
+                )
+
+        self.assertTrue(result["created"])
+        self.assertEqual(request_mock.call_count, 2)
+        first = request_mock.call_args_list[0].kwargs
+        second = request_mock.call_args_list[1].kwargs
+        self.assertEqual(first["idempotency_key"], second["idempotency_key"])
+        self.assertIn("candidate%2F1", request_mock.call_args_list[0].args[1])
+        sleep_mock.assert_called_once_with(0.25)
+
+    def test_materialize_agent_work_does_not_retry_non_retryable_error(self):
+        with mock.patch(
+            "infergrade.transport._json_request",
+            return_value=(409, {"error": {"code": "work_grant_budget_exhausted", "message": "exhausted"}}),
+        ) as request_mock:
+            with self.assertRaisesRegex(RuntimeError, "work_grant_budget_exhausted"):
+                materialize_agent_work_candidate(
+                    "https://infergrade.com", candidate_id="candidate-1", api_token="token"
+                )
+        request_mock.assert_called_once()
