@@ -93,6 +93,19 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(score_policies["local_coding_capability"]["minimum_scored_components"], 2)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_score_dimensions"], 2)
         self.assertEqual(score_policies["local_coding_capability"]["maximum_component_weight_fraction"], 0.8)
+        for surface_id, expected_policy_id in (
+            ("local_coding_capability", "coding_capability_headroom_gate_v1"),
+            ("local_reasoning_capability", "reasoning_capability_headroom_gate_v1"),
+        ):
+            task_policy = score_policies[surface_id]
+            self.assertEqual(task_policy["distribution_calibration_status"], "provisional_pending_distribution_audit")
+            self.assertEqual(task_policy["calibration_policy"]["policy_id"], expected_policy_id)
+            self.assertEqual(task_policy["calibration_policy"]["minimum_observations"], 20)
+            self.assertEqual(task_policy["calibration_policy"]["minimum_unique_setups"], 8)
+            self.assertEqual(task_policy["calibration_policy"]["minimum_replicated_setups"], 4)
+            self.assertEqual(task_policy["calibration_policy"]["minimum_current_generation_fraction"], 0.75)
+            self.assertEqual(task_policy["calibration_policy"]["maximum_suite_ceiling_fraction"], 0.2)
+            self.assertEqual(task_policy["calibration_policy"]["maximum_single_setup_fraction"], 0.25)
 
     def test_coverage_expansion_priorities_are_ordered_and_answer_loop_scoped(self):
         priorities = coverage_expansion_priorities()

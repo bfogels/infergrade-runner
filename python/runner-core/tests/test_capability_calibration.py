@@ -9,6 +9,22 @@ from infergrade.benchmark_catalog import load_capability_catalog
 
 
 class CapabilityCalibrationTests(unittest.TestCase):
+    def test_each_task_surface_owns_an_independent_distribution_policy(self):
+        catalog = load_capability_catalog()
+
+        assistant = policy_for_score_version("local_assistant_score_v4", catalog=catalog)
+        coding = policy_for_score_version("local_coding_score_v2", catalog=catalog)
+        reasoning = policy_for_score_version("local_reasoning_score_v2", catalog=catalog)
+
+        self.assertEqual(assistant["policy_id"], "capability_headroom_gate_v2")
+        self.assertEqual(coding["policy_id"], "coding_capability_headroom_gate_v1")
+        self.assertEqual(reasoning["policy_id"], "reasoning_capability_headroom_gate_v1")
+        for policy in (assistant, coding, reasoning):
+            self.assertEqual(policy["minimum_observations"], 20)
+            self.assertEqual(policy["minimum_unique_setups"], 8)
+            self.assertEqual(policy["minimum_replicated_setups"], 4)
+            self.assertEqual(policy["maximum_suite_ceiling_fraction"], 0.2)
+
     def test_audit_blocks_small_or_saturated_corpus_without_rescaling_scores(self):
         observations = [
             {"score_version": "local_assistant_score_v4", "score": 1.0, "model_family": "A", "parameter_band": "under_3b"},

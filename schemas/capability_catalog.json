@@ -75,6 +75,20 @@
       "maximum_component_weight_fraction": 0.8,
       "dominant_component_weight_fraction": 0.67,
       "calibration_status": "not_psychometrically_calibrated",
+      "distribution_calibration_status": "provisional_pending_distribution_audit",
+      "calibration_policy": {
+        "policy_id": "coding_capability_headroom_gate_v1",
+        "minimum_observations": 20,
+        "minimum_model_families": 5,
+        "minimum_parameter_bands": 3,
+        "minimum_distinct_scores": 6,
+        "minimum_unique_setups": 8,
+        "minimum_replicated_setups": 4,
+        "minimum_current_generation_fraction": 0.75,
+        "maximum_suite_ceiling_fraction": 0.2,
+        "maximum_largest_family_fraction": 0.4,
+        "maximum_single_setup_fraction": 0.25
+      },
       "claim_boundary": "Task-scoped coding evidence from the versioned benchmark mix. It does not imply repository-editing or general software-engineering capability."
     },
     {
@@ -88,6 +102,20 @@
       "maximum_component_weight_fraction": 0.8,
       "dominant_component_weight_fraction": 0.67,
       "calibration_status": "not_psychometrically_calibrated",
+      "distribution_calibration_status": "provisional_pending_distribution_audit",
+      "calibration_policy": {
+        "policy_id": "reasoning_capability_headroom_gate_v1",
+        "minimum_observations": 20,
+        "minimum_model_families": 5,
+        "minimum_parameter_bands": 3,
+        "minimum_distinct_scores": 6,
+        "minimum_unique_setups": 8,
+        "minimum_replicated_setups": 4,
+        "minimum_current_generation_fraction": 0.75,
+        "maximum_suite_ceiling_fraction": 0.2,
+        "maximum_largest_family_fraction": 0.4,
+        "maximum_single_setup_fraction": 0.25
+      },
       "claim_boundary": "Task-scoped reasoning evidence from the versioned benchmark mix. It is not an expert-reasoning, global intelligence, or leaderboard claim."
     }
   ],
