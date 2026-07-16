@@ -10,6 +10,7 @@ from urllib.error import URLError
 
 from infergrade import __version__
 from infergrade.analysis import recommend, summarize_bundle
+from infergrade.autopilot import run_agent_work_loop
 from infergrade.artifacts import artifact_cache_status, default_artifact_cache_dir, prune_partial_artifacts
 from infergrade.benchmark_catalog import load_capability_catalog
 from infergrade.doctor import run_doctor
@@ -308,6 +309,11 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     start_parser.add_argument("--poll-interval-seconds", type=float, default=10.0)
     start_parser.add_argument("--max-jobs", type=int)
     start_parser.add_argument("--once", action="store_true")
+    start_parser.add_argument(
+        "--autopilot",
+        action="store_true",
+        help="Materialize and execute the paired benchmark agent's bounded Hub work plan, then exit.",
+    )
     start_parser.add_argument(
         "--simulate",
         action="store_true",
@@ -798,7 +804,24 @@ def main(argv: Optional[list] = None) -> int:
     if args.command == "start":
         execution_mode = _resolve_local_execution_mode(args.execution_mode)
         worker_id = _resolve_runner_worker_id(args.worker_id, execution_mode)
-        if args.once:
+        if args.autopilot:
+            if args.once:
+                raise SystemExit("--autopilot already stops at the bounded grant; do not combine it with --once.")
+            if execution_mode != "local_native":
+                raise SystemExit("Benchmark-agent autopilot requires --execution-mode local_native.")
+            try:
+                result = run_agent_work_loop(
+                    api_url=_require_runner_api_url(args.api_url),
+                    worker_id=worker_id,
+                    hostname=args.hostname,
+                    api_token=resolve_runner_api_token(args.api_token),
+                    simulate=bool(args.simulate),
+                    max_jobs=args.max_jobs,
+                    emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
+                )
+            except RunnerTokenInvalidError as exc:
+                _exit_for_invalid_runner_token(exc)
+        elif args.once:
             try:
                 result = run_worker_once(
                     api_url=_require_runner_api_url(args.api_url),
