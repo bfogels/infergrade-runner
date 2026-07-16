@@ -3,6 +3,8 @@
 import ipaddress
 import json
 import os
+import time
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
@@ -282,6 +284,51 @@ def list_run_configs(api_url: str, api_token: str = None) -> Dict[str, Any]:
     """List server-issued run configs from the hosted catalog."""
     _, payload = _json_request(api_url, "/run-configs", api_token=api_token)
     return payload
+
+
+def fetch_agent_work_plan(api_url: str, api_token: str = None) -> Dict[str, Any]:
+    """Fetch the immutable work plan attached to a paired benchmark agent."""
+    status, payload = _json_request(api_url, "/v1/agent/work-plan", api_token=api_token)
+    if status >= 400:
+        raise RuntimeError("agent work-plan fetch failed (HTTP %d): %s" % (status, _api_error_detail(payload) or "no detail"))
+    return payload
+
+
+def materialize_agent_work_candidate(
+    api_url: str,
+    *,
+    candidate_id: str,
+    grant_id: str = None,
+    api_token: str = None,
+    max_attempts: int = 4,
+) -> Dict[str, Any]:
+    """Materialize one immutable candidate, retrying transient Hub contention."""
+    idempotency_key = "agent-work-%s-%s" % ((grant_id or "grant")[-12:], uuid.uuid4().hex)
+    attempts = max(1, int(max_attempts))
+    for attempt in range(attempts):
+        status, payload = _json_request(
+            api_url,
+            "/v1/agent/work-plan/%s/materialize" % urllib_parse.quote(candidate_id, safe=""),
+            method="POST",
+            payload={},
+            api_token=api_token,
+            idempotency_key=idempotency_key,
+        )
+        if status < 400:
+            return payload
+        error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+        if status == 503 and error.get("retryable") is True and attempt + 1 < attempts:
+            time.sleep(0.25 * (2 ** attempt))
+            continue
+        raise RuntimeError(
+            "agent work materialization failed (HTTP %d%s): %s"
+            % (
+                status,
+                " %s" % error.get("code") if error.get("code") else "",
+                _api_error_detail(payload) or "no detail",
+            )
+        )
+    raise RuntimeError("agent work materialization retry budget exhausted")
 
 
 def publish_run_config(
