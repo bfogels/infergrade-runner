@@ -1,6 +1,7 @@
 """Bundle orchestration for InferGrade runner executions."""
 
 from copy import deepcopy
+from datetime import datetime
 import os
 from typing import Any, Callable, Dict, List, Optional
 
@@ -91,6 +92,22 @@ def _verification_level(request: RunRequest, hardware: Dict[str, Any], backend_v
     return "experimental"
 
 
+def _recorded_elapsed_seconds(started_at: str, completed_at: str) -> int:
+    """Return honest recorded wall time for one result interval."""
+    try:
+        started = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+        completed = datetime.fromisoformat(str(completed_at).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return 0
+    try:
+        elapsed = (completed - started).total_seconds()
+    except TypeError:
+        return 0
+    if elapsed <= 0:
+        return 0
+    return max(1, int(elapsed))
+
+
 def _build_result_record(
     bundle_id: str,
     request: RunRequest,
@@ -125,7 +142,7 @@ def _build_result_record(
     has_capability = capability.status in ("completed", "partial")
     comparison_grade_candidate = _local_comparison_grade_candidate(request, verification_level, has_capability)
     result_id = "%s_%s" % (bundle_id, slugify(deployment_profile))
-    execution_runtime = max(1, int((len(request.backend_flags) + 1) * 30))
+    execution_runtime = _recorded_elapsed_seconds(started_at, completed_at)
     artifact_sha256 = (
         request.quant_artifact_sha256
         or resolve_artifact_sha256(request.quant_artifact_resolved_path)
