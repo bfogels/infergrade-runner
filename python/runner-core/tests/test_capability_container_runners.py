@@ -414,7 +414,7 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertEqual(summary["metrics"]["invalid_count"], 0)
         self.assertEqual(summary["metrics"]["correct_count"], 25)
         self.assertEqual(summary["primary_metric"], {"name": "accuracy", "value": 1.0})
-        self.assertEqual(summary["scoring_policy"], "exact_multiple_choice_letter_accuracy_v2")
+        self.assertEqual(summary["scoring_policy"], "exact_multiple_choice_letter_accuracy_v3")
 
     def test_mmlu_pro_terminal_normalization_does_not_hide_extra_output(self):
         module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
@@ -426,7 +426,7 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertIsNone(module._prediction_letter("B extra output [end of text]"))
         self.assertIsNone(module._prediction_letter("[end of text] B"))
 
-    def test_mmlu_pro_all_invalid_predictions_fail_instead_of_scoring_zero(self):
+    def test_mmlu_pro_all_malformed_completed_predictions_score_zero(self):
         module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
         module = _load_module("mmlu_pro_all_invalid_test_module", module_path)
         with tempfile.TemporaryDirectory() as tempdir:
@@ -437,12 +437,12 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
             module.evaluate(tempdir)
             with open(os.path.join(tempdir, "summary.json"), "r", encoding="utf-8") as handle:
                 summary = json.load(handle)
-        self.assertEqual(summary["status"], "failed")
-        self.assertIsNone(summary["primary_metric"]["value"])
-        self.assertIsNone(summary["metrics"]["accuracy"])
-        self.assertIn("every generated answer", summary["error"])
+        self.assertEqual(summary["status"], "completed")
+        self.assertEqual(summary["primary_metric"]["value"], 0.0)
+        self.assertEqual(summary["metrics"]["accuracy"], 0.0)
+        self.assertEqual(summary["metrics"]["malformed_output_count"], 1)
 
-    def test_mmlu_pro_mixed_validity_is_partial_and_keeps_strict_denominator(self):
+    def test_mmlu_pro_mixed_format_validity_is_completed_and_keeps_strict_denominator(self):
         module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
         module = _load_module("mmlu_pro_partial_test_module", module_path)
         cases = [
@@ -461,9 +461,32 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
             module.evaluate(tempdir)
             with open(os.path.join(tempdir, "summary.json"), "r", encoding="utf-8") as handle:
                 summary = json.load(handle)
-        self.assertEqual(summary["status"], "partial")
+        self.assertEqual(summary["status"], "completed")
         self.assertEqual(summary["primary_metric"]["value"], 0.5)
         self.assertEqual(summary["metrics"]["invalid_count"], 1)
+
+    def test_mmlu_pro_generation_failure_is_excluded_from_scored_denominator(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
+        module = _load_module("mmlu_pro_generation_failure_test_module", module_path)
+        cases = [
+            {"case_id": "mmlu_pro/1", "task_id": "mmlu_pro/1", "category": "fixture", "answer": "B"},
+            {"case_id": "mmlu_pro/2", "task_id": "mmlu_pro/2", "category": "fixture", "answer": "C"},
+        ]
+        predictions = [
+            {"task_id": "mmlu_pro/1", "completion": "B", "generation_status": "completed"},
+            {"task_id": "mmlu_pro/2", "completion": "", "generation_status": "failed"},
+        ]
+        with tempfile.TemporaryDirectory() as tempdir:
+            for filename, rows in (("cases.jsonl", cases), ("predictions.jsonl", predictions)):
+                with open(os.path.join(tempdir, filename), "w", encoding="utf-8") as handle:
+                    for row in rows:
+                        handle.write(json.dumps(row) + "\n")
+            module.evaluate(tempdir)
+            with open(os.path.join(tempdir, "summary.json"), "r", encoding="utf-8") as handle:
+                summary = json.load(handle)
+        self.assertEqual(summary["status"], "completed")
+        self.assertEqual(summary["primary_metric"]["value"], 1.0)
+        self.assertEqual(summary["metrics"]["total_count"], 1)
 
     def test_mmlu_pro_dockerfile_pins_official_dataset_revision(self):
         dockerfile_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "Dockerfile")

@@ -431,10 +431,7 @@ def _benchmark_primary_metric_value(summary: Dict[str, Any]) -> Optional[float]:
 
 
 def _benchmark_counts_as_scored(summary: Dict[str, Any]) -> bool:
-    return _benchmark_primary_metric_value(summary) is not None and str((summary or {}).get("status") or "") not in {
-        "failed",
-        "degraded",
-    }
+    return _benchmark_primary_metric_value(summary) is not None and str((summary or {}).get("status") or "") == "completed"
 
 
 def _component_report_for_benchmark(
@@ -504,7 +501,7 @@ def _capability_reason_codes(
     benchmark_ids = _planned_benchmark_ids(execution, suite, request)
     if not request.use_case and not execution.suite_ids:
         codes.append("use_case_missing")
-    if suite is None and request.use_case and not execution.suite_ids:
+    if suite is None and request.use_case and not execution.suite_ids and not benchmark_ids:
         codes.append("suite_unavailable_for_use_case")
     if request.capability == "none" or execution.status == "skipped":
         codes.append("capability_disabled")
@@ -1303,9 +1300,9 @@ def _write_mmlu_pro_capability_run_artifact(
             task_score = None
             error_class = "generation_failed"
         elif predicted is None:
-            task_state = "failed"
-            task_score = None
-            error_class = "malformed_output"
+            task_state = "scored"
+            task_score = 0.0
+            error_class = None
         else:
             task_state = "scored"
             task_score = 1.0 if result.get("correct") else 0.0
@@ -1325,6 +1322,8 @@ def _write_mmlu_pro_capability_run_artifact(
                 "category": result.get("category") or case.get("category"),
                 "expected": result.get("expected") or case.get("answer"),
                 "predicted": predicted,
+                "format_valid": predicted is not None if generation_status == "completed" else None,
+                "format_violation": "malformed_output" if generation_status == "completed" and predicted is None else None,
             }
         )
     metrics = dict(summary.get("metrics") or {})
@@ -1385,7 +1384,7 @@ def _write_mmlu_pro_capability_run_artifact(
             "fixture_revision": str(metadata.get("sample_policy") or "mmlu_pro_snapshot"),
             "dataset_revision": metadata.get("dataset_revision"),
             "scorer_type": "multiple_choice",
-            "scoring_policy": summary.get("scoring_policy") or "exact_multiple_choice_letter_accuracy_v2",
+            "scoring_policy": summary.get("scoring_policy") or "exact_multiple_choice_letter_accuracy_v3",
             "repetitions": 1,
             "sample_policy": metadata.get("sample_policy"),
             "category_count": metadata.get("category_count"),
@@ -1395,12 +1394,17 @@ def _write_mmlu_pro_capability_run_artifact(
             "score": score if summary_state in ("scored", "partial") else None,
             "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
             "passed_count": metrics.get("correct_count"),
-            "failed_count": metrics.get("invalid_count"),
+            "failed_count": (
+                metrics.get("total_count") - metrics.get("correct_count")
+                if isinstance(metrics.get("total_count"), int) and isinstance(metrics.get("correct_count"), int)
+                else None
+            ),
             "partial_count": summary.get("generation_failure_count") or 0,
             "skipped_count": 0,
             "not_comparable_count": 0,
             **_artifact_summary_performance(summary.get("task_performance")),
             "category_metrics": dict(summary.get("category_metrics") or {}),
+            "malformed_output_count": metrics.get("malformed_output_count", metrics.get("invalid_count")),
         },
         "tasks": tasks,
         "artifacts": {
@@ -1776,7 +1780,7 @@ def _mmlu_pro_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
     if state == "scored":
         supported = [
             "This setup completed the pinned MMLU-Pro sampled reference protocol recorded in this artifact.",
-            "The score reports exact multiple-choice answer-letter accuracy with category breakdowns.",
+            "The score reports strict multiple-choice answer-letter accuracy with category breakdowns; completed malformed answers count as incorrect.",
         ]
     elif state == "partial":
         supported = [
