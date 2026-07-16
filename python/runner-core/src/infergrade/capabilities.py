@@ -453,7 +453,7 @@ def _component_report_for_benchmark(
         benchmark_result.get("status")
         or ("simulated" if benchmark_result == {} and component_score is not None else ("completed" if primary_metric_value is not None else "not_run"))
     )
-    return {
+    report = {
         "benchmark_id": benchmark_id,
         "display_name": spec.display_name,
         "benchmark_kind": spec.benchmark_kind,
@@ -467,6 +467,12 @@ def _component_report_for_benchmark(
         "generation_failure_rate": benchmark_result.get("generation_failure_rate"),
         "generation_failure_severity": benchmark_result.get("generation_failure_severity"),
     }
+    metrics = benchmark_result.get("metrics") or {}
+    if isinstance(metrics, dict):
+        malformed_output_count = metrics.get("malformed_output_count", metrics.get("invalid_count"))
+        if isinstance(malformed_output_count, int) and not isinstance(malformed_output_count, bool):
+            report["malformed_output_count"] = malformed_output_count
+    return report
 
 
 def _capability_state_for_request(
