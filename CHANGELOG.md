@@ -5,6 +5,13 @@ user-visible changes; full evidence boundaries and validation details live in
 the release PRs and tags. Versions without an entry shipped internal or
 incremental changes only — see the git history.
 
+## 0.3.37
+
+- Publishes the audited Runner source and canonical container images for public use under Apache-2.0, with refreshed architecture, contribution, and release documentation.
+- Hardens supply-chain maintenance with SHA-pinned Actions, read-only workflow permissions, Dependabot coverage, Ruff enforcement, CODEOWNERS, and one authoritative Rust lockfile.
+- Updates vulnerable transitive dependencies and preserves explicit accepted-risk documentation for platform-scoped upstream advisories.
+- Makes public releases fail closed on tag/version drift, missing signing inputs, invalid notarization credentials, or anonymously unreachable updater artifacts.
+
 ## 0.3.36
 
 - Desktop assignments received while listening is paused now show one adjacent recovery action, readable model labels, and a clock that starts only when work is claimed.
