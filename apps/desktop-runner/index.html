@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>InferGrade Runner</title>
   </head>
   <body>
@@ -65,7 +66,7 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Backend detail</p>
-                <h3 id="backend-title">Checking local backend</h3>
+                <h3 id="backend-title" data-backend-title>Checking local backend…</h3>
               </div>
             </div>
             <div class="backend-list">
@@ -77,7 +78,7 @@
                   </svg>
                 </span>
                 <strong>Local platform</strong>
-                <span class="row-state">checking</span>
+                <span class="row-state" data-backend-platform-status aria-busy="true">detecting…</span>
               </div>
               <div data-backend-row="runtime">
                 <span class="row-icon" aria-hidden="true">
@@ -197,6 +198,7 @@
             </div>
           </div>
           <div class="assignment-actions">
+            <button type="button" data-assignment-start-listening hidden>Start listening</button>
             <button type="button" class="button-secondary" data-open-hub data-hub-target="assignment">Open in Hub</button>
             <button type="button" class="button-secondary" data-view-logs>View logs</button>
           </div>
@@ -212,7 +214,7 @@
               </span>
             </span>
             <span class="drawer-summary-meta">
-              <span data-update-channel>Current release</span>
+              <span data-update-channel>Update status unknown</span>
               <span data-last-check-label>Last check pending</span>
             </span>
           </summary>

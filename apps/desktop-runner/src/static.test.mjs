@@ -33,7 +33,7 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(html.includes('data-paired="false" data-listening="false"'));
   assert.ok(html.includes("<h2 data-primary-state-title>Connect this machine</h2>"));
   assert.ok(html.includes("Pair with Hub before this Runner accepts assigned work."));
-  assert.ok(html.includes("<h3 id=\"backend-title\">Checking local backend</h3>"));
+  assert.ok(html.includes("Checking local backend…"));
   assert.ok(html.includes("<strong>Local platform</strong>"));
   assert.equal(html.includes("<h2 data-primary-state-title>Ready</h2>"), false);
   assert.equal(html.includes("Connected to Hub. Backend verified. Waiting for assigned work."), false);
@@ -402,12 +402,20 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.equal(html.includes("Choose a Hub-assigned model and selected llama.cpp runtime before running."), false);
   assert.equal(html.includes("Leave blank to use the selected llama.cpp runtime"), false);
   assert.ok(html.includes("data-assignment-progress-bar"));
+  assert.ok(html.includes("data-assignment-start-listening"));
+  assert.ok(js.includes("assignmentTitleFromRunId"));
+  assert.ok(js.includes("waitingForListener: !childProcess"));
+  assert.ok(js.includes('assignmentTime.textContent = "Not started"'));
+  assert.ok(js.includes("assignmentClockTransition"));
+  assert.ok(js.includes("currentFirstRunUploadRunId() ? renderAssignmentFromHandoff() : renderAssignmentIdle()"));
+  assert.ok(js.includes("renderAssignmentFromHandoff({ force: true })"));
   assert.ok(js.includes("renderAssignmentFromListenerEvent"));
+  assert.ok(js.includes("clearFirstRunHandoff({ renderAssignment: false })"));
   assert.ok(js.includes("renderAssignmentFromListenerLine"));
   assert.ok(js.includes("Claimed run"));
   assert.ok(js.includes("Runner claimed Hub-assigned work and is preparing local execution."));
   assert.ok(js.includes("Handoff received"));
-  assert.ok(js.includes("Waiting for listener claim"));
+  assert.ok(js.includes("Start listening to claim this run"));
   assert.ok(js.includes("currentHandoffRunId"));
   assert.equal(js.includes("Waiting for local runtime and model readiness"), false);
   assert.ok(js.includes('payload.type === "assignment_update" || payload.type === "assignment_idle"'));
@@ -432,6 +440,30 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(rust.includes('.env("INFERGRADE_DESKTOP_EVENTS", "1")'));
   assert.ok(rust.includes('emit_listener_event(&event_app, payload);'));
   assert.ok(js.includes("Installed llama.cpp runtime selected. No install command was run."));
+});
+
+test("desktop update and local platform states begin honestly", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+
+  assert.ok(html.includes("Update status unknown"));
+  assert.equal(html.includes("<span data-update-channel>Current release</span>"), false);
+  assert.ok(html.includes("data-backend-platform-status"));
+  assert.ok(js.includes('updateChannel.textContent = "Current release"'));
+  assert.ok(js.includes('backendTitle.textContent = "Local backend"'));
+  assert.ok(js.includes("displayCacheArtifactName"));
+});
+
+test("tauri commands prepare the platform sidecar before startup", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const prepareScript = readFileSync(new URL("../scripts/prepare-sidecar.mjs", import.meta.url), "utf8");
+
+  assert.equal(packageJson.scripts.pretauri, "node scripts/prepare-sidecar.mjs");
+  assert.equal(packageJson.scripts["prebuild:windows"], "node scripts/prepare-sidecar.mjs");
+  assert.ok(prepareScript.includes('run("cargo"'));
+  assert.ok(prepareScript.includes("copyFileSync"));
+  assert.ok(prepareScript.includes("spawnSync"));
+  assert.equal(prepareScript.includes("bash"), false);
 });
 
 test("desktop legacy support actions stay token-free and out of the visible drawer", () => {

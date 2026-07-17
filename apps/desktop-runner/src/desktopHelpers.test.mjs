@@ -2,13 +2,56 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assignmentClockTransition,
+  assignmentTitleFromRunId,
+  displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
   normalizeDesktopApiUrl,
+  shouldClearCompletedHandoff,
   userSafeStartFailure,
   userSafeUpdateFailure,
   userSafeTokenFailure,
 } from "./desktopHelpers.js";
+
+test("turns internal assignment ids into compact model-aware titles", () => {
+  assert.equal(
+    assignmentTitleFromRunId("run_qwen3_5_9b_complete_the_missing_benchmark_evidence_123"),
+    "Qwen3.5-9B · benchmark evidence run"
+  );
+  assert.equal(assignmentTitleFromRunId("run_gemma_4_12b_reasoning_123"), "Gemma 4 12B · benchmark evidence run");
+  assert.equal(assignmentTitleFromRunId("run_opaque_123"), "Hub benchmark run");
+});
+
+test("hides cache-address prefixes from model filenames", () => {
+  assert.equal(displayCacheArtifactName("03b74727a860a563-Qwen3.5-9B-Q4_K_M.gguf"), "Qwen3.5-9B-Q4_K_M.gguf");
+  assert.equal(displayCacheArtifactName("Qwen3.5-9B-Q4_K_M.gguf"), "Qwen3.5-9B-Q4_K_M.gguf");
+});
+
+test("assignment clocks begin on claim, reset for a new run, and freeze on terminal phases", () => {
+  const firstStart = new Date("2026-07-17T12:00:00Z");
+  const claimTime = new Date("2026-07-17T12:01:00Z");
+  const secondClaimTime = new Date("2026-07-17T12:05:00Z");
+
+  assert.deepEqual(
+    assignmentClockTransition({ runId: "run_1", phase: "Ready to claim", now: claimTime }),
+    { startedAt: null, shouldRun: false }
+  );
+  assert.deepEqual(
+    assignmentClockTransition({ previousStartedAt: firstStart, previousRunId: "run_1", runId: "run_2", phase: "Running", now: secondClaimTime }),
+    { startedAt: secondClaimTime, shouldRun: true }
+  );
+  assert.deepEqual(
+    assignmentClockTransition({ previousStartedAt: firstStart, previousRunId: "run_1", runId: "run_1", phase: "Needs attention", now: secondClaimTime }),
+    { startedAt: firstStart, shouldRun: false }
+  );
+});
+
+test("only a matching completed listener run clears its stored handoff", () => {
+  assert.equal(shouldClearCompletedHandoff({ phase: "Complete", runId: "run_1", handoffRunId: "run_1" }), true);
+  assert.equal(shouldClearCompletedHandoff({ phase: "Running", runId: "run_1", handoffRunId: "run_1" }), false);
+  assert.equal(shouldClearCompletedHandoff({ phase: "Complete", runId: "run_2", handoffRunId: "run_1" }), false);
+});
 
 test("normalizes hosted and local desktop API URLs before sidecar invocation", () => {
   assert.equal(normalizeDesktopApiUrl(""), "https://api.infergrade.com/");

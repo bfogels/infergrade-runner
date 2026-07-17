@@ -173,6 +173,54 @@ export function userSafeUpdateFailure(_message = "") {
   return "Update status is unavailable. You can still pair and start the Runner.";
 }
 
+export function assignmentTitleFromRunId(value = "") {
+  const runId = String(value || "").trim();
+  if (!runId) {
+    return "Hub benchmark run";
+  }
+  const qwen = runId.match(/(?:^|_)qwen(\d+)(?:_(\d+))?_(\d+)(?:_(\d+))?b(?:_|$)/i);
+  if (qwen) {
+    const generation = qwen[2] ? `${qwen[1]}.${qwen[2]}` : qwen[1];
+    const size = qwen[4] ? `${qwen[3]}.${qwen[4]}` : qwen[3];
+    return `Qwen${generation}-${size}B · benchmark evidence run`;
+  }
+  const gemma = runId.match(/(?:^|_)gemma(?:_|-)?(\d+)(?:_|-)(\d+)(?:_|-)?b(?:_|$)/i);
+  if (gemma) {
+    return `Gemma ${gemma[1]} ${gemma[2]}B · benchmark evidence run`;
+  }
+  return "Hub benchmark run";
+}
+
+export function displayCacheArtifactName(value = "") {
+  const name = String(value || "").trim();
+  return name.replace(/^[a-f0-9]{12,64}-/i, "") || "Cached model";
+}
+
+const TERMINAL_ASSIGNMENT_PHASES = new Set(["complete", "needs attention", "interrupted", "failed", "cancelled"]);
+
+export function assignmentClockTransition({
+  previousStartedAt = null,
+  previousRunId = "",
+  runId = "",
+  phase = "",
+  waitingForListener = false,
+  startedAt = null,
+  now = new Date(),
+} = {}) {
+  const normalizedPhase = String(phase || "").trim().toLowerCase();
+  const hasStarted = !waitingForListener && !["handoff received", "ready to claim"].includes(normalizedPhase);
+  const runChanged = Boolean(runId && previousRunId && runId !== previousRunId);
+  const nextStartedAt = hasStarted ? startedAt || (runChanged ? now : previousStartedAt) || now : null;
+  return {
+    startedAt: nextStartedAt,
+    shouldRun: Boolean(nextStartedAt) && !TERMINAL_ASSIGNMENT_PHASES.has(normalizedPhase),
+  };
+}
+
+export function shouldClearCompletedHandoff({ phase = "", runId = "", handoffRunId = "" } = {}) {
+  return String(phase || "").trim().toLowerCase() === "complete" && Boolean(runId) && runId === handoffRunId;
+}
+
 export function isCredentialCanceled(message = "") {
   return /cancelled|canceled|user interaction|user.*cancel/i.test(String(message || ""));
 }
