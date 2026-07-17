@@ -8,16 +8,24 @@ The goal is to produce one versioned bundle that the Hub can pin to explicitly:
 - a release manifest with checksums
 - the Runner-owned contract bundle
 
-## CI Bundle On Main
+## Versioned Release Bundle
 
-Every push to `main` runs `.github/workflows/release-bundle.yml`. That workflow:
+Pushing a `v*` release tag or deliberately dispatching
+`.github/workflows/release-bundle.yml` builds the versioned bundle. The workflow:
 
 1. installs the Runner package
 2. checks all version declarations against `VERSION`
 3. exports the Runner release bundle for `$(cat VERSION)`
 4. uploads `dist/releases/$(cat VERSION)/` as a GitHub Actions artifact
 
-The default main-branch artifact includes the contract bundle and release manifest with image references. It does not build or upload Docker image archives on every commit, which keeps main CI fast and avoids very large per-commit artifacts. Maintainers can run the same workflow manually with `include_image_archives=true` when they need a fully portable archive bundle.
+The default tagged artifact includes the contract bundle and release manifest with image references. It does not build or upload Docker image archives unless a maintainer deliberately dispatches the workflow with `include_image_archives=true`. Ordinary `main` promotions do not create release-bundle artifacts.
+
+Tag-triggered release, contract, and container workflows fail unless the tag is
+exactly `v$(cat VERSION)` and the tagged commit belongs to fetched `main`
+history. This prevents a mistyped tag from publishing container and bundle
+artifacts under different versions. The manual portable-image bundle receives a
+larger bounded timeout because it cold-builds and exports all canonical images;
+the normal tagged bundle retains the shorter limit.
 
 `VERSION` is the human-edited release version. Some package managers still require static manifest versions, so after changing `VERSION`, run:
 
@@ -50,9 +58,12 @@ python3 ./scripts/check_public_release_readiness.py
 
 The expected healthy local result from a clean Git worktree is `public_release_readiness=manual_required`, not `pass`. The command checks repository-local docs, scripts, workflow posture, Git state, and suspicious secret-looking filenames. It deliberately leaves GitHub settings, release-environment secrets, signing credentials, notarization credentials, and published artifact verification as manual gates.
 
-## Desktop App On Main
+## Desktop App Release
 
-Every push to `main` also runs `.github/workflows/desktop-runner-release.yml`. That workflow:
+Maintainers deliberately dispatch `.github/workflows/desktop-runner-release.yml`
+from `main` after the versioned source promotion and local release checks are
+complete. Ordinary pushes and documentation promotions do not publish desktop
+artifacts. The workflow:
 
 1. resolves the desktop app version from `VERSION`
 2. builds the source sidecar wrapper for the CI host's Rust target triple
@@ -98,7 +109,21 @@ When the workflow fails at `Validate Apple signing certificate password`, fix th
    - `APPLE_CERTIFICATE`: contents of the `.p12.b64` file
    - `APPLE_CERTIFICATE_PASSWORD`: the password used by the local `openssl pkcs12` check
 
-After you update the certificate and password secrets together, rerun the `Desktop Runner Release` workflow from `main`. A passing preflight only proves the certificate opens; the workflow must still complete signing, notarization, Gatekeeper assessment, and stapled-ticket checks before the DMG is user-ready.
+After you update the certificate and password secrets together, deliberately dispatch the `Desktop Runner Release` workflow from `main`. A passing preflight only proves the certificate opens; the workflow must still complete signing, notarization, Gatekeeper assessment, stapled-ticket checks, and anonymous updater verification before the DMG is user-ready.
+
+## Actions Budget And Public-Fork Boundary
+
+Validation workflows run for pull requests targeting `develop` or `main` and
+for pushes to those two integration branches. Feature-branch pushes do not
+duplicate the pull-request run. Superseded validation runs are cancelled by a
+workflow-level concurrency group.
+
+All workflow jobs have explicit timeouts. Temporary release, package-smoke, and
+runtime-intake artifacts have bounded retention. Third-party and GitHub-owned
+actions are pinned to immutable commit SHAs, and validation checkouts do not
+persist Git credentials. Pull-request jobs remain read-only and must never
+receive release, package-publishing, signing, notarization, Hub, or model-registry
+secrets.
 
 ### Verify Published Desktop Artifacts
 
