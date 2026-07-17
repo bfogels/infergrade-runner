@@ -35,6 +35,9 @@ python3 ./scripts/sync_versions.py --check
 ```
 
 CI runs the same check and fails if any required package manifest copy is stale.
+Pull requests to `main` may be version-neutral source promotions. When such a PR
+does change `VERSION`, CI still requires a forward version bump; an unchanged
+`VERSION` does not turn an ordinary promotion into a release.
 
 Local equivalent:
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from scripts.sync_versions import sync_versions
 from scripts.check_public_release_readiness import main as check_public_release_readiness
 from scripts.check_release_tag import validate_release_tag
+from scripts.check_version_bump import parse_release_version, validate_forward_version
 from scripts.verify_desktop_release_artifacts import main as verify_desktop_release_artifacts
 from scripts.verify_desktop_update_endpoint import verify_manifest as verify_desktop_update_manifest_endpoint
 from scripts.write_desktop_release_checksums import main as write_desktop_release_checksums
@@ -212,6 +213,24 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("python3 ./scripts/check_llama_cpp_runtime_policy.py", workflow)
         self.assertIn("fetch-depth: 0", workflow)
         self.assertNotIn("git fetch origin main", workflow)
+        self.assertIn("git diff --quiet origin/main...HEAD -- VERSION", workflow)
+        self.assertIn("VERSION is unchanged; this is a version-neutral source promotion.", workflow)
+        self.assertIn("python3 ./scripts/check_version_bump.py --base-ref origin/main", workflow)
+
+    def test_release_version_guard_requires_strict_semver_forward_progress(self):
+        self.assertEqual(parse_release_version("0.3.36"), (0, 3, 36))
+        validate_forward_version("0.3.37", "0.3.36")
+        validate_forward_version("0.4.0", "0.3.36")
+
+        for current in ("0.3.36", "0.3.35", "0.2.99"):
+            with self.subTest(current=current):
+                with self.assertRaisesRegex(ValueError, "must move forward"):
+                    validate_forward_version(current, "0.3.36")
+
+        for malformed in ("v0.3.37", "0.3", "0.3.37-beta", "01.2.3"):
+            with self.subTest(malformed=malformed):
+                with self.assertRaisesRegex(ValueError, "MAJOR.MINOR.PATCH"):
+                    parse_release_version(malformed)
 
     def test_validation_workflows_scope_branches_and_cancel_superseded_runs(self):
         for filename in ("ci.yml", "secret-scan.yml"):

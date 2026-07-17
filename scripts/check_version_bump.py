@@ -3,11 +3,28 @@
 
 import argparse
 import pathlib
+import re
 import subprocess
 import sys
+from typing import Tuple
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+RELEASE_VERSION_PATTERN = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+
+
+def parse_release_version(value: str) -> Tuple[int, int, int]:
+    match = RELEASE_VERSION_PATTERN.fullmatch(value)
+    if match is None:
+        raise ValueError(f"VERSION must use MAJOR.MINOR.PATCH integers; got {value!r}.")
+    return tuple(int(component) for component in match.groups())
+
+
+def validate_forward_version(current: str, base: str) -> None:
+    current_parts = parse_release_version(current)
+    base_parts = parse_release_version(base)
+    if current_parts <= base_parts:
+        raise ValueError(f"VERSION must move forward from {base}; got {current}.")
 
 
 def git_show(ref: str, path: str) -> str:
@@ -30,13 +47,12 @@ def main() -> int:
     except subprocess.CalledProcessError:
         print("Base branch has no VERSION file yet; skipping first bump enforcement.")
         return 0
-    if current == base:
-        print(
-            f"VERSION must change for PRs into main; current and {args.base_ref} are both {current}.",
-            file=sys.stderr,
-        )
+    try:
+        validate_forward_version(current, base)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
         return 1
-    print(f"VERSION changed from {base} to {current}.")
+    print(f"VERSION moved forward from {base} to {current}.")
     return 0
 
 
