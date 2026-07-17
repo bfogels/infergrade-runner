@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 from tempfile import TemporaryDirectory
 from pathlib import Path
 
@@ -11,8 +12,10 @@ from scripts.sync_versions import sync_versions
 from scripts.check_public_release_readiness import main as check_public_release_readiness
 from scripts.check_release_tag import validate_release_tag
 from scripts.check_version_bump import parse_release_version, validate_forward_version
+from scripts.prepare_desktop_release_dmg import DEFAULT_PUBLIC_DMG_NAME, prepare_public_dmg
 from scripts.verify_desktop_release_artifacts import main as verify_desktop_release_artifacts
 from scripts.verify_desktop_update_endpoint import verify_manifest as verify_desktop_update_manifest_endpoint
+from scripts.verify_release_images import _linux_amd64_descriptor, parse_registry_prefix, verify_image
 from scripts.write_desktop_release_checksums import main as write_desktop_release_checksums
 from scripts.write_desktop_update_manifest import main as write_desktop_update_manifest
 
@@ -24,7 +27,7 @@ class ReleaseCiTests(unittest.TestCase):
     def test_desktop_release_workflow_verifies_public_updater_reachability(self):
         workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")
 
-        self.assertIn("Verify anonymous updater access", workflow)
+        self.assertIn("Verify published desktop release", workflow)
         self.assertIn("verify_desktop_update_endpoint.py", workflow)
         self.assertIn('--expected-version "$DESKTOP_VERSION"', workflow)
 
@@ -200,10 +203,49 @@ class ReleaseCiTests(unittest.TestCase):
 
     def test_release_image_verifier_is_anonymous_and_checks_every_image(self):
         script = (ROOT / "scripts" / "verify_release_images.sh").read_text(encoding="utf-8")
-        self.assertIn('DOCKER_CONFIG_DIR="$(mktemp -d)"', script)
-        self.assertIn('DOCKER_CONFIG="${DOCKER_CONFIG_DIR}" docker manifest inspect', script)
+        verifier = (ROOT / "scripts" / "verify_release_images.py").read_text(encoding="utf-8")
+        self.assertIn("verify_release_images.py", script)
+        self.assertNotIn("docker manifest inspect", script)
+        self.assertIn("/token?", verifier)
+        self.assertIn("Docker-Content-Digest".lower(), verifier.lower())
         for image in ("infergrade-runner-core", "infergrade-llama-cpp", "infergrade-ifeval", "infergrade-evalplus", "infergrade-mmlu-pro"):
-            self.assertIn(image, script)
+            self.assertIn(image, verifier)
+
+    def test_release_image_verifier_selects_linux_amd64_from_oci_index(self):
+        self.assertEqual(parse_registry_prefix("https://ghcr.io/bfogels/"), ("ghcr.io", "bfogels"))
+        descriptor = _linux_amd64_descriptor(
+            {
+                "manifests": [
+                    {"digest": "sha256:arm", "platform": {"os": "linux", "architecture": "arm64"}},
+                    {"digest": "sha256:amd", "platform": {"os": "linux", "architecture": "amd64"}},
+                ]
+            }
+        )
+        self.assertEqual(descriptor["digest"], "sha256:amd")
+
+    def test_release_image_verifier_rejects_index_without_linux_amd64(self):
+        with self.assertRaisesRegex(ValueError, "linux/amd64"):
+            _linux_amd64_descriptor(
+                {"manifests": [{"digest": "sha256:arm", "platform": {"os": "linux", "architecture": "arm64"}}]}
+            )
+
+    def test_release_image_verifier_rejects_platform_digest_drift(self):
+        token_payload = ({"token": "anonymous-token"}, {})
+        index_payload = (
+            {
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "manifests": [
+                    {"digest": "sha256:expected", "platform": {"os": "linux", "architecture": "amd64"}}
+                ],
+            },
+            "sha256:index",
+        )
+        platform_payload = ({"config": {"digest": "sha256:config"}}, "sha256:different")
+        with patch("scripts.verify_release_images._json_request", return_value=token_payload), patch(
+            "scripts.verify_release_images._manifest_request", side_effect=[index_payload, platform_payload]
+        ):
+            with self.assertRaisesRegex(ValueError, "digest drifted"):
+                verify_image("ghcr.io", "bfogels", "infergrade-runner-core", "0.3.37")
 
     def test_ci_checks_version_sync_before_running_tests(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
@@ -512,7 +554,38 @@ class ReleaseCiTests(unittest.TestCase):
         )
         self.assertIn("./scripts/write_desktop_release_checksums.py", workflow)
         self.assertIn("target/release/bundle/macos/SHA256SUMS", workflow)
+        self.assertIn("prepare_desktop_release_dmg.py", workflow)
+        self.assertIn("InferGrade.Runner.macOS-arm64.dmg", workflow)
         self.assertIn("gh release upload", workflow)
+        self.assertIn("gh release download", workflow)
+        self.assertIn("Reconcile desktop release asset set", workflow)
+        self.assertIn("gh release delete-asset", workflow)
+        self.assertIn("--required-dmg-name \"$PUBLIC_DMG_NAME\"", workflow)
+        self.assertIn("--reject-unexpected", workflow)
+        self.assertIn("curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2", workflow)
+        self.assertIn('test "$actual_dmg_sha" = "$expected_dmg_sha"', workflow)
+
+    def test_desktop_release_dmg_gets_stable_url_safe_public_name(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "InferGrade Runner_0.3.37_aarch64.dmg"
+            source.write_bytes(b"signed-notarized-dmg")
+
+            destination = prepare_public_dmg(root)
+
+            self.assertEqual(destination.name, DEFAULT_PUBLIC_DMG_NAME)
+            self.assertEqual(destination.read_bytes(), b"signed-notarized-dmg")
+            self.assertFalse(source.exists())
+
+    def test_desktop_release_dmg_preparation_fails_closed_on_ambiguous_inputs(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "one.dmg").write_bytes(b"one")
+            (root / "two.dmg").write_bytes(b"two")
+            with self.assertRaisesRegex(ValueError, "exactly one DMG"):
+                prepare_public_dmg(root)
+            with self.assertRaisesRegex(ValueError, "plain .dmg filename"):
+                prepare_public_dmg(root, "../installer.dmg")
 
     def test_desktop_release_workflow_smokes_windows_and_linux_packages(self):
         workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")
@@ -794,7 +867,7 @@ class ReleaseCiTests(unittest.TestCase):
     def test_desktop_release_artifact_verifier_checks_checksums_and_updater_manifest(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
-            dmg = root / "InferGrade Runner_0.2.5_aarch64.dmg"
+            dmg = root / DEFAULT_PUBLIC_DMG_NAME
             archive = root / "InferGrade Runner.app.tar.gz"
             signature = root / "InferGrade Runner.app.tar.gz.sig"
             manifest = root / "infergrade-runner-desktop-latest.json"
@@ -836,7 +909,10 @@ class ReleaseCiTests(unittest.TestCase):
                     "--directory",
                     str(root),
                     "--require-dmg",
+                    "--required-dmg-name",
+                    DEFAULT_PUBLIC_DMG_NAME,
                     "--require-updater",
+                    "--reject-unexpected",
                 ]
                 stdout = io.StringIO()
                 with contextlib.redirect_stdout(stdout):
@@ -847,6 +923,25 @@ class ReleaseCiTests(unittest.TestCase):
             output = stdout.getvalue()
             self.assertIn("desktop_release_artifacts_verified=4", output)
             self.assertIn("desktop_release_notarization=not_checked_by_artifact_manifest", output)
+
+            stale_dmg = root / "InferGrade.Runner_0.3.36_aarch64.dmg"
+            stale_dmg.write_bytes(b"stale")
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "verify_desktop_release_artifacts",
+                    "--directory",
+                    str(root),
+                    "--required-dmg-name",
+                    DEFAULT_PUBLIC_DMG_NAME,
+                    "--require-updater",
+                    "--reject-unexpected",
+                ]
+                with self.assertRaises(SystemExit) as raised:
+                    verify_desktop_release_artifacts()
+            finally:
+                sys.argv = old_argv
+            self.assertIn("exactly one DMG", str(raised.exception))
 
     def test_desktop_release_artifact_verifier_rejects_bad_checksums_and_missing_signatures(self):
         with TemporaryDirectory() as tmp:
