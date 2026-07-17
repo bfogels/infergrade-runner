@@ -19,6 +19,7 @@ from infergrade.capability_summary import write_capability_summary_artifact
 from infergrade.contracts import load_contract_manifest
 from infergrade.images import container_image_identity, install_image
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
+from infergrade.progress import request_fingerprint
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcnow_iso, write_json
 
 CAPABILITY_REGISTRY_VERSION = "2026-07-capability-protocol-3.1"
@@ -1915,6 +1916,131 @@ def _host_mount_path(path: str) -> str:
     return normalized_path
 
 
+_CASE_CHECKPOINT_VERSION = "capability_case_checkpoint_v1"
+
+
+def _case_checkpoint_path(request: RunRequest, benchmark_id: str) -> str:
+    root = request.output_dir or os.path.join("runs", "infergrade_capability")
+    return os.path.join(root, "artifacts", "capability", benchmark_id, "case-checkpoint.jsonl")
+
+
+def _case_checkpoint_fingerprint(
+    request: RunRequest,
+    spec: CapabilityBenchmarkSpec,
+    cases: List[Dict[str, Any]],
+) -> str:
+    return stable_hash(
+        {
+            "checkpoint_version": _CASE_CHECKPOINT_VERSION,
+            "registry_version": CAPABILITY_REGISTRY_VERSION,
+            "request_fingerprint": request_fingerprint(request),
+            "benchmark": {
+                "benchmark_id": spec.benchmark_id,
+                "benchmark_kind": spec.benchmark_kind,
+                "primary_metric_name": spec.primary_metric_name,
+                "generation_max_tokens": spec.generation_max_tokens,
+                "execution_mode": spec.execution_mode,
+                "container_image": spec.container_image,
+                "container_args": list(spec.container_args),
+            },
+            "cases": cases,
+        },
+        length=64,
+    )
+
+
+def _initialize_case_checkpoint(path: str, fingerprint: str, spec: CapabilityBenchmarkSpec, total_cases: int) -> None:
+    ensure_dir(os.path.dirname(path))
+    header = {
+        "record_type": "header",
+        "checkpoint_version": _CASE_CHECKPOINT_VERSION,
+        "fingerprint_sha256": fingerprint,
+        "benchmark_id": spec.benchmark_id,
+        "total_cases": total_cases,
+    }
+    temporary_path = "%s.tmp-%s" % (path, os.getpid())
+    with open(temporary_path, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(header, sort_keys=True, separators=(",", ":")) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary_path, path)
+
+
+def _load_case_checkpoint(path: str, fingerprint: str, spec: CapabilityBenchmarkSpec) -> Dict[str, Dict[str, Any]]:
+    with open(path, "r+", encoding="utf-8") as handle:
+        header_line = handle.readline()
+        try:
+            header = json.loads(header_line)
+        except (TypeError, ValueError):
+            raise ValueError("Capability checkpoint header is unreadable for %s." % spec.benchmark_id)
+        if (
+            header.get("record_type") != "header"
+            or header.get("checkpoint_version") != _CASE_CHECKPOINT_VERSION
+            or header.get("benchmark_id") != spec.benchmark_id
+            or header.get("fingerprint_sha256") != fingerprint
+        ):
+            raise ValueError(
+                "Capability checkpoint does not match the current %s request and protocol; refusing unsafe reuse."
+                % spec.benchmark_id
+            )
+        completed = {}
+        while True:
+            line_offset = handle.tell()
+            line = handle.readline()
+            if not line:
+                break
+            try:
+                envelope = json.loads(line)
+            except (TypeError, ValueError):
+                # A process can stop between bytes of the final append. Ignore
+                # and remove that incomplete tail before appending new cases.
+                handle.seek(line_offset)
+                handle.truncate()
+                handle.flush()
+                os.fsync(handle.fileno())
+                break
+            prediction = envelope.get("prediction") if envelope.get("record_type") == "prediction" else None
+            if not isinstance(prediction, dict):
+                continue
+            if envelope.get("prediction_sha256") != stable_hash(prediction, length=64):
+                raise ValueError("Capability checkpoint record integrity failed for %s." % spec.benchmark_id)
+            if prediction.get("benchmark_id") != spec.benchmark_id:
+                raise ValueError("Capability checkpoint record benchmark mismatch for %s." % spec.benchmark_id)
+            case_id = str(prediction.get("case_id") or "")
+            if case_id and prediction.get("generation_status") == "completed":
+                completed[case_id] = prediction
+        return completed
+
+
+def _append_case_checkpoint(path: str, prediction: Dict[str, Any]) -> None:
+    envelope = {
+        "record_type": "prediction",
+        "prediction_sha256": stable_hash(prediction, length=64),
+        "prediction": prediction,
+    }
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(envelope, sort_keys=True, separators=(",", ":")) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def remove_capability_case_checkpoints(output_dir: str) -> int:
+    """Remove temporary per-case duplicates only after the whole bundle completes."""
+    capability_root = os.path.join(output_dir, "artifacts", "capability")
+    removed = 0
+    if not os.path.isdir(capability_root):
+        return removed
+    for root, _dirs, files in os.walk(capability_root):
+        if "case-checkpoint.jsonl" not in files:
+            continue
+        try:
+            os.remove(os.path.join(root, "case-checkpoint.jsonl"))
+        except OSError:
+            continue
+        removed += 1
+    return removed
+
+
 def _generate_predictions(
     adapter,
     request: RunRequest,
@@ -1924,8 +2050,33 @@ def _generate_predictions(
 ) -> List[Dict[str, Any]]:
     predictions = []
     total_cases = len(cases)
+    checkpoint_path = _case_checkpoint_path(request, spec.benchmark_id)
+    checkpoint_fingerprint = _case_checkpoint_fingerprint(request, spec, cases)
+    if request.resume and os.path.exists(checkpoint_path):
+        completed_checkpoint = _load_case_checkpoint(checkpoint_path, checkpoint_fingerprint, spec)
+    else:
+        _initialize_case_checkpoint(checkpoint_path, checkpoint_fingerprint, spec, total_cases)
+        completed_checkpoint = {}
     for index, case in enumerate(cases, start=1):
         case_id = case.get("case_id") or case.get("task_id") or stable_hash(case, length=12)
+        checkpoint_prediction = completed_checkpoint.get(str(case_id))
+        if checkpoint_prediction is not None:
+            predictions.append(checkpoint_prediction)
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "case_progress",
+                        "benchmark_id": spec.benchmark_id,
+                        "display_name": spec.display_name,
+                        "completed_cases": index,
+                        "total_cases": total_cases,
+                        "current_case": case_id,
+                        "checkpoint_reused": True,
+                        "message": "Capability benchmark %s %d/%d cases (checkpoint reused)."
+                        % (spec.display_name, index, total_cases),
+                    }
+                )
+            continue
         generated: Dict[str, Any] = {}
         normalization = None
         raw_completion = None
@@ -1971,6 +2122,7 @@ def _generate_predictions(
         else:
             record["task_id"] = case["task_id"]
             record["completion"] = text
+        _append_case_checkpoint(checkpoint_path, record)
         predictions.append(record)
         if progress_callback:
             progress_callback(
