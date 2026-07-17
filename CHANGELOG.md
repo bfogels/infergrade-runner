@@ -11,6 +11,7 @@ incremental changes only — see the git history.
 - Hardens supply-chain maintenance with SHA-pinned Actions, read-only workflow permissions, Dependabot coverage, Ruff enforcement, CODEOWNERS, and one authoritative Rust lockfile.
 - Updates vulnerable transitive dependencies and preserves explicit accepted-risk documentation for platform-scoped upstream advisories.
 - Makes public releases fail closed on tag/version drift, missing signing inputs, invalid notarization credentials, or anonymously unreachable updater artifacts.
+- Removes the pre-rebrand `QUANTBENCH_*` environment aliases and unused `run_quantbench` Python entrypoint; use the corresponding `INFERGRADE_*` variables and `run_infergrade`.
 
 ## 0.3.36
 
