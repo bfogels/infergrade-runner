@@ -48,9 +48,14 @@ jobs:
           python3 ./scripts/check_versions.py
           python3 ./scripts/check_llama_cpp_runtime_policy.py
 
-      - name: Check main PR version bump
+      - name: Validate changed release version
         if: github.event_name == 'pull_request' && github.base_ref == 'main'
-        run: python3 ./scripts/check_version_bump.py --base-ref origin/main
+        run: |
+          if git diff --quiet origin/main...HEAD -- VERSION; then
+            echo "VERSION is unchanged; this is a version-neutral source promotion."
+          else
+            python3 ./scripts/check_version_bump.py --base-ref origin/main
+          fi
 
       - name: Run Python test suite
         run: ./scripts/test_all.sh
