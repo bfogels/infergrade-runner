@@ -931,8 +931,3 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         mark_failed(output_dir, progress, current_stage, current_detail, str(exc))
         write_failure_report(output_dir, request, progress, str(exc), stage=current_stage, detail=current_detail)
         raise
-
-
-def run_quantbench(request: RunRequest, emit_progress: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
-    """Legacy compatibility alias for the pre-rebrand runner entrypoint."""
-    return run_infergrade(request, emit_progress=emit_progress)

@@ -3,14 +3,12 @@ __pycache__/
 .venv/
 .env
 .infergrade-api/
-.quantbench-api/
 build/
 dist/
 *.pyc
 *.egg-info/
 runs/
 node_modules/
-.next/
 data/
 memory/reference_runs/
 apps/desktop-runner/src-tauri/gen/
@@ -18,4 +16,3 @@ target/
 apps/desktop-runner/src-tauri/target/
 apps/desktop-runner/src-tauri/binaries/infergrade-sidecar-*
 apps/desktop-runner/sidecar/target/
-~/

@@ -360,7 +360,6 @@ def normalize_request_selection(request: RunRequest, catalog: Optional[Dict[str,
     """Apply selection defaults and compatibility-derived fields directly onto a request."""
     payload = catalog or load_capability_catalog()
     suites = suite_index(payload)
-    checks = check_index(payload)
     selection = resolve_request_selection(request, payload)
 
     suite_ids = list(selection["suite_ids"])

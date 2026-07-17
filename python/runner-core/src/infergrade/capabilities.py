@@ -42,10 +42,10 @@ def _released_capability_image(image_name: str) -> str:
     return "ghcr.io/bfogels/%s:%s" % (image_name, __version__)
 
 DEFAULT_CAPABILITY_IMAGES = {
-    "ifeval": env_value("INFERGRADE_IFEVAL_IMAGE", "QUANTBENCH_IFEVAL_IMAGE", _released_capability_image("infergrade-ifeval")),
-    "evalplus_humaneval": env_value("INFERGRADE_EVALPLUS_IMAGE", "QUANTBENCH_EVALPLUS_IMAGE", _released_capability_image("infergrade-evalplus")),
-    "evalplus_mbpp": env_value("INFERGRADE_EVALPLUS_IMAGE", "QUANTBENCH_EVALPLUS_IMAGE", _released_capability_image("infergrade-evalplus")),
-    "mmlu_pro_reference_v1": env_value("INFERGRADE_MMLU_PRO_IMAGE", "QUANTBENCH_MMLU_PRO_IMAGE", _released_capability_image("infergrade-mmlu-pro")),
+    "ifeval": env_value("INFERGRADE_IFEVAL_IMAGE", _released_capability_image("infergrade-ifeval")),
+    "evalplus_humaneval": env_value("INFERGRADE_EVALPLUS_IMAGE", _released_capability_image("infergrade-evalplus")),
+    "evalplus_mbpp": env_value("INFERGRADE_EVALPLUS_IMAGE", _released_capability_image("infergrade-evalplus")),
+    "mmlu_pro_reference_v1": env_value("INFERGRADE_MMLU_PRO_IMAGE", _released_capability_image("infergrade-mmlu-pro")),
 }
 
 _LISTENER_RUNS_DIR = "/app/runs"

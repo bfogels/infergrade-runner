@@ -5,7 +5,7 @@ import copy
 import json
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict
 from urllib import request as urllib_request
 
 from infergrade.benchmark_catalog import normalize_request_selection

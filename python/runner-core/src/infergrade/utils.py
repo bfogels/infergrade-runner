@@ -45,12 +45,10 @@ def read_json(path: str) -> Dict[str, Any]:
         return json.load(handle)
 
 
-def env_value(primary: str, legacy: Optional[str] = None, default: Optional[str] = None) -> Optional[str]:
-    """Read a renamed environment variable while preserving a legacy fallback."""
-    if primary in os.environ:
-        return os.environ.get(primary)
-    if legacy and legacy in os.environ:
-        return os.environ.get(legacy)
+def env_value(name: str, default: Optional[str] = None) -> Optional[str]:
+    """Read an environment variable, returning the default when unset."""
+    if name in os.environ:
+        return os.environ.get(name)
     return default
 
 

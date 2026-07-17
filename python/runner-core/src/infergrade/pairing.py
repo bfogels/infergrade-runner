@@ -80,9 +80,9 @@ def runner_api_credential_source(api_token: Optional[str] = None) -> str:
     """Describe which credential generic transport would use without exposing it."""
     if str(api_token or "").strip():
         return "explicit"
-    if env_value("INFERGRADE_HUB_TOKEN", "QUANTBENCH_HUB_TOKEN"):
+    if env_value("INFERGRADE_HUB_TOKEN"):
         return "hub_environment"
-    if env_value("INFERGRADE_API_TOKEN", "QUANTBENCH_API_TOKEN"):
+    if env_value("INFERGRADE_API_TOKEN"):
         return "legacy_api_environment"
     profile = load_runner_profile() or {}
     if str(profile.get("access_token") or "").strip():
