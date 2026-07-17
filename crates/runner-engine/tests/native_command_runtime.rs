@@ -233,8 +233,13 @@ fn llama_cpp_runtime_disables_prompt_echo_before_measuring_ttft() {
 #[test]
 fn llama_cpp_runtime_parses_modern_generation_summary() {
     let extension = if cfg!(windows) { "cmd" } else { "sh" };
-    let runtime_path = temp_path("llama-cli-modern-summary", extension);
-    let model_path = temp_path("llama-model-modern-summary", "gguf");
+    let runtime_dir = std::env::temp_dir().join(format!(
+        "infergrade-native-command-runtime-modern-summary-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&runtime_dir).expect("runtime dir");
+    let runtime_path = runtime_dir.join(format!("llama-cli.{extension}"));
+    let model_path = runtime_dir.join("llama-model-modern-summary.gguf");
     std::fs::write(&model_path, b"fake model").expect("model file");
 
     if cfg!(windows) {
@@ -265,8 +270,7 @@ fn llama_cpp_runtime_parses_modern_generation_summary() {
     assert_eq!(error.code(), "native_runtime_failed");
     assert!(error.message().contains("eval tokens"));
 
-    let _ = std::fs::remove_file(runtime_path);
-    let _ = std::fs::remove_file(model_path);
+    let _ = std::fs::remove_dir_all(runtime_dir);
 }
 
 #[test]
