@@ -96,11 +96,15 @@ Run the full local Python verification pass with:
 
 That script runs the runner-core unit and integration-style tests with stdlib `unittest` (the repo intentionally does not use pytest). CI also lints Python with `ruff check python scripts`; the rule set lives in [`ruff.toml`](ruff.toml).
 
-For the Rust workspace, run the same checks CI enforces:
+For the baseline Rust workspace checks, run:
 
 ```bash
 cargo fmt --all -- --check
 cargo test --workspace --exclude infergrade_desktop_runner --locked
 ./scripts/build_desktop_sidecar.sh
+cargo test -p infergrade_desktop_runner --lib --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
+
+The CI workflow also performs explicit build steps on Linux and macOS; see
+`.github/workflows/ci.yml` for the complete protected sequence.
