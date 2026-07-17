@@ -110,9 +110,17 @@ The sidecar source can now generate matching platform sidecars on Windows and Li
 
 The primary UI redeems the one-time Hub pairing code with:
 
-```text
-infergrade pair --api-url <hub url> --pair-code <pairing code> --label <runner label>
+```bash
+printf '%s\n' "$INFERGRADE_PAIR_CODE" | infergrade pair \
+  --api-url "$HUB_URL" \
+  --pair-code-stdin \
+  --label "$RUNNER_LABEL"
 ```
+
+The pairing code must be supplied through protected stdin or the dedicated
+environment variable, not as a command-line argument that can appear in shell
+history or process listings. Set `HUB_URL` and `RUNNER_LABEL` to the values
+provided by the Hub before running the example.
 
 On success, the CLI saves the durable runner profile and the app starts:
 

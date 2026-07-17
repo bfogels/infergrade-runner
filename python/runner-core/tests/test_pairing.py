@@ -81,9 +81,7 @@ class PairingTests(unittest.TestCase):
             os.environ,
             {
                 "INFERGRADE_HUB_TOKEN": "",
-                "QUANTBENCH_HUB_TOKEN": "",
                 "INFERGRADE_API_TOKEN": "",
-                "QUANTBENCH_API_TOKEN": "",
             },
         ):
             self.assertEqual(runner_api_credential_source(None), "paired_runner_profile")
@@ -98,9 +96,7 @@ class PairingTests(unittest.TestCase):
             os.environ,
             {
                 "INFERGRADE_HUB_TOKEN": "",
-                "QUANTBENCH_HUB_TOKEN": "",
                 "INFERGRADE_API_TOKEN": "",
-                "QUANTBENCH_API_TOKEN": "",
             },
         ):
             self.assertEqual(runner_api_credential_source(None), "none")

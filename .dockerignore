@@ -12,7 +12,5 @@ venv
 runs
 archive
 memory/reference_runs
-services/api/src/.infergrade-api
-services/api/src/.quantbench-api
 *.sqlite3
 *.log

@@ -14,7 +14,7 @@ The goal is to make every vendored asset inspectable before the repository becom
 
 | Path | Source | Revision | Purpose | Status | Required before public release |
 | --- | --- | --- | --- | --- | --- |
-| `third_party/instruction_following_eval/` | Google Research `instruction_following_eval` | `fa55fe4af97c6756b6fe5b0639464f6b72f37c5a` | IFEval benchmark logic for the instruction-following capability container | Needs license-file confirmation | Confirm upstream license, add the upstream license/notice file to the vendored subtree if required, and keep the README citation visible. |
+| `third_party/instruction_following_eval/` | Google Research `instruction_following_eval` | `fa55fe4af97c6756b6fe5b0639464f6b72f37c5a` | IFEval benchmark logic for the instruction-following capability container | Confirmed Apache-2.0; upstream `LICENSE` vendored in the subtree | Keep the vendored `LICENSE` and README citation visible alongside the code. |
 
 ## Audit Commands
 

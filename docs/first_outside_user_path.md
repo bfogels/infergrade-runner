@@ -9,7 +9,9 @@ For the Desktop Runner path, Docker should not be required for the first local b
 ```bash
 brew install llama.cpp
 python3 -m pip install -e ./python/runner-core
-infergrade pair --api-url http://127.0.0.1:8000 --pair-code 'igrp_example'
+python3 -c 'import getpass; print(getpass.getpass("InferGrade pairing code: "))' | infergrade pair \
+  --api-url http://127.0.0.1:8000 \
+  --pair-code-stdin
 infergrade start --execution-mode local_native
 ```
 
@@ -22,7 +24,9 @@ The proof lane uses this native path with TinyLlama, the public Q4_K_M GGUF arti
 ```bash
 python3 -m pip install -e ./python/runner-core
 infergrade install-images
-infergrade pair --api-url http://127.0.0.1:8000 --pair-code 'igrp_example'
+python3 -c 'import getpass; print(getpass.getpass("InferGrade pairing code: "))' | infergrade pair \
+  --api-url http://127.0.0.1:8000 \
+  --pair-code-stdin
 infergrade start --execution-mode local_container
 ```
 
