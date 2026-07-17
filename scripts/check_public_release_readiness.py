@@ -16,6 +16,8 @@ REQUIRED_FILES = [
     "LICENSE",
     "SECURITY.md",
     "CONTRIBUTING.md",
+    ".github/CODEOWNERS",
+    ".github/dependabot.yml",
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/ISSUE_TEMPLATE/bug_report.md",
     ".github/ISSUE_TEMPLATE/benchmark_methodology.md",
