@@ -153,6 +153,21 @@ class BenchmarkCatalogTests(unittest.TestCase):
         )
         self.assertEqual(gemma4["target_quants"], ["q4_0"])
         self.assertEqual(gemma4["parameter_scale"], "E4B")
+        ministral8 = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_ministral3_8b_assistant_expansion"
+        )
+        self.assertEqual(ministral8["status"], "needs_initial_observation")
+        self.assertEqual(ministral8["campaign_availability"], "reviewed_runnable")
+        self.assertNotIn("blocked_reason", ministral8)
+        qwen35_4b = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_qwen35_4b_assistant_expansion"
+        )
+        self.assertEqual(qwen35_4b["status"], "needs_initial_observation")
+        self.assertEqual(qwen35_4b["campaign_availability"], "reviewed_runnable")
+        self.assertEqual(qwen35_4b["generation_preset_id"], "deterministic_direct_answer_v1")
+        self.assertNotIn("blocked_reason", qwen35_4b)
         qwen36 = next(
             item for item in priorities
             if item["priority_id"] == "apple_silicon_qwen36_27b_assistant_canary"
