@@ -896,7 +896,7 @@ class LlamaCppAdapter(BaseAdapter):
     def _image_name(self, request: RunRequest = None) -> str:
         if request and request.backend_image:
             return request.backend_image
-        return env_value("INFERGRADE_LLAMA_CPP_IMAGE", "QUANTBENCH_LLAMA_CPP_IMAGE", _DEFAULT_IMAGE)
+        return env_value("INFERGRADE_LLAMA_CPP_IMAGE", _DEFAULT_IMAGE)
 
     def _ensure_backend_model_compatibility(self, request: RunRequest) -> None:
         architecture = _infer_llama_cpp_architecture(request)
@@ -1736,7 +1736,7 @@ def _wait_for_native_server_ready(process: subprocess.Popen, port: int, started_
 
 def _server_base_url_candidates(published_port: int) -> List[str]:
     candidates = ["http://127.0.0.1:%s" % published_port]
-    host_alias = env_value("INFERGRADE_DOCKER_HOST_ALIAS", "", "")
+    host_alias = env_value("INFERGRADE_DOCKER_HOST_ALIAS", "")
     if host_alias:
         candidates.append("http://%s:%s" % (host_alias, published_port))
     candidates.append("http://host.docker.internal:%s" % published_port)
@@ -2171,7 +2171,7 @@ def _native_runtime_source(request: RunRequest = None) -> str:
 
 
 def _resolve_native_binary(explicit: Optional[str], env_name: str, default: str, label: str) -> str:
-    binary = explicit or env_value(env_name, "", "")
+    binary = explicit or env_value(env_name, "")
     if not binary:
         managed = managed_llama_cpp_binary_path({"CLI": "cli", "server": "server", "perplexity": "perplexity"}.get(label, label))
         if managed:
@@ -2187,7 +2187,7 @@ def _resolve_native_binary(explicit: Optional[str], env_name: str, default: str,
 
 
 def _try_resolve_native_binary(explicit: Optional[str], env_name: str, default: str) -> Optional[str]:
-    binary = explicit or env_value(env_name, "", "")
+    binary = explicit or env_value(env_name, "")
     if binary:
         return shutil.which(binary)
     return managed_llama_cpp_binary_path("perplexity") or shutil.which(default)

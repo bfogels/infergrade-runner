@@ -1,4 +1,4 @@
-"""HTTP transport helpers for talking to a InferGrade API."""
+"""HTTP transport helpers for talking to an InferGrade Hub API."""
 
 import ipaddress
 import json
@@ -57,8 +57,8 @@ def _resolve_api_token(api_token: str = None) -> str:
     profile = load_runner_profile() or {}
     return (
         api_token
-        or env_value("INFERGRADE_HUB_TOKEN", "QUANTBENCH_HUB_TOKEN")
-        or env_value("INFERGRADE_API_TOKEN", "QUANTBENCH_API_TOKEN")
+        or env_value("INFERGRADE_HUB_TOKEN")
+        or env_value("INFERGRADE_API_TOKEN")
         or profile.get("access_token")
         or ""
     ).strip()
