@@ -1,6 +1,8 @@
 import "./styles.css";
 import packageInfo from "../package.json";
 import {
+  assignmentTitleFromRunId,
+  displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
   normalizeDesktopApiUrl,
@@ -15,7 +17,6 @@ const FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY = "infergrade.runner.firstRun.runId";
 const FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY = "infergrade.runner.firstRun.workerId";
 const THEME_STORAGE_KEY = "infergrade.runner.theme";
 const APP_VERSION_FALLBACK = packageInfo.version;
-const UPDATE_CHANNEL = "release";
 const UPDATE_STATUS = "Open the signed desktop app to check for verified updates.";
 
 const form = document.querySelector("[data-runner-form]");
@@ -87,6 +88,8 @@ const backendRuntimeStatus = document.querySelector("[data-backend-runtime-statu
 const backendTokenStatus = document.querySelector("[data-backend-token-status]");
 const backendReconnectStatus = document.querySelector("[data-backend-reconnect-status]");
 const backendContainerStatus = document.querySelector("[data-backend-container-status]");
+const backendTitle = document.querySelector("[data-backend-title]");
+const backendPlatformStatus = document.querySelector("[data-backend-platform-status]");
 const supportDetails = document.querySelector("[data-support-details]");
 const logDisclosure = document.querySelector(".log-disclosure");
 const lastCheckLabel = document.querySelector("[data-last-check-label]");
@@ -102,6 +105,7 @@ const assignmentPhase = document.querySelector("[data-assignment-phase]");
 const assignmentTime = document.querySelector("[data-assignment-time]");
 const assignmentProgressBar = document.querySelector("[data-assignment-progress-bar]");
 const assignmentCheck = document.querySelector("[data-assignment-check]");
+const assignmentStartListeningButton = document.querySelector("[data-assignment-start-listening]");
 
 let childProcess = null;
 let logLines = [];
@@ -314,6 +318,10 @@ function renderAssignmentTime() {
   if (!assignmentTime) {
     return;
   }
+  if (!assignmentStartedAt) {
+    assignmentTime.textContent = "Not started";
+    return;
+  }
   assignmentTime.textContent = currentAssignmentRemaining
     ? `${formatElapsed()} · ${currentAssignmentRemaining} remaining`
     : formatElapsed();
@@ -375,6 +383,9 @@ function renderAssignmentIdle() {
   if (assignmentProgressWrap) {
     assignmentProgressWrap.hidden = true;
   }
+  if (assignmentStartListeningButton) {
+    assignmentStartListeningButton.hidden = true;
+  }
 }
 
 function renderAssignmentActive({
@@ -386,17 +397,22 @@ function renderAssignmentActive({
   startedAt = null,
   remaining = "",
   runId = "",
+  waitingForListener = false,
 } = {}) {
   if (!assignmentPanel) {
     return;
   }
-  assignmentPanel.dataset.state = "active";
-  assignmentStartedAt = startedAt || assignmentStartedAt || new Date();
+  const wasWaitingForListener = assignmentPanel.dataset.state === "waiting-for-listener";
+  const assignmentHasStarted = !waitingForListener && !["Handoff received", "Ready to claim"].includes(phase);
+  assignmentPanel.dataset.state = waitingForListener ? "waiting-for-listener" : "active";
+  assignmentStartedAt = !assignmentHasStarted
+    ? null
+    : startedAt || (wasWaitingForListener ? new Date() : assignmentStartedAt) || new Date();
   currentAssignmentRemaining = remaining;
   currentAssignmentRunId = runId || currentAssignmentRunId;
   currentAssignmentPhase = phase;
   if (assignmentKicker) {
-    assignmentKicker.textContent = "Active assignment";
+    assignmentKicker.textContent = waitingForListener ? "Action needed" : "Active assignment";
   }
   if (assignmentTitle) {
     assignmentTitle.textContent = title;
@@ -420,6 +436,9 @@ function renderAssignmentActive({
     const boundedProgress = Math.max(0, Math.min(100, Number(progress) || 0));
     assignmentProgressBar.style.width = `${boundedProgress}%`;
   }
+  if (assignmentStartListeningButton) {
+    assignmentStartListeningButton.hidden = !waitingForListener;
+  }
   if (assignmentCheck) {
     assignmentCheck.hidden = !checkName;
     assignmentCheck.textContent = checkName ? `Current check: ${checkName}` : "";
@@ -432,16 +451,20 @@ function renderAssignmentFromHandoff() {
     renderAssignmentIdle();
     return;
   }
-  if (currentAssignmentRunId === runId && currentAssignmentPhase !== "idle" && currentAssignmentPhase !== "Handoff received") {
+  const handoffPhases = new Set(["idle", "Handoff received", "Listening paused", "Ready to claim"]);
+  if (currentAssignmentRunId === runId && !handoffPhases.has(currentAssignmentPhase)) {
     return;
   }
   renderAssignmentActive({
-    title: `Hub run ${runId}`,
-    phase: "Handoff received",
-    description: "Hub opened this Runner for an assigned run. The listener will update this when it claims work.",
+    title: assignmentTitleFromRunId(runId),
+    phase: childProcess ? "Ready to claim" : "Listening paused",
+    description: childProcess
+      ? "The listener is ready to claim this Hub assignment."
+      : "Start listening to claim this run. The benchmark has not started yet.",
     progress: 6,
-    checkName: "Waiting for listener claim",
+    checkName: childProcess ? "Waiting for Hub claim" : "Waiting for you",
     runId,
+    waitingForListener: !childProcess,
   });
 }
 
@@ -478,6 +501,13 @@ function applyPreviewStateFromUrl() {
     setRunnerButtonsDisabled("start", false);
     setRunnerButtonsDisabled("stop", true);
     setStatus("Pairing needed", "warning");
+  } else if (mockAssignment === "paused") {
+    savedTokenAvailable = true;
+    runnerProfileAvailable = true;
+    childProcess = null;
+    setRunnerButtonsDisabled("start", false);
+    setRunnerButtonsDisabled("stop", true);
+    setStatus("Paused", "warning");
   }
   if (mockAssignment === "active") {
     if (firstRunUploadRunIdInput && !firstRunUploadRunIdInput.value.trim()) {
@@ -492,6 +522,9 @@ function applyPreviewStateFromUrl() {
       remaining: "about 6 min",
       runId: "run_preview_assignment",
     });
+  } else if (mockAssignment === "paused") {
+    currentHandoffRunId = "run_qwen3_5_9b_complete_the_missing_benchmark_evidence_preview";
+    renderAssignmentFromHandoff();
   } else {
     renderAssignmentFromHandoff();
   }
@@ -517,7 +550,7 @@ async function renderReleaseStatus() {
     appVersion.textContent = `v${version}`;
   }
   if (updateChannel) {
-    updateChannel.textContent = UPDATE_CHANNEL === "release" ? "Current release" : `${UPDATE_CHANNEL} channel`;
+    updateChannel.textContent = "Update status unknown";
   }
   if (updateStatus) {
     updateStatus.textContent = isTauriRuntime() ? "Ready to check for verified updates." : UPDATE_STATUS;
@@ -572,11 +605,17 @@ async function checkForAppUpdate() {
     pendingUpdate = update;
     if (!update) {
       setUpdateStatus("InferGrade Runner is up to date.");
+      if (updateChannel) {
+        updateChannel.textContent = "Current release";
+      }
       appendLog("No desktop Runner update is available.");
       return;
     }
     const detail = update.body || `Current ${update.currentVersion}; available ${update.version}.`;
     setUpdateStatus(`Update ${update.version} is available.`);
+    if (updateChannel) {
+      updateChannel.textContent = `Update ${update.version} available`;
+    }
     renderUpdateActions(true, `Update ${update.version}`, detail);
     if (installUpdateButton) {
       installUpdateButton.disabled = false;
@@ -586,6 +625,9 @@ async function checkForAppUpdate() {
     }
     appendLog(`Desktop Runner update ${update.version} is available.`);
   } catch (error) {
+    if (updateChannel) {
+      updateChannel.textContent = "Update status unknown";
+    }
     setUpdateStatus(userSafeUpdateFailure(error.message || error));
     appendLog(`Update check failed: ${error.message || error}`);
   } finally {
@@ -686,7 +728,7 @@ function renderModelCache(payload = null) {
   artifacts.slice(0, 5).forEach((artifact) => {
     const item = document.createElement("li");
     const name = document.createElement("strong");
-    name.textContent = artifact.name || "Cached model";
+    name.textContent = displayCacheArtifactName(artifact.name);
     const size = document.createElement("em");
     size.textContent = formatBytes(artifact.size_bytes);
     item.append(name, size);
@@ -821,6 +863,19 @@ function renderDesktopReadiness(payload = {}) {
     return;
   }
   lastReadinessCheckAt = new Date();
+  if (backendTitle) {
+    backendTitle.textContent = "Local backend";
+  }
+  if (backendPlatformStatus) {
+    const platformLabels = {
+      apple_silicon: "Apple Silicon",
+      nvidia_gpu: "NVIDIA GPU",
+      amd_gpu: "AMD GPU",
+      cpu_only: "CPU",
+    };
+    backendPlatformStatus.textContent = platformLabels[payload.hardware_class] || payload.accelerator_api || "detected";
+    backendPlatformStatus.removeAttribute("aria-busy");
+  }
   nativeSuiteReadiness =
     payload.native_benchmark_message ||
     "Local execution readiness is available for Hub-assigned work.";
@@ -1247,7 +1302,7 @@ function firstRunMessageFromEvent(payload = {}) {
 function renderAssignmentFromFirstRunEvent(payload = {}) {
   if (payload.type === "benchmark_started") {
     renderAssignmentActive({
-      title: currentFirstRunUploadRunId() ? `Hub run ${currentFirstRunUploadRunId()}` : "Local readiness smoke",
+      title: currentFirstRunUploadRunId() ? assignmentTitleFromRunId(currentFirstRunUploadRunId()) : "Local readiness smoke",
       phase: "Running",
       description: "Runner is executing local work assigned through Hub handoff.",
       progress: 18,
@@ -1258,7 +1313,7 @@ function renderAssignmentFromFirstRunEvent(payload = {}) {
   if (payload.type === "benchmark_progress") {
     const progress = Number.isFinite(payload.progress_percent) ? payload.progress_percent : 45;
     renderAssignmentActive({
-      title: currentFirstRunUploadRunId() ? `Hub run ${currentFirstRunUploadRunId()}` : "Local readiness smoke",
+      title: currentFirstRunUploadRunId() ? assignmentTitleFromRunId(currentFirstRunUploadRunId()) : "Local readiness smoke",
       phase: "Running",
       description: "Runner is executing local work assigned through Hub handoff.",
       progress,
@@ -1268,7 +1323,7 @@ function renderAssignmentFromFirstRunEvent(payload = {}) {
   }
   if (payload.type === "benchmark_completed") {
     renderAssignmentActive({
-      title: currentFirstRunUploadRunId() ? `Hub run ${currentFirstRunUploadRunId()}` : "Local readiness smoke",
+      title: currentFirstRunUploadRunId() ? assignmentTitleFromRunId(currentFirstRunUploadRunId()) : "Local readiness smoke",
       phase: "Uploading",
       description: "Local execution is complete. Runner is preparing Hub upload or support artifacts.",
       progress: 86,
@@ -1278,7 +1333,7 @@ function renderAssignmentFromFirstRunEvent(payload = {}) {
   }
   if (payload.type === "error") {
     renderAssignmentActive({
-      title: currentFirstRunUploadRunId() ? `Hub run ${currentFirstRunUploadRunId()}` : "Local readiness smoke",
+      title: currentFirstRunUploadRunId() ? assignmentTitleFromRunId(currentFirstRunUploadRunId()) : "Local readiness smoke",
       phase: "Needs attention",
       description: payload.message || "Runner needs attention before this assignment can continue.",
       progress: 100,
@@ -1300,7 +1355,7 @@ function renderAssignmentFromListenerEvent(payload = {}) {
   const phase = payload.phase || "Running";
   const runId = payload.run_id || payload.runId || "";
   renderAssignmentActive({
-    title: redactSecrets(payload.title || (runId ? `Hub run ${runId}` : "Hub assignment")),
+    title: redactSecrets(payload.title || assignmentTitleFromRunId(runId)),
     phase,
     description: redactSecrets(payload.description || "Runner is processing Hub-assigned work."),
     progress: Number.isFinite(payload.progress) ? payload.progress : phase === "Complete" ? 100 : 32,
@@ -1326,7 +1381,7 @@ function renderAssignmentFromListenerLine(line = "") {
   if (claimed) {
     const runId = claimed[1];
     renderAssignmentActive({
-      title: `Hub run ${runId}`,
+      title: assignmentTitleFromRunId(runId),
       phase: "Preparing",
       description: "Runner claimed Hub-assigned work and is preparing local execution.",
       progress: 12,
@@ -1340,7 +1395,7 @@ function renderAssignmentFromListenerLine(line = "") {
   if (failed) {
     const runId = failed[1];
     renderAssignmentActive({
-      title: `Hub run ${runId}`,
+      title: assignmentTitleFromRunId(runId),
       phase: "Needs attention",
       description: failed[2],
       progress: 100,
@@ -1352,7 +1407,7 @@ function renderAssignmentFromListenerLine(line = "") {
   }
   if (trimmed.startsWith("Resolving model artifact")) {
     renderAssignmentActive({
-      title: currentAssignmentRunId ? `Hub run ${currentAssignmentRunId}` : "Hub assignment",
+      title: assignmentTitleFromRunId(currentAssignmentRunId),
       phase: "Downloading",
       description: "Runner is resolving the Hub-assigned model artifact.",
       progress: 24,
@@ -1364,7 +1419,7 @@ function renderAssignmentFromListenerLine(line = "") {
   }
   if (trimmed.startsWith("Running capability suite")) {
     renderAssignmentActive({
-      title: currentAssignmentRunId ? `Hub run ${currentAssignmentRunId}` : "Hub assignment",
+      title: assignmentTitleFromRunId(currentAssignmentRunId),
       phase: "Running",
       description: "Runner is executing Hub-assigned checks.",
       progress: 48,
@@ -1385,7 +1440,7 @@ function renderAssignmentFromListenerLine(line = "") {
           ? "failed"
           : "complete";
     renderAssignmentActive({
-      title: currentAssignmentRunId ? `Hub run ${currentAssignmentRunId}` : "Hub assignment",
+      title: assignmentTitleFromRunId(currentAssignmentRunId),
       phase: "Running",
       description: "Runner is executing Hub-assigned benchmark checks.",
       progress: assignmentProgressBar ? Number.parseFloat(assignmentProgressBar.style.width) || 52 : 52,
@@ -1398,7 +1453,7 @@ function renderAssignmentFromListenerLine(line = "") {
   const deploymentProfile = trimmed.match(/^Running deployment profile (.+)\.\.\.$/);
   if (deploymentProfile) {
     renderAssignmentActive({
-      title: currentAssignmentRunId ? `Hub run ${currentAssignmentRunId}` : "Hub assignment",
+      title: assignmentTitleFromRunId(currentAssignmentRunId),
       phase: "Running",
       description: "Runner is executing Hub-assigned deployment checks.",
       progress: 62,
@@ -1411,7 +1466,7 @@ function renderAssignmentFromListenerLine(line = "") {
   const completed = trimmed.match(/^Completed bundle (.+)$/);
   if (completed) {
     renderAssignmentActive({
-      title: currentAssignmentRunId ? `Hub run ${currentAssignmentRunId}` : "Hub assignment",
+      title: assignmentTitleFromRunId(currentAssignmentRunId),
       phase: "Uploading",
       description: "Execution completed locally. Uploading results to Hub.",
       progress: 94,
@@ -1944,6 +1999,9 @@ async function startRunner({ confirmStarted = false } = {}) {
   setRunnerButtonsDisabled("stop", false);
   setStatus("Listening", "good");
   renderLocalReadinessChecklist();
+  if (currentFirstRunUploadRunId()) {
+    renderAssignmentFromHandoff();
+  }
   appendLog(`Started infergrade listener for ${apiUrl}.`);
   if (confirmStarted) {
     const earlyFailure = await waitForEarlyRunnerFailure();
@@ -2092,7 +2150,7 @@ async function runNativeFirstRun() {
     if (payload?.upload?.uploaded) {
       clearFirstRunHandoff();
       renderAssignmentActive({
-        title: `Hub run ${payload.upload.run_id}`,
+        title: assignmentTitleFromRunId(payload.upload.run_id),
         phase: "Complete",
         description: `Uploaded bundle ${payload.upload.bundle_id} to Hub.`,
         progress: 100,
@@ -2101,7 +2159,7 @@ async function runNativeFirstRun() {
     } else {
       applyFirstRunHandoff();
       renderAssignmentActive({
-        title: currentFirstRunUploadRunId() ? `Hub run ${currentFirstRunUploadRunId()}` : "Local readiness smoke",
+        title: currentFirstRunUploadRunId() ? assignmentTitleFromRunId(currentFirstRunUploadRunId()) : "Local readiness smoke",
         phase: payload?.upload?.error ? "Needs attention" : "Complete",
         description: payload?.upload?.error
           ? "Local execution completed, but Hub upload needs recovery."
@@ -2118,7 +2176,7 @@ async function runNativeFirstRun() {
     firstRunStatus.textContent = `Native first-run failed: ${message}`;
     setStatus("First benchmark failed", "error");
     renderAssignmentActive({
-      title: currentFirstRunUploadRunId() ? `Hub run ${currentFirstRunUploadRunId()}` : "Local readiness smoke",
+      title: currentFirstRunUploadRunId() ? assignmentTitleFromRunId(currentFirstRunUploadRunId()) : "Local readiness smoke",
       phase: "Needs attention",
       description: "Local execution failed. Logs are available in Details and support.",
       progress: 100,
@@ -2153,6 +2211,10 @@ async function stopRunner() {
     await childProcess.kill();
   }
   appendLog("Stop requested.");
+  if (currentFirstRunUploadRunId()) {
+    childProcess = null;
+    renderAssignmentFromHandoff();
+  }
 }
 
 pairButton.addEventListener("click", () => {
@@ -2178,6 +2240,15 @@ startButtons.forEach((button) => button.addEventListener("click", () => {
     appendLog(`Could not start Runner: ${error.message || error}`);
   });
 }));
+
+assignmentStartListeningButton?.addEventListener("click", () => {
+  startRunner().catch((error) => {
+    setStatus("Failed", "error");
+    setRunnerButtonsDisabled("start", false);
+    setRunnerButtonsDisabled("stop", true);
+    appendLog(`Could not start Runner: ${error.message || error}`);
+  });
+});
 
 stopButtons.forEach((button) => button.addEventListener("click", () => {
   stopRunner().catch((error) => appendLog(`Could not stop Runner: ${error.message || error}`));

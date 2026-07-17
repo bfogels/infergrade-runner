@@ -224,6 +224,12 @@ jobs:
             target/release/bundle/macos/SHA256SUMS \
             --clobber
 
+      - name: Verify anonymous updater access
+        run: |
+          python3 ./scripts/verify_desktop_update_endpoint.py \
+            --url "https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/infergrade-runner-desktop-latest.json" \
+            --expected-version "$DESKTOP_VERSION"
+
   windows-package-smoke:
     name: Build Windows desktop packages
     runs-on: windows-latest

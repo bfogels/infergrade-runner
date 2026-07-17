@@ -39,6 +39,8 @@ Run the Tauri shell after installing Rust and platform prerequisites:
 npm run tauri dev
 ```
 
+The `pretauri` hook builds the platform sidecar automatically, so a cold Tauri dev or package build does not require a separate preparation command. Run the script below directly only when testing or rebuilding the sidecar by itself.
+
 Build the platform-specific sidecar wrapper for the current Rust host with:
 
 ```bash
@@ -93,6 +95,8 @@ The release workflow publishes the latest desktop release manifest at:
 ```text
 https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-latest/infergrade-runner-desktop-latest.json
 ```
+
+The workflow then performs an unauthenticated manifest read and archive `HEAD` check. A private repository or otherwise inaccessible release origin fails this gate even when an authenticated maintainer can see the assets; updater clients cannot use maintainer credentials.
 
 For nontechnical beta users, the macOS DMG should be Developer ID signed and notarized. Ad-hoc signed DMGs are appropriate for local development and internal smoke testing only.
 

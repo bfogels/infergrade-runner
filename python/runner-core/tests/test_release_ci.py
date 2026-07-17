@@ -10,6 +10,7 @@ from pathlib import Path
 from scripts.sync_versions import sync_versions
 from scripts.check_public_release_readiness import main as check_public_release_readiness
 from scripts.verify_desktop_release_artifacts import main as verify_desktop_release_artifacts
+from scripts.verify_desktop_update_endpoint import verify_manifest as verify_desktop_update_manifest_endpoint
 from scripts.write_desktop_release_checksums import main as write_desktop_release_checksums
 from scripts.write_desktop_update_manifest import main as write_desktop_update_manifest
 
@@ -18,6 +19,76 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 class ReleaseCiTests(unittest.TestCase):
+    def test_desktop_release_workflow_verifies_public_updater_reachability(self):
+        workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")
+
+        self.assertIn("Verify anonymous updater access", workflow)
+        self.assertIn("verify_desktop_update_endpoint.py", workflow)
+        self.assertIn('--expected-version "$DESKTOP_VERSION"', workflow)
+
+    def test_desktop_update_endpoint_requires_anonymous_manifest_and_archive_access(self):
+        class Response:
+            status = 200
+
+            def __init__(self, body=b""):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return self.body
+
+        requests = []
+
+        def opener(request, timeout=0):
+            requests.append((request.full_url, request.get_method(), request.headers, timeout))
+            if request.get_method() == "HEAD":
+                return Response()
+            return Response(
+                json.dumps(
+                    {
+                        "version": "0.3.36",
+                        "platforms": {
+                            "darwin-aarch64": {
+                                "signature": "signed",
+                                "url": "https://downloads.example.test/InferGrade.Runner.app.tar.gz",
+                            }
+                        },
+                    }
+                ).encode("utf-8")
+            )
+
+        manifest = verify_desktop_update_manifest_endpoint(
+            "https://downloads.example.test/latest.json", "0.3.36", opener=opener
+        )
+
+        self.assertEqual(manifest["version"], "0.3.36")
+        self.assertEqual([request[1] for request in requests], ["GET", "HEAD"])
+        self.assertTrue(all("Authorization" not in request[2] for request in requests))
+
+    def test_desktop_update_endpoint_rejects_version_drift(self):
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps({"version": "0.3.35", "platforms": {"darwin-aarch64": {}}}).encode("utf-8")
+
+        with self.assertRaises(SystemExit) as raised:
+            verify_desktop_update_manifest_endpoint(
+                "https://downloads.example.test/latest.json", "0.3.36", opener=lambda *_args, **_kwargs: Response()
+            )
+        self.assertIn("version mismatch", str(raised.exception))
+
     def test_release_bundle_workflow_runs_on_main_push(self):
         workflow = (ROOT / ".github" / "workflows" / "release-bundle.yml").read_text(encoding="utf-8")
 

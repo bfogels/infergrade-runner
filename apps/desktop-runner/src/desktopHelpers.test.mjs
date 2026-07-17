@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assignmentTitleFromRunId,
+  displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
   normalizeDesktopApiUrl,
@@ -9,6 +11,20 @@ import {
   userSafeUpdateFailure,
   userSafeTokenFailure,
 } from "./desktopHelpers.js";
+
+test("turns internal assignment ids into compact model-aware titles", () => {
+  assert.equal(
+    assignmentTitleFromRunId("run_qwen3_5_9b_complete_the_missing_benchmark_evidence_123"),
+    "Qwen3.5-9B · benchmark evidence run"
+  );
+  assert.equal(assignmentTitleFromRunId("run_gemma_4_12b_reasoning_123"), "Gemma 4 12B · benchmark evidence run");
+  assert.equal(assignmentTitleFromRunId("run_opaque_123"), "Hub benchmark run");
+});
+
+test("hides cache-address prefixes from model filenames", () => {
+  assert.equal(displayCacheArtifactName("03b74727a860a563-Qwen3.5-9B-Q4_K_M.gguf"), "Qwen3.5-9B-Q4_K_M.gguf");
+  assert.equal(displayCacheArtifactName("Qwen3.5-9B-Q4_K_M.gguf"), "Qwen3.5-9B-Q4_K_M.gguf");
+});
 
 test("normalizes hosted and local desktop API URLs before sidecar invocation", () => {
   assert.equal(normalizeDesktopApiUrl(""), "https://api.infergrade.com/");

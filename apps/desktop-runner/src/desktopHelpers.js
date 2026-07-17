@@ -173,6 +173,29 @@ export function userSafeUpdateFailure(_message = "") {
   return "Update status is unavailable. You can still pair and start the Runner.";
 }
 
+export function assignmentTitleFromRunId(value = "") {
+  const runId = String(value || "").trim();
+  if (!runId) {
+    return "Hub benchmark run";
+  }
+  const qwen = runId.match(/(?:^|_)qwen(\d+)(?:_(\d+))?_(\d+)(?:_(\d+))?b(?:_|$)/i);
+  if (qwen) {
+    const generation = qwen[2] ? `${qwen[1]}.${qwen[2]}` : qwen[1];
+    const size = qwen[4] ? `${qwen[3]}.${qwen[4]}` : qwen[3];
+    return `Qwen${generation}-${size}B · benchmark evidence run`;
+  }
+  const gemma = runId.match(/(?:^|_)gemma(?:_|-)?(\d+)(?:_|-)(\d+)(?:_|-)?b(?:_|$)/i);
+  if (gemma) {
+    return `Gemma ${gemma[1]} ${gemma[2]}B · benchmark evidence run`;
+  }
+  return "Hub benchmark run";
+}
+
+export function displayCacheArtifactName(value = "") {
+  const name = String(value || "").trim();
+  return name.replace(/^[a-f0-9]{12,64}-/i, "") || "Cached model";
+}
+
 export function isCredentialCanceled(message = "") {
   return /cancelled|canceled|user interaction|user.*cancel/i.test(String(message || ""));
 }
