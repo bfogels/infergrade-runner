@@ -38,6 +38,50 @@ class CliTests(unittest.TestCase):
         self.assertIn("upload-bundle", help_text)
         self.assertIn("show-capabilities", help_text)
 
+    def test_doctor_help_keeps_internal_run_request_flags_hidden(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            with self.assertRaises(SystemExit) as caught:
+                main(["doctor", "--help"])
+
+        self.assertEqual(caught.exception.code, 0)
+        help_text = output.getvalue()
+        self.assertIn("--json", help_text)
+        self.assertNotIn("--quant-artifact-sha256", help_text)
+        self.assertNotIn("--backend-flags", help_text)
+        self.assertNotIn("--cloud-instance-type", help_text)
+
+    def test_doctor_prints_readiness_summary_by_default_and_json_on_request(self):
+        report = {
+            "ok": True,
+            "warning_count": 0,
+            "error_count": 0,
+            "checks": [{
+                "id": "hardware_snapshot",
+                "status": "info",
+                "ok": True,
+                "message": "Captured local hardware snapshot.",
+                "details": {
+                    "accelerator_model": "Apple M1 Pro",
+                    "memory_gb": 16,
+                    "memory_architecture": "unified_memory",
+                    "accelerator_api": "metal",
+                },
+            }],
+        }
+        human = io.StringIO()
+        machine = io.StringIO()
+        with mock.patch("infergrade.cli.run_doctor", return_value=report):
+            with redirect_stdout(human):
+                self.assertEqual(main(["doctor"]), 0)
+            with redirect_stdout(machine):
+                self.assertEqual(main(["doctor", "--json"]), 0)
+
+        self.assertIn("✓ Ready to benchmark", human.getvalue())
+        self.assertIn("Apple M1 Pro · 16 GB unified memory · METAL", human.getvalue())
+        self.assertNotIn('"checks"', human.getvalue())
+        self.assertEqual(json.loads(machine.getvalue())["ok"], True)
+
     def test_install_images_command_invokes_image_installer(self):
         output = io.StringIO()
         with mock.patch(
@@ -75,7 +119,17 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         status_mock.assert_called_once_with(cache_dir="/tmp/cache")
-        self.assertIn('"total_bytes": 123', output.getvalue())
+        self.assertIn("Artifact cache · 123 B", output.getvalue())
+        self.assertNotIn("{", output.getvalue())
+
+    def test_cache_status_json_preserves_machine_readable_payload(self):
+        output = io.StringIO()
+        with mock.patch("infergrade.cli.artifact_cache_status", return_value={"cache_dir": "/tmp/cache", "total_bytes": 123}):
+            with redirect_stdout(output):
+                exit_code = main(["cache", "--status", "--json"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(output.getvalue())["total_bytes"], 123)
 
     def test_upload_bundle_without_catalog_credential_preserves_401_and_explains_normal_flow(self):
         api_error = "bundle upload failed (HTTP 401): Missing or invalid API token."
@@ -274,7 +328,7 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         prune_mock.assert_called_once_with(cache_dir="/tmp/cache", dry_run=True, min_age_seconds=0)
-        self.assertIn('"removed_count": 1', output.getvalue())
+        self.assertIn("Would remove 1 partial download", output.getvalue())
 
     def test_install_runtime_lists_manifest(self):
         output = io.StringIO()
@@ -282,7 +336,8 @@ class CliTests(unittest.TestCase):
             exit_code = main(["install-runtime", "--runtime", "llama.cpp", "--list"])
 
         self.assertEqual(exit_code, 0)
-        self.assertIn('"runtime_family": "llama.cpp"', output.getvalue())
+        self.assertIn("Known llama.cpp runtimes", output.getvalue())
+        self.assertNotIn("install_command", output.getvalue())
 
     def test_install_runtime_preview_does_not_execute(self):
         output = io.StringIO()
@@ -290,7 +345,16 @@ class CliTests(unittest.TestCase):
             exit_code = main(["install-runtime", "--runtime", "llama.cpp"])
 
         self.assertEqual(exit_code, 0)
-        self.assertIn('"action": "plan"', output.getvalue())
+        self.assertIn("llama.cpp runtime", output.getvalue())
+        self.assertNotIn("/var/folders/", output.getvalue())
+
+    def test_install_runtime_json_preserves_machine_readable_plan(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = main(["install-runtime", "--runtime", "llama.cpp", "--json"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(output.getvalue())["action"], "plan")
 
     def test_start_command_invokes_local_worker_loop(self):
         output = io.StringIO()
@@ -331,7 +395,18 @@ class CliTests(unittest.TestCase):
             max_jobs=None,
             emit_progress=mock.ANY,
         )
-        self.assertIn('"worker_id": "worker-test"', output.getvalue())
+        self.assertIn("Runner stopped · 0 completed · 0 failed.", output.getvalue())
+
+    def test_start_without_pairing_fails_before_polling(self):
+        with mock.patch("infergrade.cli.resolve_runner_api_url", return_value=None), mock.patch(
+            "infergrade.cli.run_worker_loop"
+        ) as loop_mock:
+            with self.assertRaises(SystemExit) as caught:
+                main(["start"])
+
+        self.assertIn("No pairing profile found", str(caught.exception))
+        self.assertIn("infergrade.com/?tab=setup", str(caught.exception))
+        loop_mock.assert_not_called()
 
     def test_start_command_uses_paired_profile_when_api_url_is_omitted(self):
         output = io.StringIO()
@@ -395,7 +470,7 @@ class CliTests(unittest.TestCase):
             max_jobs=2,
             emit_progress=mock.ANY,
         )
-        self.assertIn('"mode": "bounded_agent_work"', output.getvalue())
+        self.assertIn("Benchmark plan finished · 1 job processed.", output.getvalue())
 
     def test_start_command_refuses_remote_http_profile_url(self):
         with mock.patch("infergrade.cli.run_worker_once") as run_once_mock, mock.patch(
@@ -567,6 +642,7 @@ class CliTests(unittest.TestCase):
                         "igrp_example",
                         "--label",
                         "Brian MacBook Pro",
+                        "--json",
                     ]
                 )
 
@@ -676,6 +752,18 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(redeem_mock.call_args.kwargs["pair_code"], "igrp_stdin")
+
+    def test_pair_command_defaults_label_to_hostname(self):
+        response = {"runner_profile": {"api_url": "http://localhost:8000", "access_token": "qbhr_token", "runner_id": "runner-host"}}
+        with mock.patch("sys.stdin", io.StringIO("igrp_host\n")), mock.patch("infergrade.cli.socket.gethostname", return_value="brians-mac.local"), mock.patch(
+            "infergrade.cli.redeem_runner_pairing", return_value=response
+        ) as redeem_mock, mock.patch("infergrade.cli.save_runner_profile", return_value="/tmp/profile.json"), mock.patch(
+            "infergrade.cli.preferred_local_execution_mode", return_value="local_native"
+        ), mock.patch("infergrade.cli.capture_environment", return_value={}):
+            exit_code = main(["pair", "--api-url", "http://localhost:8000", "--pair-code-stdin"],)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(redeem_mock.call_args.kwargs["label"], "brians-mac")
 
     def test_export_support_command_prints_json_when_output_is_omitted(self):
         output = io.StringIO()
