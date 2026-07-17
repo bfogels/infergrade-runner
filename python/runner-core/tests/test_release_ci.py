@@ -257,6 +257,24 @@ class ReleaseCiTests(unittest.TestCase):
             workflow = (ROOT / ".github" / "workflows" / filename).read_text(encoding="utf-8")
             self.assertEqual(workflow.count("persist-credentials: false"), workflow.count("actions/checkout@"))
 
+    def test_public_dependency_automation_and_code_ownership_are_declared(self):
+        codeowners = (ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
+        dependabot = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+
+        self.assertIn("* @bfogels", codeowners)
+        for ecosystem in ("cargo", "npm", "github-actions"):
+            self.assertIn(f"package-ecosystem: {ecosystem}", dependabot)
+        self.assertIn("directory: /apps/desktop-runner", dependabot)
+        self.assertEqual(dependabot.count("target-branch: develop"), 3)
+
+    def test_workspace_uses_one_authoritative_cargo_lock(self):
+        lockfiles = subprocess.check_output(
+            ["git", "ls-files", "*Cargo.lock"],
+            cwd=ROOT,
+            text=True,
+        ).splitlines()
+        self.assertEqual(lockfiles, ["Cargo.lock"])
+
     def test_llama_cpp_intake_is_read_only_advisory_automation(self):
         workflow = (ROOT / ".github" / "workflows" / "llama-cpp-runtime-intake.yml").read_text(
             encoding="utf-8"
@@ -328,12 +346,6 @@ class ReleaseCiTests(unittest.TestCase):
                 '[package]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
                 encoding="utf-8",
             )
-            (root / "apps/desktop-runner/src-tauri/Cargo.lock").write_text(
-                '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
-                '[[package]]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n'
-                '[[package]]\nname = "schannel"\nversion = "0.1.29"\n',
-                encoding="utf-8",
-            )
             (root / "Cargo.lock").write_text(
                 '[[package]]\nname = "infergrade-runner-cli"\nversion = "0.0.1"\n'
                 '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
@@ -361,10 +373,6 @@ class ReleaseCiTests(unittest.TestCase):
             self.assertIn('version = "1.2.3"', (root / "apps/desktop-runner/src-tauri/Cargo.toml").read_text())
             self.assertIn('version = "1.2.3"', (root / "apps/runner-cli/Cargo.toml").read_text())
             self.assertIn('version = "1.2.3"', (root / "crates/runner-engine/Cargo.toml").read_text())
-            cargo_lock = (root / "apps/desktop-runner/src-tauri/Cargo.lock").read_text()
-            self.assertIn('name = "infergrade_desktop_runner"\nversion = "1.2.3"', cargo_lock)
-            self.assertIn('name = "infergrade_runner_engine"\nversion = "1.2.3"', cargo_lock)
-            self.assertIn('name = "schannel"\nversion = "0.1.29"', cargo_lock)
             workspace_cargo_lock = (root / "Cargo.lock").read_text()
             self.assertIn('name = "infergrade-runner-cli"\nversion = "1.2.3"', workspace_cargo_lock)
             self.assertIn('name = "infergrade_desktop_runner"\nversion = "1.2.3"', workspace_cargo_lock)
@@ -412,11 +420,6 @@ class ReleaseCiTests(unittest.TestCase):
             )
             (root / "crates/runner-engine/Cargo.toml").write_text(
                 '[package]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
-                encoding="utf-8",
-            )
-            (root / "apps/desktop-runner/src-tauri/Cargo.lock").write_text(
-                '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
-                '[[package]]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
                 encoding="utf-8",
             )
             (root / "Cargo.lock").write_text(
@@ -468,11 +471,6 @@ class ReleaseCiTests(unittest.TestCase):
             )
             (root / "crates/runner-engine/Cargo.toml").write_text(
                 '[package]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
-                encoding="utf-8",
-            )
-            (root / "apps/desktop-runner/src-tauri/Cargo.lock").write_text(
-                '[[package]]\nname = "infergrade_desktop_runner"\nversion = "0.0.1"\n'
-                '[[package]]\nname = "infergrade_runner_engine"\nversion = "0.0.1"\n',
                 encoding="utf-8",
             )
             (root / "Cargo.lock").write_text(

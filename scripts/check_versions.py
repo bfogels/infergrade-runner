@@ -50,10 +50,6 @@ CHECKS = {
     "crates/runner-engine/Cargo.toml": lambda: regex_version(
         "crates/runner-engine/Cargo.toml", r'^version = "([^"]+)"$'
     ),
-    "apps/desktop-runner/src-tauri/Cargo.lock": lambda: regex_version(
-        "apps/desktop-runner/src-tauri/Cargo.lock",
-        r'name = "infergrade_desktop_runner"\nversion = "([^"]+)"',
-    ),
     "Cargo.lock infergrade-runner-cli": lambda: regex_version(
         "Cargo.lock",
         r'name = "infergrade-runner-cli"\nversion = "([^"]+)"',
@@ -66,10 +62,6 @@ CHECKS = {
         "Cargo.lock",
         r'name = "infergrade_runner_engine"\nversion = "([^"]+)"',
     ),
-    "apps/desktop-runner/src-tauri/Cargo.lock infergrade_runner_engine": lambda: regex_version(
-        "apps/desktop-runner/src-tauri/Cargo.lock",
-        r'name = "infergrade_runner_engine"\nversion = "([^"]+)"',
-    ),
 }
 
 
@@ -80,7 +72,7 @@ def main() -> int:
         normalized = actual[1:] if actual.startswith("v") else actual
         if normalized != EXPECTED:
             failures.append(f"{label}: {actual!r} != VERSION {EXPECTED!r}")
-    cargo_lock = read("apps/desktop-runner/src-tauri/Cargo.lock")
+    cargo_lock = read("Cargo.lock")
     for package_name in ("libredox", "winapi-util"):
         third_party_lock_match = re.search(
             r'name = "%s"\nversion = "([^"]+)"' % re.escape(package_name),
@@ -88,7 +80,7 @@ def main() -> int:
         )
         if third_party_lock_match and third_party_lock_match.group(1) == EXPECTED:
             failures.append(
-                "apps/desktop-runner/src-tauri/Cargo.lock: third-party %s version was changed to VERSION"
+                "Cargo.lock: third-party %s version was changed to VERSION"
                 % package_name
             )
     if failures:
