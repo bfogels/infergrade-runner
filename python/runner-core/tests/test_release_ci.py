@@ -266,6 +266,10 @@ class ReleaseCiTests(unittest.TestCase):
             self.assertIn(f"package-ecosystem: {ecosystem}", dependabot)
         self.assertIn("directory: /apps/desktop-runner", dependabot)
         self.assertEqual(dependabot.count("target-branch: develop"), 3)
+        self.assertEqual(dependabot.count("interval: monthly"), 3)
+        self.assertEqual(dependabot.count("open-pull-requests-limit: 3"), 3)
+        for group in ("cargo-minor-patch", "desktop-minor-patch", "actions-minor-patch"):
+            self.assertIn(group, dependabot)
 
     def test_workspace_uses_one_authoritative_cargo_lock(self):
         lockfiles = subprocess.check_output(
