@@ -178,7 +178,13 @@ fn exec_command(program: &str, args: &[OsString], pythonpath: Option<OsString>) 
 }
 
 fn repo_python_args(args: &[OsString]) -> Vec<OsString> {
-    let mut python_args = vec![OsString::from("-m"), OsString::from("infergrade")];
+    // The runner core can live inside a code-signed application bundle. Prevent
+    // Python imports from adding __pycache__ resources that invalidate the seal.
+    let mut python_args = vec![
+        OsString::from("-B"),
+        OsString::from("-m"),
+        OsString::from("infergrade"),
+    ];
     python_args.extend(args.iter().cloned());
     python_args
 }
@@ -549,9 +555,10 @@ mod tests {
         let args = vec![OsString::from("--version")];
         let python_args = repo_python_args(&args);
 
-        assert_eq!(python_args[0], OsString::from("-m"));
-        assert_eq!(python_args[1], OsString::from("infergrade"));
-        assert_eq!(python_args[2], OsString::from("--version"));
+        assert_eq!(python_args[0], OsString::from("-B"));
+        assert_eq!(python_args[1], OsString::from("-m"));
+        assert_eq!(python_args[2], OsString::from("infergrade"));
+        assert_eq!(python_args[3], OsString::from("--version"));
     }
 
     #[test]
