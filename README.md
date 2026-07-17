@@ -130,12 +130,9 @@ If you are benchmarking locally on Apple Silicon, use the native `llama.cpp` pat
 ```bash
 brew install llama.cpp
 python3 -m pip install -e ./python/runner-core
-read -rsp 'InferGrade pairing code: ' INFERGRADE_PAIR_CODE
-printf '\n'
-printf '%s\n' "$INFERGRADE_PAIR_CODE" | infergrade pair \
+python3 -c 'import getpass; print(getpass.getpass("InferGrade pairing code: "))' | infergrade pair \
   --api-url http://127.0.0.1:8000 \
   --pair-code-stdin
-unset INFERGRADE_PAIR_CODE
 infergrade start
 ```
 

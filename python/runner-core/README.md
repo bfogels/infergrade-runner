@@ -71,12 +71,10 @@ For realistic local benchmarks on Apple Silicon, install `llama.cpp` natively an
 ```bash
 brew install llama.cpp
 PYTHONPATH=python/runner-core/src python3 -m unittest discover -s python/runner-core/tests
-read -rsp 'InferGrade pairing code: ' INFERGRADE_PAIR_CODE
-printf '\n'
-printf '%s\n' "$INFERGRADE_PAIR_CODE" | PYTHONPATH=python/runner-core/src python3 -m infergrade pair \
+python3 -c 'import getpass; print(getpass.getpass("InferGrade pairing code: "))' | \
+  PYTHONPATH=python/runner-core/src python3 -m infergrade pair \
   --api-url http://127.0.0.1:8000 \
   --pair-code-stdin
-unset INFERGRADE_PAIR_CODE
 PYTHONPATH=python/runner-core/src python3 -m infergrade start
 ```
 
@@ -141,12 +139,10 @@ Those structured failures are what power the Hub’s recovery guidance and suppo
 For Hub-generated local runs, the preferred operator flow is now:
 
 ```bash
-read -rsp 'InferGrade pairing code: ' INFERGRADE_PAIR_CODE
-printf '\n'
-printf '%s\n' "$INFERGRADE_PAIR_CODE" | PYTHONPATH=python/runner-core/src python3 -m infergrade pair \
+python3 -c 'import getpass; print(getpass.getpass("InferGrade pairing code: "))' | \
+  PYTHONPATH=python/runner-core/src python3 -m infergrade pair \
   --api-url http://127.0.0.1:8000 \
   --pair-code-stdin
-unset INFERGRADE_PAIR_CODE
 
 PYTHONPATH=python/runner-core/src python3 -m infergrade start
 ```
