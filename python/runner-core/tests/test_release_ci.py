@@ -135,14 +135,16 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertEqual(artifact_attempts, 2)
         self.assertEqual(delays, [1])
 
-    def test_release_bundle_workflow_runs_on_main_push(self):
+    def test_release_bundle_workflow_runs_only_for_version_tags_or_manual_dispatch(self):
         workflow = (ROOT / ".github" / "workflows" / "release-bundle.yml").read_text(encoding="utf-8")
 
-        self.assertIn("branches:", workflow)
-        self.assertIn("- main", workflow)
+        self.assertIn('tags:\n      - "v*"', workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotIn("branches:", workflow)
         self.assertIn("./scripts/build_release_bundle.sh", workflow)
-        self.assertIn("actions/upload-artifact@v4", workflow)
+        self.assertIn("actions/upload-artifact@", workflow)
         self.assertIn("infergrade-runner-release-${{ steps.release_bundle.outputs.release_version }}", workflow)
+        self.assertIn("retention-days: 7", workflow)
 
     def test_release_bundle_script_defaults_to_version(self):
         script = (ROOT / "scripts" / "build_release_bundle.sh").read_text(encoding="utf-8")
@@ -173,6 +175,33 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("python3 ./scripts/sync_versions.py --check", workflow)
         self.assertIn("python3 ./scripts/check_versions.py", workflow)
         self.assertIn("python3 ./scripts/check_llama_cpp_runtime_policy.py", workflow)
+        self.assertIn("fetch-depth: 0", workflow)
+        self.assertNotIn("git fetch origin main", workflow)
+
+    def test_validation_workflows_scope_branches_and_cancel_superseded_runs(self):
+        for filename in ("ci.yml", "secret-scan.yml"):
+            workflow = (ROOT / ".github" / "workflows" / filename).read_text(encoding="utf-8")
+            self.assertIn("push:\n    branches:\n      - main\n      - develop", workflow)
+            self.assertIn("pull_request:\n    branches:\n      - main\n      - develop", workflow)
+            self.assertIn("github.event.pull_request.number || github.ref", workflow)
+            self.assertIn("cancel-in-progress: true", workflow)
+            self.assertIn("timeout-minutes:", workflow)
+
+    def test_workflow_actions_are_commit_pinned_and_validation_checkouts_drop_credentials(self):
+        workflow_paths = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        for path in workflow_paths:
+            workflow = path.read_text(encoding="utf-8")
+            for line in workflow.splitlines():
+                if "uses:" not in line:
+                    continue
+                self.assertRegex(
+                    line,
+                    r"uses:\s+[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}\s+#\s+\S+",
+                    msg=f"unpinned action in {path.name}: {line.strip()}",
+                )
+        for filename in ("ci.yml", "secret-scan.yml"):
+            workflow = (ROOT / ".github" / "workflows" / filename).read_text(encoding="utf-8")
+            self.assertEqual(workflow.count("persist-credentials: false"), workflow.count("actions/checkout@"))
 
     def test_llama_cpp_intake_is_read_only_advisory_automation(self):
         workflow = (ROOT / ".github" / "workflows" / "llama-cpp-runtime-intake.yml").read_text(
@@ -183,7 +212,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("permissions:\n  contents: read", workflow)
         self.assertIn("repos/ggml-org/llama.cpp/releases/latest", workflow)
         self.assertIn("scripts/check_llama_cpp_runtime_policy.py", workflow)
-        self.assertIn("actions/upload-artifact@v4", workflow)
+        self.assertIn("actions/upload-artifact@", workflow)
         self.assertNotIn("contents: write", workflow)
         self.assertNotIn("pull-requests: write", workflow)
         self.assertNotIn("issues: write", workflow)
@@ -404,11 +433,13 @@ class ReleaseCiTests(unittest.TestCase):
             self.assertIn("python/runner-core/pyproject.toml", changed)
             self.assertIn('version = "0.0.1"', (root / "python/runner-core/pyproject.toml").read_text())
 
-    def test_desktop_release_workflow_publishes_latest_dmg_on_main_push(self):
+    def test_desktop_release_workflow_publishes_latest_dmg_only_when_dispatched(self):
         workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")
 
-        self.assertIn("branches:", workflow)
-        self.assertIn("- main", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotIn("  push:", workflow)
+        self.assertIn("group: desktop-runner-release", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn('description: "SemVer desktop app version to publish; defaults to VERSION on main"', workflow)
         self.assertIn('default: ""', workflow)
         self.assertIn('DESKTOP_VERSION="$(cat VERSION)"', workflow)
@@ -430,19 +461,22 @@ class ReleaseCiTests(unittest.TestCase):
     def test_desktop_release_workflow_smokes_windows_and_linux_packages(self):
         workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")
 
-        self.assertIn("permissions:\n  contents: read\n\njobs:", workflow)
-        self.assertIn("macos-preview:\n    name: Build and publish macOS desktop app\n    runs-on: macos-latest\n    permissions:\n      contents: write", workflow)
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn("macos-preview:\n    name: Build and publish macOS desktop app\n    runs-on: macos-latest", workflow)
+        self.assertIn("macos-preview:", workflow)
+        self.assertIn("permissions:\n      contents: write", workflow)
         self.assertIn("windows-package-smoke:", workflow)
         self.assertIn("linux-package-smoke:", workflow)
         self.assertIn("runs-on: windows-latest", workflow)
         self.assertIn("runs-on: ubuntu-22.04", workflow)
-        self.assertIn("windows-package-smoke:\n    name: Build Windows desktop packages\n    runs-on: windows-latest\n    permissions:\n      contents: read", workflow)
-        self.assertIn("linux-package-smoke:\n    name: Build Linux desktop packages\n    runs-on: ubuntu-22.04\n    permissions:\n      contents: read", workflow)
+        self.assertIn("windows-package-smoke:\n    name: Build Windows desktop packages\n    runs-on: windows-latest", workflow)
+        self.assertIn("linux-package-smoke:\n    name: Build Linux desktop packages\n    runs-on: ubuntu-22.04", workflow)
         self.assertIn("npm run build:windows", workflow)
         self.assertIn("npm run build:linux", workflow)
         self.assertIn("libwebkit2gtk-4.1-dev", workflow)
         self.assertIn("libayatana-appindicator3-dev", workflow)
-        self.assertIn("actions/upload-artifact@v4", workflow)
+        self.assertIn("actions/upload-artifact@", workflow)
+        self.assertEqual(workflow.count("retention-days: 7"), 2)
         self.assertIn("infergrade-runner-desktop-windows-${{ github.sha }}", workflow)
         self.assertIn("infergrade-runner-desktop-linux-${{ github.sha }}", workflow)
         self.assertIn("target/release/bundle/nsis/*.exe", workflow)
