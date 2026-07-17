@@ -1628,7 +1628,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade-runner-cli"
-version = "0.3.32"
+version = "0.3.33"
 dependencies = [
  "infergrade_runner_engine",
  "serde_json",
@@ -1637,7 +1637,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_desktop_runner"
-version = "0.3.32"
+version = "0.3.33"
 dependencies = [
  "infergrade_runner_engine",
  "keyring",
@@ -1653,7 +1653,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_runner_engine"
-version = "0.3.32"
+version = "0.3.33"
 dependencies = [
  "flate2",
  "reqwest 0.12.28",
