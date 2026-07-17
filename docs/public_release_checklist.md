@@ -73,7 +73,8 @@ python3 ./scripts/verify_desktop_release_artifacts.py \
   --directory /path/to/downloaded/desktop-runner-latest \
   --require-dmg \
   --required-dmg-name InferGrade.Runner.macOS-arm64.dmg \
-  --require-updater
+  --require-updater \
+  --reject-unexpected
 ```
 
 This proves local artifact-manifest consistency only. It does not replace Developer ID signing, notarization, Gatekeeper assessment, stapled-ticket checks, or a clean-machine launch smoke. Windows and Linux package smoke artifacts are not supported public installers.

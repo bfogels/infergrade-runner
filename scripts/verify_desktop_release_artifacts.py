@@ -34,6 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Require an updater manifest, updater archive, and updater signature.",
     )
+    parser.add_argument(
+        "--reject-unexpected",
+        action="store_true",
+        help="Reject release-directory files not covered by SHA256SUMS (except SHA256SUMS itself).",
+    )
     return parser
 
 
@@ -104,6 +109,15 @@ def require_checksum_coverage(verified_names: set[str], artifact: Path) -> None:
         raise SystemExit(f"Release artifact is not covered by SHA256SUMS: {artifact.name}")
 
 
+def verify_exact_release_set(directory: Path, checksum_path: Path, verified: list[Path]) -> None:
+    expected_names = {path.name for path in verified}
+    expected_names.add(checksum_path.name)
+    actual_names = {path.name for path in directory.iterdir() if path.is_file()}
+    unexpected = sorted(actual_names - expected_names)
+    if unexpected:
+        raise SystemExit(f"Unexpected release artifact(s): {', '.join(unexpected)}")
+
+
 def verify_update_manifest(
     directory: Path,
     manifest_path: Path,
@@ -163,6 +177,11 @@ def main() -> int:
             raise SystemExit("--required-dmg-name must be one plain .dmg filename.")
         if not any(path.name == args.required_dmg_name for path in verified):
             raise SystemExit(f"Required public DMG was not verified: {args.required_dmg_name}")
+        dmg_names = sorted(path.name for path in directory.glob("*.dmg") if path.is_file())
+        if dmg_names != [args.required_dmg_name]:
+            raise SystemExit(f"Public release must contain exactly one DMG named {args.required_dmg_name}.")
+    if args.reject_unexpected:
+        verify_exact_release_set(directory, checksum_path, verified)
     verified_names = {path.name for path in verified}
     verify_update_manifest(directory, update_manifest_path, args.require_updater, verified_names)
 

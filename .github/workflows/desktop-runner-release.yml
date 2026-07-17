@@ -235,6 +235,21 @@ jobs:
             target/release/bundle/macos/SHA256SUMS \
             --clobber
 
+      - name: Reconcile desktop release asset set
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          expected_assets="$RUNNER_TEMP/desktop-runner-expected-assets.txt"
+          {
+            awk -F '  ' '{print $2}' target/release/bundle/macos/SHA256SUMS
+            echo SHA256SUMS
+          } | sort -u > "$expected_assets"
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | while IFS= read -r asset_name; do
+            if ! grep -Fqx "$asset_name" "$expected_assets"; then
+              gh release delete-asset "$RELEASE_TAG" "$asset_name" --yes
+            fi
+          done
+
       - name: Verify published desktop release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -246,13 +261,19 @@ jobs:
             --directory "$published_dir" \
             --require-dmg \
             --required-dmg-name "$PUBLIC_DMG_NAME" \
-            --require-updater
+            --require-updater \
+            --reject-unexpected
           python3 ./scripts/verify_desktop_update_endpoint.py \
             --url "https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/infergrade-runner-desktop-latest.json" \
             --expected-version "$DESKTOP_VERSION"
-          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --range 0-0 \
-            --output /dev/null \
+          public_dmg="$RUNNER_TEMP/$PUBLIC_DMG_NAME"
+          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
+            --output "$public_dmg" \
             "https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${PUBLIC_DMG_NAME}"
+          expected_dmg_sha="$(awk -F '  ' -v name="$PUBLIC_DMG_NAME" '$2 == name {print $1}' target/release/bundle/macos/SHA256SUMS)"
+          actual_dmg_sha="$(shasum -a 256 "$public_dmg" | awk '{print $1}')"
+          test -n "$expected_dmg_sha"
+          test "$actual_dmg_sha" = "$expected_dmg_sha"
 
   windows-package-smoke:
     name: Build Windows desktop packages

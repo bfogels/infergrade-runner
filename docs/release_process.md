@@ -75,7 +75,7 @@ artifacts. The workflow:
 5. signs and notarizes the Tauri updater archive and macOS bundle with the configured release credentials
 6. verifies the app bundle and DMG with `codesign`, Gatekeeper assessment, and stapled notarization-ticket checks
 7. renames the notarized DMG to the stable public asset `InferGrade.Runner.macOS-arm64.dmg`, then publishes it with the updater archive, updater signature, and updater manifest to the `desktop-runner-latest` GitHub release
-8. redownloads the published assets, verifies their checksum/updater relationship, and anonymously probes both the updater and stable installer URLs
+8. removes assets outside the exact checksummed release set, redownloads the published assets, rejects stale or extra files, verifies their checksum/updater relationship, and anonymously probes both the updater and stable installer URLs
 
 The same workflow also runs unsigned Windows and Linux package smoke jobs. Those jobs build NSIS/MSI artifacts on `windows-latest` and AppImage/`.deb` artifacts on `ubuntu-22.04`, write `SHA256SUMS` manifests for the emitted packages, then upload them as GitHub Actions artifacts for maintainer inspection. They are package-readiness gates only; they do not publish to the desktop release tag and they do not replace Windows Authenticode signing, Linux install/launch validation, or platform-specific support notes.
 

@@ -114,7 +114,8 @@ scripts/verify_desktop_release_artifacts.py \
   --directory /path/to/downloaded/desktop-runner-latest \
   --require-dmg \
   --required-dmg-name InferGrade.Runner.macOS-arm64.dmg \
-  --require-updater
+  --require-updater \
+  --reject-unexpected
 ```
 
 This verifies `SHA256SUMS`, confirms the updater manifest references local updater archives and signature artifacts, and prints stable evidence lines. It does not check Developer ID signing, notarization, or Gatekeeper behavior; use `scripts/verify_desktop_macos_release.sh` on the built macOS artifacts and clean-machine DMG smoke before treating a release as public-user-ready.
