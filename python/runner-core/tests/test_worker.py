@@ -365,6 +365,43 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(fail_mock.call_args.kwargs["error_code"], "missing_runtime_image")
         self.assertTrue(fail_mock.call_args.kwargs["recovery"])
 
+    def test_worker_once_marks_interrupted_job_failed_before_exiting(self):
+        claimed_run = {
+            "run_id": "run_interrupted",
+            "run_config_id": "rcfg_interrupted",
+            "execution_mode": "local_native",
+            "output_dir": "runs/run_interrupted",
+            "cloud": None,
+        }
+        fake_request = mock.Mock()
+        fake_request.execution_mode = "local_native"
+        fake_request.resume = False
+        fake_request.output_dir = None
+        fake_request.cloud_provider = None
+        fake_request.cloud_instance_type = None
+        messages = []
+
+        with mock.patch("infergrade.worker.claim_run_job", return_value={"run": claimed_run}):
+            with mock.patch("infergrade.worker.fetch_run_config", return_value={"request": {"run": {}}}):
+                with mock.patch("infergrade.worker.request_from_run_config_document", return_value=fake_request):
+                    with mock.patch("infergrade.worker.run_doctor", return_value={"ok": True, "checks": []}):
+                        with mock.patch("infergrade.worker.run_infergrade", side_effect=KeyboardInterrupt):
+                            with mock.patch("infergrade.worker.fail_run_job", return_value={}) as fail_mock:
+                                with mock.patch("infergrade.worker.heartbeat_run_job"):
+                                    with self.assertRaises(KeyboardInterrupt):
+                                        run_worker_once(
+                                            api_url="http://localhost:8000",
+                                            execution_mode="local_native",
+                                            worker_id="worker-1",
+                                            emit_progress=messages.append,
+                                        )
+
+        fail_mock.assert_called_once()
+        self.assertEqual(fail_mock.call_args.args[:3], ("http://localhost:8000", "run_interrupted", "worker-1"))
+        self.assertEqual(fail_mock.call_args.kwargs["error_code"], "runner_interrupted")
+        self.assertIn("partial output is preserved", fail_mock.call_args.kwargs["recovery"][0]["detail"])
+        self.assertIn("marked failed and can be retried", messages[-1])
+
     def test_cloud_worker_passes_provider_filters_when_claiming(self):
         with mock.patch("infergrade.worker.claim_run_job", return_value={"run": None}) as claim_mock:
             result = run_worker_once(

@@ -242,6 +242,44 @@ def execute_run_job(
             "bundle": result,
             "upload": upload,
         }
+    except KeyboardInterrupt:
+        failure = {
+            "error_code": "runner_interrupted",
+            "message": "Runner execution was interrupted before the result bundle was uploaded.",
+            "recovery": [
+                {
+                    "label": "Restart the runner and retry",
+                    "detail": "The partial output is preserved; retrying the tracked run can resume completed benchmark stages.",
+                },
+            ],
+            "details": {"interruption": "keyboard_interrupt"},
+        }
+        try:
+            fail_run_job(
+                api_url,
+                run_id,
+                worker_id,
+                message=failure["message"],
+                error_code=failure["error_code"],
+                recovery=failure["recovery"],
+                details=failure["details"],
+                api_token=api_token,
+                run_token=run_token,
+            )
+        except Exception:
+            pass
+        _emit_desktop_event(
+            emit_progress,
+            "assignment_update",
+            phase="Interrupted",
+            run_id=run_id,
+            description=failure["message"],
+            progress=100,
+            check_name=failure["error_code"],
+        )
+        if emit_progress:
+            emit_progress("Run %s interrupted; the Hub run was marked failed and can be retried." % run_id)
+        raise
     except Exception as exc:
         failure = _classify_worker_failure(exc, doctor_report=doctor_report)
         try:
