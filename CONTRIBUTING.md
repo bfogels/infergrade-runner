@@ -101,5 +101,6 @@ For the Rust workspace, run the same checks CI enforces:
 ```bash
 cargo fmt --all -- --check
 cargo test --workspace --exclude infergrade_desktop_runner --locked
+./scripts/build_desktop_sidecar.sh
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
