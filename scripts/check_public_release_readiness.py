@@ -30,6 +30,8 @@ REQUIRED_FILES = [
     "scripts/notarize_desktop_dmg.sh",
     "scripts/write_desktop_release_checksums.py",
     "scripts/verify_desktop_release_artifacts.py",
+    "scripts/prepare_desktop_release_dmg.py",
+    "scripts/verify_release_images.py",
 ]
 
 SECRET_FILE_PATTERNS = [

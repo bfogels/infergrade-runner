@@ -97,7 +97,13 @@ The macOS app reads the latest updater manifest from:
 https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-latest/infergrade-runner-desktop-latest.json
 ```
 
-The GitHub Actions workflow publishes the latest DMG and updater artifacts on each push to `main`. That makes release artifacts available quickly, but it does not replace the signing gates above: public distribution still needs Developer ID signing, notarization, clean-machine Gatekeeper verification, and a rollback policy.
+The signed and notarized Apple Silicon installer has a stable public URL so the Hub can link directly to GitHub without proxying installer bytes:
+
+```text
+https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-latest/InferGrade.Runner.macOS-arm64.dmg
+```
+
+Maintainers deliberately dispatch the protected GitHub Actions workflow from `main` for a reviewed release. The workflow publishes the latest DMG and updater artifacts only after Developer ID signing, notarization, Gatekeeper verification, and stapled-ticket checks pass.
 
 The protected workflow also runs `scripts/verify_desktop_macos_release.sh` before upload. That script verifies the built app bundle with `codesign`, assesses the app and DMG with Gatekeeper, and validates stapled notarization tickets for both artifacts. If any of those checks fail, the workflow must stop before updating the downloadable release.
 
@@ -107,7 +113,9 @@ After downloading release artifacts from GitHub, maintainers can verify the publ
 scripts/verify_desktop_release_artifacts.py \
   --directory /path/to/downloaded/desktop-runner-latest \
   --require-dmg \
-  --require-updater
+  --required-dmg-name InferGrade.Runner.macOS-arm64.dmg \
+  --require-updater \
+  --reject-unexpected
 ```
 
 This verifies `SHA256SUMS`, confirms the updater manifest references local updater archives and signature artifacts, and prints stable evidence lines. It does not check Developer ID signing, notarization, or Gatekeeper behavior; use `scripts/verify_desktop_macos_release.sh` on the built macOS artifacts and clean-machine DMG smoke before treating a release as public-user-ready.
