@@ -5,6 +5,13 @@ user-visible changes; full evidence boundaries and validation details live in
 the release PRs and tags. Versions without an entry shipped internal or
 incremental changes only — see the git history.
 
+## 0.3.36
+
+- Desktop assignments received while listening is paused now show one adjacent recovery action, readable model labels, and a clock that starts only when work is claimed.
+- Update status begins unknown and reports `Current release` only after a successful signed-update check.
+- Cold Tauri builds prepare the sidecar automatically, and bundled Python execution preserves the signed app seal after launch.
+- Desktop publication fails closed until its manifest and archive are anonymously reachable from a public signed and notarized artifact origin.
+
 ## 0.3.35
 
 - `infergrade start` fails fast when no pairing profile exists and points to the Hub pairing flow.
