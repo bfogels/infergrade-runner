@@ -11,7 +11,11 @@ from infergrade.artifacts import resolve_quant_artifact
 from infergrade.benchmark_catalog import normalize_request_selection, selection_metadata_for_request
 from infergrade.cuda import WINDOWS_CUDA_BINARY_SET, windows_cuda_preflight
 from infergrade.environment import capture_environment
-from infergrade.capabilities import attach_quant_fidelity_capability_artifact, summarize_capability_execution
+from infergrade.capabilities import (
+    attach_quant_fidelity_capability_artifact,
+    remove_capability_case_checkpoints,
+    summarize_capability_execution,
+)
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.memory_fit import estimate_memory_fit, standard_context_estimates
 from infergrade.ontology import build_ontology, resolve_artifact_sha256, resolve_quant_format
@@ -912,6 +916,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         report_path = write_bundle_report(output_dir, manifest, summary, final_validation.to_dict(), result_records)
         mark_stage_completed(output_dir, progress, current_stage, metadata={"result_count": len(result_records)})
         mark_completed(output_dir, progress, len(result_records))
+        remove_capability_case_checkpoints(output_dir)
         _emit_progress(emit_progress, "Completed bundle %s" % bundle_id)
         return {
             "bundle_id": bundle_id,

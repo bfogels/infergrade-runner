@@ -18,6 +18,7 @@ from infergrade.capabilities import (
     _run_capability_container,
     capability_images_for_request,
     execute_capability_suite,
+    remove_capability_case_checkpoints,
     resolve_capability_suite,
     summarize_capability_execution,
 )
@@ -57,6 +58,18 @@ class _CompositionalPassingAdapter(object):
         else:
             value = None
         return {"text": json.dumps(value), "status": "completed", "error": None}
+
+
+class _InterruptingCompositionalAdapter(_CompositionalPassingAdapter):
+    def __init__(self, interrupt_after=None):
+        self.calls = 0
+        self.interrupt_after = interrupt_after
+
+    def generate_text(self, request, prompt, max_tokens):
+        self.calls += 1
+        if self.interrupt_after is not None and self.calls > self.interrupt_after:
+            raise KeyboardInterrupt()
+        return super().generate_text(request, prompt, max_tokens)
 
 
 class _MeasuredMemoryAdapter(_MemoryPassingAdapter):
@@ -219,6 +232,96 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(artifact["protocol"]["scorer_type"], "strict_json_equality")
         self.assertEqual(artifact["protocol"]["scoring_policy"], "strict_json_equality_v1")
         self.assertIn("not psychometrically calibrated", artifact["claim_boundary"]["unsupported_claims"][1])
+
+    def test_resume_reuses_exact_completed_capability_cases(self):
+        first_request = RunRequest(
+            model="Qwen/Qwen3-8B",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=["assistant_compositional_instruction_v2"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        interrupted = _InterruptingCompositionalAdapter(interrupt_after=2)
+
+        with self.assertRaises(KeyboardInterrupt):
+            execute_capability_suite(interrupted, first_request)
+
+        checkpoint_path = os.path.join(
+            self.tempdir,
+            "artifacts",
+            "capability",
+            "assistant_compositional_instruction_v2",
+            "case-checkpoint.jsonl",
+        )
+        self.assertTrue(os.path.exists(checkpoint_path))
+        with open(checkpoint_path, "r", encoding="utf-8") as handle:
+            self.assertEqual(len(handle.readlines()), 3)
+        with open(checkpoint_path, "a", encoding="utf-8") as handle:
+            handle.write('{"record_type":"prediction"')
+
+        resume_request = RunRequest(
+            model="Qwen/Qwen3-8B",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=["assistant_compositional_instruction_v2"],
+            output_dir=self.tempdir,
+            simulate=False,
+            resume=True,
+        )
+        resumed = _InterruptingCompositionalAdapter()
+        events = []
+        execution = execute_capability_suite(resumed, resume_request, progress_callback=events.append)
+
+        self.assertEqual(resumed.calls, 2)
+        self.assertEqual(execution.status, "completed")
+        self.assertEqual(
+            execution.benchmark_results["assistant_compositional_instruction_v2"]["primary_metric"]["value"],
+            1.0,
+        )
+        self.assertEqual(len([item for item in events if item.get("checkpoint_reused")]), 2)
+        self.assertTrue(os.path.exists(checkpoint_path))
+        self.assertEqual(remove_capability_case_checkpoints(self.tempdir), 1)
+        self.assertFalse(os.path.exists(checkpoint_path))
+
+    def test_resume_rejects_mismatched_capability_checkpoint(self):
+        request = RunRequest(
+            model="Qwen/Qwen3-8B",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=["assistant_compositional_instruction_v2"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        with self.assertRaises(KeyboardInterrupt):
+            execute_capability_suite(_InterruptingCompositionalAdapter(interrupt_after=1), request)
+
+        checkpoint_path = os.path.join(
+            self.tempdir,
+            "artifacts",
+            "capability",
+            "assistant_compositional_instruction_v2",
+            "case-checkpoint.jsonl",
+        )
+        with open(checkpoint_path, "r", encoding="utf-8") as handle:
+            lines = handle.readlines()
+        header = json.loads(lines[0])
+        header["fingerprint_sha256"] = "0" * 64
+        with open(checkpoint_path, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(header) + "\n")
+            handle.writelines(lines[1:])
+
+        request.resume = True
+        adapter = _InterruptingCompositionalAdapter()
+        execution = execute_capability_suite(adapter, request)
+
+        result = execution.benchmark_results["assistant_compositional_instruction_v2"]
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("refusing unsafe reuse", result["error"])
 
     def test_compositional_standard_fixture_retains_twenty_four_pinned_cases(self):
         cases = _native_benchmark_cases(CAPABILITY_BENCHMARKS["assistant_compositional_instruction_v2"])
