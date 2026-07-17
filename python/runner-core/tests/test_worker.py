@@ -46,6 +46,20 @@ class WorkerTests(unittest.TestCase):
         ]
         self.assertEqual(structured, [{"type": "assignment_idle"}])
 
+    def test_worker_once_can_suppress_repeated_human_idle_status(self):
+        messages = []
+        with mock.patch("infergrade.worker.claim_run_job", return_value={"run": None}):
+            result = run_worker_once(
+                api_url="http://localhost:8000",
+                execution_mode="local_container",
+                worker_id="worker-1",
+                emit_progress=messages.append,
+                emit_idle_status=False,
+            )
+
+        self.assertFalse(result["claimed"])
+        self.assertNotIn("No matching run jobs are awaiting execution.", messages)
+
     def test_desktop_structured_events_redact_token_shaped_values(self):
         messages = []
         with mock.patch.dict("os.environ", {"INFERGRADE_DESKTOP_EVENTS": "1"}, clear=False):
@@ -576,6 +590,31 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(register_mock.call_args.kwargs["environment"], snapshot["environment"])
         self.assertEqual(register_mock.call_args.kwargs["contract"], snapshot["contract"])
         self.assertEqual(register_mock.call_args.kwargs["diagnostics"], snapshot["diagnostics"])
+
+    def test_worker_loop_announces_listening_once_and_suppresses_poll_spam(self):
+        snapshot = {"environment": {}, "contract": {}, "diagnostics": {}}
+        messages = []
+        attempts = [
+            {"claimed": False, "worker_id": "runner-1"},
+            {"claimed": True, "completed": True, "worker_id": "runner-1"},
+        ]
+        with mock.patch("infergrade.worker.collect_runner_diagnostics", return_value=snapshot), mock.patch(
+            "infergrade.worker.register_runner"
+        ), mock.patch("infergrade.worker.heartbeat_runner"), mock.patch(
+            "infergrade.worker.time.sleep"
+        ), mock.patch("infergrade.worker.run_worker_once", side_effect=attempts) as once_mock:
+            result = run_worker_loop(
+                api_url="http://localhost:8000",
+                execution_mode="local_native",
+                worker_id="runner-1",
+                max_jobs=1,
+                emit_progress=messages.append,
+            )
+
+        self.assertEqual(result["completed_jobs"], 1)
+        self.assertEqual(messages.count("✓ Runner connected · waiting for benchmarks from InferGrade Hub."), 1)
+        self.assertNotIn("No matching run jobs are awaiting execution.", messages)
+        self.assertTrue(all(call.kwargs["emit_idle_status"] is False for call in once_mock.call_args_list))
 
     def test_worker_loop_retries_after_claim_error(self):
         snapshot = {

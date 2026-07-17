@@ -334,6 +334,7 @@ def run_worker_once(
     simulate: bool = False,
     emit_progress: Optional[Callable[[str], None]] = None,
     runner_snapshot: Optional[Dict[str, Any]] = None,
+    emit_idle_status: bool = True,
 ) -> Dict[str, Any]:
     """Claim and execute at most one run job."""
     resolved_worker_id = worker_id or _default_worker_id()
@@ -354,7 +355,7 @@ def run_worker_once(
     run_job = claimed.get("run")
     if not run_job:
         _emit_desktop_event(emit_progress, "assignment_idle")
-        if emit_progress:
+        if emit_progress and emit_idle_status:
             emit_progress("No matching run jobs are awaiting execution.")
         return {"claimed": False, "worker_id": resolved_worker_id}
     if emit_progress:
@@ -438,6 +439,8 @@ def run_worker_loop(
     processed = 0
     completed = 0
     failed = 0
+    if emit_progress:
+        emit_progress("✓ Runner connected · waiting for benchmarks from InferGrade Hub.")
     while True:
         if max_jobs is not None and processed >= max_jobs:
             break
@@ -456,6 +459,7 @@ def run_worker_loop(
                 simulate=simulate,
                 emit_progress=emit_progress,
                 runner_snapshot=runner_snapshot,
+                emit_idle_status=False,
             )
         except RunnerTokenInvalidError:
             raise

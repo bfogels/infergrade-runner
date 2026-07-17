@@ -145,6 +145,8 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade start
 
 After a one-time pair, `infergrade start` and `infergrade run-job` can omit `--api-url` and `--api-token`; the Runner will fall back to the saved local profile and choose the clearest local execution mode for the machine by default.
 
+The first-run commands print short human summaries by default. Use `--json` with `doctor`, `cache`, `install-runtime`, `pair`, `unpair`, or `start` when a script needs the complete structured payload. `infergrade pair` uses the machine hostname as its label unless `--label` is supplied. Running `infergrade start` before pairing exits with the exact pairing command instead of entering an idle polling loop.
+
 For the containerized listener path, the helper script remains the easiest option:
 
 ```bash
