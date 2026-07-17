@@ -50,6 +50,8 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
 
 ## JavaScript Conventions
 
+These apply to the Desktop Runner web assets under `apps/desktop-runner/`.
+
 - Prefer small helpers with descriptive names over deeply nested callbacks.
 - Add JSDoc comments to important stateful, rendering, or API-related functions.
 - Keep DOM-building helpers deterministic where possible.
@@ -86,14 +88,18 @@ This is not about maximizing process. It is about keeping InferGrade welcoming f
 
 ## Testing
 
-Run the full local verification pass with:
+Run the full local Python verification pass with:
 
 ```bash
 ./scripts/test_all.sh
 ```
 
-That script is the deployment-oriented baseline and currently covers:
+That script runs the runner-core unit and integration-style tests with stdlib `unittest` (the repo intentionally does not use pytest). CI also lints Python with `ruff check python scripts`; the rule set lives in [`ruff.toml`](ruff.toml).
 
-- runner-core unit and integration-style tests
-- API unit tests plus real HTTP endpoint tests
-- web JavaScript syntax checks
+For the Rust workspace, run the same checks CI enforces:
+
+```bash
+cargo fmt --all -- --check
+cargo test --workspace --exclude infergrade_desktop_runner --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+```
