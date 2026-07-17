@@ -46,7 +46,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Validate release tag
+        if: github.ref_type == 'tag'
+        run: python3 ./scripts/check_release_tag.py --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA" --main-ref origin/main
 
       - name: Set image tag
         id: meta

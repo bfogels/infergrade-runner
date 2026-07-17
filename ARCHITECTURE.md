@@ -82,9 +82,10 @@ schemas/  ──export──▶  contract bundle (versioned)  ──pin──▶
 `scripts/export_contract_bundle.py` and `scripts/build_release_bundle.sh`
 produce the versioned artifacts. The `publish-contract-bundle` workflow exports
 the contract bundle for `v*` tags or manual dispatch. The `release-bundle`
-workflow rebuilds the complete release bundle on `main` pushes or manual
-dispatch. `schemas/contract_manifest.json` declares the contract version and its
-supporting docs.
+workflow rebuilds the complete release bundle for matching `v*` tags or manual
+dispatch; ordinary `main` promotions do not create release artifacts.
+`schemas/contract_manifest.json` declares the contract version and its supporting
+docs.
 
 ## Principles
 

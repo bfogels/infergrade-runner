@@ -9,6 +9,7 @@ from pathlib import Path
 
 from scripts.sync_versions import sync_versions
 from scripts.check_public_release_readiness import main as check_public_release_readiness
+from scripts.check_release_tag import validate_release_tag
 from scripts.verify_desktop_release_artifacts import main as verify_desktop_release_artifacts
 from scripts.verify_desktop_update_endpoint import verify_manifest as verify_desktop_update_manifest_endpoint
 from scripts.write_desktop_release_checksums import main as write_desktop_release_checksums
@@ -145,6 +146,40 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("actions/upload-artifact@", workflow)
         self.assertIn("infergrade-runner-release-${{ steps.release_bundle.outputs.release_version }}", workflow)
         self.assertIn("retention-days: 7", workflow)
+        self.assertIn("inputs.include_image_archives && 180 || 30", workflow)
+
+    def test_tagged_publish_workflows_fail_closed_on_release_identity(self):
+        for filename in ("release-bundle.yml", "publish-contract-bundle.yml", "publish-containers.yml"):
+            workflow = (ROOT / ".github" / "workflows" / filename).read_text(encoding="utf-8")
+            self.assertIn("fetch-depth: 0", workflow)
+            self.assertIn("if: github.ref_type == 'tag'", workflow)
+            self.assertIn(
+                'check_release_tag.py --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA" --main-ref origin/main',
+                workflow,
+            )
+
+    def test_release_tag_validator_checks_version_and_main_ancestry(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.check_call(["git", "init", "-b", "main"], cwd=root, stdout=subprocess.DEVNULL)
+            subprocess.check_call(["git", "config", "user.email", "runner-tests@example.invalid"], cwd=root)
+            subprocess.check_call(["git", "config", "user.name", "Runner Tests"], cwd=root)
+            (root / "VERSION").write_text("0.3.36\n", encoding="utf-8")
+            subprocess.check_call(["git", "add", "VERSION"], cwd=root)
+            subprocess.check_call(["git", "commit", "-m", "release"], cwd=root, stdout=subprocess.DEVNULL)
+            main_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+
+            validate_release_tag("v0.3.36", root=root, commit=main_commit, main_ref="main")
+            with self.assertRaisesRegex(ValueError, "does not match VERSION"):
+                validate_release_tag("v0.3.37", root=root)
+
+            subprocess.check_call(["git", "checkout", "-b", "unmerged"], cwd=root, stdout=subprocess.DEVNULL)
+            (root / "extra.txt").write_text("not on main\n", encoding="utf-8")
+            subprocess.check_call(["git", "add", "extra.txt"], cwd=root)
+            subprocess.check_call(["git", "commit", "-m", "unmerged"], cwd=root, stdout=subprocess.DEVNULL)
+            unmerged_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+            with self.assertRaisesRegex(ValueError, "must point to main history"):
+                validate_release_tag("v0.3.36", root=root, commit=unmerged_commit, main_ref="main")
 
     def test_release_bundle_script_defaults_to_version(self):
         script = (ROOT / "scripts" / "build_release_bundle.sh").read_text(encoding="utf-8")

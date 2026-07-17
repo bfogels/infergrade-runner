@@ -20,6 +20,13 @@ Pushing a `v*` release tag or deliberately dispatching
 
 The default tagged artifact includes the contract bundle and release manifest with image references. It does not build or upload Docker image archives unless a maintainer deliberately dispatches the workflow with `include_image_archives=true`. Ordinary `main` promotions do not create release-bundle artifacts.
 
+Tag-triggered release, contract, and container workflows fail unless the tag is
+exactly `v$(cat VERSION)` and the tagged commit belongs to fetched `main`
+history. This prevents a mistyped tag from publishing container and bundle
+artifacts under different versions. The manual portable-image bundle receives a
+larger bounded timeout because it cold-builds and exports all canonical images;
+the normal tagged bundle retains the shorter limit.
+
 `VERSION` is the human-edited release version. Some package managers still require static manifest versions, so after changing `VERSION`, run:
 
 ```bash
