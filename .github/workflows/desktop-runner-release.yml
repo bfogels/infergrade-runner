@@ -31,6 +31,7 @@ jobs:
       DESKTOP_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
       RELEASE_TAG: desktop-runner-latest
       RELEASE_NOTES: ${{ github.event_name == 'workflow_dispatch' && inputs.notes || '' }}
+      PUBLIC_DMG_NAME: InferGrade.Runner.macOS-arm64.dmg
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -194,6 +195,12 @@ jobs:
       - name: Verify macOS signing and notarization
         run: ./scripts/verify_desktop_macos_release.sh
 
+      - name: Prepare stable public installer filename
+        run: |
+          python3 ./scripts/prepare_desktop_release_dmg.py \
+            --dmg-dir target/release/bundle/dmg \
+            --output-name "$PUBLIC_DMG_NAME"
+
       - name: Write updater manifest
         run: |
           BASE_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}"
@@ -228,11 +235,24 @@ jobs:
             target/release/bundle/macos/SHA256SUMS \
             --clobber
 
-      - name: Verify anonymous updater access
+      - name: Verify published desktop release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          published_dir="$RUNNER_TEMP/desktop-runner-published"
+          mkdir -p "$published_dir"
+          gh release download "$RELEASE_TAG" --dir "$published_dir"
+          python3 ./scripts/verify_desktop_release_artifacts.py \
+            --directory "$published_dir" \
+            --require-dmg \
+            --required-dmg-name "$PUBLIC_DMG_NAME" \
+            --require-updater
           python3 ./scripts/verify_desktop_update_endpoint.py \
             --url "https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/infergrade-runner-desktop-latest.json" \
             --expected-version "$DESKTOP_VERSION"
+          curl --fail --location --silent --show-error --range 0-0 \
+            --output /dev/null \
+            "https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${PUBLIC_DMG_NAME}"
 
   windows-package-smoke:
     name: Build Windows desktop packages

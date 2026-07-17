@@ -25,6 +25,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--require-dmg", action="store_true", help="Require at least one DMG artifact.")
     parser.add_argument(
+        "--required-dmg-name",
+        default="",
+        help="Require one checksummed DMG with this exact public filename.",
+    )
+    parser.add_argument(
         "--require-updater",
         action="store_true",
         help="Require an updater manifest, updater archive, and updater signature.",
@@ -153,6 +158,11 @@ def main() -> int:
     verified = verify_checksums(directory, checksum_path)
     if args.require_dmg and not any(path.suffix == ".dmg" for path in verified):
         raise SystemExit("No DMG artifact was verified.")
+    if args.required_dmg_name:
+        if Path(args.required_dmg_name).name != args.required_dmg_name or not args.required_dmg_name.endswith(".dmg"):
+            raise SystemExit("--required-dmg-name must be one plain .dmg filename.")
+        if not any(path.name == args.required_dmg_name for path in verified):
+            raise SystemExit(f"Required public DMG was not verified: {args.required_dmg_name}")
     verified_names = {path.name for path in verified}
     verify_update_manifest(directory, update_manifest_path, args.require_updater, verified_names)
 

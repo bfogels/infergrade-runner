@@ -45,13 +45,13 @@ Local equivalent:
 ./scripts/build_release_bundle.sh
 ```
 
-Before merging a Runner release, publish all five canonical container tags and verify that they are anonymously readable:
+After the exact promoted `main` commit receives its immutable `vX.Y.Z` tag, let the tag-triggered workflow publish all five canonical container tags, then verify that they are anonymously readable:
 
 ```bash
 INFERGRADE_IMAGE_TAG="$(cat VERSION)" ./scripts/verify_release_images.sh
 ```
 
-The verifier uses an empty temporary Docker credential store, checks every runtime and capability image, and prints immutable registry manifest and image-config digests for the release record. Do not distribute a Runner version whose matching images fail this check.
+The verifier requests anonymous GHCR pull tokens directly, checks every runtime and capability image through the OCI Distribution API, and prints immutable index, Linux/amd64 manifest, and image-config digests for the release record. Do not distribute a Runner version whose matching images fail this check.
 
 Before a public release candidate, also run the local readiness summary:
 
@@ -74,7 +74,8 @@ artifacts. The workflow:
 4. verifies the protected release signing and notarization inputs before building user-downloadable artifacts
 5. signs and notarizes the Tauri updater archive and macOS bundle with the configured release credentials
 6. verifies the app bundle and DMG with `codesign`, Gatekeeper assessment, and stapled notarization-ticket checks
-7. publishes the DMG, updater archive, updater signature, and updater manifest to the `desktop-runner-latest` GitHub release
+7. renames the notarized DMG to the stable public asset `InferGrade.Runner.macOS-arm64.dmg`, then publishes it with the updater archive, updater signature, and updater manifest to the `desktop-runner-latest` GitHub release
+8. redownloads the published assets, verifies their checksum/updater relationship, and anonymously probes both the updater and stable installer URLs
 
 The same workflow also runs unsigned Windows and Linux package smoke jobs. Those jobs build NSIS/MSI artifacts on `windows-latest` and AppImage/`.deb` artifacts on `ubuntu-22.04`, write `SHA256SUMS` manifests for the emitted packages, then upload them as GitHub Actions artifacts for maintainer inspection. They are package-readiness gates only; they do not publish to the desktop release tag and they do not replace Windows Authenticode signing, Linux install/launch validation, or platform-specific support notes.
 

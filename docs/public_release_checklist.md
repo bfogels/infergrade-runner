@@ -72,6 +72,7 @@ After the protected desktop workflow publishes `desktop-runner-latest`, download
 python3 ./scripts/verify_desktop_release_artifacts.py \
   --directory /path/to/downloaded/desktop-runner-latest \
   --require-dmg \
+  --required-dmg-name InferGrade.Runner.macOS-arm64.dmg \
   --require-updater
 ```
 
