@@ -5,7 +5,7 @@ import json
 import os
 import socket
 import sys
-from typing import Optional
+from typing import Dict, Optional
 from urllib.error import URLError
 
 from infergrade import __version__
@@ -87,9 +87,9 @@ def _command_help(command: str, help_text: str, show_advanced: bool) -> str:
     return help_text
 
 
-def _add_api_token_argument(parser: argparse.ArgumentParser) -> None:
+def _add_api_token_argument(parser: argparse.ArgumentParser) -> argparse.Action:
     """Add the shared hosted-API token flag to a parser."""
-    parser.add_argument(
+    return parser.add_argument(
         "--api-token",
         help="Optional Hub/API token. Falls back to INFERGRADE_HUB_TOKEN, then INFERGRADE_API_TOKEN, then a paired local runner profile if unset.",
     )
@@ -155,11 +155,17 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help=_command_help("run", "Run or simulate an InferGrade bundle.", show_advanced))
     _add_run_request_arguments(run_parser)
 
-    doctor_parser = subparsers.add_parser("doctor", help="Check whether the current machine is ready for a InferGrade run.")
+    doctor_parser = subparsers.add_parser("doctor", help="Check whether this machine is ready to benchmark.")
+    doctor_actions = set(doctor_parser._actions)
     _add_run_request_arguments(doctor_parser)
-    doctor_parser.add_argument("--api-url")
-    doctor_parser.add_argument("--run-config-id")
-    _add_api_token_argument(doctor_parser)
+    for action in doctor_parser._actions:
+        if action not in doctor_actions:
+            action.help = argparse.SUPPRESS
+    doctor_parser.add_argument("--api-url", help=argparse.SUPPRESS)
+    doctor_parser.add_argument("--run-config-id", help=argparse.SUPPRESS)
+    doctor_api_token = _add_api_token_argument(doctor_parser)
+    doctor_api_token.help = argparse.SUPPRESS
+    doctor_parser.add_argument("--json", action="store_true", help="Print the complete machine-readable report.")
 
     validate_parser = subparsers.add_parser("validate-bundle", help=_command_help("validate-bundle", "Validate an existing bundle.", show_advanced))
     validate_parser.add_argument("path")
@@ -215,6 +221,7 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     cache_parser.add_argument("--prune-partials", action="store_true", help="Remove interrupted artifact downloads.")
     cache_parser.add_argument("--dry-run", action="store_true", help="Report what would be removed without deleting files.")
     cache_parser.add_argument("--partial-min-age-seconds", type=int, default=3600, help="Only prune partial downloads at least this old.")
+    cache_parser.add_argument("--json", action="store_true", help="Print the complete machine-readable result.")
 
     runtime_parser = subparsers.add_parser("install-runtime", help="Inspect, install, or select an explicit managed runtime.")
     runtime_parser.add_argument("--runtime", choices=("llama.cpp",), default="llama.cpp")
@@ -225,16 +232,19 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     runtime_parser.add_argument("--llama-cpp-server-path")
     runtime_parser.add_argument("--llama-cpp-perplexity-path")
     runtime_parser.add_argument("--list", action="store_true", help="Print the Runner-owned known-good runtime manifest.")
+    runtime_parser.add_argument("--json", action="store_true", help="Print the complete machine-readable result.")
 
     pair_parser = subparsers.add_parser("pair", help="Pair this local machine with InferGrade Hub and save a reusable runner profile.")
     pair_parser.add_argument("--api-url", required=True)
     pair_parser.add_argument("--pair-code")
     pair_parser.add_argument("--pair-code-stdin", action="store_true", help="Read the one-time pair code from stdin.")
-    pair_parser.add_argument("--label", "--runner-label", dest="label", required=True)
+    pair_parser.add_argument("--label", "--runner-label", dest="label", help="Optional machine label; defaults to this hostname.")
     pair_parser.add_argument("--hostname")
+    pair_parser.add_argument("--json", action="store_true", help="Print the complete machine-readable result.")
 
     unpair_parser = subparsers.add_parser("unpair", help="Remove the saved local runner pairing profile.")
     unpair_parser.add_argument("--print-path", action="store_true")
+    unpair_parser.add_argument("--json", action="store_true", help="Print the complete machine-readable result.")
 
     init_config_parser = subparsers.add_parser(
         "init-run-config",
@@ -319,6 +329,7 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
         action="store_true",
         help="Use simulated execution when the local runner claims jobs.",
     )
+    start_parser.add_argument("--json", action="store_true", help="Print the final machine-readable worker summary.")
     _add_api_token_argument(start_parser)
 
     worker_parser = subparsers.add_parser("worker", help=_command_help("worker", "Claim and execute API-backed run jobs.", show_advanced))
@@ -388,7 +399,10 @@ def _require_runner_api_url(api_url: Optional[str]) -> str:
     resolved = resolve_runner_api_url(api_url)
     if resolved:
         return _require_secure_hub_api_url(resolved)
-    raise SystemExit("No API URL provided and no paired runner profile found. Pass --api-url or run `infergrade pair` first.")
+    raise SystemExit(
+        "No pairing profile found. Open https://infergrade.com/?tab=setup, create a pairing code, "
+        "then run `infergrade pair --api-url https://api.infergrade.com --pair-code-stdin`."
+    )
 
 
 def _require_secure_hub_api_url(api_url: str) -> str:
@@ -447,6 +461,92 @@ def _exit_for_invalid_runner_token(exc: RunnerTokenInvalidError) -> None:
     raise SystemExit("%s%s" % (str(exc), suffix))
 
 
+def _format_bytes(value: object) -> str:
+    """Format byte counts for concise human CLI summaries."""
+    try:
+        size = max(0.0, float(value or 0))
+    except (TypeError, ValueError):
+        size = 0.0
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return ("%.1f %s" % (size, unit)).replace(".0 ", " ")
+        size /= 1024
+    return "0 B"
+
+
+def _doctor_summary(report: Dict) -> str:
+    """Render the zero-config readiness answer before diagnostic detail."""
+    checks = list(report.get("checks") or [])
+    hardware = next((item.get("details") or {} for item in checks if item.get("id") == "hardware_snapshot"), {})
+    accelerator = hardware.get("accelerator_model") or hardware.get("cpu_model") or "Hardware detected"
+    memory = hardware.get("memory_gb")
+    try:
+        memory_label = "%g GB" % float(memory)
+    except (TypeError, ValueError):
+        memory_label = "memory unknown"
+    architecture = "unified memory" if hardware.get("memory_architecture") == "unified_memory" else "system memory"
+    api = str(hardware.get("accelerator_api") or "").upper()
+    headline = "✓ Ready to benchmark" if report.get("ok") else "✗ Not ready to benchmark"
+    lines = [headline, "%s · %s %s%s" % (accelerator, memory_label, architecture, " · %s" % api if api else "")]
+    problems = [item for item in checks if item.get("status") in {"warning", "error"} or item.get("ok") is False]
+    for item in problems:
+        marker = "!" if item.get("status") == "warning" else "✗"
+        lines.append("%s %s" % (marker, item.get("message") or item.get("id") or "Readiness issue"))
+    if report.get("ok"):
+        lines.append("Next: choose a benchmark at https://infergrade.com/?tab=build")
+    else:
+        lines.append("Run `infergrade doctor --json` for complete diagnostics.")
+    return "\n".join(lines)
+
+
+def _cache_summary(payload: Dict, pruning: bool = False) -> str:
+    if pruning:
+        action = "Would remove" if payload.get("dry_run") else "Removed"
+        return "%s %s partial download%s · %s" % (
+            action,
+            payload.get("removed_count", 0),
+            "" if payload.get("removed_count") == 1 else "s",
+            payload.get("cache_dir") or "artifact cache",
+        )
+    return "Artifact cache · %s across %s model%s\n%s free · %s partial download%s" % (
+        _format_bytes(payload.get("artifact_bytes") or payload.get("total_bytes")),
+        payload.get("artifact_count", payload.get("total_count", 0)),
+        "" if payload.get("artifact_count", payload.get("total_count", 0)) == 1 else "s",
+        _format_bytes(payload.get("free_bytes")),
+        payload.get("partial_count", 0),
+        "" if payload.get("partial_count") == 1 else "s",
+    )
+
+
+def _runtime_summary(payload: Dict) -> str:
+    runtime = payload.get("runtime") or {}
+    current = payload.get("current_selection") or {}
+    current_cli = ((current.get("binaries") or {}).get("cli") or "").strip()
+    lines = ["llama.cpp runtime · %s" % (runtime.get("version_label") or runtime.get("runtime_id") or "managed")]
+    if payload.get("action") == "installed":
+        lines[0] = "✓ Installed and selected %s" % (runtime.get("version_label") or "llama.cpp")
+    elif payload.get("supported_on_this_platform"):
+        lines.append("Ready to install · run again with `--execute`.")
+    else:
+        lines.append("This managed runtime does not match the current platform.")
+    if current_cli:
+        if os.path.exists(current_cli):
+            lines.append("Current selection: %s" % (current.get("version_label") or current.get("runtime_id") or "local binary"))
+        else:
+            lines.append("Current selection needs repair: its binary no longer exists.")
+    lines.append("Use `infergrade install-runtime --json` for provenance and binary details.")
+    return "\n".join(lines)
+
+
+def _runtime_manifest_summary(payload: Dict) -> str:
+    lines = ["Known llama.cpp runtimes"]
+    for runtime in payload.get("runtimes") or []:
+        support = runtime.get("support_tier") or runtime.get("source") or "available"
+        lines.append("- %s · %s" % (runtime.get("version_label") or runtime.get("runtime_id"), support))
+    lines.append("Use `infergrade install-runtime --list --json` for the complete manifest.")
+    return "\n".join(lines)
+
+
 def main(argv: Optional[list] = None) -> int:
     """Run the InferGrade CLI."""
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
@@ -472,7 +572,7 @@ def main(argv: Optional[list] = None) -> int:
         if args.api_url:
             args.api_url = _require_secure_hub_api_url(args.api_url)
         report = run_doctor(request=_request_for_doctor(args), api_url=args.api_url)
-        print(json.dumps(report, indent=2, sort_keys=True))
+        print(json.dumps(report, indent=2, sort_keys=True) if args.json else _doctor_summary(report))
         return 0 if report["ok"] else 1
 
     if args.command == "validate-bundle":
@@ -572,12 +672,13 @@ def main(argv: Optional[list] = None) -> int:
             )
         else:
             payload = artifact_cache_status(cache_dir=args.artifact_cache_dir)
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        print(json.dumps(payload, indent=2, sort_keys=True) if args.json else _cache_summary(payload, pruning=bool(args.prune_partials)))
         return 0
 
     if args.command == "install-runtime":
         if args.list:
-            print(json.dumps(runtime_manifest(), indent=2, sort_keys=True))
+            payload = runtime_manifest()
+            print(json.dumps(payload, indent=2, sort_keys=True) if args.json else _runtime_manifest_summary(payload))
             return 0
         if args.select_existing:
             payload = select_llama_cpp_runtime(
@@ -590,7 +691,7 @@ def main(argv: Optional[list] = None) -> int:
             payload = install_llama_cpp_runtime(runtime_id=args.runtime_id, execute=args.execute)
         payload = dict(payload)
         payload["current_selection"] = selected_llama_cpp_runtime()
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        print(json.dumps(payload, indent=2, sort_keys=True) if args.json else _runtime_summary(payload))
         return 0
 
     if args.command == "pair":
@@ -602,7 +703,7 @@ def main(argv: Optional[list] = None) -> int:
             payload = redeem_runner_pairing(
                 api_url=api_url,
                 pair_code=pair_code,
-                label=args.label,
+                label=args.label or (args.hostname or socket.gethostname()).split(".", 1)[0],
                 hostname=args.hostname or socket.gethostname(),
                 execution_mode=execution_mode,
                 environment=environment,
@@ -643,16 +744,20 @@ def main(argv: Optional[list] = None) -> int:
                 "start": "infergrade start",
             },
         }
-        print(json.dumps(result, indent=2, sort_keys=True))
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            label = public_profile.get("label") or public_profile.get("runner_label") or "this machine"
+            print("✓ Paired %s\nRun `infergrade start` to listen for benchmarks." % label)
         return 0
 
     if args.command == "unpair":
         profile_path = runner_profile_path()
         removed = clear_runner_profile()
-        if args.print_path:
+        if args.json or args.print_path:
             print(json.dumps({"removed": removed, "profile_path": profile_path}, indent=2, sort_keys=True))
         else:
-            print(json.dumps({"removed": removed}, indent=2, sort_keys=True))
+            print("Pairing removed." if removed else "No saved pairing was found.")
         return 0
 
     if args.command == "init-run-config":
@@ -802,6 +907,7 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "start":
+        api_url = _require_runner_api_url(args.api_url)
         execution_mode = _resolve_local_execution_mode(args.execution_mode)
         worker_id = _resolve_runner_worker_id(args.worker_id, execution_mode)
         if args.autopilot:
@@ -811,7 +917,7 @@ def main(argv: Optional[list] = None) -> int:
                 raise SystemExit("Benchmark-agent autopilot requires --execution-mode local_native.")
             try:
                 result = run_agent_work_loop(
-                    api_url=_require_runner_api_url(args.api_url),
+                    api_url=api_url,
                     worker_id=worker_id,
                     hostname=args.hostname,
                     api_token=resolve_runner_api_token(args.api_token),
@@ -824,7 +930,7 @@ def main(argv: Optional[list] = None) -> int:
         elif args.once:
             try:
                 result = run_worker_once(
-                    api_url=_require_runner_api_url(args.api_url),
+                    api_url=api_url,
                     execution_mode=execution_mode,
                     worker_id=worker_id,
                     hostname=args.hostname,
@@ -838,7 +944,7 @@ def main(argv: Optional[list] = None) -> int:
         else:
             try:
                 result = run_worker_loop(
-                    api_url=_require_runner_api_url(args.api_url),
+                    api_url=api_url,
                     execution_mode=execution_mode,
                     worker_id=worker_id,
                     hostname=args.hostname,
@@ -851,7 +957,20 @@ def main(argv: Optional[list] = None) -> int:
                 )
             except RunnerTokenInvalidError as exc:
                 _exit_for_invalid_runner_token(exc)
-        print(json.dumps(result, indent=2, sort_keys=True))
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        elif args.once:
+            print("Benchmark completed." if result.get("completed") else "No benchmark is queued for this runner.")
+        elif args.autopilot:
+            print("Benchmark plan finished · %s job%s processed." % (
+                result.get("processed_jobs", 0),
+                "" if result.get("processed_jobs") == 1 else "s",
+            ))
+        else:
+            print("Runner stopped · %s completed · %s failed." % (
+                result.get("completed_jobs", 0),
+                result.get("failed_jobs", 0),
+            ))
         return 0
 
     if args.command == "worker":

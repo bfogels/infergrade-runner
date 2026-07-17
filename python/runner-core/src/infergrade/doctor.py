@@ -169,7 +169,7 @@ def _request_context(request: Optional[RunRequest], api_url: Optional[str]) -> D
 
 def _generic_environment_checks() -> List[Dict[str, Any]]:
     environment = capture_environment("local_container")
-    return [
+    checks = [
         _check(
             "hardware_snapshot",
             "info",
@@ -177,6 +177,26 @@ def _generic_environment_checks() -> List[Dict[str, Any]]:
             environment,
         )
     ]
+    if environment.get("hardware_class") == "apple_silicon":
+        checks.append(_llama_native_binary_check("llama_cli_native", None, "INFERGRADE_LLAMA_CPP_CLI", "llama-cli", "Native llama-cli"))
+        checks.append(_llama_native_binary_check("llama_server_native", None, "INFERGRADE_LLAMA_CPP_SERVER", "llama-server", "Native llama-server"))
+        checks.append(
+            _check(
+                "apple_silicon_native_runtime",
+                "ok",
+                "Apple Silicon native execution can use Metal acceleration when the installed llama.cpp binaries include Metal support.",
+                {
+                    "hardware_class": environment.get("hardware_class"),
+                    "accelerator_api": environment.get("accelerator_api"),
+                },
+            )
+        )
+        return checks
+    docker_cli = _binary_check("docker", "docker_cli", "Docker CLI is available.")
+    checks.append(docker_cli)
+    if docker_cli["status"] == "ok":
+        checks.append(_docker_daemon_check())
+    return checks
 
 
 def _request_checks(request: RunRequest) -> List[Dict[str, Any]]:
