@@ -410,6 +410,7 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("currentFirstRunUploadRunId() ? renderAssignmentFromHandoff() : renderAssignmentIdle()"));
   assert.ok(js.includes("renderAssignmentFromHandoff({ force: true })"));
   assert.ok(js.includes("renderAssignmentFromListenerEvent"));
+  assert.ok(js.includes("clearFirstRunHandoff({ renderAssignment: false })"));
   assert.ok(js.includes("renderAssignmentFromListenerLine"));
   assert.ok(js.includes("Claimed run"));
   assert.ok(js.includes("Runner claimed Hub-assigned work and is preparing local execution."));

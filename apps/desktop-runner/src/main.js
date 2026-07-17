@@ -7,6 +7,7 @@ import {
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
   normalizeDesktopApiUrl,
+  shouldClearCompletedHandoff,
   userSafeStartFailure,
   userSafeTokenFailure,
   userSafeUpdateFailure,
@@ -1376,6 +1377,9 @@ function renderAssignmentFromListenerEvent(payload = {}) {
   if (phase === "Needs attention") {
     setStatus("Needs attention", "error");
   } else if (phase === "Complete") {
+    if (shouldClearCompletedHandoff({ phase, runId, handoffRunId: currentFirstRunUploadRunId() })) {
+      clearFirstRunHandoff({ renderAssignment: false });
+    }
     setStatus("Complete", "good");
   } else {
     setStatus("Running assignment", "warning");
@@ -1846,7 +1850,7 @@ function readFirstRunUploadWorkerId() {
   return workerId || null;
 }
 
-function clearFirstRunHandoff() {
+function clearFirstRunHandoff({ renderAssignment = true } = {}) {
   window.localStorage.removeItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY);
   window.localStorage.removeItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY);
   currentHandoffRunId = "";
@@ -1860,7 +1864,9 @@ function clearFirstRunHandoff() {
   if (firstRunHandoffStatus) {
     firstRunHandoffStatus.textContent = "Hub upload complete. Start another run from Hub when you want to add more evidence.";
   }
-  renderAssignmentIdle();
+  if (renderAssignment) {
+    renderAssignmentIdle();
+  }
 }
 
 function firstRunArtifactText(payload = lastFirstRunPayload) {

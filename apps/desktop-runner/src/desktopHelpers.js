@@ -217,6 +217,10 @@ export function assignmentClockTransition({
   };
 }
 
+export function shouldClearCompletedHandoff({ phase = "", runId = "", handoffRunId = "" } = {}) {
+  return String(phase || "").trim().toLowerCase() === "complete" && Boolean(runId) && runId === handoffRunId;
+}
+
 export function isCredentialCanceled(message = "") {
   return /cancelled|canceled|user interaction|user.*cancel/i.test(String(message || ""));
 }

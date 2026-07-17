@@ -8,6 +8,7 @@ import {
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
   normalizeDesktopApiUrl,
+  shouldClearCompletedHandoff,
   userSafeStartFailure,
   userSafeUpdateFailure,
   userSafeTokenFailure,
@@ -44,6 +45,12 @@ test("assignment clocks begin on claim, reset for a new run, and freeze on termi
     assignmentClockTransition({ previousStartedAt: firstStart, previousRunId: "run_1", runId: "run_1", phase: "Needs attention", now: secondClaimTime }),
     { startedAt: firstStart, shouldRun: false }
   );
+});
+
+test("only a matching completed listener run clears its stored handoff", () => {
+  assert.equal(shouldClearCompletedHandoff({ phase: "Complete", runId: "run_1", handoffRunId: "run_1" }), true);
+  assert.equal(shouldClearCompletedHandoff({ phase: "Running", runId: "run_1", handoffRunId: "run_1" }), false);
+  assert.equal(shouldClearCompletedHandoff({ phase: "Complete", runId: "run_2", handoffRunId: "run_1" }), false);
 });
 
 test("normalizes hosted and local desktop API URLs before sidecar invocation", () => {
