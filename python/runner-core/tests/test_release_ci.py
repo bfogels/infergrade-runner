@@ -534,7 +534,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("gh release upload", workflow)
         self.assertIn("gh release download", workflow)
         self.assertIn("--required-dmg-name \"$PUBLIC_DMG_NAME\"", workflow)
-        self.assertIn("curl --fail --location --silent --show-error --range 0-0", workflow)
+        self.assertIn("curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --range 0-0", workflow)
 
     def test_desktop_release_dmg_gets_stable_url_safe_public_name(self):
         with TemporaryDirectory() as tmp:
