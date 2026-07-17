@@ -6,6 +6,9 @@
   "type": "module",
   "scripts": {
     "pretauri": "node scripts/prepare-sidecar.mjs",
+    "prebuild:mac": "node scripts/prepare-sidecar.mjs",
+    "prebuild:windows": "node scripts/prepare-sidecar.mjs",
+    "prebuild:linux": "node scripts/prepare-sidecar.mjs",
     "check": "node --test src/*.test.mjs && vite build",
     "dev": "vite --host 127.0.0.1 --port 1420",
     "build": "vite build",

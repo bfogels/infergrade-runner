@@ -1,6 +1,7 @@
 import "./styles.css";
 import packageInfo from "../package.json";
 import {
+  assignmentClockTransition,
   assignmentTitleFromRunId,
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
@@ -402,14 +403,19 @@ function renderAssignmentActive({
   if (!assignmentPanel) {
     return;
   }
-  const wasWaitingForListener = assignmentPanel.dataset.state === "waiting-for-listener";
-  const assignmentHasStarted = !waitingForListener && !["Handoff received", "Ready to claim"].includes(phase);
+  const nextRunId = runId || currentAssignmentRunId;
+  const clock = assignmentClockTransition({
+    previousStartedAt: assignmentStartedAt,
+    previousRunId: currentAssignmentRunId,
+    runId: nextRunId,
+    phase,
+    waitingForListener,
+    startedAt,
+  });
   assignmentPanel.dataset.state = waitingForListener ? "waiting-for-listener" : "active";
-  assignmentStartedAt = !assignmentHasStarted
-    ? null
-    : startedAt || (wasWaitingForListener ? new Date() : assignmentStartedAt) || new Date();
+  assignmentStartedAt = clock.startedAt;
   currentAssignmentRemaining = remaining;
-  currentAssignmentRunId = runId || currentAssignmentRunId;
+  currentAssignmentRunId = nextRunId;
   currentAssignmentPhase = phase;
   if (assignmentKicker) {
     assignmentKicker.textContent = waitingForListener ? "Action needed" : "Active assignment";
@@ -427,7 +433,7 @@ function renderAssignmentActive({
     assignmentPhase.textContent = phase;
   }
   renderAssignmentTime();
-  if (phase === "Complete") {
+  if (!clock.shouldRun) {
     stopAssignmentClock();
   } else {
     startAssignmentClock();
@@ -445,14 +451,14 @@ function renderAssignmentActive({
   }
 }
 
-function renderAssignmentFromHandoff() {
+function renderAssignmentFromHandoff({ force = false } = {}) {
   const runId = currentFirstRunUploadRunId();
   if (!runId) {
     renderAssignmentIdle();
     return;
   }
   const handoffPhases = new Set(["idle", "Handoff received", "Listening paused", "Ready to claim"]);
-  if (currentAssignmentRunId === runId && !handoffPhases.has(currentAssignmentPhase)) {
+  if (!force && currentAssignmentRunId === runId && !handoffPhases.has(currentAssignmentPhase)) {
     return;
   }
   renderAssignmentActive({
@@ -1140,6 +1146,9 @@ async function ensureRunnerListenerEvents() {
       const detail = payload.detail || "Runner process error.";
       appendLog(`Runner process error: ${detail}`);
       childProcess = null;
+      if (currentFirstRunUploadRunId()) {
+        renderAssignmentFromHandoff({ force: true });
+      }
       setRunnerButtonsDisabled("start", false);
       setRunnerButtonsDisabled("stop", true);
       setStatus("Failed", "error");
@@ -1151,6 +1160,9 @@ async function ensureRunnerListenerEvents() {
       const code = payload.code ?? "unknown";
       appendLog(`Runner exited with code ${code}.`);
       childProcess = null;
+      if (currentFirstRunUploadRunId()) {
+        renderAssignmentFromHandoff({ force: true });
+      }
       setRunnerButtonsDisabled("start", false);
       setRunnerButtonsDisabled("stop", true);
       setStatus("Stopped", code === 0 ? "idle" : "error");
@@ -1344,9 +1356,7 @@ function renderAssignmentFromFirstRunEvent(payload = {}) {
 
 function renderAssignmentFromListenerEvent(payload = {}) {
   if (payload.type === "assignment_idle") {
-    if (currentAssignmentPhase !== "Handoff received") {
-      renderAssignmentIdle();
-    }
+    currentFirstRunUploadRunId() ? renderAssignmentFromHandoff() : renderAssignmentIdle();
     return;
   }
   if (payload.type !== "assignment_update") {
@@ -1476,8 +1486,8 @@ function renderAssignmentFromListenerLine(line = "") {
     setStatus("Uploading", "warning");
     return true;
   }
-  if (trimmed === "No matching run jobs are awaiting execution." && currentAssignmentPhase !== "Handoff received") {
-    renderAssignmentIdle();
+  if (trimmed === "No matching run jobs are awaiting execution.") {
+    currentFirstRunUploadRunId() ? renderAssignmentFromHandoff() : renderAssignmentIdle();
     return true;
   }
   return false;
@@ -2000,7 +2010,7 @@ async function startRunner({ confirmStarted = false } = {}) {
   setStatus("Listening", "good");
   renderLocalReadinessChecklist();
   if (currentFirstRunUploadRunId()) {
-    renderAssignmentFromHandoff();
+    renderAssignmentFromHandoff({ force: true });
   }
   appendLog(`Started infergrade listener for ${apiUrl}.`);
   if (confirmStarted) {
@@ -2213,7 +2223,7 @@ async function stopRunner() {
   appendLog("Stop requested.");
   if (currentFirstRunUploadRunId()) {
     childProcess = null;
-    renderAssignmentFromHandoff();
+    renderAssignmentFromHandoff({ force: true });
   }
 }
 

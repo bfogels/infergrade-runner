@@ -39,7 +39,7 @@ Run the Tauri shell after installing Rust and platform prerequisites:
 npm run tauri dev
 ```
 
-The `pretauri` hook builds the platform sidecar automatically, so a cold Tauri dev or package build does not require a separate preparation command. Run the script below directly only when testing or rebuilding the sidecar by itself.
+The Tauri and platform package scripts build and copy the platform sidecar through a cross-platform Node hook, so a cold dev or package build does not require Bash or a separate preparation command. Run the script below directly only when testing or rebuilding the sidecar by itself.
 
 Build the platform-specific sidecar wrapper for the current Rust host with:
 

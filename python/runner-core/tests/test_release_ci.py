@@ -39,14 +39,14 @@ class ReleaseCiTests(unittest.TestCase):
             def __exit__(self, *_args):
                 return False
 
-            def read(self):
-                return self.body
+            def read(self, size=-1):
+                return self.body if size is None or size < 0 else self.body[:size]
 
         requests = []
 
         def opener(request, timeout=0):
             requests.append((request.full_url, request.get_method(), request.headers, timeout))
-            if request.get_method() == "HEAD":
+            if request.headers.get("Range"):
                 return Response()
             return Response(
                 json.dumps(
@@ -63,11 +63,12 @@ class ReleaseCiTests(unittest.TestCase):
             )
 
         manifest = verify_desktop_update_manifest_endpoint(
-            "https://downloads.example.test/latest.json", "0.3.36", opener=opener
+            "https://downloads.example.test/latest.json", "0.3.36", opener=opener, sleeper=lambda _delay: None
         )
 
         self.assertEqual(manifest["version"], "0.3.36")
-        self.assertEqual([request[1] for request in requests], ["GET", "HEAD"])
+        self.assertEqual([request[1] for request in requests], ["GET", "GET"])
+        self.assertEqual(requests[1][2].get("Range"), "bytes=0-0")
         self.assertTrue(all("Authorization" not in request[2] for request in requests))
 
     def test_desktop_update_endpoint_rejects_version_drift(self):
@@ -88,6 +89,51 @@ class ReleaseCiTests(unittest.TestCase):
                 "https://downloads.example.test/latest.json", "0.3.36", opener=lambda *_args, **_kwargs: Response()
             )
         self.assertIn("version mismatch", str(raised.exception))
+
+    def test_desktop_update_endpoint_retries_archive_propagation(self):
+        class Response:
+            status = 200
+
+            def __init__(self, body=b""):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, size=-1):
+                return self.body if size is None or size < 0 else self.body[:size]
+
+        artifact_attempts = 0
+        delays = []
+
+        def opener(request, timeout=0):
+            nonlocal artifact_attempts
+            if request.headers.get("Range"):
+                artifact_attempts += 1
+                if artifact_attempts == 1:
+                    raise OSError("release asset is still propagating")
+                return Response(b"a")
+            return Response(json.dumps({
+                "version": "0.3.36",
+                "platforms": {"darwin-aarch64": {
+                    "signature": "signed",
+                    "url": "https://downloads.example.test/InferGrade.Runner.app.tar.gz",
+                }},
+            }).encode("utf-8"))
+
+        verify_desktop_update_manifest_endpoint(
+            "https://downloads.example.test/latest.json",
+            "0.3.36",
+            opener=opener,
+            attempts=2,
+            sleeper=delays.append,
+        )
+
+        self.assertEqual(artifact_attempts, 2)
+        self.assertEqual(delays, [1])
 
     def test_release_bundle_workflow_runs_on_main_push(self):
         workflow = (ROOT / ".github" / "workflows" / "release-bundle.yml").read_text(encoding="utf-8")

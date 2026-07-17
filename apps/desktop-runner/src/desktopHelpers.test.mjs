@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assignmentClockTransition,
   assignmentTitleFromRunId,
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
@@ -24,6 +25,25 @@ test("turns internal assignment ids into compact model-aware titles", () => {
 test("hides cache-address prefixes from model filenames", () => {
   assert.equal(displayCacheArtifactName("03b74727a860a563-Qwen3.5-9B-Q4_K_M.gguf"), "Qwen3.5-9B-Q4_K_M.gguf");
   assert.equal(displayCacheArtifactName("Qwen3.5-9B-Q4_K_M.gguf"), "Qwen3.5-9B-Q4_K_M.gguf");
+});
+
+test("assignment clocks begin on claim, reset for a new run, and freeze on terminal phases", () => {
+  const firstStart = new Date("2026-07-17T12:00:00Z");
+  const claimTime = new Date("2026-07-17T12:01:00Z");
+  const secondClaimTime = new Date("2026-07-17T12:05:00Z");
+
+  assert.deepEqual(
+    assignmentClockTransition({ runId: "run_1", phase: "Ready to claim", now: claimTime }),
+    { startedAt: null, shouldRun: false }
+  );
+  assert.deepEqual(
+    assignmentClockTransition({ previousStartedAt: firstStart, previousRunId: "run_1", runId: "run_2", phase: "Running", now: secondClaimTime }),
+    { startedAt: secondClaimTime, shouldRun: true }
+  );
+  assert.deepEqual(
+    assignmentClockTransition({ previousStartedAt: firstStart, previousRunId: "run_1", runId: "run_1", phase: "Needs attention", now: secondClaimTime }),
+    { startedAt: firstStart, shouldRun: false }
+  );
 });
 
 test("normalizes hosted and local desktop API URLs before sidecar invocation", () => {

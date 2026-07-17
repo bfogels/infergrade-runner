@@ -406,7 +406,9 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("assignmentTitleFromRunId"));
   assert.ok(js.includes("waitingForListener: !childProcess"));
   assert.ok(js.includes('assignmentTime.textContent = "Not started"'));
-  assert.ok(js.includes('!["Handoff received", "Ready to claim"].includes(phase)'));
+  assert.ok(js.includes("assignmentClockTransition"));
+  assert.ok(js.includes("currentFirstRunUploadRunId() ? renderAssignmentFromHandoff() : renderAssignmentIdle()"));
+  assert.ok(js.includes("renderAssignmentFromHandoff({ force: true })"));
   assert.ok(js.includes("renderAssignmentFromListenerEvent"));
   assert.ok(js.includes("renderAssignmentFromListenerLine"));
   assert.ok(js.includes("Claimed run"));
@@ -456,8 +458,11 @@ test("tauri commands prepare the platform sidecar before startup", () => {
   const prepareScript = readFileSync(new URL("../scripts/prepare-sidecar.mjs", import.meta.url), "utf8");
 
   assert.equal(packageJson.scripts.pretauri, "node scripts/prepare-sidecar.mjs");
-  assert.ok(prepareScript.includes("build_desktop_sidecar.sh"));
+  assert.equal(packageJson.scripts["prebuild:windows"], "node scripts/prepare-sidecar.mjs");
+  assert.ok(prepareScript.includes('run("cargo"'));
+  assert.ok(prepareScript.includes("copyFileSync"));
   assert.ok(prepareScript.includes("spawnSync"));
+  assert.equal(prepareScript.includes("bash"), false);
 });
 
 test("desktop legacy support actions stay token-free and out of the visible drawer", () => {

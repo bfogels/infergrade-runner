@@ -196,6 +196,27 @@ export function displayCacheArtifactName(value = "") {
   return name.replace(/^[a-f0-9]{12,64}-/i, "") || "Cached model";
 }
 
+const TERMINAL_ASSIGNMENT_PHASES = new Set(["complete", "needs attention", "interrupted", "failed", "cancelled"]);
+
+export function assignmentClockTransition({
+  previousStartedAt = null,
+  previousRunId = "",
+  runId = "",
+  phase = "",
+  waitingForListener = false,
+  startedAt = null,
+  now = new Date(),
+} = {}) {
+  const normalizedPhase = String(phase || "").trim().toLowerCase();
+  const hasStarted = !waitingForListener && !["handoff received", "ready to claim"].includes(normalizedPhase);
+  const runChanged = Boolean(runId && previousRunId && runId !== previousRunId);
+  const nextStartedAt = hasStarted ? startedAt || (runChanged ? now : previousStartedAt) || now : null;
+  return {
+    startedAt: nextStartedAt,
+    shouldRun: Boolean(nextStartedAt) && !TERMINAL_ASSIGNMENT_PHASES.has(normalizedPhase),
+  };
+}
+
 export function isCredentialCanceled(message = "") {
   return /cancelled|canceled|user interaction|user.*cancel/i.test(String(message || ""));
 }

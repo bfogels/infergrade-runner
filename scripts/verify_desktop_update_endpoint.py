@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import ssl
+import time
 from typing import Any, Callable
 from urllib.request import Request, urlopen
 
@@ -27,18 +28,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def fetch(request: Request, opener: Callable[..., Any]) -> bytes:
+def fetch(request: Request, opener: Callable[..., Any], read_limit: int | None = None) -> bytes:
     with opener(request, timeout=30) as response:
         status = getattr(response, "status", 200)
         if status < 200 or status >= 300:
             raise SystemExit(f"Updater endpoint returned HTTP {status}: {request.full_url}")
-        return response.read()
+        return response.read(read_limit) if read_limit is not None else response.read()
 
 
 def verify_manifest(
     url: str,
     expected_version: str = "",
     opener: Callable[..., Any] = anonymous_urlopen,
+    attempts: int = 4,
+    sleeper: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     if not url.startswith("https://"):
         raise SystemExit("Updater manifest URL must use HTTPS.")
@@ -62,13 +65,23 @@ def verify_manifest(
             raise SystemExit(f"Updater platform {platform!r} is missing a public HTTPS URL or signature.")
         artifact_request = Request(
             artifact_url,
-            method="HEAD",
-            headers={"User-Agent": "InferGrade-Desktop-Release-Verification/1"},
+            headers={
+                "Range": "bytes=0-0",
+                "User-Agent": "InferGrade-Desktop-Release-Verification/1",
+            },
         )
-        try:
-            fetch(artifact_request, opener)
-        except OSError as error:
-            raise SystemExit(f"Updater archive is not anonymously reachable: {artifact_url}: {error}") from error
+        last_error = None
+        for attempt in range(max(1, attempts)):
+            try:
+                fetch(artifact_request, opener, read_limit=1)
+                last_error = None
+                break
+            except OSError as error:
+                last_error = error
+                if attempt + 1 < max(1, attempts):
+                    sleeper(2**attempt)
+        if last_error is not None:
+            raise SystemExit(f"Updater archive is not anonymously reachable: {artifact_url}: {last_error}") from last_error
     return manifest
 
 
