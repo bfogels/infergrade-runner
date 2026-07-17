@@ -11,6 +11,7 @@ Runner 0.3.36 makes the desktop handoff and update surfaces truthful and recover
 - Update status starts unknown and changes to `Current release` only after a successful signed-update check.
 - Local platform detection now resolves to a readable hardware class instead of lingering on `checking`.
 - Cold Tauri and platform package builds prepare the sidecar through a cross-platform Node hook.
+- Bundled Python launches no longer write bytecode into the signed app, preserving its Developer ID seal after use.
 - Vite moves to 6.4.3 to resolve the current Windows dev-server path advisories.
 
 ## Release integrity
