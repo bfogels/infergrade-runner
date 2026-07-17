@@ -5,6 +5,10 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
+    "pretauri": "node scripts/prepare-sidecar.mjs",
+    "prebuild:mac": "node scripts/prepare-sidecar.mjs",
+    "prebuild:windows": "node scripts/prepare-sidecar.mjs",
+    "prebuild:linux": "node scripts/prepare-sidecar.mjs",
     "check": "node --test src/*.test.mjs && vite build",
     "dev": "vite --host 127.0.0.1 --port 1420",
     "build": "vite build",
@@ -23,6 +27,6 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.0",
-    "vite": "6.4.2"
+    "vite": "^6.4.3"
   }
 }

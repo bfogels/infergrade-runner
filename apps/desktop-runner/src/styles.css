@@ -623,6 +623,11 @@ h4 {
   background: color-mix(in srgb, var(--success-soft) 34%, var(--surface));
 }
 
+.assignment-panel[data-state="waiting-for-listener"] {
+  border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface-raised));
+}
+
 .progress-wrap {
   display: grid;
   gap: 8px;
