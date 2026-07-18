@@ -162,6 +162,48 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "cli" } } }
+            }
+          }
+        }
+      },
+      "then": { "properties": { "locked_roles": { "contains": { "const": "cli" } } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "server" } } }
+            }
+          }
+        }
+      },
+      "then": { "properties": { "locked_roles": { "contains": { "const": "server" } } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "perplexity" } } }
+            }
+          }
+        }
+      },
+      "then": { "properties": { "locked_roles": { "contains": { "const": "perplexity" } } } }
     }
   ],
   "additionalProperties": false

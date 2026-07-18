@@ -278,6 +278,10 @@ class ContractExportTests(unittest.TestCase):
             item["roles"] = ["cli"]
         with self.assertRaisesRegex(AssertionError, "contains"):
             _validate_schema_subset(missing_server_coverage, receipt_schema)
+        undeclared_perplexity_coverage = json.loads(json.dumps(receipt_example))
+        undeclared_perplexity_coverage["role_files"][0]["roles"].append("perplexity")
+        with self.assertRaisesRegex(AssertionError, "contains"):
+            _validate_schema_subset(undeclared_perplexity_coverage, receipt_schema)
         artifact_schema = json.loads(
             (repo_root() / "schemas" / "json" / "runtime_receipt_artifact.schema.json").read_text(
                 encoding="utf-8"
@@ -285,6 +289,12 @@ class ContractExportTests(unittest.TestCase):
         )
         self.assertIn("files", artifact_schema["required"])
         self.assertEqual(artifact_schema["properties"]["files"]["maxItems"], 4096)
+        artifact_example = {**receipt_example, "files": receipt_example["role_files"]}
+        _validate_schema_subset(artifact_example, artifact_schema)
+        undeclared_artifact_coverage = json.loads(json.dumps(artifact_example))
+        undeclared_artifact_coverage["role_files"][0]["roles"].append("perplexity")
+        with self.assertRaisesRegex(AssertionError, "contains"):
+            _validate_schema_subset(undeclared_artifact_coverage, artifact_schema)
 
     def test_runtime_selector_schema_accepts_emitted_windows_cuda_preflight_selector(self):
         selector_schema = json.loads(
