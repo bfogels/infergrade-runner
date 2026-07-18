@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import stat
 import sys
 import tempfile
@@ -12,6 +13,8 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.runtime_locks import (
     _build_identity,
+    _build_identity_for_platform,
+    _assert_records_bounded,
     _canonical_sha256,
     _normalized_platform_arch,
     _package_records,
@@ -62,14 +65,41 @@ class RuntimeLockTests(unittest.TestCase):
             llama_cpp_perplexity_path=str(root / "llama-perplexity"),
         )
 
-    def _write_managed_selection(self, root: Path) -> None:
+    def _write_managed_selection(self, source_root: Path) -> Path:
+        staging_root = self.cache / "managed-staging"
+        shutil.copytree(source_root, staging_root)
         role_paths = {
-            "cli": (root / "llama-cli").resolve(),
-            "server": (root / "llama-server").resolve(),
-            "perplexity": (root / "llama-perplexity").resolve(),
+            "cli": (staging_root / "llama-cli").resolve(),
+            "server": (staging_root / "llama-server").resolve(),
+            "perplexity": (staging_root / "llama-perplexity").resolve(),
         }
-        identity = _build_identity(_package_records(root.resolve(), role_paths), "managed_package")
+        identity = _build_identity(_package_records(staging_root.resolve(), role_paths), "managed_package")
         runtime_build_id = _canonical_sha256(identity)
+        root = self.cache / "llama.cpp" / "builds" / runtime_build_id
+        root.parent.mkdir(parents=True, exist_ok=True)
+        staging_root.rename(root)
+        role_paths = {role: root / path.name for role, path in role_paths.items()}
+        manifest_path = self.cache / "llama.cpp" / "build-metadata" / (runtime_build_id + ".json")
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "registry_version": "infergrade_runtime_registry_v1",
+                    "runtime_build_id": runtime_build_id,
+                    "identity": identity,
+                    "origin": "managed_download",
+                    "runtime_id": "managed-a",
+                    "maturity": "reviewed_candidate",
+                    "provenance": "test managed package",
+                    "archive": {
+                        "sha256": "a" * 64,
+                        "checksum_verified": True,
+                        "independent_signature_verified": False,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
         path = selected_llama_cpp_runtime_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -79,10 +109,17 @@ class RuntimeLockTests(unittest.TestCase):
                     "source": "managed_download",
                     "channel": "reviewed_candidate",
                     "provenance": "test managed package",
-                    "archive": {"sha256": "a" * 64, "independent_signature_verified": False},
+                    "archive": {
+                        "sha256": "a" * 64,
+                        "checksum_verified": True,
+                        "independent_signature_verified": False,
+                    },
                     "runtime_build": {
                         "package_root": str(root),
                         "runtime_build_id": runtime_build_id,
+                        "identity_version": "infergrade_runtime_build_v1",
+                        "content_scope": "managed_package",
+                        "manifest_path": str(manifest_path),
                     },
                     "binaries": {
                         "cli": str(root / "llama-cli"),
@@ -93,9 +130,10 @@ class RuntimeLockTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        return root
 
     def test_managed_package_lock_fingerprints_full_package_without_public_paths(self):
-        self._write_managed_selection(self.runtime_a)
+        managed_root = self._write_managed_selection(self.runtime_a)
         request = self._request()
         request.llama_cpp_cli_path = None
         request.llama_cpp_server_path = None
@@ -103,6 +141,9 @@ class RuntimeLockTests(unittest.TestCase):
 
         lock, summary = resolve_runtime_lock(request, "bundle-a")
         receipt = finalize_runtime_receipt(lock)
+        artifact_schema = json.loads(
+            Path("schemas/json/runtime_receipt_artifact.schema.json").read_text(encoding="utf-8")
+        )
 
         self.assertEqual(summary["content_scope"], "managed_package")
         self.assertEqual(summary["origin"], "managed_download")
@@ -111,9 +152,46 @@ class RuntimeLockTests(unittest.TestCase):
         rendered = json.dumps(receipt, sort_keys=True)
         self.assertNotIn(self.tempdir.name, rendered)
         self.assertEqual(receipt["verification"]["silent_substitution_allowed"], False)
+        self.assertTrue(set(artifact_schema["required"]).issubset(receipt))
+        self.assertTrue(set(receipt).issubset(artifact_schema["properties"]))
+        self.assertLessEqual(
+            len(receipt["files"]), artifact_schema["properties"]["files"]["maxItems"]
+        )
         lock_path = self.cache / "llama.cpp" / "locks" / (lock["runtime_lock_id"] + ".json")
         if os.name != "nt":
             self.assertEqual(stat.S_IMODE(lock_path.stat().st_mode), 0o600)
+        self.assertEqual(request.llama_cpp_cli_path, str((managed_root / "llama-cli").resolve()))
+
+    def test_untrusted_managed_selection_is_downgraded_to_local_fingerprint(self):
+        path = selected_llama_cpp_runtime_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "runtime_id": "self-asserted",
+                    "source": "managed_download",
+                    "archive": {"sha256": "not-a-digest", "checksum_verified": True},
+                    "binaries": {
+                        "cli": str(self.runtime_a / "llama-cli"),
+                        "server": str(self.runtime_a / "llama-server"),
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        request = self._request()
+        request.llama_cpp_cli_path = None
+        request.llama_cpp_server_path = None
+        request.llama_cpp_perplexity_path = None
+
+        lock, summary = resolve_runtime_lock(request, "bundle-untrusted-managed")
+
+        self.assertEqual(summary["content_scope"], "selected_binary_set")
+        self.assertEqual(summary["origin"], "managed_download_unverified")
+        self.assertEqual(lock["provenance_strength"], "local_fingerprint_only")
+        self.assertTrue(all(item["relative_path"].startswith("selected/") for item in lock["files"]))
+        receipt = finalize_runtime_receipt(lock)
+        self.assertNotIn("llama-cli", json.dumps(receipt))
 
     def test_resume_restores_original_lock_after_preference_changes(self):
         request = self._request(self.runtime_a)
@@ -129,6 +207,12 @@ class RuntimeLockTests(unittest.TestCase):
         self.assertEqual(resumed_summary["runtime_build_id"], summary["runtime_build_id"])
         self.assertEqual(resumed_request.llama_cpp_cli_path, str((self.runtime_a / "llama-cli").resolve()))
         self.assertEqual(resumed_lock["runtime_lock_id"], lock["runtime_lock_id"])
+        persisted = json.loads(
+            (self.cache / "llama.cpp" / "locks" / (lock["runtime_lock_id"] + ".json")).read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(persisted["status"], "active")
 
     def test_mutated_binary_is_rejected_instead_of_silently_relocked(self):
         request = self._request(self.runtime_a)
@@ -191,7 +275,25 @@ class RuntimeLockTests(unittest.TestCase):
     def test_runtime_build_identity_matches_shared_rust_fixture(self):
         fixture_path = Path("crates/runner-engine/tests/fixtures/runtime_build_identity.json")
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-        self.assertEqual(_canonical_sha256(fixture["identity"]), fixture["runtime_build_id"])
+        root = Path(self.tempdir.name) / "fixture-tree"
+        role_paths = {}
+        for item in fixture["tree"]:
+            path = root / item["relative_path"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(item["content"], encoding="utf-8")
+            path.chmod(0o755)
+            for role in item["roles"]:
+                role_paths[role] = path.resolve()
+        records = _package_records(root.resolve(), role_paths)
+        identity = _build_identity_for_platform(
+            records,
+            "managed_package",
+            system=fixture["identity"]["platform"]["system"],
+            arch=fixture["identity"]["platform"]["arch"],
+        )
+
+        self.assertEqual(identity, fixture["identity"])
+        self.assertEqual(_canonical_sha256(identity), fixture["runtime_build_id"])
 
     def test_platform_arch_matches_rust_names(self):
         with mock.patch("infergrade.runtime_locks.platform.machine", return_value="arm64"):
@@ -211,6 +313,21 @@ class RuntimeLockTests(unittest.TestCase):
         second = _canonical_sha256(_build_identity(records, "managed_package"))
 
         self.assertEqual(first, second)
+
+    def test_runtime_receipt_generation_enforces_contract_bounds(self):
+        record = {
+            "relative_path": "selected/0001",
+            "kind": "regular",
+            "mode": 0,
+            "size_bytes": 1,
+            "sha256": "a" * 64,
+            "roles": ["cli"],
+        }
+        with self.assertRaisesRegex(RuntimeError, "4096"):
+            _assert_records_bounded([record] * 4097)
+        too_long = dict(record, relative_path="x" * 513)
+        with self.assertRaisesRegex(RuntimeError, "512"):
+            _assert_records_bounded([too_long])
 
 
 if __name__ == "__main__":

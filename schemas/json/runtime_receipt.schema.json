@@ -12,6 +12,7 @@
     "content_scope",
     "origin",
     "provenance_strength",
+    "provenance_evidence",
     "locked_roles",
     "content_manifest_file_count",
     "content_manifest_sha256",
@@ -29,6 +30,27 @@
     "maturity": { "type": ["string", "null"], "maxLength": 64 },
     "provenance_strength": {
       "enum": ["independently_signed", "checksum_verified", "local_fingerprint_only"]
+    },
+    "provenance_evidence": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "registry_version", "runtime_id", "source_archive_sha256"],
+          "properties": {
+            "kind": { "const": "managed_registry" },
+            "registry_version": { "const": "infergrade_runtime_registry_v1" },
+            "runtime_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "source_archive_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": { "kind": { "const": "local_fingerprint" } },
+          "additionalProperties": false
+        }
+      ]
     },
     "locked_roles": {
       "type": "array",

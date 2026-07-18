@@ -8,6 +8,12 @@
   "origin": "managed_download",
   "maturity": "reviewed_candidate",
   "provenance_strength": "checksum_verified",
+  "provenance_evidence": {
+    "kind": "managed_registry",
+    "registry_version": "infergrade_runtime_registry_v1",
+    "runtime_id": "llama-cpp-macos-metal-b9994",
+    "source_archive_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+  },
   "locked_roles": ["cli", "server"],
   "content_manifest_file_count": 2,
   "content_manifest_sha256": "3333333333333333333333333333333333333333333333333333333333333333",

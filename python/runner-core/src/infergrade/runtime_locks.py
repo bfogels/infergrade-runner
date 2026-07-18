@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -21,6 +22,10 @@ from infergrade.utils import utcnow_iso
 RUNTIME_BUILD_IDENTITY_VERSION = "infergrade_runtime_build_v1"
 RUNTIME_LOCK_VERSION = "infergrade_runtime_lock_v1"
 RUNTIME_RECEIPT_VERSION = "infergrade_runtime_receipt_v1"
+_SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
+_MAX_RECEIPT_FILES = 4096
+_MAX_RECEIPT_PATH_LENGTH = 512
+_MAX_RECEIPT_FILE_SIZE = 2**50
 _ROLE_DEFAULTS = {
     "cli": "llama-cli",
     "server": "llama-server",
@@ -126,6 +131,9 @@ def _resolve_role_paths(request: Any) -> Tuple[Dict[str, Path], Dict[str, Any]]:
         "channel": selected.get("channel"),
         "provenance": selected.get("provenance"),
         "archive_sha256": (selected.get("archive") or {}).get("sha256") if isinstance(selected.get("archive"), dict) else None,
+        "archive_checksum_verified": bool((selected.get("archive") or {}).get("checksum_verified"))
+        if isinstance(selected.get("archive"), dict)
+        else False,
         "independent_signature_verified": bool(
             (selected.get("archive") or {}).get("independent_signature_verified")
         ) if isinstance(selected.get("archive"), dict) else False,
@@ -140,34 +148,126 @@ def _mode(path: Path) -> int:
 
 
 def _role_records(paths: Dict[str, Path]) -> List[Dict[str, Any]]:
-    records = []
-    for role, path in sorted(paths.items()):
+    roles_by_path: Dict[Path, List[str]] = {}
+    for role, path in paths.items():
+        roles_by_path.setdefault(path.resolve(), []).append(role)
+    candidates = []
+    for path, roles in roles_by_path.items():
         stat_result = path.stat()
-        records.append(
+        candidates.append(
             {
-                "relative_path": "roles/%s/%s" % (role, path.name),
                 "kind": "regular",
                 "mode": _mode(path),
                 "size_bytes": int(stat_result.st_size),
                 "sha256": _sha256_file(path),
-                "roles": [role],
+                "roles": sorted(roles),
                 "source_path": str(path),
             }
         )
+    candidates.sort(
+        key=lambda item: (
+            item["sha256"],
+            item["size_bytes"],
+            item["mode"],
+            item["source_path"],
+        )
+    )
+    records = []
+    for index, item in enumerate(candidates):
+        record = dict(item)
+        # Synthetic names keep private/custom executable basenames out of public receipts.
+        # Role bindings are assertions on the locked content, not part of build identity.
+        record["relative_path"] = "selected/%04d" % (index + 1)
+        records.append(record)
     return records
 
 
 def _package_root(paths: Dict[str, Path], selection_metadata: Dict[str, Any]) -> Optional[Path]:
+    """Return a registry-backed managed root, or downgrade an unverifiable selection."""
     build = selection_metadata.get("managed_runtime_build") or {}
-    configured = build.get("package_root")
-    if configured:
-        root = Path(configured).expanduser().resolve()
-        if root.is_dir() and all(path == root or root in path.parents for path in paths.values()):
-            return root
     if selection_metadata.get("origin") != "managed_download":
         return None
-    common = Path(os.path.commonpath([str(path.parent) for path in paths.values()])).resolve()
-    return common if common.is_dir() else None
+    build_id = str(build.get("runtime_build_id") or "")
+    archive_sha256 = str(selection_metadata.get("archive_sha256") or "")
+    if (
+        not _SHA256_PATTERN.fullmatch(build_id)
+        or not _SHA256_PATTERN.fullmatch(archive_sha256)
+        or not selection_metadata.get("archive_checksum_verified")
+        or build.get("identity_version") != RUNTIME_BUILD_IDENTITY_VERSION
+        or build.get("content_scope") != "managed_package"
+    ):
+        selection_metadata["origin"] = "managed_download_unverified"
+        return None
+    expected_root = (llama_cpp_runtime_dir() / "builds").resolve() / build_id
+    expected_manifest = (llama_cpp_runtime_dir() / "build-metadata").resolve() / (build_id + ".json")
+    configured_root = Path(str(build.get("package_root") or "")).expanduser().resolve()
+    configured_manifest = Path(str(build.get("manifest_path") or "")).expanduser().resolve()
+    if (
+        configured_root != expected_root
+        or configured_manifest != expected_manifest
+        or expected_root.is_symlink()
+        or expected_manifest.is_symlink()
+        or not expected_root.is_dir()
+        or not expected_manifest.is_file()
+    ):
+        selection_metadata["origin"] = "managed_download_unverified"
+        return None
+    if not all(path == expected_root or expected_root in path.parents for path in paths.values()):
+        selection_metadata["origin"] = "managed_download_unverified"
+        return None
+    try:
+        with expected_manifest.open("r", encoding="utf-8") as handle:
+            registry = json.load(handle)
+    except (OSError, ValueError):
+        selection_metadata["origin"] = "managed_download_unverified"
+        return None
+    identity = registry.get("identity") if isinstance(registry, dict) else None
+    registry_archive = registry.get("archive") if isinstance(registry, dict) else None
+    registry_digest = str((registry_archive or {}).get("sha256") or "")
+    registry_runtime_id = registry.get("runtime_id") if isinstance(registry, dict) else None
+    if (
+        registry.get("registry_version") != "infergrade_runtime_registry_v1"
+        or registry.get("runtime_build_id") != build_id
+        or not isinstance(identity, dict)
+        or _canonical_sha256(identity) != build_id
+        or registry.get("origin") != "managed_download"
+        or not isinstance(registry_runtime_id, str)
+        or not registry_runtime_id.strip()
+        or len(registry_runtime_id) > 128
+        or not isinstance(registry_archive, dict)
+        or registry_archive.get("checksum_verified") is not True
+        or registry_digest != archive_sha256
+        or not _SHA256_PATTERN.fullmatch(registry_digest)
+    ):
+        selection_metadata["origin"] = "managed_download_unverified"
+        return None
+    selection_metadata["archive_sha256"] = registry_digest
+    selection_metadata["archive_checksum_verified"] = True
+    selection_metadata["independent_signature_verified"] = bool(
+        registry_archive.get("independent_signature_verified")
+    )
+    selection_metadata["runtime_id"] = registry_runtime_id
+    selection_metadata["channel"] = registry.get("maturity")
+    selection_metadata["provenance"] = registry.get("provenance")
+    return expected_root
+
+
+def _assert_records_bounded(records: List[Dict[str, Any]]) -> None:
+    if not 1 <= len(records) <= _MAX_RECEIPT_FILES:
+        raise RuntimeError(
+            "Cannot lock llama.cpp runtime: content manifest must contain between 1 and %d files."
+            % _MAX_RECEIPT_FILES
+        )
+    for item in records:
+        relative_path = str(item.get("relative_path") or "")
+        if not relative_path or len(relative_path) > _MAX_RECEIPT_PATH_LENGTH:
+            raise RuntimeError(
+                "Cannot lock llama.cpp runtime: content manifest path exceeds the %d-character receipt limit."
+                % _MAX_RECEIPT_PATH_LENGTH
+            )
+        size_bytes = item.get("size_bytes")
+        if isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or not 0 <= size_bytes <= _MAX_RECEIPT_FILE_SIZE:
+            raise RuntimeError("Cannot lock llama.cpp runtime: content manifest contains an unsupported file size.")
 
 
 def _package_records(root: Path, role_paths: Dict[str, Path]) -> List[Dict[str, Any]]:
@@ -189,11 +289,22 @@ def _package_records(root: Path, role_paths: Dict[str, Path]) -> List[Dict[str, 
             raise RuntimeError(
                 "Cannot lock llama.cpp runtime: managed package contains a file outside its immutable root."
             )
+        relative_path = path.relative_to(root).as_posix()
+        if len(relative_path) > _MAX_RECEIPT_PATH_LENGTH:
+            raise RuntimeError(
+                "Cannot lock llama.cpp runtime: content manifest path exceeds the %d-character receipt limit."
+                % _MAX_RECEIPT_PATH_LENGTH
+            )
+        if len(records) >= _MAX_RECEIPT_FILES:
+            raise RuntimeError(
+                "Cannot lock llama.cpp runtime: content manifest exceeds the %d-file receipt limit."
+                % _MAX_RECEIPT_FILES
+            )
         stat_result = resolved.stat()
         file_roles = [] if path.is_symlink() else sorted(roles_by_path.get(resolved, []))
         records.append(
             {
-                "relative_path": path.relative_to(root).as_posix(),
+                "relative_path": relative_path,
                 "kind": "regular",
                 "mode": _mode(resolved),
                 "size_bytes": int(stat_result.st_size),
@@ -211,6 +322,7 @@ def _package_records(root: Path, role_paths: Dict[str, Path]) -> List[Dict[str, 
             "Cannot lock llama.cpp runtime: managed package manifest omitted role(s): %s"
             % ", ".join(missing_roles)
         )
+    _assert_records_bounded(records)
     return records
 
 
@@ -236,13 +348,28 @@ def _build_identity(records: List[Dict[str, Any]], content_scope: str) -> Dict[s
     system = platform.system().lower() or "unknown"
     if system == "darwin":
         system = "macos"
+    return _build_identity_for_platform(
+        records,
+        content_scope,
+        system=system,
+        arch=_normalized_platform_arch(),
+    )
+
+
+def _build_identity_for_platform(
+    records: List[Dict[str, Any]],
+    content_scope: str,
+    system: str,
+    arch: str,
+) -> Dict[str, Any]:
+    """Construct the qualified content identity with explicit platform inputs."""
     return {
         "identity_version": RUNTIME_BUILD_IDENTITY_VERSION,
         "runtime_family": "llama.cpp",
         "runtime_interface": "llama_cpp_cli_server_v1",
         "platform": {
             "system": system,
-            "arch": _normalized_platform_arch(),
+            "arch": arch,
         },
         "content_scope": content_scope,
         "files": _identity_files(records),
@@ -260,6 +387,7 @@ def _public_lock_summary(lock: Dict[str, Any]) -> Dict[str, Any]:
         "origin": lock["origin"],
         "maturity": lock.get("maturity"),
         "provenance_strength": lock["provenance_strength"],
+        "provenance_evidence": lock["provenance_evidence"],
         "file_count": len(lock["files"]),
         "locked_roles": sorted(lock["resolved_paths"]),
         "created_at": lock["created_at"],
@@ -317,6 +445,7 @@ def resolve_runtime_lock(
         root = _package_root(paths, selection_metadata)
         content_scope = "managed_package" if root else "selected_binary_set"
         records = _package_records(root, paths) if root else _role_records(paths)
+        _assert_records_bounded(records)
         identity = _build_identity(records, content_scope)
         build_id = _canonical_sha256(identity)
         declared_build = selection_metadata.get("managed_runtime_build") or {}
@@ -346,10 +475,20 @@ def resolve_runtime_lock(
             "maturity": selection_metadata.get("channel"),
             "provenance_strength": (
                 "independently_signed"
-                if selection_metadata.get("independent_signature_verified")
+                if root and selection_metadata.get("independent_signature_verified")
                 else "checksum_verified"
-                if selection_metadata.get("archive_sha256")
+                if root and selection_metadata.get("archive_checksum_verified")
                 else "local_fingerprint_only"
+            ),
+            "provenance_evidence": (
+                {
+                    "kind": "managed_registry",
+                    "registry_version": "infergrade_runtime_registry_v1",
+                    "runtime_id": selection_metadata["runtime_id"],
+                    "source_archive_sha256": selection_metadata["archive_sha256"],
+                }
+                if root
+                else {"kind": "local_fingerprint"}
             ),
             "provenance": selection_metadata.get("provenance"),
             "runtime_id": selection_metadata.get("runtime_id"),
@@ -363,6 +502,11 @@ def resolve_runtime_lock(
         }
         _verify_lock(lock)
         _atomic_write_json(_lock_path(lock_id), lock)
+    if existing_summary:
+        # Resuming is a new active execution lease on the same immutable lock.
+        lock["status"] = "active"
+        lock["updated_at"] = utcnow_iso()
+        _atomic_write_json(_lock_path(lock["runtime_lock_id"]), lock)
     for role, field in _ROLE_REQUEST_FIELDS.items():
         setattr(request, field, lock.get("resolved_paths", {}).get(role))
     return lock, _public_lock_summary(lock)
@@ -386,6 +530,7 @@ def finalize_runtime_receipt(lock: Dict[str, Any]) -> Dict[str, Any]:
         }
         for item in lock["files"]
     ]
+    _assert_records_bounded(receipt_files)
     receipt = {
         "receipt_version": RUNTIME_RECEIPT_VERSION,
         "runtime_lock_id": lock["runtime_lock_id"],
@@ -396,6 +541,7 @@ def finalize_runtime_receipt(lock: Dict[str, Any]) -> Dict[str, Any]:
         "origin": lock["origin"],
         "maturity": lock.get("maturity"),
         "provenance_strength": lock["provenance_strength"],
+        "provenance_evidence": lock["provenance_evidence"],
         "locked_roles": sorted(lock["resolved_paths"]),
         "content_manifest_file_count": len(receipt_files),
         "content_manifest_sha256": _canonical_sha256(receipt_files),
@@ -422,6 +568,7 @@ def runtime_receipt_summary(receipt: Dict[str, Any]) -> Dict[str, Any]:
         "origin",
         "maturity",
         "provenance_strength",
+        "provenance_evidence",
         "locked_roles",
         "content_manifest_file_count",
         "content_manifest_sha256",

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import shutil
@@ -183,6 +184,54 @@ class TransportHttpTests(unittest.TestCase):
             json.dump({"bundle_id": "bundle-http", "files": {"results": ["../secret.json"]}}, handle)
 
         with self.assertRaises(ValueError):
+            bundle_payload(bundle_dir)
+
+    def test_bundle_payload_uploads_one_declared_full_runtime_receipt(self):
+        bundle_dir = self._write_bundle(include_summary=True)
+        files = [{
+            "relative_path": "selected/0001",
+            "kind": "regular",
+            "mode": 493,
+            "size_bytes": 3,
+            "sha256": "a" * 64,
+            "roles": ["cli", "server"],
+        }]
+        receipt = {
+            "files": files,
+            "content_manifest_file_count": 1,
+            "content_manifest_sha256": hashlib.sha256(
+                json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+        }
+        receipt_dir = os.path.join(bundle_dir, "artifacts", "receipts")
+        os.makedirs(receipt_dir)
+        with open(os.path.join(receipt_dir, "runtime_receipt.json"), "w", encoding="utf-8") as handle:
+            json.dump(receipt, handle)
+        manifest_path = os.path.join(bundle_dir, "manifest.json")
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        manifest["files"]["runtime_receipt"] = "artifacts/receipts/runtime_receipt.json"
+        with open(manifest_path, "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle)
+
+        payload = bundle_payload(bundle_dir)
+
+        self.assertEqual(payload["runtime_receipt_artifact"], receipt)
+
+    def test_bundle_payload_rejects_mismatched_runtime_receipt_digest(self):
+        bundle_dir = self._write_bundle(include_summary=True)
+        receipt_dir = os.path.join(bundle_dir, "artifacts", "receipts")
+        os.makedirs(receipt_dir)
+        with open(os.path.join(receipt_dir, "runtime_receipt.json"), "w", encoding="utf-8") as handle:
+            json.dump({"files": [{}], "content_manifest_file_count": 1, "content_manifest_sha256": "0" * 64}, handle)
+        manifest_path = os.path.join(bundle_dir, "manifest.json")
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        manifest["files"]["runtime_receipt"] = "artifacts/receipts/runtime_receipt.json"
+        with open(manifest_path, "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle)
+
+        with self.assertRaisesRegex(ValueError, "manifest digest"):
             bundle_payload(bundle_dir)
 
     def test_transport_calls_use_expected_paths_and_auth_headers(self):

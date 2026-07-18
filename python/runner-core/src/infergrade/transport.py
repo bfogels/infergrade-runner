@@ -1,5 +1,6 @@
 """HTTP transport helpers for talking to an InferGrade Hub API."""
 
+import hashlib
 import ipaddress
 import json
 import os
@@ -24,6 +25,8 @@ class RunnerTokenInvalidError(RuntimeError):
 
 
 RUNNER_TOKEN_INVALID_MESSAGE = "Runner token revoked or expired. Run 'infergrade pair' to re-pair."
+RUNTIME_RECEIPT_ARTIFACT_PATH = "artifacts/receipts/runtime_receipt.json"
+RUNTIME_RECEIPT_ARTIFACT_MAX_BYTES = 4 * 1024 * 1024
 
 
 def _is_local_http_api_host(host: str) -> bool:
@@ -136,7 +139,35 @@ def bundle_payload(bundle_dir: str) -> Dict[str, Any]:
     if validation is not None:
         payload["validation"] = validation
     payload["summary"] = summary or _summarize_payload_results(manifest, validation, results)
+    receipt_path = (manifest.get("files") or {}).get("runtime_receipt")
+    if receipt_path is not None:
+        if receipt_path != RUNTIME_RECEIPT_ARTIFACT_PATH:
+            raise ValueError(
+                "manifest files.runtime_receipt must be %s" % RUNTIME_RECEIPT_ARTIFACT_PATH
+            )
+        receipt = read_json(os.path.join(bundle_dir, *RUNTIME_RECEIPT_ARTIFACT_PATH.split("/")))
+        _validate_runtime_receipt_artifact_for_upload(receipt)
+        payload["runtime_receipt_artifact"] = receipt
     return payload
+
+
+def _validate_runtime_receipt_artifact_for_upload(receipt: Any) -> None:
+    """Refuse unbounded or internally inconsistent full receipts before upload."""
+    if not isinstance(receipt, dict):
+        raise ValueError("runtime receipt artifact must be an object")
+    encoded = json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if len(encoded) > RUNTIME_RECEIPT_ARTIFACT_MAX_BYTES:
+        raise ValueError("runtime receipt artifact exceeds the 4 MiB upload limit")
+    files = receipt.get("files")
+    if not isinstance(files, list) or not 1 <= len(files) <= 4096:
+        raise ValueError("runtime receipt artifact files must contain between 1 and 4096 records")
+    if receipt.get("content_manifest_file_count") != len(files):
+        raise ValueError("runtime receipt artifact file count does not match files")
+    manifest_digest = hashlib.sha256(
+        json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if receipt.get("content_manifest_sha256") != manifest_digest:
+        raise ValueError("runtime receipt artifact manifest digest does not match files")
 
 
 def _manifest_result_paths(manifest: Dict[str, Any], summary: Optional[Dict[str, Any]] = None) -> List[str]:

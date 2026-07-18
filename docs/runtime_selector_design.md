@@ -164,17 +164,19 @@ Fallbacks must be explicit and non-silent:
 `execution.runtime_receipt` is the evidence binding produced after a successful
 native run. It records:
 
-- an immutable `runtime_build_id` derived from the platform, runtime interface,
-  content scope, and normalized execution-tree file manifest. Executable role
-  assertions are deliberately excluded from this content digest;
+- an immutable, qualified `runtime_build_id` derived from the platform, runtime
+  interface, content scope, and normalized execution-tree file manifest.
+  Executable role assertions are deliberately excluded from this digest;
 - the per-attempt `runtime_lock_id`;
-- runtime origin, maturity, and provenance strength as separate dimensions;
+- runtime origin, maturity, provenance strength, and bounded registry/source
+  evidence as separate dimensions;
 - the exact CLI/server/perplexity role digests without absolute local paths;
 - the declared content-scope file count and manifest digest; and
 - successful pre-launch and post-run verification with silent substitution
   explicitly disabled.
 
-The complete declared-scope manifest is emitted once as a receipt artifact. For
+The complete declared-scope manifest is emitted and uploaded once as a bounded
+receipt artifact. For
 managed packages this covers the full package. For advanced local binaries it
 covers only the explicitly selected binary set and does not claim every dynamic
 library on the host. Result rows
@@ -188,6 +190,10 @@ chain provenance. Native llama.cpp evidence can reach `verified` only when the
 receipt covers a managed package and its archive was checksum-verified or
 independently signed. A selected local binary set can still prove stable bytes,
 but its verification level tops out at `community`.
+
+Managed provenance comes from the Runner build registry, not a mutable
+`selected_runtime.json` label alone. A missing, malformed, or legacy registry
+claim is treated as `selected_binary_set` plus `local_fingerprint_only`.
 
 ## Initial Selector Matrix
 

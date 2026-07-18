@@ -65,6 +65,9 @@ const CANDIDATE_LLAMA_CPP_MACOS_METAL_ARCHIVE_URL: &str =
     "https://github.com/ggml-org/llama.cpp/releases/download/b9994/llama-b9994-bin-macos-arm64.tar.gz";
 const CANDIDATE_LLAMA_CPP_MACOS_METAL_SHA256: &str =
     "39aeba4d7cd04803ea15760f01af6990c35487b8a83446fa0e7bb394b5c5f3c5";
+const RUNTIME_RECEIPT_MAX_FILES: usize = 4096;
+const RUNTIME_RECEIPT_MAX_PATH_CHARS: usize = 512;
+const RUNTIME_RECEIPT_MAX_FILE_SIZE: u64 = 1_u64 << 50;
 
 fn is_local_http_host(host: &str) -> bool {
     if host == "localhost" {
@@ -1549,6 +1552,15 @@ fn runtime_build_identity(
     package_root: &Path,
     roles: &[(&str, &Path)],
 ) -> Result<(String, Value), String> {
+    runtime_build_identity_for_platform(package_root, roles, env::consts::OS, env::consts::ARCH)
+}
+
+fn runtime_build_identity_for_platform(
+    package_root: &Path,
+    roles: &[(&str, &Path)],
+    system: &str,
+    arch: &str,
+) -> Result<(String, Value), String> {
     let canonical_root = fs::canonicalize(package_root).map_err(|error| {
         format!(
             "could not canonicalize runtime package `{}`: {error}",
@@ -1570,6 +1582,12 @@ fn runtime_build_identity(
     }
     let mut paths = Vec::new();
     collect_runtime_files(package_root, &mut paths)?;
+    if paths.is_empty() || paths.len() > RUNTIME_RECEIPT_MAX_FILES {
+        return Err(format!(
+            "managed runtime package must contain between 1 and {} files",
+            RUNTIME_RECEIPT_MAX_FILES
+        ));
+    }
     let mut file_values = Vec::new();
     let mut present_roles = Vec::new();
     for path in paths {
@@ -1587,12 +1605,23 @@ fn runtime_build_identity(
             .map_err(|error| format!("could not relativize runtime file: {error}"))?
             .to_string_lossy()
             .replace('\\', "/");
+        if relative.is_empty() || relative.chars().count() > RUNTIME_RECEIPT_MAX_PATH_CHARS {
+            return Err(format!(
+                "managed runtime package path exceeds the {}-character receipt limit",
+                RUNTIME_RECEIPT_MAX_PATH_CHARS
+            ));
+        }
         let metadata = fs::metadata(&canonical).map_err(|error| {
             format!(
                 "could not inspect runtime file `{}`: {error}",
                 canonical.display()
             )
         })?;
+        if metadata.len() > RUNTIME_RECEIPT_MAX_FILE_SIZE {
+            return Err(
+                "managed runtime package contains a file too large for a receipt".to_string(),
+            );
+        }
         let mut file_roles = roles_by_path.get(&canonical).cloned().unwrap_or_default();
         file_roles.sort();
         present_roles.extend(file_roles.iter().cloned());
@@ -1613,8 +1642,8 @@ fn runtime_build_identity(
         }
     }
     let mut platform = BTreeMap::new();
-    platform.insert("arch", json!(env::consts::ARCH));
-    platform.insert("system", json!(env::consts::OS));
+    platform.insert("arch", json!(arch));
+    platform.insert("system", json!(system));
     let mut identity = BTreeMap::new();
     identity.insert("content_scope", json!("managed_package"));
     identity.insert("files", json!(file_values));
@@ -1948,53 +1977,6 @@ fn managed_runtime_root_for_selection(selection: &Value) -> Result<Option<PathBu
     managed_runtime_install_root(&runtime_id).map(Some)
 }
 
-fn active_runtime_locks(runtime_build_id: &str) -> Result<Vec<String>, String> {
-    let locks_root = runtime_cache_root()?.join("llama.cpp").join("locks");
-    let entries = match fs::read_dir(&locks_root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(format!(
-                "could not inspect runtime execution locks `{}`: {error}",
-                locks_root.display()
-            ))
-        }
-    };
-    let mut lock_ids = Vec::new();
-    for entry in entries {
-        let path = entry
-            .map_err(|error| format!("could not inspect runtime execution lock: {error}"))?
-            .path();
-        if path.extension().and_then(|value| value.to_str()) != Some("json") {
-            continue;
-        }
-        let text = fs::read_to_string(&path).map_err(|error| {
-            format!(
-                "could not read runtime execution lock `{}`: {error}",
-                path.display()
-            )
-        })?;
-        let lock: Value = serde_json::from_str(&text).map_err(|error| {
-            format!(
-                "runtime execution lock `{}` is invalid JSON: {error}",
-                path.display()
-            )
-        })?;
-        if lock.get("status").and_then(Value::as_str) == Some("active")
-            && lock.get("runtime_build_id").and_then(Value::as_str) == Some(runtime_build_id)
-        {
-            lock_ids.push(
-                lock.get("runtime_lock_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown")
-                    .to_string(),
-            );
-        }
-    }
-    lock_ids.sort();
-    Ok(lock_ids)
-}
-
 pub fn remove_selected_llama_cpp_runtime(remove_managed_files: bool) -> Result<Value, String> {
     let selected_path = selected_llama_cpp_runtime_path()?;
     let selected_text = match fs::read_to_string(&selected_path) {
@@ -2018,21 +2000,6 @@ pub fn remove_selected_llama_cpp_runtime(remove_managed_files: bool) -> Result<V
         .as_ref()
         .and_then(|value| managed_runtime_root_for_selection(value).transpose())
         .transpose()?;
-    if remove_managed_files {
-        if let Some(runtime_build_id) = selection
-            .as_ref()
-            .and_then(|value| value.pointer("/runtime_build/runtime_build_id"))
-            .and_then(Value::as_str)
-        {
-            let active_locks = active_runtime_locks(runtime_build_id)?;
-            if !active_locks.is_empty() {
-                return Err(format!(
-                    "cannot remove managed runtime build while {} run attempt lock(s) are active",
-                    active_locks.len()
-                ));
-            }
-        }
-    }
     let removed_selection = match fs::remove_file(&selected_path) {
         Ok(()) => true,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
@@ -2043,23 +2010,12 @@ pub fn remove_selected_llama_cpp_runtime(remove_managed_files: bool) -> Result<V
             ))
         }
     };
-    let removed_managed_files = if remove_managed_files {
-        match managed_root.as_ref() {
-            Some(root) => match fs::remove_dir_all(root) {
-                Ok(()) => true,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-                Err(error) => {
-                    return Err(format!(
-                        "could not remove managed runtime files `{}`: {error}",
-                        root.display()
-                    ))
-                }
-            },
-            None => false,
-        }
-    } else {
-        false
-    };
+    // Runtime builds are immutable and may be referenced by resumable or crashed
+    // attempts. Until a cross-process lease/recovery protocol exists, clearing a
+    // preference never deletes managed bytes; safe pruning is a separate operation.
+    let removed_managed_files = false;
+    let retained_managed_files =
+        remove_managed_files && managed_root.as_ref().is_some_and(|root| root.exists());
     let selected_source = selection
         .as_ref()
         .and_then(|value| value.get("source"))
@@ -2069,10 +2025,13 @@ pub fn remove_selected_llama_cpp_runtime(remove_managed_files: bool) -> Result<V
         "status": if removed_selection || removed_managed_files { "removed" } else { "not_selected" },
         "removed_selection": removed_selection,
         "removed_managed_files": removed_managed_files,
+        "retained_managed_files": retained_managed_files,
         "selected_runtime_path": selected_path.display().to_string(),
         "managed_runtime_root": managed_root.map(|path| path.display().to_string()),
         "selected_source": selected_source,
-        "message": if removed_selection || removed_managed_files {
+        "message": if removed_selection && retained_managed_files {
+            "Selected llama.cpp runtime cleared. Immutable managed build bytes were retained for resumable runs; safe cache pruning is not available yet."
+        } else if removed_selection {
             "Selected llama.cpp runtime cleared. Install the managed runtime again or select a runnable local binary before native first-run."
         } else {
             "No selected llama.cpp runtime was recorded. Install or select a runtime before native first-run."
@@ -2239,8 +2198,18 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         .map_err(|error| format!("could not create runtime build metadata directory: {error}"))?;
     let build_manifest_path = metadata_root.join(format!("{runtime_build_id}.json"));
     let build_manifest = json!({
+        "registry_version": "infergrade_runtime_registry_v1",
         "runtime_build_id": runtime_build_id,
         "identity": build_identity,
+        "origin": "managed_download",
+        "runtime_id": runtime_id,
+        "maturity": entry["channel"].clone(),
+        "provenance": entry["provenance"].clone(),
+        "archive": {
+            "sha256": expected_sha256,
+            "checksum_verified": true,
+            "independent_signature_verified": false,
+        },
     });
     let build_manifest_bytes = serde_json::to_vec_pretty(&build_manifest)
         .map_err(|error| format!("could not serialize runtime build manifest: {error}"))?;
@@ -2348,16 +2317,52 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    #[cfg(unix)]
     #[test]
     fn runtime_build_identity_matches_shared_python_fixture() {
         let fixture: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/runtime_build_identity.json"
         ))
         .expect("runtime build identity fixture");
-        assert_eq!(
-            runtime_build_id_from_identity(&fixture["identity"]).expect("runtime build id"),
-            fixture["runtime_build_id"]
-        );
+        let root = env::temp_dir().join(format!(
+            "infergrade-runtime-shared-identity-fixture-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let mut owned_roles: Vec<(String, PathBuf)> = Vec::new();
+        for item in fixture["tree"].as_array().expect("fixture tree") {
+            let relative = item["relative_path"].as_str().expect("fixture path");
+            let path = root.join(relative);
+            fs::create_dir_all(path.parent().expect("fixture parent")).expect("fixture parent");
+            fs::write(&path, item["content"].as_str().expect("fixture content"))
+                .expect("fixture file");
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("fixture mode");
+            for role in item["roles"].as_array().expect("fixture roles") {
+                owned_roles.push((
+                    role.as_str().expect("fixture role").to_string(),
+                    path.clone(),
+                ));
+            }
+        }
+        let roles: Vec<(&str, &Path)> = owned_roles
+            .iter()
+            .map(|(role, path)| (role.as_str(), path.as_path()))
+            .collect();
+        let (runtime_build_id, identity) = runtime_build_identity_for_platform(
+            &root,
+            &roles,
+            fixture["identity"]["platform"]["system"]
+                .as_str()
+                .expect("fixture system"),
+            fixture["identity"]["platform"]["arch"]
+                .as_str()
+                .expect("fixture arch"),
+        )
+        .expect("constructed runtime identity");
+        assert_eq!(identity, fixture["identity"]);
+        assert_eq!(runtime_build_id, fixture["runtime_build_id"]);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]
@@ -2832,6 +2837,22 @@ mod tests {
             .as_str()
             .unwrap_or("")
             .contains("managed-test"));
+        let manifest_path = result["selection"]["runtime_build"]["manifest_path"]
+            .as_str()
+            .expect("registry manifest path");
+        let registry: Value =
+            serde_json::from_slice(&fs::read(manifest_path).expect("registry manifest"))
+                .expect("registry manifest JSON");
+        assert_eq!(
+            registry["registry_version"],
+            "infergrade_runtime_registry_v1"
+        );
+        assert_eq!(registry["origin"], "managed_download");
+        assert_eq!(registry["archive"]["checksum_verified"], true);
+        assert_eq!(
+            registry["archive"]["sha256"],
+            result["selection"]["archive"]["sha256"]
+        );
 
         if let Some(previous_cache_dir) = previous_cache_dir {
             env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
@@ -2897,7 +2918,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_runtime_removal_refuses_active_run_lock() {
+    fn managed_runtime_clear_retains_immutable_build_even_with_active_lock() {
         let _guard = env_test_lock().lock().expect("env lock");
         let runtime_cache_dir = env::temp_dir().join(format!(
             "infergrade-runner-engine-active-lock-{}",
@@ -2935,10 +2956,11 @@ mod tests {
         )
         .expect("active lock");
 
-        let error = remove_selected_llama_cpp_runtime(true)
-            .expect_err("active runtime lock must block deletion");
-        assert!(error.contains("run attempt lock"));
-        assert!(selected_path.is_file());
+        let removed = remove_selected_llama_cpp_runtime(true).expect("selection cleared safely");
+        assert_eq!(removed["removed_selection"], true);
+        assert_eq!(removed["removed_managed_files"], false);
+        assert_eq!(removed["retained_managed_files"], true);
+        assert!(!selected_path.is_file());
         assert!(build_root.is_dir());
 
         if let Some(previous_cache_dir) = previous_cache_dir {
@@ -3599,7 +3621,7 @@ mod tests {
     }
 
     #[test]
-    fn removes_selected_managed_runtime_without_touching_local_binary_selections() {
+    fn clears_selected_runtime_without_deleting_runtime_bytes() {
         let _guard = env_test_lock().lock().expect("env lock");
         let runtime_cache_dir = env::temp_dir().join(format!(
             "infergrade-runner-engine-remove-runtime-cache-{}",
@@ -3645,12 +3667,13 @@ mod tests {
         write_selected_llama_cpp_runtime(&managed_selection).expect("selected managed runtime");
         let removed = remove_selected_llama_cpp_runtime(true).expect("managed runtime removed");
         assert_eq!(removed["removed_selection"], true);
-        assert_eq!(removed["removed_managed_files"], true);
-        assert!(!managed_root.exists());
+        assert_eq!(removed["removed_managed_files"], false);
+        assert_eq!(removed["retained_managed_files"], true);
+        assert!(managed_root.exists());
         assert!(removed["message"]
             .as_str()
             .expect("message")
-            .contains("Install the managed runtime again"));
+            .contains("safe cache pruning is not available yet"));
 
         if let Some(previous_cache_dir) = previous_cache_dir {
             env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);

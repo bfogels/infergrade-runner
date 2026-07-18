@@ -74,16 +74,26 @@ infergrade-runner runtime install
   `~/.cache/infergrade/runtimes/llama.cpp/locks/`. Results contain a path-free
   receipt with the exact build id, executable-role digests, execution-tree
   digest, origin, maturity, and provenance strength. The full managed-package
-  manifest is stored once in `artifacts/receipts/runtime_receipt.json`.
-- Build identity is content-only. Executable-role assertions and support policy
-  are recorded alongside it but cannot change the id of otherwise identical
-  runtime bytes.
+  manifest is stored once in `artifacts/receipts/runtime_receipt.json` and sent
+  once as the bounded `runtime_receipt_artifact` Hub upload field.
+- Build identity is a qualified content identity: it covers the normalized
+  bytes plus platform, runtime interface, and declared content scope. Executable
+  role assertions and support policy are recorded alongside it but do not enter
+  the digest. Advanced selected binaries use synthetic receipt names so private
+  executable basenames are not published.
+- A managed provenance claim is accepted only when the selection points to the
+  expected content-addressed build and matching Runner registry manifest. The
+  receipt carries the registry version, managed runtime id, and verified source
+  archive digest. Legacy or malformed managed selections are downgraded to a
+  selected-binary local fingerprint.
 - Runner verifies every locked file before backend execution and again after
   the run. Mutation or a missing lock fails the attempt; it never triggers a
-  silent runtime substitution. Active locks also prevent managed-build removal.
-- The registry does not auto-delete older content-addressed builds. This first
-  slice can remove the selected managed build; explicit inventory and safe
-  pruning of unselected, unlocked builds remain a separate lifecycle feature.
+  silent runtime substitution. Resume verifies the saved lock and marks the
+  same attempt active again before backend execution.
+- Clearing a selected runtime removes only the mutable preference. It never
+  deletes immutable managed bytes. Cross-process leases, crashed-run recovery,
+  inventory, and safe pruning remain a separate lifecycle feature; until that
+  protocol exists, retention is deliberately conservative.
 - Explicit CLI paths and `INFERGRADE_LLAMA_CPP_*` environment variables override managed selection.
 - Doctor reports whether native binaries came from `custom_path`, `environment_path`, `managed_runtime`, or `system_path`.
 - The Rust manifest includes macOS Apple Silicon `llama.cpp` GitHub release assets with pinned SHA-256 digests, expected binaries, compatibility notes, and rollback metadata. b9050 remains InferGrade Stable; b9994 is an explicit reviewed upstream candidate until the complete compatibility matrix is recorded.
