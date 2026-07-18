@@ -1,5 +1,5 @@
 {
-  "contract_version": "0.3.22",
+  "contract_version": "0.3.23",
   "publisher": "infergrade-runner",
   "ontology_source": "schemas/json/model_ontology.schema.json",
   "schema_files": [
@@ -12,10 +12,12 @@
     "schemas/json/result_record.schema.json",
     "schemas/json/run_config.schema.json",
     "schemas/json/run_request.schema.json",
+    "schemas/json/runtime_receipt.schema.json",
     "schemas/json/runtime_selector.schema.json"
   ],
   "example_files": [
     "schemas/examples/model_ontology.qwen2.5-7b-instruct.gguf.json",
+    "schemas/examples/runtime_receipt.example.json",
     "schemas/examples/runtime_selector.macos_metal_managed.json",
     "schemas/examples/runtime_selector.windows_cuda_preview.json",
     "schemas/examples/run_config.tinyllama_preview_demo.json",
@@ -35,6 +37,7 @@
     "docs/input_output_spec.md",
     "docs/local_benchmark_methodology.md",
     "docs/local_capability_score.md",
+    "docs/managed_llama_cpp_runtime.md",
     "docs/schema_draft.md",
     "docs/windows_nvidia_cuda_beta.md",
     "docs/coverage_expansion_v0_3_5.md"

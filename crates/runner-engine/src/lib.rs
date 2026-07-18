@@ -37,9 +37,10 @@ pub use worker_protocol::{
 use flate2::read::GzDecoder;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::IpAddr;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command as StdCommand;
@@ -1439,6 +1440,202 @@ fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let mut file = fs::File::open(path)
+        .map_err(|error| format!("could not open runtime file `{}`: {error}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer).map_err(|error| {
+            format!("could not hash runtime file `{}`: {error}", path.display())
+        })?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn runtime_file_mode(path: &Path) -> Result<u32, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        return fs::metadata(path)
+            .map(|metadata| metadata.permissions().mode() & 0o777)
+            .map_err(|error| {
+                format!(
+                    "could not inspect runtime file `{}`: {error}",
+                    path.display()
+                )
+            });
+    }
+    #[cfg(not(unix))]
+    {
+        fs::metadata(path).map(|_| 0).map_err(|error| {
+            format!(
+                "could not inspect runtime file `{}`: {error}",
+                path.display()
+            )
+        })
+    }
+}
+
+fn runtime_builds_root() -> Result<PathBuf, String> {
+    Ok(runtime_cache_root()?.join("llama.cpp").join("builds"))
+}
+
+fn runtime_build_root(runtime_build_id: &str) -> Result<PathBuf, String> {
+    if runtime_build_id.len() != 64
+        || !runtime_build_id
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err("runtime_build_id must be a 64-character hex digest".to_string());
+    }
+    Ok(runtime_builds_root()?.join(runtime_build_id))
+}
+
+fn collect_runtime_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+    let mut entries = fs::read_dir(root)
+        .map_err(|error| {
+            format!(
+                "could not scan runtime package `{}`: {error}",
+                root.display()
+            )
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            format!(
+                "could not scan runtime package `{}`: {error}",
+                root.display()
+            )
+        })?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let path = entry.path();
+        let link_metadata = fs::symlink_metadata(&path).map_err(|error| {
+            format!(
+                "could not inspect runtime package path `{}`: {error}",
+                path.display()
+            )
+        })?;
+        if link_metadata.file_type().is_symlink() {
+            let target_metadata = fs::metadata(&path).map_err(|error| {
+                format!(
+                    "could not inspect runtime package symlink `{}`: {error}",
+                    path.display()
+                )
+            })?;
+            if target_metadata.is_dir() {
+                return Err(format!(
+                    "managed runtime package contains an unsupported directory symlink `{}`",
+                    path.display()
+                ));
+            }
+            if target_metadata.is_file() {
+                files.push(path);
+            }
+        } else if link_metadata.is_dir() {
+            collect_runtime_files(&path, files)?;
+        } else if link_metadata.is_file() {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn runtime_build_identity(
+    package_root: &Path,
+    roles: &[(&str, &Path)],
+) -> Result<(String, Value), String> {
+    let canonical_root = fs::canonicalize(package_root).map_err(|error| {
+        format!(
+            "could not canonicalize runtime package `{}`: {error}",
+            package_root.display()
+        )
+    })?;
+    let mut roles_by_path: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
+    for (role, path) in roles {
+        let canonical = fs::canonicalize(path).map_err(|error| {
+            format!(
+                "could not canonicalize runtime role `{}`: {error}",
+                path.display()
+            )
+        })?;
+        roles_by_path
+            .entry(canonical)
+            .or_default()
+            .push((*role).to_string());
+    }
+    let mut paths = Vec::new();
+    collect_runtime_files(package_root, &mut paths)?;
+    let mut file_values = Vec::new();
+    let mut present_roles = Vec::new();
+    for path in paths {
+        let canonical = fs::canonicalize(&path).map_err(|error| {
+            format!(
+                "could not canonicalize runtime file `{}`: {error}",
+                path.display()
+            )
+        })?;
+        if canonical != canonical_root && !canonical.starts_with(&canonical_root) {
+            return Err("runtime package contains a file outside its immutable root".to_string());
+        }
+        let relative = path
+            .strip_prefix(package_root)
+            .map_err(|error| format!("could not relativize runtime file: {error}"))?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let metadata = fs::metadata(&canonical).map_err(|error| {
+            format!(
+                "could not inspect runtime file `{}`: {error}",
+                canonical.display()
+            )
+        })?;
+        let mut file_roles = roles_by_path.get(&canonical).cloned().unwrap_or_default();
+        file_roles.sort();
+        present_roles.extend(file_roles.iter().cloned());
+        let mut record = BTreeMap::new();
+        record.insert("kind", json!("regular"));
+        record.insert("mode", json!(runtime_file_mode(&canonical)?));
+        record.insert("relative_path", json!(relative));
+        record.insert("roles", json!(file_roles));
+        record.insert("sha256", json!(sha256_file(&canonical)?));
+        record.insert("size_bytes", json!(metadata.len()));
+        file_values.push(json!(record));
+    }
+    if file_values.is_empty() {
+        return Err("managed runtime package is empty".to_string());
+    }
+    for (role, _) in roles {
+        if !present_roles.iter().any(|present| present == role) {
+            return Err(format!("managed runtime package omitted role `{role}`"));
+        }
+    }
+    let mut platform = BTreeMap::new();
+    platform.insert("arch", json!(env::consts::ARCH));
+    platform.insert("system", json!(env::consts::OS));
+    let mut identity = BTreeMap::new();
+    identity.insert("content_scope", json!("managed_package"));
+    identity.insert("files", json!(file_values));
+    identity.insert("identity_version", json!("infergrade_runtime_build_v1"));
+    identity.insert("platform", json!(platform));
+    identity.insert("runtime_family", json!("llama.cpp"));
+    identity.insert("runtime_interface", json!("llama_cpp_cli_server_v1"));
+    let identity_value = json!(identity);
+    Ok((
+        runtime_build_id_from_identity(&identity_value)?,
+        identity_value,
+    ))
+}
+
+fn runtime_build_id_from_identity(identity: &Value) -> Result<String, String> {
+    let canonical = serde_json::to_vec(identity)
+        .map_err(|error| format!("could not serialize runtime build identity: {error}"))?;
+    Ok(sha256_hex(&canonical))
+}
+
 fn managed_runtime_install_root(runtime_id: &str) -> Result<PathBuf, String> {
     Ok(runtime_cache_root()?
         .join("llama.cpp")
@@ -1738,12 +1935,65 @@ fn managed_runtime_root_for_selection(selection: &Value) -> Result<Option<PathBu
     if selection.get("source").and_then(Value::as_str) != Some("managed_download") {
         return Ok(None);
     }
+    if let Some(runtime_build_id) = selection
+        .pointer("/runtime_build/runtime_build_id")
+        .and_then(Value::as_str)
+    {
+        return runtime_build_root(runtime_build_id).map(Some);
+    }
     let runtime_id = selection
         .get("runtime_id")
         .and_then(Value::as_str)
-        .ok_or_else(|| "managed runtime selection is missing runtime_id".to_string())?;
+        .ok_or_else(|| "managed runtime selection is missing runtime identity".to_string())?;
     let runtime_id = safe_runtime_id(Some(runtime_id))?;
     managed_runtime_install_root(&runtime_id).map(Some)
+}
+
+fn active_runtime_locks(runtime_build_id: &str) -> Result<Vec<String>, String> {
+    let locks_root = runtime_cache_root()?.join("llama.cpp").join("locks");
+    let entries = match fs::read_dir(&locks_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(format!(
+                "could not inspect runtime execution locks `{}`: {error}",
+                locks_root.display()
+            ))
+        }
+    };
+    let mut lock_ids = Vec::new();
+    for entry in entries {
+        let path = entry
+            .map_err(|error| format!("could not inspect runtime execution lock: {error}"))?
+            .path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let text = fs::read_to_string(&path).map_err(|error| {
+            format!(
+                "could not read runtime execution lock `{}`: {error}",
+                path.display()
+            )
+        })?;
+        let lock: Value = serde_json::from_str(&text).map_err(|error| {
+            format!(
+                "runtime execution lock `{}` is invalid JSON: {error}",
+                path.display()
+            )
+        })?;
+        if lock.get("status").and_then(Value::as_str) == Some("active")
+            && lock.get("runtime_build_id").and_then(Value::as_str) == Some(runtime_build_id)
+        {
+            lock_ids.push(
+                lock.get("runtime_lock_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string(),
+            );
+        }
+    }
+    lock_ids.sort();
+    Ok(lock_ids)
 }
 
 pub fn remove_selected_llama_cpp_runtime(remove_managed_files: bool) -> Result<Value, String> {
@@ -1769,6 +2019,21 @@ pub fn remove_selected_llama_cpp_runtime(remove_managed_files: bool) -> Result<V
         .as_ref()
         .and_then(|value| managed_runtime_root_for_selection(value).transpose())
         .transpose()?;
+    if remove_managed_files {
+        if let Some(runtime_build_id) = selection
+            .as_ref()
+            .and_then(|value| value.pointer("/runtime_build/runtime_build_id"))
+            .and_then(Value::as_str)
+        {
+            let active_locks = active_runtime_locks(runtime_build_id)?;
+            if !active_locks.is_empty() {
+                return Err(format!(
+                    "cannot remove managed runtime build while {} run attempt lock(s) are active",
+                    active_locks.len()
+                ));
+            }
+        }
+    }
     let removed_selection = match fs::remove_file(&selected_path) {
         Ok(()) => true,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
@@ -1844,11 +2109,13 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         ));
     }
 
-    let install_root = managed_runtime_install_root(runtime_id)?;
-    let staging_root = install_root.with_extension(format!("staging-{}", std::process::id()));
-    let previous_root = install_root.with_extension(format!("previous-{}", std::process::id()));
+    let builds_root = runtime_builds_root()?;
+    let staging_root = builds_root.join(format!(
+        ".staging-{}-{}",
+        safe_runtime_id(Some(runtime_id))?,
+        std::process::id()
+    ));
     cleanup_stale_runtime_dir(&staging_root, "staging")?;
-    cleanup_stale_runtime_dir(&previous_root, "rollback")?;
     safe_extract_targz(&bytes, &staging_root)?;
     assert_symlinks_stay_under(&staging_root)?;
 
@@ -1891,36 +2158,111 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         }
     }
     set_executable_if_needed(&cli)?;
+    if let Some(path) = server.as_ref() {
+        set_executable_if_needed(path)?;
+    }
+    if let Some(path) = perplexity.as_ref() {
+        set_executable_if_needed(path)?;
+    }
     let version_output = smoke_runtime_binary(&cli)?;
-
+    let server =
+        server.ok_or_else(|| "managed runtime archive did not contain llama-server".to_string())?;
+    let perplexity = perplexity
+        .ok_or_else(|| "managed runtime archive did not contain llama-perplexity".to_string())?;
+    let relative_cli = cli
+        .strip_prefix(&staging_root)
+        .map_err(|error| format!("could not resolve installed llama-cli path: {error}"))?
+        .to_path_buf();
+    let relative_server = server
+        .strip_prefix(&staging_root)
+        .map_err(|error| format!("could not resolve installed llama-server path: {error}"))?
+        .to_path_buf();
+    let relative_perplexity = perplexity
+        .strip_prefix(&staging_root)
+        .map_err(|error| format!("could not resolve installed llama-perplexity path: {error}"))?
+        .to_path_buf();
+    let (runtime_build_id, build_identity) = runtime_build_identity(
+        &staging_root,
+        &[
+            ("cli", &cli),
+            ("server", &server),
+            ("perplexity", &perplexity),
+        ],
+    )?;
+    let install_root = runtime_build_root(&runtime_build_id)?;
+    fs::create_dir_all(&builds_root).map_err(|error| {
+        format!(
+            "could not create runtime build registry `{}`: {error}",
+            builds_root.display()
+        )
+    })?;
     if install_root.exists() {
-        fs::rename(&install_root, &previous_root).map_err(|error| {
-            format!(
-                "could not prepare rollback for managed runtime `{}`: {error}",
-                install_root.display()
-            )
-        })?;
-    }
-    if let Err(error) = fs::rename(&staging_root, &install_root) {
-        if previous_root.exists() {
-            let _ = fs::rename(&previous_root, &install_root);
+        let existing_cli = install_root.join(&relative_cli);
+        let existing_server = install_root.join(&relative_server);
+        let existing_perplexity = install_root.join(&relative_perplexity);
+        let (existing_id, _) = runtime_build_identity(
+            &install_root,
+            &[
+                ("cli", &existing_cli),
+                ("server", &existing_server),
+                ("perplexity", &existing_perplexity),
+            ],
+        )?;
+        if existing_id != runtime_build_id {
+            return Err(
+                "content-addressed runtime registry contains a mismatched build".to_string(),
+            );
         }
-        return Err(format!("could not activate managed runtime: {error}"));
+        fs::remove_dir_all(&staging_root).map_err(|error| {
+            format!("could not clean duplicate runtime staging directory: {error}")
+        })?;
+    } else {
+        fs::rename(&staging_root, &install_root)
+            .map_err(|error| format!("could not activate immutable managed runtime: {error}"))?;
     }
-    let installed_cli = install_root.join(
-        cli.strip_prefix(&staging_root)
-            .map_err(|error| format!("could not resolve installed llama-cli path: {error}"))?,
-    );
-    let installed_server = server.and_then(|path| {
-        path.strip_prefix(&staging_root)
-            .ok()
-            .map(|relative| install_root.join(relative).display().to_string())
+    let installed_cli = install_root.join(&relative_cli);
+    let installed_server = install_root.join(&relative_server);
+    let installed_perplexity = install_root.join(&relative_perplexity);
+    let file_count = build_identity
+        .get("files")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    let metadata_root = runtime_cache_root()?
+        .join("llama.cpp")
+        .join("build-metadata");
+    fs::create_dir_all(&metadata_root)
+        .map_err(|error| format!("could not create runtime build metadata directory: {error}"))?;
+    let build_manifest_path = metadata_root.join(format!("{runtime_build_id}.json"));
+    let build_manifest = json!({
+        "runtime_build_id": runtime_build_id,
+        "identity": build_identity,
     });
-    let installed_perplexity = perplexity.and_then(|path| {
-        path.strip_prefix(&staging_root)
-            .ok()
-            .map(|relative| install_root.join(relative).display().to_string())
-    });
+    let build_manifest_bytes = serde_json::to_vec_pretty(&build_manifest)
+        .map_err(|error| format!("could not serialize runtime build manifest: {error}"))?;
+    if build_manifest_path.exists() {
+        let existing = fs::read(&build_manifest_path)
+            .map_err(|error| format!("could not read runtime build manifest: {error}"))?;
+        let existing: Value = serde_json::from_slice(&existing)
+            .map_err(|error| format!("runtime build manifest is invalid JSON: {error}"))?;
+        if existing != build_manifest {
+            return Err(
+                "immutable runtime build manifest does not match the cached build".to_string(),
+            );
+        }
+    } else {
+        let temporary_manifest =
+            build_manifest_path.with_extension(format!("json.tmp-{}", std::process::id()));
+        {
+            let mut file = fs::File::create(&temporary_manifest)
+                .map_err(|error| format!("could not write runtime build manifest: {error}"))?;
+            file.write_all(&build_manifest_bytes)
+                .and_then(|_| file.write_all(b"\n"))
+                .map_err(|error| format!("could not write runtime build manifest: {error}"))?;
+        }
+        fs::rename(&temporary_manifest, &build_manifest_path)
+            .map_err(|error| format!("could not activate runtime build manifest: {error}"))?;
+    }
     let selection = json!({
         "runtime_id": runtime_id,
         "backend": "llama.cpp",
@@ -1938,8 +2280,16 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         },
         "binaries": {
             "cli": installed_cli.display().to_string(),
-            "server": installed_server,
-            "perplexity": installed_perplexity,
+            "server": installed_server.display().to_string(),
+            "perplexity": installed_perplexity.display().to_string(),
+        },
+        "runtime_build": {
+            "runtime_build_id": runtime_build_id,
+            "identity_version": "infergrade_runtime_build_v1",
+            "content_scope": "managed_package",
+            "file_count": file_count,
+            "package_root": install_root.display().to_string(),
+            "manifest_path": build_manifest_path.display().to_string(),
         },
         "version_smoke": {
             "command": "--version",
@@ -1950,29 +2300,15 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
             "machine": env::consts::ARCH,
         },
     });
-    let selected_path = match write_selected_llama_cpp_runtime(&selection) {
-        Ok(path) => path,
-        Err(error) => {
-            restore_previous_runtime_root(&install_root, &previous_root);
-            return Err(error);
-        }
-    };
-    let _ = fs::remove_dir_all(&previous_root);
+    let selected_path = write_selected_llama_cpp_runtime(&selection)?;
 
     Ok(json!({
         "status": "selected",
         "selection": selection,
         "path": selected_path.display().to_string(),
         "install_root": install_root.display().to_string(),
-        "message": "Managed llama.cpp runtime installed and selected. The archive checksum was verified; no independent signature was verified.",
+        "message": "Managed llama.cpp runtime installed as an immutable content-addressed build and selected. The archive checksum was verified; no independent signature was verified.",
     }))
-}
-
-fn restore_previous_runtime_root(install_root: &Path, previous_root: &Path) {
-    let _ = fs::remove_dir_all(install_root);
-    if previous_root.exists() {
-        let _ = fs::rename(previous_root, install_root);
-    }
 }
 
 fn write_selected_llama_cpp_runtime(selection: &Value) -> Result<PathBuf, String> {
@@ -2006,6 +2342,44 @@ mod tests {
     fn env_test_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn runtime_build_identity_matches_shared_python_fixture() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/runtime_build_identity.json"
+        ))
+        .expect("runtime build identity fixture");
+        assert_eq!(
+            runtime_build_id_from_identity(&fixture["identity"]).expect("runtime build id"),
+            fixture["runtime_build_id"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_build_identity_rejects_directory_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = env::temp_dir().join(format!(
+            "infergrade-runtime-identity-directory-symlink-{}",
+            std::process::id()
+        ));
+        let bin = root.join("bin");
+        let libraries = root.join("libraries");
+        fs::create_dir_all(&bin).expect("bin directory");
+        fs::create_dir_all(&libraries).expect("libraries directory");
+        let cli = bin.join("llama-cli");
+        let server = bin.join("llama-server");
+        fs::write(&cli, "cli").expect("cli");
+        fs::write(&server, "server").expect("server");
+        symlink(&libraries, root.join("library-alias")).expect("directory symlink");
+
+        let error = runtime_build_identity(&root, &[("cli", &cli), ("server", &server)])
+            .expect_err("directory symlink must be rejected");
+        assert!(error.contains("directory symlink"));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     fn write_test_llama_binary(path: &Path, binary_label: &str) {
@@ -2079,29 +2453,36 @@ mod tests {
             .expect("append test archive file");
     }
 
-    fn test_runtime_archive() -> Vec<u8> {
+    fn test_runtime_archive_with_marker(marker: &str) -> Vec<u8> {
         let encoder = GzEncoder::new(Vec::new(), Compression::default());
         let mut builder = Builder::new(encoder);
+        let cli = format!("#!/bin/sh\necho 'llama-cli version {marker}'\n");
+        let server = format!("#!/bin/sh\necho 'llama-server version {marker}'\n");
+        let perplexity = format!("#!/bin/sh\necho 'llama-perplexity version {marker}'\n");
         append_tar_file(
             &mut builder,
             "llama-test/bin/llama-cli",
-            b"#!/bin/sh\necho 'llama-cli version managed-test'\n",
+            cli.as_bytes(),
             0o755,
         );
         append_tar_file(
             &mut builder,
             "llama-test/bin/llama-server",
-            b"#!/bin/sh\necho 'llama-server version managed-test'\n",
+            server.as_bytes(),
             0o755,
         );
         append_tar_file(
             &mut builder,
             "llama-test/bin/llama-perplexity",
-            b"#!/bin/sh\necho 'llama-perplexity version managed-test'\n",
+            perplexity.as_bytes(),
             0o755,
         );
         let encoder = builder.into_inner().expect("finish tar");
         encoder.finish().expect("finish gzip")
+    }
+
+    fn test_runtime_archive() -> Vec<u8> {
+        test_runtime_archive_with_marker("managed-test")
     }
 
     fn test_runtime_archive_without_perplexity() -> Vec<u8> {
@@ -2429,6 +2810,114 @@ mod tests {
     }
 
     #[test]
+    fn managed_runtime_install_keeps_distinct_builds_side_by_side() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-side-by-side-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let archive_a = test_runtime_archive_with_marker("build-a");
+        let archive_b = test_runtime_archive_with_marker("build-b");
+
+        let first = install_managed_llama_cpp_runtime_from_manifest_entry(
+            test_runtime_manifest_entry(&archive_a),
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive_a),
+            },
+        )
+        .expect("first immutable runtime build");
+        let second = install_managed_llama_cpp_runtime_from_manifest_entry(
+            test_runtime_manifest_entry(&archive_b),
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive_b),
+            },
+        )
+        .expect("second immutable runtime build");
+
+        let first_id = first["selection"]["runtime_build"]["runtime_build_id"]
+            .as_str()
+            .expect("first build id");
+        let second_id = second["selection"]["runtime_build"]["runtime_build_id"]
+            .as_str()
+            .expect("second build id");
+        assert_ne!(first_id, second_id);
+        assert!(runtime_build_root(first_id).expect("first root").is_dir());
+        assert!(runtime_build_root(second_id).expect("second root").is_dir());
+        assert!(first["selection"]["binaries"]["cli"]
+            .as_str()
+            .unwrap_or("")
+            .contains(first_id));
+        assert!(second["selection"]["binaries"]["cli"]
+            .as_str()
+            .unwrap_or("")
+            .contains(second_id));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn managed_runtime_removal_refuses_active_run_lock() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-active-lock-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let runtime_build_id = "a".repeat(64);
+        let build_root = runtime_build_root(&runtime_build_id).expect("build root");
+        fs::create_dir_all(&build_root).expect("build root");
+        let selected_path = selected_llama_cpp_runtime_path().expect("selected path");
+        fs::create_dir_all(selected_path.parent().expect("selected parent"))
+            .expect("selected parent");
+        fs::write(
+            &selected_path,
+            serde_json::to_vec(&json!({
+                "runtime_id": "managed-active-test",
+                "source": "managed_download",
+                "runtime_build": {"runtime_build_id": runtime_build_id},
+                "binaries": {"cli": build_root.join("llama-cli")}
+            }))
+            .expect("selection json"),
+        )
+        .expect("selection");
+        let locks_root = runtime_cache_dir.join("llama.cpp").join("locks");
+        fs::create_dir_all(&locks_root).expect("locks root");
+        fs::write(
+            locks_root.join("lock.json"),
+            serde_json::to_vec(&json!({
+                "runtime_lock_id": "lock-active",
+                "runtime_build_id": runtime_build_id,
+                "status": "active"
+            }))
+            .expect("lock json"),
+        )
+        .expect("active lock");
+
+        let error = remove_selected_llama_cpp_runtime(true)
+            .expect_err("active runtime lock must block deletion");
+        assert!(error.contains("run attempt lock"));
+        assert!(selected_path.is_file());
+        assert!(build_root.is_dir());
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
     fn managed_runtime_install_rejects_checksum_mismatch_before_extracting() {
         let _guard = env_test_lock().lock().expect("env lock");
         let runtime_cache_dir = env::temp_dir().join(format!(
@@ -2596,7 +3085,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_runtime_install_restores_previous_root_when_selection_write_fails() {
+    fn managed_runtime_install_preserves_legacy_root_when_selection_write_fails() {
         let _guard = env_test_lock().lock().expect("env lock");
         let runtime_cache_dir = env::temp_dir().join(format!(
             "infergrade-runner-engine-managed-rollback-{}",

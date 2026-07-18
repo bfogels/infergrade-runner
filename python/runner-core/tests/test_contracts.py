@@ -98,7 +98,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.22")
+        self.assertEqual(manifest["contract_version"], "0.3.23")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_run_request_contract_accepts_authorized_artifact_download_size(self):
@@ -196,6 +196,34 @@ class ContractExportTests(unittest.TestCase):
         self.assertFalse(cuda_example["fallback"]["allowed"])
         self.assertIn("full_loop_not_proven", cuda_example["compatibility"]["reason_codes"])
         _validate_schema_subset(cuda_example, selector_schema)
+
+    def test_contract_declares_exact_runtime_receipts(self):
+        manifest = load_contract_manifest()
+        self.assertIn("schemas/json/runtime_receipt.schema.json", manifest["schema_files"])
+        self.assertIn("schemas/examples/runtime_receipt.example.json", manifest["example_files"])
+        result_schema = json.loads(
+            (repo_root() / "schemas" / "json" / "result_record.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            result_schema["properties"]["execution"]["properties"]["runtime_receipt"]["$ref"],
+            "runtime_receipt.schema.json",
+        )
+        receipt_schema = json.loads(
+            (repo_root() / "schemas" / "json" / "runtime_receipt.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            receipt_schema["properties"]["receipt_version"]["const"],
+            "infergrade_runtime_receipt_v1",
+        )
+        self.assertIn("files", receipt_schema["properties"])
+        self.assertFalse(
+            receipt_schema["properties"]["verification"]["properties"]
+            ["silent_substitution_allowed"]["const"]
+        )
+        receipt_example = json.loads(
+            (repo_root() / "schemas" / "examples" / "runtime_receipt.example.json").read_text(encoding="utf-8")
+        )
+        _validate_schema_subset(receipt_example, receipt_schema)
 
     def test_runtime_selector_schema_accepts_emitted_windows_cuda_preflight_selector(self):
         selector_schema = json.loads(

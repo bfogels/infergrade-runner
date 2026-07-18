@@ -8,6 +8,12 @@ InferGrade needs one contract for the runtime path that produced, or is expected
 
 The selector is not a marketing support claim. It is a structured compatibility and provenance record with an explicit support tier, probe result, fallback boundary, and claim boundary.
 
+The selector is also not execution authority. It describes requirements and
+compatibility. For a real native run, Runner resolves it together with local
+operator preferences into one exact `runtime_build_id` and a private
+per-attempt lock. Result records then carry a compact `runtime_receipt`; Hub
+must not choose a local path or replace that receipt with a runtime label.
+
 ## Inputs
 
 The field plan follows the active roadmap v0.3.0 runtime-selector scope and the CUDA feasibility decision in `infergrade-hub/docs/cuda_feasibility_report.md`:
@@ -148,6 +154,30 @@ Fallbacks must be explicit and non-silent:
 - A user-selected binary may be used only when the selector records `delivery.mode: "user_selected"` and preserves the claim boundary.
 - Container fallback from native is allowed only when the user or run config explicitly chose container execution.
 - Hub may show an alternate path as a recovery action, but the resulting run gets a new selector.
+- Runtime fallback may occur only before evidence measurement begins and must
+  create a new attempt lock. Resume always reuses the saved lock. After
+  measurement starts, another runtime requires a new attempt rather than an
+  in-place selector update.
+
+## Exact Runtime Receipt
+
+`execution.runtime_receipt` is the evidence binding produced after a successful
+native run. It records:
+
+- an immutable `runtime_build_id` derived from the platform, runtime interface,
+  content scope, and normalized execution-tree file manifest;
+- the per-attempt `runtime_lock_id`;
+- runtime origin, maturity, and provenance strength as separate dimensions;
+- the exact CLI/server/perplexity role digests without absolute local paths;
+- the full execution-tree file count and manifest digest; and
+- successful pre-launch and post-run verification with silent substitution
+  explicitly disabled.
+
+The complete file manifest is emitted once as a receipt artifact. Result rows
+use the compact projection so multi-profile bundles do not duplicate every
+library entry. Different build ids remain distinct evidence setup facts; any
+future cross-build comparison policy must be dimension-specific rather than a
+generic runtime-equivalence cohort.
 
 ## Initial Selector Matrix
 

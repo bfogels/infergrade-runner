@@ -39,6 +39,12 @@ from infergrade.progress import (
 from infergrade.profiles import resolve_capability_behavior, resolve_deployment_profiles, resolve_generation_preset
 from infergrade.reports import write_bundle_report, write_failure_report
 from infergrade.request import request_to_dict
+from infergrade.runtime_locks import (
+    finalize_runtime_receipt,
+    mark_runtime_lock_failed,
+    resolve_runtime_lock,
+    runtime_receipt_summary,
+)
 from infergrade.utils import ensure_dir, read_json, slugify, stable_hash, utcnow_iso, write_json
 from infergrade.validators import validate_bundle, validate_request
 
@@ -89,9 +95,14 @@ def _verification_level(request: RunRequest, hardware: Dict[str, Any], backend_v
         return "experimental"
     pinned_artifact = bool(request.quant_artifact and request.quant_artifact_sha256)
     hardware_captured = bool(hardware.get("accelerator_type"))
-    if pinned_artifact and backend_version and hardware_captured:
+    backend_pinned = bool(backend_version) and (
+        request.execution_mode != "local_native"
+        or request.backend != "llama.cpp"
+        or bool((request.runtime_lock or {}).get("runtime_build_id"))
+    )
+    if pinned_artifact and backend_pinned and hardware_captured:
         return "verified"
-    if backend_version and hardware_captured:
+    if backend_pinned and hardware_captured:
         return "community"
     return "experimental"
 
@@ -140,6 +151,7 @@ def _build_result_record(
         "backend_image": request.backend_image,
         "generation_preset": request.generation_preset,
         "backend_flags": request.backend_flags,
+        "runtime_build_id": (request.runtime_lock or {}).get("runtime_build_id"),
     }
     configuration_id = "cfg_%s" % stable_hash(config_payload)
     verification_level = _verification_level(request, environment, adapter_version)
@@ -186,7 +198,11 @@ def _build_result_record(
         "verification": {
             "verification_level": verification_level,
             "artifact_pinned": bool(request.quant_artifact and artifact_sha256),
-            "backend_version_pinned": bool(adapter_version),
+            "backend_version_pinned": bool(adapter_version) and (
+                request.execution_mode != "local_native"
+                or request.backend != "llama.cpp"
+                or bool((request.runtime_lock or {}).get("runtime_build_id"))
+            ),
             "container_pinned": request.execution_mode in ("local_container", "cloud_container"),
             "hardware_captured": True,
             "repeated_runs": 5 if request.tier != "canary" else 1,
@@ -313,6 +329,16 @@ def _build_result_record(
     return record
 
 
+def _path_free_runtime_metadata(runtime_metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep uploaded provenance useful without exposing absolute local paths."""
+    payload = deepcopy(runtime_metadata or {})
+    for key in ("native_binary", "native_server_binary", "native_perplexity_binary"):
+        value = payload.get(key)
+        if value:
+            payload[key] = os.path.basename(str(value))
+    return payload
+
+
 def _memory_fit_payload(
     deployment: Dict[str, Any], deployment_profile: str, model_weights_bytes: Optional[int]
 ) -> Dict[str, Any]:
@@ -414,6 +440,13 @@ def _missing_requirements(request: RunRequest, artifact_sha256: Any) -> List[str
         missing.append("quant_artifact")
     if request.quant_artifact and not artifact_sha256:
         missing.append("quant_artifact_sha256")
+    if (
+        not request.simulate
+        and request.backend == "llama.cpp"
+        and request.execution_mode == "local_native"
+        and not (request.runtime_lock or {}).get("runtime_build_id")
+    ):
+        missing.append("runtime_build_id")
     return missing
 
 
@@ -567,6 +600,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
 
     current_stage = "initializing"
     current_detail = None
+    runtime_lock = None
 
     try:
         current_stage = "environment_capture"
@@ -589,6 +623,42 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             progress,
             current_stage,
             metadata={"resolved": bool(resolved_artifact), "artifact": request.quant_artifact},
+        )
+
+        current_stage = "runtime_lock"
+        mark_stage_started(output_dir, progress, current_stage)
+        existing_lock_summary = existing_progress.get("runtime_lock") if existing_progress else None
+        if (
+            existing_progress
+            and not existing_lock_summary
+            and (existing_progress.get("stages") or {}).get("backend_resolution")
+            and request.backend == "llama.cpp"
+            and request.execution_mode == "local_native"
+            and not request.simulate
+        ):
+            raise RuntimeError(
+                "Cannot resume this legacy native run because execution began before exact runtime locks were recorded. "
+                "Start a new run attempt; InferGrade will not guess which llama.cpp build was used."
+            )
+        resolved_runtime = resolve_runtime_lock(
+            request,
+            bundle_id,
+            existing_summary=existing_lock_summary,
+        )
+        if resolved_runtime:
+            runtime_lock, runtime_lock_summary = resolved_runtime
+            request.runtime_lock = runtime_lock_summary
+            progress["runtime_lock"] = runtime_lock_summary
+            save_progress(output_dir, progress)
+        mark_stage_completed(
+            output_dir,
+            progress,
+            current_stage,
+            metadata={
+                "locked": bool(resolved_runtime),
+                "runtime_build_id": (request.runtime_lock or {}).get("runtime_build_id"),
+                "runtime_lock_id": (request.runtime_lock or {}).get("runtime_lock_id"),
+            },
         )
 
         current_stage = "backend_resolution"
@@ -752,6 +822,14 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             else:
                 deployment_artifacts[profile_id] = execution.metrics
 
+        runtime_receipt = finalize_runtime_receipt(runtime_lock) if runtime_lock else None
+        if runtime_receipt:
+            request.runtime_receipt = runtime_receipt_summary(runtime_receipt)
+            for record, relative_path in zip(result_records, result_paths):
+                record["execution"]["runtime_receipt"] = deepcopy(request.runtime_receipt)
+                record["verification"]["backend_version_pinned"] = True
+                write_json(os.path.join(output_dir, relative_path), record)
+
         _emit_progress(emit_progress, "Writing bundle artifacts...")
         write_json(os.path.join(output_dir, "artifacts", "environment.json"), environment)
         write_json(os.path.join(output_dir, "artifacts", "ontology.json"), ontology)
@@ -760,6 +838,11 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             write_json(
                 os.path.join(output_dir, "artifacts", "receipts", "artifact_resolution.json"),
                 resolved_artifact.to_dict(),
+            )
+        if runtime_receipt is not None:
+            write_json(
+                os.path.join(output_dir, "artifacts", "receipts", "runtime_receipt.json"),
+                runtime_receipt,
             )
         if capability_execution.status != "skipped":
             write_json(
@@ -806,7 +889,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
                 "backend_flags": request.backend_flags,
                 "generation_preset": request.generation_preset,
                 "simulate": request.simulate,
-                "runtime_metadata": runtime_metadata,
+                "runtime_metadata": _path_free_runtime_metadata(runtime_metadata),
             },
         )
         write_json(os.path.join(output_dir, "provenance", "hardware_snapshot.json"), environment)
@@ -835,6 +918,8 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         }
         if resolved_artifact:
             manifest_files["artifact_resolution"] = "artifacts/receipts/artifact_resolution.json"
+        if runtime_receipt is not None:
+            manifest_files["runtime_receipt"] = "artifacts/receipts/runtime_receipt.json"
         if fidelity_execution.metrics or fidelity_execution.context or fidelity_execution.reason_codes:
             manifest_files["fidelity"] = "artifacts/fidelity.json"
         capability_summary_path = ((capability_execution.artifacts or {}).get("_summary") or {}).get("capability_summary_path")
@@ -928,6 +1013,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             "validation": final_validation.to_dict(),
         }
     except Exception as exc:
+        mark_runtime_lock_failed(runtime_lock)
         mark_failed(output_dir, progress, current_stage, current_detail, str(exc))
         write_failure_report(output_dir, request, progress, str(exc), stage=current_stage, detail=current_detail)
         raise
