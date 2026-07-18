@@ -81,6 +81,9 @@ infergrade-runner runtime install
 - Runner verifies every locked file before backend execution and again after
   the run. Mutation or a missing lock fails the attempt; it never triggers a
   silent runtime substitution. Active locks also prevent managed-build removal.
+- The registry does not auto-delete older content-addressed builds. This first
+  slice can remove the selected managed build; explicit inventory and safe
+  pruning of unselected, unlocked builds remain a separate lifecycle feature.
 - Explicit CLI paths and `INFERGRADE_LLAMA_CPP_*` environment variables override managed selection.
 - Doctor reports whether native binaries came from `custom_path`, `environment_path`, `managed_runtime`, or `system_path`.
 - The Rust manifest includes macOS Apple Silicon `llama.cpp` GitHub release assets with pinned SHA-256 digests, expected binaries, compatibility notes, and rollback metadata. b9050 remains InferGrade Stable; b9994 is an explicit reviewed upstream candidate until the complete compatibility matrix is recorded.
