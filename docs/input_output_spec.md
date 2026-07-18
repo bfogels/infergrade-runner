@@ -634,10 +634,14 @@ Required:
 
 For real `local_native` llama.cpp results, `runtime_receipt` records the exact
 content-addressed runtime build and per-attempt lock. The result projection is
-path-free and includes the executable-role digests plus the full execution-tree
-manifest digest. `artifacts/receipts/runtime_receipt.json` contains the complete
-file manifest once per bundle. A runtime label or version string alone is not
-an exact runtime binding.
+path-free and includes the executable-role digests plus the declared content
+manifest digest. `artifacts/receipts/runtime_receipt.json` contains that complete
+scope once per bundle. Managed packages cover the full package; advanced local
+paths cover only the selected binary set. A runtime label or version string
+alone is not an exact runtime binding. The compact result projection conforms
+to `runtime_receipt.schema.json`; the one full receipt artifact conforms to
+`runtime_receipt_artifact.schema.json`. The compact schema rejects `files` so a
+bundle cannot duplicate the full manifest into every result row.
 
 ### `capability`
 

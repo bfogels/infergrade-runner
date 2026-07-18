@@ -996,6 +996,7 @@ pub fn native_first_run_bundle_payload(
     let missing_requirements = vec![
         "quant_artifact_sha256",
         "backend_version_pinned",
+        "runtime_receipt_not_recorded",
         "capability_suite_not_run",
         "multi_run_variance_not_captured",
     ];

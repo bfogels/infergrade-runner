@@ -190,6 +190,7 @@ def _package_records(root: Path, role_paths: Dict[str, Path]) -> List[Dict[str, 
                 "Cannot lock llama.cpp runtime: managed package contains a file outside its immutable root."
             )
         stat_result = resolved.stat()
+        file_roles = [] if path.is_symlink() else sorted(roles_by_path.get(resolved, []))
         records.append(
             {
                 "relative_path": path.relative_to(root).as_posix(),
@@ -197,7 +198,7 @@ def _package_records(root: Path, role_paths: Dict[str, Path]) -> List[Dict[str, 
                 "mode": _mode(resolved),
                 "size_bytes": int(stat_result.st_size),
                 "sha256": _sha256_file(resolved),
-                "roles": sorted(roles_by_path.get(resolved, [])),
+                "roles": file_roles,
                 "source_path": str(resolved),
             }
         )
@@ -215,7 +216,7 @@ def _package_records(root: Path, role_paths: Dict[str, Path]) -> List[Dict[str, 
 
 def _identity_files(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [
-        {key: item[key] for key in ("relative_path", "kind", "mode", "size_bytes", "sha256", "roles")}
+        {key: item[key] for key in ("relative_path", "kind", "mode", "size_bytes", "sha256")}
         for item in records
     ]
 
@@ -396,8 +397,9 @@ def finalize_runtime_receipt(lock: Dict[str, Any]) -> Dict[str, Any]:
         "maturity": lock.get("maturity"),
         "provenance_strength": lock["provenance_strength"],
         "locked_roles": sorted(lock["resolved_paths"]),
-        "execution_tree_file_count": len(receipt_files),
-        "execution_tree_manifest_sha256": _canonical_sha256(receipt_files),
+        "content_manifest_file_count": len(receipt_files),
+        "content_manifest_sha256": _canonical_sha256(receipt_files),
+        "role_files": [item for item in receipt_files if item.get("roles")],
         "files": receipt_files,
         "verification": {
             "prelaunch": "passed",
@@ -409,7 +411,7 @@ def finalize_runtime_receipt(lock: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def runtime_receipt_summary(receipt: Dict[str, Any]) -> Dict[str, Any]:
-    """Return the compact result-record projection of a full execution-tree receipt."""
+    """Return the compact result-record projection of a path-free content receipt."""
     payload = {key: receipt.get(key) for key in (
         "receipt_version",
         "runtime_lock_id",
@@ -421,8 +423,8 @@ def runtime_receipt_summary(receipt: Dict[str, Any]) -> Dict[str, Any]:
         "maturity",
         "provenance_strength",
         "locked_roles",
-        "execution_tree_file_count",
-        "execution_tree_manifest_sha256",
+        "content_manifest_file_count",
+        "content_manifest_sha256",
         "verification",
     )}
     payload["role_files"] = [

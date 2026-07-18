@@ -1600,7 +1600,6 @@ fn runtime_build_identity(
         record.insert("kind", json!("regular"));
         record.insert("mode", json!(runtime_file_mode(&canonical)?));
         record.insert("relative_path", json!(relative));
-        record.insert("roles", json!(file_roles));
         record.insert("sha256", json!(sha256_file(&canonical)?));
         record.insert("size_bytes", json!(metadata.len()));
         file_values.push(json!(record));
@@ -2384,6 +2383,34 @@ mod tests {
             .expect_err("directory symlink must be rejected");
         assert!(error.contains("directory symlink"));
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn runtime_build_identity_excludes_role_assertions() {
+        let root = env::temp_dir().join(format!(
+            "infergrade-runtime-identity-role-assertions-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("runtime root");
+        let cli = root.join("llama-cli");
+        let server = root.join("llama-server");
+        fs::write(&cli, "cli").expect("cli");
+        fs::write(&server, "server").expect("server");
+
+        let (first, _) = runtime_build_identity(
+            &root,
+            &[("cli", cli.as_path()), ("server", server.as_path())],
+        )
+        .expect("first identity");
+        let (second, _) = runtime_build_identity(
+            &root,
+            &[("generation", cli.as_path()), ("service", server.as_path())],
+        )
+        .expect("second identity");
+
+        assert_eq!(first, second);
         let _ = fs::remove_dir_all(root);
     }
 

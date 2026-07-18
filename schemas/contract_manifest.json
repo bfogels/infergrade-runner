@@ -13,6 +13,7 @@
     "schemas/json/run_config.schema.json",
     "schemas/json/run_request.schema.json",
     "schemas/json/runtime_receipt.schema.json",
+    "schemas/json/runtime_receipt_artifact.schema.json",
     "schemas/json/runtime_selector.schema.json"
   ],
   "example_files": [

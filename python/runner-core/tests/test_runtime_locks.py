@@ -106,7 +106,7 @@ class RuntimeLockTests(unittest.TestCase):
 
         self.assertEqual(summary["content_scope"], "managed_package")
         self.assertEqual(summary["origin"], "managed_download")
-        self.assertEqual(receipt["execution_tree_file_count"], 4)
+        self.assertEqual(receipt["content_manifest_file_count"], 4)
         self.assertIn("libggml-test.dylib", [item["relative_path"] for item in receipt["files"]])
         rendered = json.dumps(receipt, sort_keys=True)
         self.assertNotIn(self.tempdir.name, rendered)
@@ -198,6 +198,19 @@ class RuntimeLockTests(unittest.TestCase):
             self.assertEqual(_normalized_platform_arch(), "aarch64")
         with mock.patch("infergrade.runtime_locks.platform.machine", return_value="AMD64"):
             self.assertEqual(_normalized_platform_arch(), "x86_64")
+
+    def test_runtime_build_identity_excludes_role_assertions(self):
+        role_paths = {
+            "cli": (self.runtime_a / "llama-cli").resolve(),
+            "server": (self.runtime_a / "llama-server").resolve(),
+        }
+        records = _package_records(self.runtime_a.resolve(), role_paths)
+        first = _canonical_sha256(_build_identity(records, "managed_package"))
+        for record in records:
+            record["roles"] = ["generation"] if record["roles"] else []
+        second = _canonical_sha256(_build_identity(records, "managed_package"))
+
+        self.assertEqual(first, second)
 
 
 if __name__ == "__main__":

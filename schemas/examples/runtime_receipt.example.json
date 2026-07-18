@@ -9,8 +9,8 @@
   "maturity": "reviewed_candidate",
   "provenance_strength": "checksum_verified",
   "locked_roles": ["cli", "server"],
-  "execution_tree_file_count": 2,
-  "execution_tree_manifest_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+  "content_manifest_file_count": 2,
+  "content_manifest_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
   "role_files": [
     {
       "relative_path": "bin/llama-cli",

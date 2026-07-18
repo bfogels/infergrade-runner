@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://infergrade.dev/schemas/runtime_receipt.schema.json",
-  "title": "InferGrade Runtime Receipt",
+  "title": "InferGrade Compact Runtime Receipt",
   "type": "object",
   "required": [
     "receipt_version",
@@ -13,8 +13,8 @@
     "origin",
     "provenance_strength",
     "locked_roles",
-    "execution_tree_file_count",
-    "execution_tree_manifest_sha256",
+    "content_manifest_file_count",
+    "content_manifest_sha256",
     "role_files",
     "verification"
   ],
@@ -22,11 +22,11 @@
     "receipt_version": { "const": "infergrade_runtime_receipt_v1" },
     "runtime_lock_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "runtime_build_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "runtime_family": { "type": "string", "minLength": 1 },
-    "runtime_interface": { "type": "string", "minLength": 1 },
+    "runtime_family": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "runtime_interface": { "type": "string", "minLength": 1, "maxLength": 128 },
     "content_scope": { "enum": ["managed_package", "selected_binary_set"] },
-    "origin": { "type": "string", "minLength": 1 },
-    "maturity": { "type": ["string", "null"] },
+    "origin": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "maturity": { "type": ["string", "null"], "maxLength": 64 },
     "provenance_strength": {
       "enum": ["independently_signed", "checksum_verified", "local_fingerprint_only"]
     },
@@ -34,48 +34,29 @@
       "type": "array",
       "items": { "enum": ["cli", "server", "perplexity"] },
       "minItems": 2,
+      "maxItems": 3,
       "uniqueItems": true
     },
-    "execution_tree_file_count": { "type": "integer", "minimum": 1 },
-    "execution_tree_manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "content_manifest_file_count": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "content_manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "role_files": {
       "type": "array",
       "minItems": 2,
+      "maxItems": 3,
       "items": {
         "type": "object",
         "required": ["relative_path", "kind", "mode", "size_bytes", "sha256", "roles"],
         "properties": {
-          "relative_path": { "type": "string", "minLength": 1 },
+          "relative_path": { "type": "string", "minLength": 1, "maxLength": 512 },
           "kind": { "const": "regular" },
           "mode": { "type": "integer", "minimum": 0, "maximum": 511 },
-          "size_bytes": { "type": "integer", "minimum": 0 },
+          "size_bytes": { "type": "integer", "minimum": 0, "maximum": 1125899906842624 },
           "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
           "roles": {
             "type": "array",
             "items": { "enum": ["cli", "server", "perplexity"] },
             "minItems": 1,
-            "uniqueItems": true
-          }
-        },
-        "additionalProperties": false
-      }
-    },
-    "files": {
-      "description": "Complete path-free execution-tree manifest. Present in the bundle receipt artifact and omitted from compact per-result projections.",
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": ["relative_path", "kind", "mode", "size_bytes", "sha256", "roles"],
-        "properties": {
-          "relative_path": { "type": "string", "minLength": 1 },
-          "kind": { "const": "regular" },
-          "mode": { "type": "integer", "minimum": 0, "maximum": 511 },
-          "size_bytes": { "type": "integer", "minimum": 0 },
-          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-          "roles": {
-            "type": "array",
-            "items": { "enum": ["cli", "server", "perplexity"] },
+            "maxItems": 3,
             "uniqueItems": true
           }
         },

@@ -6,7 +6,6 @@
         "kind": "regular",
         "mode": 493,
         "relative_path": "bin/llama-cli",
-        "roles": ["cli"],
         "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "size_bytes": 123
       },
@@ -14,7 +13,6 @@
         "kind": "regular",
         "mode": 493,
         "relative_path": "bin/llama-server",
-        "roles": ["server"],
         "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "size_bytes": 456
       }
@@ -24,5 +22,5 @@
     "runtime_family": "llama.cpp",
     "runtime_interface": "llama_cpp_cli_server_v1"
   },
-  "runtime_build_id": "722617711e8b12ffa37f572c103f0764c62e127d349a17294313933eb88d4587"
+  "runtime_build_id": "0a6896ba474dfdbee58daa32ed8a9f34f6cef90810131f8166a09a6238bfa016"
 }

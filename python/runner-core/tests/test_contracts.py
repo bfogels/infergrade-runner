@@ -200,6 +200,7 @@ class ContractExportTests(unittest.TestCase):
     def test_contract_declares_exact_runtime_receipts(self):
         manifest = load_contract_manifest()
         self.assertIn("schemas/json/runtime_receipt.schema.json", manifest["schema_files"])
+        self.assertIn("schemas/json/runtime_receipt_artifact.schema.json", manifest["schema_files"])
         self.assertIn("schemas/examples/runtime_receipt.example.json", manifest["example_files"])
         result_schema = json.loads(
             (repo_root() / "schemas" / "json" / "result_record.schema.json").read_text(encoding="utf-8")
@@ -215,7 +216,8 @@ class ContractExportTests(unittest.TestCase):
             receipt_schema["properties"]["receipt_version"]["const"],
             "infergrade_runtime_receipt_v1",
         )
-        self.assertIn("files", receipt_schema["properties"])
+        self.assertNotIn("files", receipt_schema["properties"])
+        self.assertEqual(receipt_schema["properties"]["role_files"]["maxItems"], 3)
         self.assertFalse(
             receipt_schema["properties"]["verification"]["properties"]
             ["silent_substitution_allowed"]["const"]
@@ -224,6 +226,13 @@ class ContractExportTests(unittest.TestCase):
             (repo_root() / "schemas" / "examples" / "runtime_receipt.example.json").read_text(encoding="utf-8")
         )
         _validate_schema_subset(receipt_example, receipt_schema)
+        artifact_schema = json.loads(
+            (repo_root() / "schemas" / "json" / "runtime_receipt_artifact.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertIn("files", artifact_schema["required"])
+        self.assertEqual(artifact_schema["properties"]["files"]["maxItems"], 4096)
 
     def test_runtime_selector_schema_accepts_emitted_windows_cuda_preflight_selector(self):
         selector_schema = json.loads(

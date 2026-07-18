@@ -65,13 +65,19 @@ infergrade-runner runtime install
   different bytes under the same release label creates another build instead
   of replacing the existing package.
 - `selected_runtime.json` is only the user's preferred/default runtime. A real
-  native run resolves that preference into a private per-attempt lock before
-  backend execution; changing the preference cannot change a resumed run.
+  native runner-core benchmark resolves that preference into a private
+  per-attempt lock before backend execution; changing the preference cannot
+  change a resumed run. The separate Rust CLI native-first-run preview remains
+  experimental and declares `runtime_receipt_not_recorded` until it adopts the
+  same binding.
 - Per-attempt locks live outside uploaded bundles under
   `~/.cache/infergrade/runtimes/llama.cpp/locks/`. Results contain a path-free
   receipt with the exact build id, executable-role digests, execution-tree
-  digest, origin, maturity, and provenance strength. The full execution-tree
+  digest, origin, maturity, and provenance strength. The full managed-package
   manifest is stored once in `artifacts/receipts/runtime_receipt.json`.
+- Build identity is content-only. Executable-role assertions and support policy
+  are recorded alongside it but cannot change the id of otherwise identical
+  runtime bytes.
 - Runner verifies every locked file before backend execution and again after
   the run. Mutation or a missing lock fails the attempt; it never triggers a
   silent runtime substitution. Active locks also prevent managed-build removal.

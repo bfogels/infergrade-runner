@@ -165,19 +165,29 @@ Fallbacks must be explicit and non-silent:
 native run. It records:
 
 - an immutable `runtime_build_id` derived from the platform, runtime interface,
-  content scope, and normalized execution-tree file manifest;
+  content scope, and normalized execution-tree file manifest. Executable role
+  assertions are deliberately excluded from this content digest;
 - the per-attempt `runtime_lock_id`;
 - runtime origin, maturity, and provenance strength as separate dimensions;
 - the exact CLI/server/perplexity role digests without absolute local paths;
-- the full execution-tree file count and manifest digest; and
+- the declared content-scope file count and manifest digest; and
 - successful pre-launch and post-run verification with silent substitution
   explicitly disabled.
 
-The complete file manifest is emitted once as a receipt artifact. Result rows
+The complete declared-scope manifest is emitted once as a receipt artifact. For
+managed packages this covers the full package. For advanced local binaries it
+covers only the explicitly selected binary set and does not claim every dynamic
+library on the host. Result rows
 use the compact projection so multi-profile bundles do not duplicate every
 library entry. Different build ids remain distinct evidence setup facts; any
 future cross-build comparison policy must be dimension-specific rather than a
 generic runtime-equivalence cohort.
+
+An exact local fingerprint is useful but is not equivalent to managed supply
+chain provenance. Native llama.cpp evidence can reach `verified` only when the
+receipt covers a managed package and its archive was checksum-verified or
+independently signed. A selected local binary set can still prove stable bytes,
+but its verification level tops out at `community`.
 
 ## Initial Selector Matrix
 

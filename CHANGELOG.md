@@ -13,6 +13,9 @@ incremental changes only — see the git history.
   resume, verifies it before and after execution, and emits a path-free runtime
   receipt. Runtime preference changes and binary mutation cannot silently alter
   an in-progress run.
+- Keeps content identity separate from executable-role and support assertions,
+  bounds compact per-result receipts, and limits locally fingerprinted binary
+  sets to community verification unless managed-package provenance is present.
 
 ## 0.3.37
 

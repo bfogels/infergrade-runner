@@ -89,19 +89,33 @@ def _local_comparison_grade_candidate(request: RunRequest, verification_level: s
     return "comparable"
 
 
+def _backend_version_pinned(request: RunRequest, backend_version: str) -> bool:
+    return bool(backend_version) and (
+        request.execution_mode != "local_native"
+        or request.backend != "llama.cpp"
+        or bool((request.runtime_lock or {}).get("runtime_build_id"))
+    )
+
+
+def _runtime_receipt_supports_verified(request: RunRequest) -> bool:
+    if request.execution_mode != "local_native" or request.backend != "llama.cpp":
+        return True
+    receipt = request.runtime_lock or {}
+    return receipt.get("content_scope") == "managed_package" and receipt.get("provenance_strength") in (
+        "checksum_verified",
+        "independently_signed",
+    )
+
+
 def _verification_level(request: RunRequest, hardware: Dict[str, Any], backend_version: str) -> str:
     """Estimate the trust level implied by the current run metadata."""
     if request.simulate:
         return "experimental"
     pinned_artifact = bool(request.quant_artifact and request.quant_artifact_sha256)
     hardware_captured = bool(hardware.get("accelerator_type"))
-    backend_pinned = bool(backend_version) and (
-        request.execution_mode != "local_native"
-        or request.backend != "llama.cpp"
-        or bool((request.runtime_lock or {}).get("runtime_build_id"))
-    )
+    backend_pinned = _backend_version_pinned(request, backend_version)
     if pinned_artifact and backend_pinned and hardware_captured:
-        return "verified"
+        return "verified" if _runtime_receipt_supports_verified(request) else "community"
     if backend_pinned and hardware_captured:
         return "community"
     return "experimental"
@@ -198,11 +212,7 @@ def _build_result_record(
         "verification": {
             "verification_level": verification_level,
             "artifact_pinned": bool(request.quant_artifact and artifact_sha256),
-            "backend_version_pinned": bool(adapter_version) and (
-                request.execution_mode != "local_native"
-                or request.backend != "llama.cpp"
-                or bool((request.runtime_lock or {}).get("runtime_build_id"))
-            ),
+            "backend_version_pinned": _backend_version_pinned(request, adapter_version),
             "container_pinned": request.execution_mode in ("local_container", "cloud_container"),
             "hardware_captured": True,
             "repeated_runs": 5 if request.tier != "canary" else 1,
@@ -447,6 +457,13 @@ def _missing_requirements(request: RunRequest, artifact_sha256: Any) -> List[str
         and not (request.runtime_lock or {}).get("runtime_build_id")
     ):
         missing.append("runtime_build_id")
+    elif (
+        not request.simulate
+        and request.backend == "llama.cpp"
+        and request.execution_mode == "local_native"
+        and not _runtime_receipt_supports_verified(request)
+    ):
+        missing.append("managed_runtime_provenance")
     return missing
 
 

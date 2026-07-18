@@ -10,7 +10,7 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.models import DeploymentExecution
 from infergrade.models import RunRequest
-from infergrade.runner import _memory_fit_payload, _recorded_elapsed_seconds, run_infergrade
+from infergrade.runner import _memory_fit_payload, _recorded_elapsed_seconds, _verification_level, run_infergrade
 
 
 class RunnerTests(unittest.TestCase):
@@ -19,6 +19,30 @@ class RunnerTests(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.tempdir)
+
+    def test_native_runtime_provenance_bounds_verified_tier(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-4B",
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            quant_artifact="model.gguf",
+            quant_artifact_sha256="a" * 64,
+            simulate=False,
+        )
+        hardware = {"accelerator_type": "metal"}
+        request.runtime_lock = {
+            "runtime_build_id": "b" * 64,
+            "content_scope": "selected_binary_set",
+            "provenance_strength": "local_fingerprint_only",
+        }
+        self.assertEqual(_verification_level(request, hardware, "b9994"), "community")
+        request.runtime_lock = {
+            "runtime_build_id": "c" * 64,
+            "content_scope": "managed_package",
+            "provenance_strength": "checksum_verified",
+        }
+        self.assertEqual(_verification_level(request, hardware, "b9994"), "verified")
 
     def test_result_runtime_uses_recorded_wall_clock_interval(self):
         self.assertEqual(
@@ -279,6 +303,8 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn("files", receipt)
         self.assertEqual(len(receipt["role_files"]), 3)
         self.assertTrue(record["verification"]["backend_version_pinned"])
+        self.assertEqual(record["verification"]["verification_level"], "community")
+        self.assertIn("managed_runtime_provenance", record["verification"]["missing_requirements"])
         self.assertNotIn(self.tempdir, json.dumps(receipt, sort_keys=True))
         progress = self.read_json(os.path.join(output_dir, "progress.json"))
         self.assertEqual(progress["runtime_lock"]["runtime_build_id"], receipt["runtime_build_id"])
@@ -286,6 +312,10 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(backend_config["runtime_metadata"]["native_binary"], "llama-cli")
         manifest = self.read_json(os.path.join(output_dir, "manifest.json"))
         self.assertEqual(manifest["files"]["runtime_receipt"], "artifacts/receipts/runtime_receipt.json")
+        full_receipt = self.read_json(os.path.join(output_dir, manifest["files"]["runtime_receipt"]))
+        self.assertEqual(len(full_receipt["role_files"]), 3)
+        self.assertGreaterEqual(len(full_receipt["files"]), len(full_receipt["role_files"]))
+        self.assertNotIn(self.tempdir, json.dumps(full_receipt, sort_keys=True))
 
     def test_model_preflight_failure_aborts_before_capability_cases(self):
         output_dir = os.path.join(self.tempdir, "preflight-failure")
