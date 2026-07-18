@@ -241,6 +241,8 @@ def _package_root(paths: Dict[str, Path], selection_metadata: Dict[str, Any]) ->
     assertion_archive = assertion.get("archive")
     registry_digest = str((assertion_archive or {}).get("sha256") or "")
     registry_runtime_id = assertion.get("runtime_id")
+    assertion_maturity = assertion.get("maturity")
+    assertion_provenance = assertion.get("provenance")
     if (
         registry.get("registry_version") != "infergrade_runtime_build_registry_v1"
         or registry.get("runtime_build_id") != build_id
@@ -248,14 +250,40 @@ def _package_root(paths: Dict[str, Path], selection_metadata: Dict[str, Any]) ->
         or not isinstance(identity, dict)
         or _canonical_sha256(identity) != build_id
         or assertion.get("assertion_version") != "infergrade_runtime_source_assertion_v1"
+        or set(assertion) != {
+            "assertion_version",
+            "runtime_build_id",
+            "runtime_id",
+            "origin",
+            "maturity",
+            "provenance",
+            "archive",
+        }
         or assertion.get("runtime_build_id") != build_id
         or _canonical_sha256(assertion) != source_assertion_id
         or assertion.get("origin") != "managed_download"
         or not isinstance(registry_runtime_id, str)
         or not registry_runtime_id.strip()
         or len(registry_runtime_id) > 128
+        or registry_runtime_id != registry_runtime_id.strip()
+        or (
+            assertion_maturity is not None
+            and (
+                not isinstance(assertion_maturity, str)
+                or assertion_maturity != assertion_maturity.strip()
+                or len(assertion_maturity) > 64
+            )
+        )
+        or not isinstance(assertion_provenance, str)
+        or len(assertion_provenance) > 1024
         or not isinstance(assertion_archive, dict)
+        or set(assertion_archive) != {
+            "sha256",
+            "checksum_verified",
+            "independent_signature_verified",
+        }
         or assertion_archive.get("checksum_verified") is not True
+        or not isinstance(assertion_archive.get("independent_signature_verified"), bool)
         or registry_digest != archive_sha256
         or not _SHA256_PATTERN.fullmatch(registry_digest)
     ):
@@ -267,8 +295,8 @@ def _package_root(paths: Dict[str, Path], selection_metadata: Dict[str, Any]) ->
         assertion_archive.get("independent_signature_verified")
     )
     selection_metadata["runtime_id"] = registry_runtime_id
-    selection_metadata["channel"] = assertion.get("maturity")
-    selection_metadata["provenance"] = assertion.get("provenance")
+    selection_metadata["channel"] = assertion_maturity
+    selection_metadata["provenance"] = assertion_provenance
     selection_metadata["source_assertion_id"] = source_assertion_id
     return expected_root
 

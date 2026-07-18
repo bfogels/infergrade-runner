@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,27 @@ def _matches_schema_type(value, schema_type):
 
 
 def _validate_schema_subset(value, schema, path="$"):
+    for index, item_schema in enumerate(schema.get("allOf") or []):
+        _validate_schema_subset(value, item_schema, "%s.allOf[%d]" % (path, index))
+    if "oneOf" in schema:
+        matches = 0
+        for item_schema in schema["oneOf"]:
+            try:
+                _validate_schema_subset(value, item_schema, path)
+            except AssertionError:
+                continue
+            matches += 1
+        if matches != 1:
+            raise AssertionError("%s expected exactly one matching oneOf branch" % path)
+    if "if" in schema:
+        try:
+            _validate_schema_subset(value, schema["if"], path)
+        except AssertionError:
+            branch = schema.get("else")
+        else:
+            branch = schema.get("then")
+        if branch:
+            _validate_schema_subset(value, branch, path)
     if "const" in schema and value != schema["const"]:
         raise AssertionError("%s expected const %r, got %r" % (path, schema["const"], value))
     if "enum" in schema and value not in schema["enum"]:
@@ -38,6 +60,10 @@ def _validate_schema_subset(value, schema, path="$"):
         raise AssertionError("%s expected type %r, got %r" % (path, schema["type"], type(value).__name__))
     if isinstance(value, str) and "minLength" in schema and len(value) < schema["minLength"]:
         raise AssertionError("%s expected minLength %r" % (path, schema["minLength"]))
+    if isinstance(value, str) and "maxLength" in schema and len(value) > schema["maxLength"]:
+        raise AssertionError("%s expected maxLength %r" % (path, schema["maxLength"]))
+    if isinstance(value, str) and "pattern" in schema and not re.fullmatch(schema["pattern"], value):
+        raise AssertionError("%s expected pattern %r" % (path, schema["pattern"]))
     if isinstance(value, (int, float)) and not isinstance(value, bool) and "minimum" in schema and value < schema["minimum"]:
         raise AssertionError("%s expected minimum %r" % (path, schema["minimum"]))
     if isinstance(value, dict):
@@ -53,12 +79,27 @@ def _validate_schema_subset(value, schema, path="$"):
             if key in properties:
                 _validate_schema_subset(item, properties[key], "%s.%s" % (path, key))
     if isinstance(value, list):
+        if "minItems" in schema and len(value) < schema["minItems"]:
+            raise AssertionError("%s expected minItems %r" % (path, schema["minItems"]))
+        if "maxItems" in schema and len(value) > schema["maxItems"]:
+            raise AssertionError("%s expected maxItems %r" % (path, schema["maxItems"]))
         if schema.get("uniqueItems") and len(value) != len({json.dumps(item, sort_keys=True) for item in value}):
             raise AssertionError("%s expected unique items" % path)
+        if "contains" in schema:
+            if not any(_schema_subset_matches(item, schema["contains"], path) for item in value):
+                raise AssertionError("%s expected an item matching contains" % path)
         item_schema = schema.get("items")
         if item_schema:
             for index, item in enumerate(value):
                 _validate_schema_subset(item, item_schema, "%s[%d]" % (path, index))
+
+
+def _schema_subset_matches(value, schema, path):
+    try:
+        _validate_schema_subset(value, schema, path)
+    except AssertionError:
+        return False
+    return True
 
 
 class ContractExportTests(unittest.TestCase):
@@ -232,6 +273,11 @@ class ContractExportTests(unittest.TestCase):
             (repo_root() / "schemas" / "examples" / "runtime_receipt.example.json").read_text(encoding="utf-8")
         )
         _validate_schema_subset(receipt_example, receipt_schema)
+        missing_server_coverage = json.loads(json.dumps(receipt_example))
+        for item in missing_server_coverage["role_files"]:
+            item["roles"] = ["cli"]
+        with self.assertRaisesRegex(AssertionError, "contains"):
+            _validate_schema_subset(missing_server_coverage, receipt_schema)
         artifact_schema = json.loads(
             (repo_root() / "schemas" / "json" / "runtime_receipt_artifact.schema.json").read_text(
                 encoding="utf-8"

@@ -224,6 +224,29 @@ class RuntimeLockTests(unittest.TestCase):
         self.assertEqual(summary["content_scope"], "selected_binary_set")
         self.assertEqual(lock["provenance_strength"], "local_fingerprint_only")
 
+    def test_non_boolean_signature_assertion_cannot_elevate_provenance(self):
+        self._write_managed_selection(self.runtime_a)
+        selection_path = selected_llama_cpp_runtime_path()
+        selection = json.loads(selection_path.read_text(encoding="utf-8"))
+        assertion_path = Path(selection["runtime_build"]["source_assertion_path"])
+        assertion = json.loads(assertion_path.read_text(encoding="utf-8"))
+        assertion["archive"]["independent_signature_verified"] = "false"
+        source_assertion_id = _canonical_sha256(assertion)
+        malformed_path = assertion_path.parent / (source_assertion_id + ".json")
+        malformed_path.write_text(json.dumps(assertion), encoding="utf-8")
+        selection["runtime_build"]["source_assertion_id"] = source_assertion_id
+        selection["runtime_build"]["source_assertion_path"] = str(malformed_path)
+        selection_path.write_text(json.dumps(selection), encoding="utf-8")
+        request = self._request()
+        request.llama_cpp_cli_path = None
+        request.llama_cpp_server_path = None
+        request.llama_cpp_perplexity_path = None
+
+        lock, summary = resolve_runtime_lock(request, "bundle-string-signature")
+
+        self.assertEqual(summary["content_scope"], "selected_binary_set")
+        self.assertEqual(lock["provenance_strength"], "local_fingerprint_only")
+
     def test_resume_restores_original_lock_after_preference_changes(self):
         request = self._request(self.runtime_a)
         lock, summary = resolve_runtime_lock(request, "bundle-resume")
