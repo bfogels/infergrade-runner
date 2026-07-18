@@ -82,9 +82,12 @@ infergrade-runner runtime install
   the digest. Advanced selected binaries use synthetic receipt names so private
   executable basenames are not published.
 - A managed provenance claim is accepted only when the selection points to the
-  expected content-addressed build and matching Runner registry manifest. The
-  receipt carries the registry version, managed runtime id, and verified source
-  archive digest. Legacy or malformed managed selections are downgraded to a
+  expected content-addressed build, identity-only build manifest, and matching
+  immutable source assertion. Source assertions are keyed separately so the
+  same execution bytes may be promoted, aliased, or obtained through another
+  reviewed archive without changing or conflicting with build identity. The
+  receipt carries the source-assertion id, managed runtime id, and verified
+  source archive digest. Legacy or malformed selections are downgraded to a
   selected-binary local fingerprint.
 - Runner verifies every locked file before backend execution and again after
   the run. Mutation or a missing lock fails the attempt; it never triggers a

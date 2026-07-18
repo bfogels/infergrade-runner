@@ -2198,11 +2198,15 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         .map_err(|error| format!("could not create runtime build metadata directory: {error}"))?;
     let build_manifest_path = metadata_root.join(format!("{runtime_build_id}.json"));
     let build_manifest = json!({
-        "registry_version": "infergrade_runtime_registry_v1",
+        "registry_version": "infergrade_runtime_build_registry_v1",
         "runtime_build_id": runtime_build_id,
         "identity": build_identity,
-        "origin": "managed_download",
+    });
+    let source_assertion = json!({
+        "assertion_version": "infergrade_runtime_source_assertion_v1",
+        "runtime_build_id": runtime_build_id,
         "runtime_id": runtime_id,
+        "origin": "managed_download",
         "maturity": entry["channel"].clone(),
         "provenance": entry["provenance"].clone(),
         "archive": {
@@ -2236,6 +2240,37 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         fs::rename(&temporary_manifest, &build_manifest_path)
             .map_err(|error| format!("could not activate runtime build manifest: {error}"))?;
     }
+    let source_assertion_id = runtime_build_id_from_identity(&source_assertion)?;
+    let assertion_root = runtime_cache_root()?
+        .join("llama.cpp")
+        .join("source-assertions")
+        .join(&runtime_build_id);
+    fs::create_dir_all(&assertion_root)
+        .map_err(|error| format!("could not create runtime source assertion registry: {error}"))?;
+    let source_assertion_path = assertion_root.join(format!("{source_assertion_id}.json"));
+    let source_assertion_bytes = serde_json::to_vec_pretty(&source_assertion)
+        .map_err(|error| format!("could not serialize runtime source assertion: {error}"))?;
+    if source_assertion_path.exists() {
+        let existing = fs::read(&source_assertion_path)
+            .map_err(|error| format!("could not read runtime source assertion: {error}"))?;
+        let existing: Value = serde_json::from_slice(&existing)
+            .map_err(|error| format!("runtime source assertion is invalid JSON: {error}"))?;
+        if existing != source_assertion {
+            return Err("immutable runtime source assertion does not match its id".to_string());
+        }
+    } else {
+        let temporary_assertion =
+            source_assertion_path.with_extension(format!("json.tmp-{}", std::process::id()));
+        {
+            let mut file = fs::File::create(&temporary_assertion)
+                .map_err(|error| format!("could not write runtime source assertion: {error}"))?;
+            file.write_all(&source_assertion_bytes)
+                .and_then(|_| file.write_all(b"\n"))
+                .map_err(|error| format!("could not write runtime source assertion: {error}"))?;
+        }
+        fs::rename(&temporary_assertion, &source_assertion_path)
+            .map_err(|error| format!("could not activate runtime source assertion: {error}"))?;
+    }
     let selection = json!({
         "runtime_id": runtime_id,
         "backend": "llama.cpp",
@@ -2263,6 +2298,8 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
             "file_count": file_count,
             "package_root": install_root.display().to_string(),
             "manifest_path": build_manifest_path.display().to_string(),
+            "source_assertion_id": source_assertion_id,
+            "source_assertion_path": source_assertion_path.display().to_string(),
         },
         "version_smoke": {
             "command": "--version",
@@ -2845,13 +2882,27 @@ mod tests {
                 .expect("registry manifest JSON");
         assert_eq!(
             registry["registry_version"],
-            "infergrade_runtime_registry_v1"
+            "infergrade_runtime_build_registry_v1"
         );
-        assert_eq!(registry["origin"], "managed_download");
-        assert_eq!(registry["archive"]["checksum_verified"], true);
+        let assertion_path = result["selection"]["runtime_build"]["source_assertion_path"]
+            .as_str()
+            .expect("source assertion path");
+        let assertion: Value =
+            serde_json::from_slice(&fs::read(assertion_path).expect("source assertion"))
+                .expect("source assertion JSON");
         assert_eq!(
-            registry["archive"]["sha256"],
+            assertion["assertion_version"],
+            "infergrade_runtime_source_assertion_v1"
+        );
+        assert_eq!(assertion["origin"], "managed_download");
+        assert_eq!(assertion["archive"]["checksum_verified"], true);
+        assert_eq!(
+            assertion["archive"]["sha256"],
             result["selection"]["archive"]["sha256"]
+        );
+        assert_eq!(
+            runtime_build_id_from_identity(&assertion).expect("source assertion id"),
+            result["selection"]["runtime_build"]["source_assertion_id"]
         );
 
         if let Some(previous_cache_dir) = previous_cache_dir {
@@ -2908,6 +2959,57 @@ mod tests {
             .as_str()
             .unwrap_or("")
             .contains(second_id));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn identical_runtime_bytes_accept_distinct_source_assertions() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-source-assertions-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let archive = test_runtime_archive();
+        let first_entry = test_runtime_manifest_entry(&archive);
+        let mut promoted_entry = test_runtime_manifest_entry(&archive);
+        promoted_entry["runtime_id"] = json!("llama-cpp-managed-test-promoted");
+        promoted_entry["channel"] = json!("reviewed_candidate");
+        promoted_entry["provenance"] =
+            json!("Same bytes, separately reviewed promotion assertion.");
+
+        let first = install_managed_llama_cpp_runtime_from_manifest_entry(
+            first_entry,
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive.clone()),
+            },
+        )
+        .expect("first source assertion");
+        let promoted = install_managed_llama_cpp_runtime_from_manifest_entry(
+            promoted_entry,
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive),
+            },
+        )
+        .expect("second source assertion for identical bytes");
+
+        assert_eq!(
+            first["selection"]["runtime_build"]["runtime_build_id"],
+            promoted["selection"]["runtime_build"]["runtime_build_id"]
+        );
+        assert_ne!(
+            first["selection"]["runtime_build"]["source_assertion_id"],
+            promoted["selection"]["runtime_build"]["source_assertion_id"]
+        );
 
         if let Some(previous_cache_dir) = previous_cache_dir {
             env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);

@@ -35,12 +35,13 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["kind", "registry_version", "runtime_id", "source_archive_sha256"],
+          "required": ["kind", "registry_version", "runtime_id", "source_archive_sha256", "source_assertion_id"],
           "properties": {
             "kind": { "const": "managed_registry" },
             "registry_version": { "const": "infergrade_runtime_registry_v1" },
             "runtime_id": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "source_archive_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            "source_archive_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "source_assertion_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
           },
           "additionalProperties": false
         },
@@ -63,7 +64,7 @@
     "content_manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "role_files": {
       "type": "array",
-      "minItems": 2,
+      "minItems": 1,
       "maxItems": 3,
       "items": {
         "type": "object",

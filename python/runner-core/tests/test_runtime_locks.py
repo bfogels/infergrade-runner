@@ -18,6 +18,7 @@ from infergrade.runtime_locks import (
     _canonical_sha256,
     _normalized_platform_arch,
     _package_records,
+    _resolve_file,
     finalize_runtime_receipt,
     resolve_runtime_lock,
 )
@@ -84,22 +85,36 @@ class RuntimeLockTests(unittest.TestCase):
         manifest_path.write_text(
             json.dumps(
                 {
-                    "registry_version": "infergrade_runtime_registry_v1",
+                    "registry_version": "infergrade_runtime_build_registry_v1",
                     "runtime_build_id": runtime_build_id,
                     "identity": identity,
-                    "origin": "managed_download",
-                    "runtime_id": "managed-a",
-                    "maturity": "reviewed_candidate",
-                    "provenance": "test managed package",
-                    "archive": {
-                        "sha256": "a" * 64,
-                        "checksum_verified": True,
-                        "independent_signature_verified": False,
-                    },
                 }
             ),
             encoding="utf-8",
         )
+        assertion = {
+            "assertion_version": "infergrade_runtime_source_assertion_v1",
+            "runtime_build_id": runtime_build_id,
+            "runtime_id": "managed-a",
+            "origin": "managed_download",
+            "maturity": "reviewed_candidate",
+            "provenance": "test managed package",
+            "archive": {
+                "sha256": "a" * 64,
+                "checksum_verified": True,
+                "independent_signature_verified": False,
+            },
+        }
+        source_assertion_id = _canonical_sha256(assertion)
+        source_assertion_path = (
+            self.cache
+            / "llama.cpp"
+            / "source-assertions"
+            / runtime_build_id
+            / (source_assertion_id + ".json")
+        )
+        source_assertion_path.parent.mkdir(parents=True, exist_ok=True)
+        source_assertion_path.write_text(json.dumps(assertion), encoding="utf-8")
         path = selected_llama_cpp_runtime_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -120,6 +135,8 @@ class RuntimeLockTests(unittest.TestCase):
                         "identity_version": "infergrade_runtime_build_v1",
                         "content_scope": "managed_package",
                         "manifest_path": str(manifest_path),
+                        "source_assertion_id": source_assertion_id,
+                        "source_assertion_path": str(source_assertion_path),
                     },
                     "binaries": {
                         "cli": str(root / "llama-cli"),
@@ -192,6 +209,20 @@ class RuntimeLockTests(unittest.TestCase):
         self.assertTrue(all(item["relative_path"].startswith("selected/") for item in lock["files"]))
         receipt = finalize_runtime_receipt(lock)
         self.assertNotIn("llama-cli", json.dumps(receipt))
+
+    def test_non_object_registry_metadata_downgrades_without_crashing(self):
+        self._write_managed_selection(self.runtime_a)
+        selection = json.loads(selected_llama_cpp_runtime_path().read_text(encoding="utf-8"))
+        Path(selection["runtime_build"]["manifest_path"]).write_text("[]\n", encoding="utf-8")
+        request = self._request()
+        request.llama_cpp_cli_path = None
+        request.llama_cpp_server_path = None
+        request.llama_cpp_perplexity_path = None
+
+        lock, summary = resolve_runtime_lock(request, "bundle-bad-registry-json")
+
+        self.assertEqual(summary["content_scope"], "selected_binary_set")
+        self.assertEqual(lock["provenance_strength"], "local_fingerprint_only")
 
     def test_resume_restores_original_lock_after_preference_changes(self):
         request = self._request(self.runtime_a)
@@ -328,6 +359,28 @@ class RuntimeLockTests(unittest.TestCase):
         too_long = dict(record, relative_path="x" * 513)
         with self.assertRaisesRegex(RuntimeError, "512"):
             _assert_records_bounded([too_long])
+
+    def test_one_physical_binary_can_cover_multiple_locked_roles(self):
+        shared_root = Path(self.tempdir.name) / "shared-runtime"
+        shared_root.mkdir()
+        shared = shared_root / "llama-cli"
+        shared.write_text("#!/bin/sh\necho shared\n", encoding="utf-8")
+        shared.chmod(0o755)
+        request = self._request(shared_root)
+        request.llama_cpp_cli_path = str(shared)
+        request.llama_cpp_server_path = str(shared)
+        request.llama_cpp_perplexity_path = None
+
+        with mock.patch(
+            "infergrade.runtime_locks._resolve_file",
+            side_effect=lambda candidate: _resolve_file(candidate) if candidate == str(shared) else None,
+        ):
+            lock, _summary = resolve_runtime_lock(request, "bundle-shared-role-file")
+        receipt = finalize_runtime_receipt(lock)
+
+        self.assertEqual(receipt["locked_roles"], ["cli", "server"])
+        self.assertEqual(len(receipt["role_files"]), 1)
+        self.assertEqual(receipt["role_files"][0]["roles"], ["cli", "server"])
 
 
 if __name__ == "__main__":

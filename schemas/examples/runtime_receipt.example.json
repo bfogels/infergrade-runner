@@ -12,7 +12,8 @@
     "kind": "managed_registry",
     "registry_version": "infergrade_runtime_registry_v1",
     "runtime_id": "llama-cpp-macos-metal-b9994",
-    "source_archive_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+    "source_archive_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+    "source_assertion_id": "7777777777777777777777777777777777777777777777777777777777777777"
   },
   "locked_roles": ["cli", "server"],
   "content_manifest_file_count": 2,

@@ -169,7 +169,8 @@ native run. It records:
   Executable role assertions are deliberately excluded from this digest;
 - the per-attempt `runtime_lock_id`;
 - runtime origin, maturity, provenance strength, and bounded registry/source
-  evidence as separate dimensions;
+  evidence (including a separately keyed source assertion) as separate
+  dimensions;
 - the exact CLI/server/perplexity role digests without absolute local paths;
 - the declared content-scope file count and manifest digest; and
 - successful pre-launch and post-run verification with silent substitution

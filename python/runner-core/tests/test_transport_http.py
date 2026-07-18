@@ -132,6 +132,57 @@ class TransportHttpTests(unittest.TestCase):
                 )
         return bundle_dir
 
+    def _attach_runtime_receipt(self, bundle_dir):
+        files = [{
+            "relative_path": "selected/0001",
+            "kind": "regular",
+            "mode": 493,
+            "size_bytes": 3,
+            "sha256": "a" * 64,
+            "roles": ["cli", "server"],
+        }]
+        receipt = {
+            "receipt_version": "infergrade_runtime_receipt_v1",
+            "runtime_lock_id": "b" * 64,
+            "runtime_build_id": "c" * 64,
+            "runtime_family": "llama.cpp",
+            "runtime_interface": "llama_cpp_cli_server_v1",
+            "content_scope": "selected_binary_set",
+            "origin": "operator_paths",
+            "maturity": None,
+            "provenance_strength": "local_fingerprint_only",
+            "provenance_evidence": {"kind": "local_fingerprint"},
+            "locked_roles": ["cli", "server"],
+            "content_manifest_file_count": 1,
+            "content_manifest_sha256": hashlib.sha256(
+                json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+            "role_files": files,
+            "files": files,
+            "verification": {
+                "prelaunch": "passed",
+                "postrun": "passed",
+                "silent_substitution_allowed": False,
+            },
+        }
+        receipt_dir = os.path.join(bundle_dir, "artifacts", "receipts")
+        os.makedirs(receipt_dir)
+        with open(os.path.join(receipt_dir, "runtime_receipt.json"), "w", encoding="utf-8") as handle:
+            json.dump(receipt, handle)
+        manifest_path = os.path.join(bundle_dir, "manifest.json")
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        manifest["files"]["runtime_receipt"] = "artifacts/receipts/runtime_receipt.json"
+        with open(manifest_path, "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle)
+        result_path = os.path.join(bundle_dir, "results", "interactive_chat_v1.json")
+        with open(result_path, "r", encoding="utf-8") as handle:
+            result = json.load(handle)
+        result["execution"] = {"runtime_receipt": {key: value for key, value in receipt.items() if key != "files"}}
+        with open(result_path, "w", encoding="utf-8") as handle:
+            json.dump(result, handle)
+        return receipt
+
     def test_bundle_payload_reads_results_and_existing_summary(self):
         bundle_dir = self._write_bundle(include_summary=True)
         payload = bundle_payload(bundle_dir)
@@ -188,31 +239,7 @@ class TransportHttpTests(unittest.TestCase):
 
     def test_bundle_payload_uploads_one_declared_full_runtime_receipt(self):
         bundle_dir = self._write_bundle(include_summary=True)
-        files = [{
-            "relative_path": "selected/0001",
-            "kind": "regular",
-            "mode": 493,
-            "size_bytes": 3,
-            "sha256": "a" * 64,
-            "roles": ["cli", "server"],
-        }]
-        receipt = {
-            "files": files,
-            "content_manifest_file_count": 1,
-            "content_manifest_sha256": hashlib.sha256(
-                json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest(),
-        }
-        receipt_dir = os.path.join(bundle_dir, "artifacts", "receipts")
-        os.makedirs(receipt_dir)
-        with open(os.path.join(receipt_dir, "runtime_receipt.json"), "w", encoding="utf-8") as handle:
-            json.dump(receipt, handle)
-        manifest_path = os.path.join(bundle_dir, "manifest.json")
-        with open(manifest_path, "r", encoding="utf-8") as handle:
-            manifest = json.load(handle)
-        manifest["files"]["runtime_receipt"] = "artifacts/receipts/runtime_receipt.json"
-        with open(manifest_path, "w", encoding="utf-8") as handle:
-            json.dump(manifest, handle)
+        receipt = self._attach_runtime_receipt(bundle_dir)
 
         payload = bundle_payload(bundle_dir)
 
@@ -220,18 +247,29 @@ class TransportHttpTests(unittest.TestCase):
 
     def test_bundle_payload_rejects_mismatched_runtime_receipt_digest(self):
         bundle_dir = self._write_bundle(include_summary=True)
-        receipt_dir = os.path.join(bundle_dir, "artifacts", "receipts")
-        os.makedirs(receipt_dir)
-        with open(os.path.join(receipt_dir, "runtime_receipt.json"), "w", encoding="utf-8") as handle:
-            json.dump({"files": [{}], "content_manifest_file_count": 1, "content_manifest_sha256": "0" * 64}, handle)
-        manifest_path = os.path.join(bundle_dir, "manifest.json")
-        with open(manifest_path, "r", encoding="utf-8") as handle:
-            manifest = json.load(handle)
-        manifest["files"]["runtime_receipt"] = "artifacts/receipts/runtime_receipt.json"
-        with open(manifest_path, "w", encoding="utf-8") as handle:
-            json.dump(manifest, handle)
+        receipt = self._attach_runtime_receipt(bundle_dir)
+        receipt["content_manifest_sha256"] = "0" * 64
+        with open(
+            os.path.join(bundle_dir, "artifacts", "receipts", "runtime_receipt.json"),
+            "w",
+            encoding="utf-8",
+        ) as handle:
+            json.dump(receipt, handle)
 
         with self.assertRaisesRegex(ValueError, "manifest digest"):
+            bundle_payload(bundle_dir)
+
+    def test_bundle_payload_rejects_receipt_that_does_not_match_results(self):
+        bundle_dir = self._write_bundle(include_summary=True)
+        self._attach_runtime_receipt(bundle_dir)
+        result_path = os.path.join(bundle_dir, "results", "interactive_chat_v1.json")
+        with open(result_path, "r", encoding="utf-8") as handle:
+            result = json.load(handle)
+        result["execution"]["runtime_receipt"]["runtime_build_id"] = "d" * 64
+        with open(result_path, "w", encoding="utf-8") as handle:
+            json.dump(result, handle)
+
+        with self.assertRaisesRegex(ValueError, "compact result receipt"):
             bundle_payload(bundle_dir)
 
     def test_transport_calls_use_expected_paths_and_auth_headers(self):

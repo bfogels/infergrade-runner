@@ -188,9 +188,11 @@ def _package_root(paths: Dict[str, Path], selection_metadata: Dict[str, Any]) ->
     if selection_metadata.get("origin") != "managed_download":
         return None
     build_id = str(build.get("runtime_build_id") or "")
+    source_assertion_id = str(build.get("source_assertion_id") or "")
     archive_sha256 = str(selection_metadata.get("archive_sha256") or "")
     if (
         not _SHA256_PATTERN.fullmatch(build_id)
+        or not _SHA256_PATTERN.fullmatch(source_assertion_id)
         or not _SHA256_PATTERN.fullmatch(archive_sha256)
         or not selection_metadata.get("archive_checksum_verified")
         or build.get("identity_version") != RUNTIME_BUILD_IDENTITY_VERSION
@@ -200,15 +202,24 @@ def _package_root(paths: Dict[str, Path], selection_metadata: Dict[str, Any]) ->
         return None
     expected_root = (llama_cpp_runtime_dir() / "builds").resolve() / build_id
     expected_manifest = (llama_cpp_runtime_dir() / "build-metadata").resolve() / (build_id + ".json")
+    expected_assertion = (
+        (llama_cpp_runtime_dir() / "source-assertions").resolve()
+        / build_id
+        / (source_assertion_id + ".json")
+    )
     configured_root = Path(str(build.get("package_root") or "")).expanduser().resolve()
     configured_manifest = Path(str(build.get("manifest_path") or "")).expanduser().resolve()
+    configured_assertion = Path(str(build.get("source_assertion_path") or "")).expanduser().resolve()
     if (
         configured_root != expected_root
         or configured_manifest != expected_manifest
+        or configured_assertion != expected_assertion
         or expected_root.is_symlink()
         or expected_manifest.is_symlink()
+        or expected_assertion.is_symlink()
         or not expected_root.is_dir()
         or not expected_manifest.is_file()
+        or not expected_assertion.is_file()
     ):
         selection_metadata["origin"] = "managed_download_unverified"
         return None
@@ -218,24 +229,33 @@ def _package_root(paths: Dict[str, Path], selection_metadata: Dict[str, Any]) ->
     try:
         with expected_manifest.open("r", encoding="utf-8") as handle:
             registry = json.load(handle)
+        with expected_assertion.open("r", encoding="utf-8") as handle:
+            assertion = json.load(handle)
     except (OSError, ValueError):
         selection_metadata["origin"] = "managed_download_unverified"
         return None
-    identity = registry.get("identity") if isinstance(registry, dict) else None
-    registry_archive = registry.get("archive") if isinstance(registry, dict) else None
-    registry_digest = str((registry_archive or {}).get("sha256") or "")
-    registry_runtime_id = registry.get("runtime_id") if isinstance(registry, dict) else None
+    if not isinstance(registry, dict) or not isinstance(assertion, dict):
+        selection_metadata["origin"] = "managed_download_unverified"
+        return None
+    identity = registry.get("identity")
+    assertion_archive = assertion.get("archive")
+    registry_digest = str((assertion_archive or {}).get("sha256") or "")
+    registry_runtime_id = assertion.get("runtime_id")
     if (
-        registry.get("registry_version") != "infergrade_runtime_registry_v1"
+        registry.get("registry_version") != "infergrade_runtime_build_registry_v1"
         or registry.get("runtime_build_id") != build_id
+        or set(registry) != {"registry_version", "runtime_build_id", "identity"}
         or not isinstance(identity, dict)
         or _canonical_sha256(identity) != build_id
-        or registry.get("origin") != "managed_download"
+        or assertion.get("assertion_version") != "infergrade_runtime_source_assertion_v1"
+        or assertion.get("runtime_build_id") != build_id
+        or _canonical_sha256(assertion) != source_assertion_id
+        or assertion.get("origin") != "managed_download"
         or not isinstance(registry_runtime_id, str)
         or not registry_runtime_id.strip()
         or len(registry_runtime_id) > 128
-        or not isinstance(registry_archive, dict)
-        or registry_archive.get("checksum_verified") is not True
+        or not isinstance(assertion_archive, dict)
+        or assertion_archive.get("checksum_verified") is not True
         or registry_digest != archive_sha256
         or not _SHA256_PATTERN.fullmatch(registry_digest)
     ):
@@ -244,11 +264,12 @@ def _package_root(paths: Dict[str, Path], selection_metadata: Dict[str, Any]) ->
     selection_metadata["archive_sha256"] = registry_digest
     selection_metadata["archive_checksum_verified"] = True
     selection_metadata["independent_signature_verified"] = bool(
-        registry_archive.get("independent_signature_verified")
+        assertion_archive.get("independent_signature_verified")
     )
     selection_metadata["runtime_id"] = registry_runtime_id
-    selection_metadata["channel"] = registry.get("maturity")
-    selection_metadata["provenance"] = registry.get("provenance")
+    selection_metadata["channel"] = assertion.get("maturity")
+    selection_metadata["provenance"] = assertion.get("provenance")
+    selection_metadata["source_assertion_id"] = source_assertion_id
     return expected_root
 
 
@@ -450,7 +471,7 @@ def resolve_runtime_lock(
         build_id = _canonical_sha256(identity)
         declared_build = selection_metadata.get("managed_runtime_build") or {}
         declared_build_id = declared_build.get("runtime_build_id")
-        if declared_build_id and declared_build_id != build_id:
+        if root and declared_build_id and declared_build_id != build_id:
             raise RuntimeError(
                 "Cannot lock llama.cpp runtime: the managed package no longer matches its content-addressed build identity."
             )
@@ -486,6 +507,7 @@ def resolve_runtime_lock(
                     "registry_version": "infergrade_runtime_registry_v1",
                     "runtime_id": selection_metadata["runtime_id"],
                     "source_archive_sha256": selection_metadata["archive_sha256"],
+                    "source_assertion_id": selection_metadata["source_assertion_id"],
                 }
                 if root
                 else {"kind": "local_fingerprint"}

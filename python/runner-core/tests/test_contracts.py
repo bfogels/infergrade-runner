@@ -217,7 +217,12 @@ class ContractExportTests(unittest.TestCase):
             "infergrade_runtime_receipt_v1",
         )
         self.assertNotIn("files", receipt_schema["properties"])
+        self.assertEqual(receipt_schema["properties"]["role_files"]["minItems"], 1)
         self.assertEqual(receipt_schema["properties"]["role_files"]["maxItems"], 3)
+        self.assertIn(
+            "source_assertion_id",
+            receipt_schema["properties"]["provenance_evidence"]["oneOf"][0]["required"],
+        )
         self.assertTrue(receipt_schema["allOf"])
         self.assertFalse(
             receipt_schema["properties"]["verification"]["properties"]
