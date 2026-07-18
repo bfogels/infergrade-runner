@@ -218,6 +218,7 @@ class ContractExportTests(unittest.TestCase):
         )
         self.assertNotIn("files", receipt_schema["properties"])
         self.assertEqual(receipt_schema["properties"]["role_files"]["maxItems"], 3)
+        self.assertTrue(receipt_schema["allOf"])
         self.assertFalse(
             receipt_schema["properties"]["verification"]["properties"]
             ["silent_substitution_allowed"]["const"]

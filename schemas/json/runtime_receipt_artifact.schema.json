@@ -61,5 +61,30 @@
     },
     "verification": { "$ref": "runtime_receipt.schema.json#/properties/verification" }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "provenance_evidence": {
+            "properties": { "kind": { "const": "managed_registry" } },
+            "required": ["kind"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "content_scope": { "const": "managed_package" },
+          "origin": { "const": "managed_download" },
+          "provenance_strength": { "enum": ["checksum_verified", "independently_signed"] }
+        }
+      },
+      "else": {
+        "properties": {
+          "content_scope": { "const": "selected_binary_set" },
+          "provenance_strength": { "const": "local_fingerprint_only" }
+        }
+      }
+    }
+  ],
   "additionalProperties": false
 }
