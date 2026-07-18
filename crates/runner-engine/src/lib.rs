@@ -1461,14 +1461,14 @@ fn runtime_file_mode(path: &Path) -> Result<u32, String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        return fs::metadata(path)
+        fs::metadata(path)
             .map(|metadata| metadata.permissions().mode() & 0o777)
             .map_err(|error| {
                 format!(
                     "could not inspect runtime file `{}`: {error}",
                     path.display()
                 )
-            });
+            })
     }
     #[cfg(not(unix))]
     {
@@ -2167,8 +2167,6 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
     let version_output = smoke_runtime_binary(&cli)?;
     let server =
         server.ok_or_else(|| "managed runtime archive did not contain llama-server".to_string())?;
-    let perplexity = perplexity
-        .ok_or_else(|| "managed runtime archive did not contain llama-perplexity".to_string())?;
     let relative_cli = cli
         .strip_prefix(&staging_root)
         .map_err(|error| format!("could not resolve installed llama-cli path: {error}"))?
@@ -2178,17 +2176,20 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         .map_err(|error| format!("could not resolve installed llama-server path: {error}"))?
         .to_path_buf();
     let relative_perplexity = perplexity
-        .strip_prefix(&staging_root)
-        .map_err(|error| format!("could not resolve installed llama-perplexity path: {error}"))?
-        .to_path_buf();
-    let (runtime_build_id, build_identity) = runtime_build_identity(
-        &staging_root,
-        &[
-            ("cli", &cli),
-            ("server", &server),
-            ("perplexity", &perplexity),
-        ],
-    )?;
+        .as_ref()
+        .map(|path| {
+            path.strip_prefix(&staging_root)
+                .map(Path::to_path_buf)
+                .map_err(|error| {
+                    format!("could not resolve installed llama-perplexity path: {error}")
+                })
+        })
+        .transpose()?;
+    let mut role_paths = vec![("cli", cli.as_path()), ("server", server.as_path())];
+    if let Some(path) = perplexity.as_ref() {
+        role_paths.push(("perplexity", path.as_path()));
+    }
+    let (runtime_build_id, build_identity) = runtime_build_identity(&staging_root, &role_paths)?;
     let install_root = runtime_build_root(&runtime_build_id)?;
     fs::create_dir_all(&builds_root).map_err(|error| {
         format!(
@@ -2199,15 +2200,17 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
     if install_root.exists() {
         let existing_cli = install_root.join(&relative_cli);
         let existing_server = install_root.join(&relative_server);
-        let existing_perplexity = install_root.join(&relative_perplexity);
-        let (existing_id, _) = runtime_build_identity(
-            &install_root,
-            &[
-                ("cli", &existing_cli),
-                ("server", &existing_server),
-                ("perplexity", &existing_perplexity),
-            ],
-        )?;
+        let existing_perplexity = relative_perplexity
+            .as_ref()
+            .map(|relative| install_root.join(relative));
+        let mut existing_roles = vec![
+            ("cli", existing_cli.as_path()),
+            ("server", existing_server.as_path()),
+        ];
+        if let Some(path) = existing_perplexity.as_ref() {
+            existing_roles.push(("perplexity", path.as_path()));
+        }
+        let (existing_id, _) = runtime_build_identity(&install_root, &existing_roles)?;
         if existing_id != runtime_build_id {
             return Err(
                 "content-addressed runtime registry contains a mismatched build".to_string(),
@@ -2222,7 +2225,9 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
     }
     let installed_cli = install_root.join(&relative_cli);
     let installed_server = install_root.join(&relative_server);
-    let installed_perplexity = install_root.join(&relative_perplexity);
+    let installed_perplexity = relative_perplexity
+        .as_ref()
+        .map(|relative| install_root.join(relative));
     let file_count = build_identity
         .get("files")
         .and_then(Value::as_array)
@@ -2281,7 +2286,7 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         "binaries": {
             "cli": installed_cli.display().to_string(),
             "server": installed_server.display().to_string(),
-            "perplexity": installed_perplexity.display().to_string(),
+            "perplexity": installed_perplexity.map(|path| path.display().to_string()),
         },
         "runtime_build": {
             "runtime_build_id": runtime_build_id,
@@ -3075,6 +3080,42 @@ mod tests {
         .expect_err("missing expected binary rejected");
 
         assert!(error.contains("llama-perplexity"));
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn managed_runtime_install_accepts_optional_perplexity_binary() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-managed-optional-perplexity-{}",
+            std::process::id()
+        ));
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let archive = test_runtime_archive_without_perplexity();
+        let mut entry = test_runtime_manifest_entry(&archive);
+        entry["expected_binaries"] = json!(["llama-cli", "llama-server"]);
+
+        let result = install_managed_llama_cpp_runtime_from_manifest_entry(
+            entry,
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive),
+            },
+        )
+        .expect("optional perplexity binary may be absent");
+
+        assert!(result["selection"]["binaries"]["perplexity"].is_null());
+        assert_eq!(
+            result["selection"]["runtime_build"]["content_scope"],
+            "managed_package"
+        );
 
         if let Some(previous_cache_dir) = previous_cache_dir {
             env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
