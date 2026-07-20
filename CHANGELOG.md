@@ -7,6 +7,11 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+- Counts EvalPlus completion-normalization failures as wrong model answers when
+  the evaluator keeps them in its denominator, while preserving their raw
+  output and failure disclosure. Runtime or adapter generation failures still
+  make capability evidence partial, degraded, or failed.
+
 ## 0.3.38 (contract 0.3.23)
 
 - Stores managed llama.cpp packages as immutable content-addressed builds, so

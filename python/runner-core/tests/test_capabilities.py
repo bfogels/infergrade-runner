@@ -1271,6 +1271,66 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(coding["lane"], "reference")
         self.assertEqual(coding["confidence_label"], "sampled_reference")
 
+    def test_evalplus_model_output_normalization_failure_scores_wrong_without_suppressing_score(self):
+        class _OneMalformedAnswerAdapter(object):
+            def __init__(self):
+                self.calls = 0
+
+            def generate_text(self, request, prompt, max_tokens):
+                self.calls += 1
+                text = "    return 1" if self.calls == 1 else "```python\n    return 2"
+                return {"text": text, "status": "completed", "error": None}
+
+        def fake_prepare(spec, benchmark_dir, tier):
+            cases = [
+                {"case_id": "HumanEval/0", "task_id": "HumanEval/0", "prompt": "def one():\n", "entry_point": "one"},
+                {"case_id": "HumanEval/1", "task_id": "HumanEval/1", "prompt": "def two():\n", "entry_point": "two"},
+            ]
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for case in cases:
+                    handle.write(json.dumps(case) + "\n")
+
+        def fake_evaluate(spec, benchmark_dir):
+            with open(os.path.join(benchmark_dir, "predictions.jsonl"), "r", encoding="utf-8") as handle:
+                predictions = [json.loads(line) for line in handle if line.strip()]
+            self.assertEqual(predictions[0]["generation_status"], "completed")
+            self.assertEqual(predictions[1]["generation_status"], "failed")
+            self.assertEqual(predictions[1]["generation_failure_kind"], "model_output")
+            return {
+                "benchmark_id": "evalplus_humaneval",
+                "display_name": "EvalPlus HumanEval+",
+                "status": "completed",
+                "primary_metric": {"name": "pass_at_1_plus", "value": 0.5},
+                "metrics": {"pass_at_1_plus": 0.5, "passed_count": 1, "failed_count": 1},
+                "case_results": [
+                    {"task_id": "HumanEval/0", "passed": True, "failure_class": None},
+                    {"task_id": "HumanEval/1", "passed": False, "failure_class": "invalid_completion"},
+                ],
+            }
+
+        request = RunRequest(
+            model="deepreinforce-ai/Ornith-1.0-9B",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="agentic_coding",
+            output_dir=self.tempdir,
+            benchmark_check_ids=["evalplus_humaneval"],
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                execution = execute_capability_suite(_OneMalformedAnswerAdapter(), request)
+
+        result = execution.benchmark_results["evalplus_humaneval"]
+        self.assertEqual(execution.status, "completed")
+        self.assertEqual(execution.component_scores["evalplus_humaneval"], 0.5)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["generation_failure_count"], 1)
+        self.assertEqual(result["model_output_failure_count"], 1)
+        self.assertEqual(result["unscored_generation_failure_count"], 0)
+        self.assertEqual(result["unscored_generation_failure_severity"], "none")
+        self.assertIn("scored as wrong", result["warning"])
+
     def test_execute_evalplus_mbpp_emits_valid_reference_capability_run_artifact(self):
         def fake_prepare(spec, benchmark_dir, tier):
             cases = [
