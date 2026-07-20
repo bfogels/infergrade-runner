@@ -1259,6 +1259,20 @@ mod tests {
         assert_eq!(attempts, 3);
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn native_spawn_stops_after_bounded_text_file_busy_retries() {
+        let mut attempts = 0;
+        let error = spawn_with_transient_retry::<()>(|| {
+            attempts += 1;
+            Err(io::Error::from_raw_os_error(TEXT_FILE_BUSY_OS_ERROR))
+        })
+        .expect_err("persistent text-file-busy errors must remain failures");
+
+        assert_eq!(error.raw_os_error(), Some(TEXT_FILE_BUSY_OS_ERROR));
+        assert_eq!(attempts, TRANSIENT_SPAWN_RETRIES + 1);
+    }
+
     #[test]
     fn native_spawn_does_not_retry_unrelated_errors() {
         let mut attempts = 0;
