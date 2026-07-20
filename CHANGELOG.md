@@ -5,7 +5,9 @@ user-visible changes; full evidence boundaries and validation details live in
 the release PRs and tags. Versions without an entry shipped internal or
 incremental changes only — see the git history.
 
-## Unreleased (contract 0.3.23)
+## Unreleased
+
+## 0.3.38 (contract 0.3.23)
 
 - Stores managed llama.cpp packages as immutable content-addressed builds, so
   installing different bytes never replaces a build already used by evidence.
