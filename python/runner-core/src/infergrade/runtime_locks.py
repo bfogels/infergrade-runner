@@ -15,6 +15,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from infergrade.environment import _detect_cpu_architecture
 from infergrade.runtimes import llama_cpp_runtime_dir, selected_llama_cpp_runtime
 from infergrade.utils import utcnow_iso
 
@@ -383,7 +384,11 @@ def _identity_files(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _normalized_platform_arch() -> str:
-    arch = (platform.machine() or "unknown").lower()
+    # Runtime identity belongs to the host/runtime platform, not the Python
+    # process architecture. An Intel Python running through Rosetta reports
+    # x86_64 even though it launches the managed Apple Silicon binaries that
+    # the native Rust installer correctly registered as aarch64.
+    arch = (_detect_cpu_architecture() or "unknown").lower()
     return {
         "arm64": "aarch64",
         "amd64": "x86_64",
