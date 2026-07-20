@@ -214,6 +214,11 @@ fn native_first_run_builds_hub_bundle_payload_with_experimental_evidence() {
         .expect("missing requirements")
         .iter()
         .any(|item| item == "backend_version_pinned"));
+    assert!(record["verification"]["missing_requirements"]
+        .as_array()
+        .expect("missing requirements")
+        .iter()
+        .any(|item| item == "runtime_receipt_not_recorded"));
     assert_eq!(record["deployment"]["decode_tokens_per_second_p50"], 42.5);
     assert_eq!(record["deployment"]["ttft_p50_ms"], 250.0);
     assert_eq!(

@@ -1,8 +1,10 @@
 """HTTP transport helpers for talking to an InferGrade Hub API."""
 
+import hashlib
 import ipaddress
 import json
 import os
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,6 +26,15 @@ class RunnerTokenInvalidError(RuntimeError):
 
 
 RUNNER_TOKEN_INVALID_MESSAGE = "Runner token revoked or expired. Run 'infergrade pair' to re-pair."
+RUNTIME_RECEIPT_ARTIFACT_PATH = "artifacts/receipts/runtime_receipt.json"
+RUNTIME_RECEIPT_ARTIFACT_MAX_BYTES = 4 * 1024 * 1024
+_SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
+_RUNTIME_RECEIPT_REQUIRED = {
+    "receipt_version", "runtime_lock_id", "runtime_build_id", "runtime_family",
+    "runtime_interface", "content_scope", "origin", "provenance_strength",
+    "provenance_evidence", "locked_roles", "content_manifest_file_count",
+    "content_manifest_sha256", "role_files", "verification",
+}
 
 
 def _is_local_http_api_host(host: str) -> bool:
@@ -136,7 +147,139 @@ def bundle_payload(bundle_dir: str) -> Dict[str, Any]:
     if validation is not None:
         payload["validation"] = validation
     payload["summary"] = summary or _summarize_payload_results(manifest, validation, results)
+    receipt_path = (manifest.get("files") or {}).get("runtime_receipt")
+    if receipt_path is not None:
+        if receipt_path != RUNTIME_RECEIPT_ARTIFACT_PATH:
+            raise ValueError(
+                "manifest files.runtime_receipt must be %s" % RUNTIME_RECEIPT_ARTIFACT_PATH
+            )
+        receipt = read_json(os.path.join(bundle_dir, *RUNTIME_RECEIPT_ARTIFACT_PATH.split("/")))
+        _validate_runtime_receipt_artifact_for_upload(receipt, results)
+        payload["runtime_receipt_artifact"] = receipt
     return payload
+
+
+def _validate_runtime_receipt_artifact_for_upload(
+    receipt: Any,
+    results: List[Dict[str, Any]],
+) -> None:
+    """Refuse unbounded or internally inconsistent full receipts before upload."""
+    if not isinstance(receipt, dict):
+        raise ValueError("runtime receipt artifact must be an object")
+    encoded = json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if len(encoded) > RUNTIME_RECEIPT_ARTIFACT_MAX_BYTES:
+        raise ValueError("runtime receipt artifact exceeds the 4 MiB upload limit")
+    required = _RUNTIME_RECEIPT_REQUIRED | {"files"}
+    if not required.issubset(receipt) or not set(receipt).issubset(required | {"maturity"}):
+        raise ValueError("runtime receipt artifact does not match the full receipt contract fields")
+    if receipt.get("receipt_version") != "infergrade_runtime_receipt_v1":
+        raise ValueError("runtime receipt artifact version is unsupported")
+    for key, limit in (("runtime_family", 128), ("runtime_interface", 128), ("origin", 64)):
+        value = receipt.get(key)
+        if not isinstance(value, str) or not value.strip() or value != value.strip() or len(value) > limit:
+            raise ValueError("runtime receipt artifact %s is invalid" % key)
+    maturity = receipt.get("maturity")
+    if maturity is not None and (
+        not isinstance(maturity, str) or maturity != maturity.strip() or len(maturity) > 64
+    ):
+        raise ValueError("runtime receipt artifact maturity is invalid")
+    for key in ("runtime_lock_id", "runtime_build_id", "content_manifest_sha256"):
+        if not _SHA256_PATTERN.fullmatch(str(receipt.get(key) or "")):
+            raise ValueError("runtime receipt artifact %s must be a SHA-256 digest" % key)
+    locked_roles = receipt.get("locked_roles")
+    if not (
+        isinstance(locked_roles, list)
+        and 2 <= len(locked_roles) <= 3
+        and all(isinstance(role, str) for role in locked_roles)
+        and len(set(locked_roles)) == len(locked_roles)
+        and set(locked_roles).issubset({"cli", "server", "perplexity"})
+    ):
+        raise ValueError("runtime receipt artifact locked_roles are invalid")
+    evidence = receipt.get("provenance_evidence")
+    if receipt.get("content_scope") == "managed_package":
+        if not (
+            receipt.get("origin") == "managed_download"
+            and receipt.get("provenance_strength") in {"checksum_verified", "independently_signed"}
+            and isinstance(evidence, dict)
+            and set(evidence) == {
+                "kind", "registry_version", "runtime_id", "source_archive_sha256", "source_assertion_id"
+            }
+            and evidence.get("kind") == "managed_registry"
+            and evidence.get("registry_version") == "infergrade_runtime_registry_v1"
+            and isinstance(evidence.get("runtime_id"), str)
+            and 1 <= len(evidence["runtime_id"]) <= 128
+            and evidence["runtime_id"] == evidence["runtime_id"].strip()
+            and _SHA256_PATTERN.fullmatch(str(evidence.get("source_archive_sha256") or ""))
+            and _SHA256_PATTERN.fullmatch(str(evidence.get("source_assertion_id") or ""))
+        ):
+            raise ValueError("runtime receipt artifact managed provenance tuple is invalid")
+    elif not (
+        receipt.get("content_scope") == "selected_binary_set"
+        and receipt.get("provenance_strength") == "local_fingerprint_only"
+        and evidence == {"kind": "local_fingerprint"}
+    ):
+        raise ValueError("runtime receipt artifact local provenance tuple is invalid")
+    verification = receipt.get("verification")
+    if verification != {
+        "prelaunch": "passed",
+        "postrun": "passed",
+        "silent_substitution_allowed": False,
+    }:
+        raise ValueError("runtime receipt artifact verification is invalid")
+    files = receipt.get("files")
+    if not isinstance(files, list) or not 1 <= len(files) <= 4096:
+        raise ValueError("runtime receipt artifact files must contain between 1 and 4096 records")
+    file_count = receipt.get("content_manifest_file_count")
+    if isinstance(file_count, bool) or not isinstance(file_count, int) or file_count != len(files):
+        raise ValueError("runtime receipt artifact file count does not match files")
+    role_files = []
+    covered_roles = set()
+    seen_paths = set()
+    file_keys = {"relative_path", "kind", "mode", "size_bytes", "sha256", "roles"}
+    for record in files:
+        if not isinstance(record, dict) or set(record) != file_keys:
+            raise ValueError("runtime receipt artifact contains an invalid file record")
+        relative_path = record.get("relative_path")
+        if not (
+            isinstance(relative_path, str)
+            and 1 <= len(relative_path) <= 512
+            and not relative_path.startswith(("/", "\\", "~"))
+            and "\\" not in relative_path
+            and all(part not in {"", ".", ".."} for part in relative_path.split("/"))
+            and relative_path not in seen_paths
+        ):
+            raise ValueError("runtime receipt artifact contains an invalid relative path")
+        seen_paths.add(relative_path)
+        roles = record.get("roles")
+        if not (
+            record.get("kind") == "regular"
+            and isinstance(record.get("mode"), int)
+            and not isinstance(record.get("mode"), bool)
+            and 0 <= record["mode"] <= 511
+            and isinstance(record.get("size_bytes"), int)
+            and not isinstance(record.get("size_bytes"), bool)
+            and 0 <= record["size_bytes"] <= 2**50
+            and _SHA256_PATTERN.fullmatch(str(record.get("sha256") or ""))
+            and isinstance(roles, list)
+            and len(roles) <= 3
+            and all(isinstance(role, str) for role in roles)
+            and len(set(roles)) == len(roles)
+            and set(roles).issubset(set(locked_roles))
+        ):
+            raise ValueError("runtime receipt artifact contains invalid file metadata")
+        if roles:
+            role_files.append(record)
+            covered_roles.update(roles)
+    if not role_files or covered_roles != set(locked_roles) or receipt.get("role_files") != role_files:
+        raise ValueError("runtime receipt artifact role_files do not cover locked_roles")
+    manifest_digest = hashlib.sha256(
+        json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if receipt.get("content_manifest_sha256") != manifest_digest:
+        raise ValueError("runtime receipt artifact manifest digest does not match files")
+    compact = {key: value for key, value in receipt.items() if key != "files"}
+    if not results or any((result.get("execution") or {}).get("runtime_receipt") != compact for result in results):
+        raise ValueError("runtime receipt artifact does not match every compact result receipt")
 
 
 def _manifest_result_paths(manifest: Dict[str, Any], summary: Optional[Dict[str, Any]] = None) -> List[str]:

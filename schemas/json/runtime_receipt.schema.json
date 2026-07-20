@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infergrade.dev/schemas/runtime_receipt.schema.json",
+  "title": "InferGrade Compact Runtime Receipt",
+  "type": "object",
+  "required": [
+    "receipt_version",
+    "runtime_lock_id",
+    "runtime_build_id",
+    "runtime_family",
+    "runtime_interface",
+    "content_scope",
+    "origin",
+    "provenance_strength",
+    "provenance_evidence",
+    "locked_roles",
+    "content_manifest_file_count",
+    "content_manifest_sha256",
+    "role_files",
+    "verification"
+  ],
+  "properties": {
+    "receipt_version": { "const": "infergrade_runtime_receipt_v1" },
+    "runtime_lock_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "runtime_build_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "runtime_family": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "runtime_interface": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "content_scope": { "enum": ["managed_package", "selected_binary_set"] },
+    "origin": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "maturity": { "type": ["string", "null"], "maxLength": 64 },
+    "provenance_strength": {
+      "enum": ["independently_signed", "checksum_verified", "local_fingerprint_only"]
+    },
+    "provenance_evidence": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "registry_version", "runtime_id", "source_archive_sha256", "source_assertion_id"],
+          "properties": {
+            "kind": { "const": "managed_registry" },
+            "registry_version": { "const": "infergrade_runtime_registry_v1" },
+            "runtime_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "source_archive_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "source_assertion_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": { "kind": { "const": "local_fingerprint" } },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "locked_roles": {
+      "type": "array",
+      "items": { "enum": ["cli", "server", "perplexity"] },
+      "minItems": 2,
+      "maxItems": 3,
+      "uniqueItems": true
+    },
+    "content_manifest_file_count": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "content_manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "role_files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["relative_path", "kind", "mode", "size_bytes", "sha256", "roles"],
+        "properties": {
+          "relative_path": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "kind": { "const": "regular" },
+          "mode": { "type": "integer", "minimum": 0, "maximum": 511 },
+          "size_bytes": { "type": "integer", "minimum": 0, "maximum": 1125899906842624 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "roles": {
+            "type": "array",
+            "items": { "enum": ["cli", "server", "perplexity"] },
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": ["prelaunch", "postrun", "silent_substitution_allowed"],
+      "properties": {
+        "prelaunch": { "const": "passed" },
+        "postrun": { "const": "passed" },
+        "silent_substitution_allowed": { "const": false }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "provenance_evidence": {
+            "properties": { "kind": { "const": "managed_registry" } },
+            "required": ["kind"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "content_scope": { "const": "managed_package" },
+          "origin": { "const": "managed_download" },
+          "provenance_strength": { "enum": ["checksum_verified", "independently_signed"] }
+        }
+      },
+      "else": {
+        "properties": {
+          "content_scope": { "const": "selected_binary_set" },
+          "provenance_strength": { "const": "local_fingerprint_only" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "locked_roles": { "contains": { "const": "cli" } } } },
+      "then": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "cli" } } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "locked_roles": { "contains": { "const": "server" } } } },
+      "then": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "server" } } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "locked_roles": { "contains": { "const": "perplexity" } } } },
+      "then": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "perplexity" } } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "cli" } } }
+            }
+          }
+        }
+      },
+      "then": { "properties": { "locked_roles": { "contains": { "const": "cli" } } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "server" } } }
+            }
+          }
+        }
+      },
+      "then": { "properties": { "locked_roles": { "contains": { "const": "server" } } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "perplexity" } } }
+            }
+          }
+        }
+      },
+      "then": { "properties": { "locked_roles": { "contains": { "const": "perplexity" } } } }
+    }
+  ],
+  "additionalProperties": false
+}

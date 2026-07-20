@@ -39,7 +39,7 @@ The clearest first path is:
 
 The broader Runner architecture remains available, but the default path is intentionally narrower than a general benchmark platform.
 
-The Desktop Runner has a native first-run lane for macOS Apple Silicon with a local GGUF model and either an explicit selected `llama.cpp` runtime or the recommended managed Metal runtime installed through the app. Docker will not be required for the first local benchmark. Runtime install is intentional: the app does not silently download, upgrade, or switch runtimes, and the current managed runtime is checksum-verified rather than independently signed. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
+The Desktop Runner has a native first-run lane for macOS Apple Silicon with a local GGUF model and either an explicit selected `llama.cpp` runtime or the recommended managed Metal runtime installed through the app. Docker will not be required for the first local benchmark. Runtime install is intentional: the app does not silently download, upgrade, or switch runtimes, and the current managed runtime is checksum-verified rather than independently signed. Managed packages are stored as immutable content-addressed builds; evidence-producing native runner-core benchmarks lock one exact build for the attempt and emit a path-free runtime receipt. The separate Rust CLI native-first-run preview remains experimental and explicitly reports that it does not yet record this receipt. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
 
 ## Decision Suite vs Reference Suite
 

@@ -1,0 +1,30 @@
+{
+  "identity": {
+    "content_scope": "managed_package",
+    "files": [
+      {
+        "kind": "regular",
+        "mode": 493,
+        "relative_path": "bin/llama-cli",
+        "sha256": "305d930ca0026416ff46eb4734a2cd1a940b935d74f4c490e42b050855f70e36",
+        "size_bytes": 12
+      },
+      {
+        "kind": "regular",
+        "mode": 493,
+        "relative_path": "bin/llama-server",
+        "sha256": "3c159e4adb18bc0a4e123ea5328fafb9975176115a01b813d334b6f37b21886b",
+        "size_bytes": 15
+      }
+    ],
+    "identity_version": "infergrade_runtime_build_v1",
+    "platform": {"arch": "fixture", "system": "fixture"},
+    "runtime_family": "llama.cpp",
+    "runtime_interface": "llama_cpp_cli_server_v1"
+  },
+  "runtime_build_id": "a503d4569c6ab81dbed0cffc05262cb2585878ec05afd419085e4a08ee64fb11",
+  "tree": [
+    {"relative_path": "bin/llama-cli", "content": "cli-fixture\n", "roles": ["cli"]},
+    {"relative_path": "bin/llama-server", "content": "server-fixture\n", "roles": ["server"]}
+  ]
+}

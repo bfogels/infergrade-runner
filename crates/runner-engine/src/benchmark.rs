@@ -2,7 +2,7 @@ use crate::{RunnerError, RunnerEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::env;
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -18,6 +18,9 @@ const PREVIEW_TRUNCATED_MARKER: &str = "\n[preview truncated]";
 const MAX_FIRST_RUN_DURATION_MS: u64 = 86_400_000;
 const MAX_DECODE_TOKENS_PER_SECOND: f64 = 1_000_000.0;
 const MAX_PEAK_MEMORY_BYTES: u64 = 1 << 44;
+const TEXT_FILE_BUSY_OS_ERROR: i32 = 26;
+const TRANSIENT_SPAWN_RETRIES: usize = 3;
+const TRANSIENT_SPAWN_RETRY_DELAY: Duration = Duration::from_millis(25);
 const LLAMA_CPP_AUTO_RUNTIME_ID: &str = "llama.cpp-auto";
 const NATIVE_FIRST_RUN_BENCHMARK_ID: &str = "native_first_run";
 
@@ -286,15 +289,30 @@ fn duration_ms(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
+fn spawn_with_transient_retry<T>(mut spawn: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    let mut retries = 0;
+    loop {
+        match spawn() {
+            Err(error)
+                if cfg!(target_os = "linux")
+                    && error.raw_os_error() == Some(TEXT_FILE_BUSY_OS_ERROR)
+                    && retries < TRANSIENT_SPAWN_RETRIES =>
+            {
+                retries += 1;
+                std::thread::sleep(TRANSIENT_SPAWN_RETRY_DELAY);
+            }
+            result => return result,
+        }
+    }
+}
+
 fn run_process_with_timeout(
     mut command: Command,
     timeout: Duration,
     extra_sensitive_values: &[String],
 ) -> Result<ProcessRun, String> {
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = spawn_with_transient_retry(|| command.spawn())
         .map_err(|error| format!("could not invoke native runtime: {error}"))?;
     let started_at = Instant::now();
     let stdout = child
@@ -996,6 +1014,7 @@ pub fn native_first_run_bundle_payload(
     let missing_requirements = vec![
         "quant_artifact_sha256",
         "backend_version_pinned",
+        "runtime_receipt_not_recorded",
         "capability_suite_not_run",
         "multi_run_variance_not_captured",
     ];
@@ -1221,6 +1240,51 @@ fn native_first_run_hardware_summary() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn native_spawn_retries_linux_text_file_busy_errors_only_within_bound() {
+        let mut attempts = 0;
+        let result = spawn_with_transient_retry(|| {
+            attempts += 1;
+            if attempts < 3 {
+                Err(io::Error::from_raw_os_error(TEXT_FILE_BUSY_OS_ERROR))
+            } else {
+                Ok("started")
+            }
+        })
+        .expect("transient text-file-busy spawn should recover");
+
+        assert_eq!(result, "started");
+        assert_eq!(attempts, 3);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn native_spawn_stops_after_bounded_text_file_busy_retries() {
+        let mut attempts = 0;
+        let error = spawn_with_transient_retry::<()>(|| {
+            attempts += 1;
+            Err(io::Error::from_raw_os_error(TEXT_FILE_BUSY_OS_ERROR))
+        })
+        .expect_err("persistent text-file-busy errors must remain failures");
+
+        assert_eq!(error.raw_os_error(), Some(TEXT_FILE_BUSY_OS_ERROR));
+        assert_eq!(attempts, TRANSIENT_SPAWN_RETRIES + 1);
+    }
+
+    #[test]
+    fn native_spawn_does_not_retry_unrelated_errors() {
+        let mut attempts = 0;
+        let error = spawn_with_transient_retry::<()>(|| {
+            attempts += 1;
+            Err(io::Error::new(io::ErrorKind::NotFound, "missing runtime"))
+        })
+        .expect_err("unrelated spawn errors must fail immediately");
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(attempts, 1);
+    }
 
     #[test]
     fn read_process_stream_caps_oversized_output_and_marks_truncated() {

@@ -817,6 +817,15 @@ mod tests {
 
         assert_eq!(output["status"], "selected");
         assert_eq!(output["selection"]["source"], "selected_existing");
+        assert!(output["selection"]["runtime_id"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("llama-cpp-local-"));
+        assert_eq!(output["selection"]["runtime_identity_basis"], "cli_sha256");
+        assert!(output["selection"]["version_label"]
+            .as_str()
+            .unwrap_or("")
+            .contains("0.0-test"));
         assert!(output["message"]
             .as_str()
             .unwrap_or("")

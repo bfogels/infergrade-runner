@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,27 @@ def _matches_schema_type(value, schema_type):
 
 
 def _validate_schema_subset(value, schema, path="$"):
+    for index, item_schema in enumerate(schema.get("allOf") or []):
+        _validate_schema_subset(value, item_schema, "%s.allOf[%d]" % (path, index))
+    if "oneOf" in schema:
+        matches = 0
+        for item_schema in schema["oneOf"]:
+            try:
+                _validate_schema_subset(value, item_schema, path)
+            except AssertionError:
+                continue
+            matches += 1
+        if matches != 1:
+            raise AssertionError("%s expected exactly one matching oneOf branch" % path)
+    if "if" in schema:
+        try:
+            _validate_schema_subset(value, schema["if"], path)
+        except AssertionError:
+            branch = schema.get("else")
+        else:
+            branch = schema.get("then")
+        if branch:
+            _validate_schema_subset(value, branch, path)
     if "const" in schema and value != schema["const"]:
         raise AssertionError("%s expected const %r, got %r" % (path, schema["const"], value))
     if "enum" in schema and value not in schema["enum"]:
@@ -38,6 +60,10 @@ def _validate_schema_subset(value, schema, path="$"):
         raise AssertionError("%s expected type %r, got %r" % (path, schema["type"], type(value).__name__))
     if isinstance(value, str) and "minLength" in schema and len(value) < schema["minLength"]:
         raise AssertionError("%s expected minLength %r" % (path, schema["minLength"]))
+    if isinstance(value, str) and "maxLength" in schema and len(value) > schema["maxLength"]:
+        raise AssertionError("%s expected maxLength %r" % (path, schema["maxLength"]))
+    if isinstance(value, str) and "pattern" in schema and not re.fullmatch(schema["pattern"], value):
+        raise AssertionError("%s expected pattern %r" % (path, schema["pattern"]))
     if isinstance(value, (int, float)) and not isinstance(value, bool) and "minimum" in schema and value < schema["minimum"]:
         raise AssertionError("%s expected minimum %r" % (path, schema["minimum"]))
     if isinstance(value, dict):
@@ -53,12 +79,27 @@ def _validate_schema_subset(value, schema, path="$"):
             if key in properties:
                 _validate_schema_subset(item, properties[key], "%s.%s" % (path, key))
     if isinstance(value, list):
+        if "minItems" in schema and len(value) < schema["minItems"]:
+            raise AssertionError("%s expected minItems %r" % (path, schema["minItems"]))
+        if "maxItems" in schema and len(value) > schema["maxItems"]:
+            raise AssertionError("%s expected maxItems %r" % (path, schema["maxItems"]))
         if schema.get("uniqueItems") and len(value) != len({json.dumps(item, sort_keys=True) for item in value}):
             raise AssertionError("%s expected unique items" % path)
+        if "contains" in schema:
+            if not any(_schema_subset_matches(item, schema["contains"], path) for item in value):
+                raise AssertionError("%s expected an item matching contains" % path)
         item_schema = schema.get("items")
         if item_schema:
             for index, item in enumerate(value):
                 _validate_schema_subset(item, item_schema, "%s[%d]" % (path, index))
+
+
+def _schema_subset_matches(value, schema, path):
+    try:
+        _validate_schema_subset(value, schema, path)
+    except AssertionError:
+        return False
+    return True
 
 
 class ContractExportTests(unittest.TestCase):
@@ -98,7 +139,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.22")
+        self.assertEqual(manifest["contract_version"], "0.3.23")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_run_request_contract_accepts_authorized_artifact_download_size(self):
@@ -196,6 +237,64 @@ class ContractExportTests(unittest.TestCase):
         self.assertFalse(cuda_example["fallback"]["allowed"])
         self.assertIn("full_loop_not_proven", cuda_example["compatibility"]["reason_codes"])
         _validate_schema_subset(cuda_example, selector_schema)
+
+    def test_contract_declares_exact_runtime_receipts(self):
+        manifest = load_contract_manifest()
+        self.assertIn("schemas/json/runtime_receipt.schema.json", manifest["schema_files"])
+        self.assertIn("schemas/json/runtime_receipt_artifact.schema.json", manifest["schema_files"])
+        self.assertIn("schemas/examples/runtime_receipt.example.json", manifest["example_files"])
+        result_schema = json.loads(
+            (repo_root() / "schemas" / "json" / "result_record.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            result_schema["properties"]["execution"]["properties"]["runtime_receipt"]["$ref"],
+            "runtime_receipt.schema.json",
+        )
+        receipt_schema = json.loads(
+            (repo_root() / "schemas" / "json" / "runtime_receipt.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            receipt_schema["properties"]["receipt_version"]["const"],
+            "infergrade_runtime_receipt_v1",
+        )
+        self.assertNotIn("files", receipt_schema["properties"])
+        self.assertEqual(receipt_schema["properties"]["role_files"]["minItems"], 1)
+        self.assertEqual(receipt_schema["properties"]["role_files"]["maxItems"], 3)
+        self.assertIn(
+            "source_assertion_id",
+            receipt_schema["properties"]["provenance_evidence"]["oneOf"][0]["required"],
+        )
+        self.assertTrue(receipt_schema["allOf"])
+        self.assertFalse(
+            receipt_schema["properties"]["verification"]["properties"]
+            ["silent_substitution_allowed"]["const"]
+        )
+        receipt_example = json.loads(
+            (repo_root() / "schemas" / "examples" / "runtime_receipt.example.json").read_text(encoding="utf-8")
+        )
+        _validate_schema_subset(receipt_example, receipt_schema)
+        missing_server_coverage = json.loads(json.dumps(receipt_example))
+        for item in missing_server_coverage["role_files"]:
+            item["roles"] = ["cli"]
+        with self.assertRaisesRegex(AssertionError, "contains"):
+            _validate_schema_subset(missing_server_coverage, receipt_schema)
+        undeclared_perplexity_coverage = json.loads(json.dumps(receipt_example))
+        undeclared_perplexity_coverage["role_files"][0]["roles"].append("perplexity")
+        with self.assertRaisesRegex(AssertionError, "contains"):
+            _validate_schema_subset(undeclared_perplexity_coverage, receipt_schema)
+        artifact_schema = json.loads(
+            (repo_root() / "schemas" / "json" / "runtime_receipt_artifact.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertIn("files", artifact_schema["required"])
+        self.assertEqual(artifact_schema["properties"]["files"]["maxItems"], 4096)
+        artifact_example = {**receipt_example, "files": receipt_example["role_files"]}
+        _validate_schema_subset(artifact_example, artifact_schema)
+        undeclared_artifact_coverage = json.loads(json.dumps(artifact_example))
+        undeclared_artifact_coverage["role_files"][0]["roles"].append("perplexity")
+        with self.assertRaisesRegex(AssertionError, "contains"):
+            _validate_schema_subset(undeclared_artifact_coverage, artifact_schema)
 
     def test_runtime_selector_schema_accepts_emitted_windows_cuda_preflight_selector(self):
         selector_schema = json.loads(

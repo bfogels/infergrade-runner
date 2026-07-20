@@ -1,0 +1,44 @@
+{
+  "receipt_version": "infergrade_runtime_receipt_v1",
+  "runtime_lock_id": "1111111111111111111111111111111111111111111111111111111111111111",
+  "runtime_build_id": "2222222222222222222222222222222222222222222222222222222222222222",
+  "runtime_family": "llama.cpp",
+  "runtime_interface": "llama_cpp_cli_server_v1",
+  "content_scope": "managed_package",
+  "origin": "managed_download",
+  "maturity": "reviewed_candidate",
+  "provenance_strength": "checksum_verified",
+  "provenance_evidence": {
+    "kind": "managed_registry",
+    "registry_version": "infergrade_runtime_registry_v1",
+    "runtime_id": "llama-cpp-macos-metal-b9994",
+    "source_archive_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+    "source_assertion_id": "7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "locked_roles": ["cli", "server"],
+  "content_manifest_file_count": 2,
+  "content_manifest_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+  "role_files": [
+    {
+      "relative_path": "bin/llama-cli",
+      "kind": "regular",
+      "mode": 493,
+      "size_bytes": 123456,
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "roles": ["cli"]
+    },
+    {
+      "relative_path": "bin/llama-server",
+      "kind": "regular",
+      "mode": 493,
+      "size_bytes": 234567,
+      "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "roles": ["server"]
+    }
+  ],
+  "verification": {
+    "prelaunch": "passed",
+    "postrun": "passed",
+    "silent_substitution_allowed": false
+  }
+}
