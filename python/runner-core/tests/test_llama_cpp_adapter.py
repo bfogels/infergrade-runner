@@ -429,7 +429,11 @@ class LlamaCppAdapterTests(unittest.TestCase):
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.run")
     def test_resolve_version_uses_selected_managed_runtime(self, run_mock, adapter_which_mock, runtime_which_mock):
         runtime_which_mock.side_effect = lambda name: name if name in ("/managed/llama-cli", "/managed/llama-server") else None
-        select_llama_cpp_runtime(cli_path="/managed/llama-cli", server_path="/managed/llama-server")
+        select_llama_cpp_runtime(
+            runtime_id="llama-cpp-homebrew-stable-2026-04",
+            cli_path="/managed/llama-cli",
+            server_path="/managed/llama-server",
+        )
         adapter_which_mock.side_effect = lambda name: name if name == "/managed/llama-cli" else None
         run_mock.return_value = mock.Mock(returncode=0, stdout="version: managed-runtime\n", stderr="")
         adapter = LlamaCppAdapter()

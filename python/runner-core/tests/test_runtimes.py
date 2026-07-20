@@ -8,6 +8,7 @@ from unittest import mock
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.runtimes import (
+    LLAMA_CPP_RUNTIME_ID,
     WINDOWS_CUDA_RUNTIME_ID,
     install_llama_cpp_runtime,
     known_llama_cpp_runtimes,
@@ -72,7 +73,11 @@ class RuntimeManagementTests(unittest.TestCase):
     @mock.patch("infergrade.runtimes.shutil.which")
     def test_select_existing_runtime_writes_managed_selection(self, which_mock):
         which_mock.side_effect = lambda name: name if name in ("/custom/llama-cli", "/custom/llama-server") else None
-        selection = select_llama_cpp_runtime(cli_path="/custom/llama-cli", server_path="/custom/llama-server")
+        selection = select_llama_cpp_runtime(
+            runtime_id=LLAMA_CPP_RUNTIME_ID,
+            cli_path="/custom/llama-cli",
+            server_path="/custom/llama-server",
+        )
         self.assertEqual(selection["source"], "homebrew")
         self.assertEqual(selection["binaries"]["cli"], "/custom/llama-cli")
         self.assertEqual(selected_llama_cpp_runtime()["binaries"]["server"], "/custom/llama-server")
@@ -85,11 +90,32 @@ class RuntimeManagementTests(unittest.TestCase):
             "llama-perplexity": "/usr/local/bin/llama-perplexity",
         }.get(name)
 
-        selection = select_llama_cpp_runtime(cli_path="/custom/llama-cli")
+        selection = select_llama_cpp_runtime(runtime_id=LLAMA_CPP_RUNTIME_ID, cli_path="/custom/llama-cli")
 
         self.assertEqual(selection["source"], "homebrew")
         self.assertEqual(selection["binaries"]["server"], "/usr/local/bin/llama-server")
         self.assertEqual(selection["binaries"]["perplexity"], "/usr/local/bin/llama-perplexity")
+
+    def test_unlabeled_explicit_runtime_uses_cli_fingerprint_identity(self):
+        paths = {}
+        for name in ("llama-cli", "llama-server", "llama-perplexity"):
+            path = os.path.join(self.tempdir.name, name)
+            with open(path, "wb") as handle:
+                handle.write((name + " local runtime").encode("utf-8"))
+            os.chmod(path, 0o755)
+            paths[name] = path
+
+        selection = select_llama_cpp_runtime(cli_path=paths["llama-cli"])
+        expected_sha256 = hashlib.sha256(b"llama-cli local runtime").hexdigest()
+
+        self.assertEqual(selection["runtime_id"], "llama-cpp-local-%s" % expected_sha256)
+        self.assertEqual(selection["runtime_identity_basis"], "cli_sha256")
+        self.assertEqual(selection["source"], "selected_existing")
+        self.assertEqual(selection["channel"], "local_binary")
+        self.assertNotEqual(selection["runtime_id"], LLAMA_CPP_RUNTIME_ID)
+        self.assertNotIn("checksum", selection)
+        self.assertNotIn("notes", selection)
+        self.assertEqual(selected_llama_cpp_runtime()["runtime_id"], selection["runtime_id"])
 
     @mock.patch("infergrade.runtimes.shutil.which")
     def test_select_existing_runtime_rejects_bad_explicit_server_without_path_fallback(self, which_mock):

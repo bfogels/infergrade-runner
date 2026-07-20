@@ -291,13 +291,33 @@ def _which_first(candidates: List[Optional[str]]) -> Optional[str]:
     return None
 
 
+def _local_runtime_id(cli_fingerprint: Dict[str, Any]) -> str:
+    digest = cli_fingerprint.get("sha256")
+    if cli_fingerprint.get("status") != "recorded" or not isinstance(digest, str) or len(digest) != 64:
+        raise RuntimeError(
+            "Cannot select existing llama.cpp runtime; the selected llama-cli binary could not be fingerprinted."
+        )
+    return "llama-cpp-local-%s" % digest
+
+
 def select_llama_cpp_runtime(
     runtime_id: Optional[str] = None,
     cli_path: Optional[str] = None,
     server_path: Optional[str] = None,
     perplexity_path: Optional[str] = None,
 ) -> Dict[str, Any]:
-    runtime = find_known_runtime(runtime_id)
+    local_binary_selection = runtime_id is None and bool(cli_path)
+    if local_binary_selection:
+        executable_suffix = ".exe" if platform.system() == "Windows" else ""
+        runtime = {
+            "binary_names": {
+                "cli": "llama-cli%s" % executable_suffix,
+                "server": "llama-server%s" % executable_suffix,
+                "perplexity": "llama-perplexity%s" % executable_suffix,
+            }
+        }
+    else:
+        runtime = find_known_runtime(runtime_id)
     names = runtime.get("binary_names") or {}
     selected_cli = shutil.which(cli_path or names.get("cli") or "llama-cli")
     infer_siblings = bool(cli_path and selected_cli)
@@ -319,28 +339,43 @@ def select_llama_cpp_runtime(
     required_kinds = ("cli", "server", "perplexity") if _is_windows_cuda_runtime(runtime) else ("cli", "server")
     missing = [name for name in required_kinds if not resolved.get(name)]
     if missing:
+        if local_binary_selection:
+            raise RuntimeError(
+                "Cannot select existing local llama.cpp runtime; missing required binary kind(s): %s"
+                % ", ".join(missing)
+            )
         raise RuntimeError(
             "Cannot select managed llama.cpp runtime %s; missing required binary kind(s): %s"
             % (runtime["runtime_id"], ", ".join(missing))
         )
+    binary_fingerprints = {
+        kind: runtime_binary_fingerprint(path)
+        for kind, path in resolved.items()
+        if path
+    }
     payload = {
-        "runtime_id": runtime["runtime_id"],
+        "runtime_id": _local_runtime_id(binary_fingerprints["cli"]) if local_binary_selection else runtime["runtime_id"],
         "backend": "llama.cpp",
-        "version_label": runtime.get("version_label"),
-        "source": runtime.get("source"),
-        "provenance": runtime.get("provenance"),
+        "version_label": "existing local binary" if local_binary_selection else runtime.get("version_label"),
+        "source": "selected_existing" if local_binary_selection else runtime.get("source"),
+        "channel": "local_binary" if local_binary_selection else runtime.get("channel"),
+        "provenance": (
+            "User-selected existing llama.cpp binary. InferGrade recorded its local fingerprint but did not install or authenticate its distribution source."
+            if local_binary_selection
+            else runtime.get("provenance")
+        ),
+        "runtime_identity_basis": (
+            "cli_sha256" if local_binary_selection else "explicit_runtime_id" if runtime_id else "registered_runtime_id"
+        ),
         "manifest_version": RUNTIME_MANIFEST_VERSION,
         "binaries": resolved,
-        "binary_fingerprints": {
-            kind: runtime_binary_fingerprint(path)
-            for kind, path in resolved.items()
-            if path
-        },
+        "binary_fingerprints": binary_fingerprints,
         "selected_at_platform": {"system": platform.system(), "machine": platform.machine()},
     }
-    for key in ("binary_set", "support_tier", "checksum", "notes"):
-        if key in runtime:
-            payload[key] = runtime.get(key)
+    if not local_binary_selection:
+        for key in ("binary_set", "support_tier", "checksum", "notes"):
+            if key in runtime:
+                payload[key] = runtime.get(key)
     if _is_windows_cuda_runtime(runtime):
         payload["checksum_verified"] = bool(runtime.get("checksum"))
         payload["checksum_status"] = (

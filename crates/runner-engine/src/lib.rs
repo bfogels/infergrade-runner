@@ -779,7 +779,11 @@ fn validate_existing_runtime_path(
     Ok(canonical.display().to_string())
 }
 
-fn validate_llama_cpp_binary(path: &Path, kind: &str, required_name: &str) -> Result<(), String> {
+fn validate_llama_cpp_binary(
+    path: &Path,
+    kind: &str,
+    required_name: &str,
+) -> Result<String, String> {
     let output = StdCommand::new(path)
         .arg("--version")
         .output()
@@ -824,7 +828,20 @@ fn validate_llama_cpp_binary(path: &Path, kind: &str, required_name: &str) -> Re
             path.display()
         ));
     }
-    Ok(())
+    Ok(preview)
+}
+
+fn local_runtime_identity(cli_path: &Path) -> Result<(String, String), String> {
+    let cli_sha256 = sha256_file(cli_path)?;
+    let version = validate_llama_cpp_binary(cli_path, "llama-cli", "llama-cli")?;
+    Ok((
+        format!("llama-cpp-local-{cli_sha256}"),
+        if version.is_empty() {
+            "llama.cpp local binary".to_string()
+        } else {
+            format!("llama.cpp · {version}")
+        },
+    ))
 }
 
 fn resolve_existing_runtime_binary(
@@ -886,8 +903,14 @@ pub fn select_existing_llama_cpp_runtime(
     server_path: Option<PathBuf>,
     perplexity_path: Option<PathBuf>,
 ) -> Result<Value, String> {
-    let runtime_id = safe_runtime_id(runtime_id)?;
-    let windows_cuda_preview = is_windows_cuda_preview_runtime(&runtime_id);
+    let requested_runtime_id = runtime_id.map(str::trim).filter(|value| !value.is_empty());
+    let explicit_runtime_id = requested_runtime_id
+        .map(|value| safe_runtime_id(Some(value)))
+        .transpose()?;
+    let windows_cuda_preview = explicit_runtime_id
+        .as_deref()
+        .map(is_windows_cuda_preview_runtime)
+        .unwrap_or(false);
     let cli_program = if windows_cuda_preview {
         "llama-cli.exe"
     } else {
@@ -907,6 +930,8 @@ pub fn select_existing_llama_cpp_runtime(
     let cli = resolve_existing_runtime_binary(cli_path, cli_program, "llama-cli", true)?
         .ok_or_else(|| "llama-cli selection failed.".to_string())?;
     let cli_path = PathBuf::from(&cli);
+    let (derived_runtime_id, derived_version_label) = local_runtime_identity(&cli_path)?;
+    let runtime_id = explicit_runtime_id.unwrap_or(derived_runtime_id);
     let server = if cli_was_explicit {
         resolve_optional_sibling_runtime_binary(
             &cli_path,
@@ -942,7 +967,8 @@ pub fn select_existing_llama_cpp_runtime(
     let mut selection = json!({
         "runtime_id": runtime_id,
         "backend": "llama.cpp",
-        "version_label": "existing local binary",
+        "version_label": derived_version_label,
+        "runtime_identity_basis": if requested_runtime_id.is_some() { "explicit_runtime_id" } else { "cli_sha256" },
         "source": "selected_existing",
         "channel": "local_binary",
         "provenance": "User-selected existing llama.cpp binary. No runtime download or install command was run by InferGrade.",
@@ -3556,6 +3582,50 @@ mod tests {
         assert_eq!(status["selected_channel"]["channel"], "local_binary");
         assert_eq!(status["selected_channel"]["update_policy"], "not_managed");
         assert_eq!(status["update_policy"]["automatic_updates"], false);
+
+        if let Some(previous_cache_dir) = previous_cache_dir {
+            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
+        } else {
+            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
+        }
+        let _ = fs::remove_file(runtime_path);
+        let _ = fs::remove_dir_all(runtime_cache_dir);
+    }
+
+    #[test]
+    fn unlabeled_existing_runtime_uses_cli_fingerprint_identity() {
+        let _guard = env_test_lock().lock().expect("env lock");
+        let runtime_cache_dir = env::temp_dir().join(format!(
+            "infergrade-runner-engine-derived-runtime-cache-{}",
+            std::process::id()
+        ));
+        let runtime_path = env::temp_dir().join(format!(
+            "infergrade-runner-engine-derived-llama-cli-{}{}",
+            std::process::id(),
+            if cfg!(windows) { ".cmd" } else { "" }
+        ));
+        write_test_llama_binary(&runtime_path, "llama-cli");
+        let expected_sha256 = sha256_file(&runtime_path).expect("runtime fingerprint");
+        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+
+        let selection =
+            select_existing_llama_cpp_runtime(None, Some(runtime_path.clone()), None, None)
+                .expect("runtime selection");
+
+        assert_eq!(
+            selection["selection"]["runtime_id"],
+            format!("llama-cpp-local-{expected_sha256}")
+        );
+        assert_eq!(
+            selection["selection"]["runtime_identity_basis"],
+            "cli_sha256"
+        );
+        assert!(selection["selection"]["version_label"]
+            .as_str()
+            .unwrap_or("")
+            .contains("0.0-test"));
+        assert_ne!(selection["selection"]["runtime_id"], LLAMA_CPP_RUNTIME_ID);
 
         if let Some(previous_cache_dir) = previous_cache_dir {
             env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);

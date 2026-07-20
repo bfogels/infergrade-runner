@@ -1823,6 +1823,14 @@ mod tests {
 
         assert_eq!(selection["status"], "selected");
         assert_eq!(selection["selection"]["source"], "selected_existing");
+        assert!(selection["selection"]["runtime_id"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("llama-cpp-local-"));
+        assert_eq!(
+            selection["selection"]["runtime_identity_basis"],
+            "cli_sha256"
+        );
         assert!(selection["message"]
             .as_str()
             .unwrap_or("")
