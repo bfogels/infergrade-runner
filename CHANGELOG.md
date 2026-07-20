@@ -16,6 +16,8 @@ incremental changes only — see the git history.
 - Keeps content identity separate from executable-role and support assertions,
   bounds compact per-result receipts, and limits locally fingerprinted binary
   sets to community verification unless managed-package provenance is present.
+- Identifies unlabeled local llama.cpp selections by the selected CLI's full
+  SHA-256 digest instead of assigning the legacy Homebrew runtime identity.
 
 ## 0.3.37
 
