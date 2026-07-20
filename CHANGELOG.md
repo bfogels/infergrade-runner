@@ -20,6 +20,8 @@ incremental changes only — see the git history.
   sets to community verification unless managed-package provenance is present.
 - Identifies unlabeled local llama.cpp selections by the selected CLI's full
   SHA-256 digest instead of assigning the legacy Homebrew runtime identity.
+- Retries Linux's transient `Text file busy` process-start error within a
+  short fixed bound while keeping every other native runtime error fail-fast.
 
 ## 0.3.37
 
