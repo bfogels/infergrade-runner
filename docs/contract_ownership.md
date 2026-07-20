@@ -47,16 +47,10 @@ These bundles are the unit the Hub should pin to.
 
 ## Versioning Model
 
-For now, the contract version follows the Runner package version.
-
-That is acceptable while the system is early, but the contract should still be treated explicitly as a published artifact rather than an accidental side effect of the repo.
-
-Future refinement may split:
-
-- Runner package version
-- contract version
-
-if those need to move at different speeds.
+The contract and Runner package use independent version sequences. A schema
+change increments `schemas/contract_manifest.json`; a feature PR does not bump
+the Runner package version unless it is also the release PR. The exported
+contract bundle remains the explicit compatibility unit Hub pins.
 
 ## Hub Consumption Recommendation
 

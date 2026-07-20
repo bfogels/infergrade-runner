@@ -5,6 +5,18 @@ user-visible changes; full evidence boundaries and validation details live in
 the release PRs and tags. Versions without an entry shipped internal or
 incremental changes only — see the git history.
 
+## Unreleased (contract 0.3.23)
+
+- Stores managed llama.cpp packages as immutable content-addressed builds, so
+  installing different bytes never replaces a build already used by evidence.
+- Resolves one exact native runtime lock per run attempt, preserves it across
+  resume, verifies it before and after execution, and emits a path-free runtime
+  receipt. Runtime preference changes and binary mutation cannot silently alter
+  an in-progress run.
+- Keeps content identity separate from executable-role and support assertions,
+  bounds compact per-result receipts, and limits locally fingerprinted binary
+  sets to community verification unless managed-package provenance is present.
+
 ## 0.3.37
 
 - Publishes the audited Runner source and canonical container images for public use under Apache-2.0, with refreshed architecture, contribution, and release documentation.

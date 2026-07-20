@@ -10,7 +10,7 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.models import DeploymentExecution
 from infergrade.models import RunRequest
-from infergrade.runner import _memory_fit_payload, _recorded_elapsed_seconds, run_infergrade
+from infergrade.runner import _memory_fit_payload, _recorded_elapsed_seconds, _verification_level, run_infergrade
 
 
 class RunnerTests(unittest.TestCase):
@@ -19,6 +19,30 @@ class RunnerTests(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.tempdir)
+
+    def test_native_runtime_provenance_bounds_verified_tier(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-4B",
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            quant_artifact="model.gguf",
+            quant_artifact_sha256="a" * 64,
+            simulate=False,
+        )
+        hardware = {"accelerator_type": "metal"}
+        request.runtime_lock = {
+            "runtime_build_id": "b" * 64,
+            "content_scope": "selected_binary_set",
+            "provenance_strength": "local_fingerprint_only",
+        }
+        self.assertEqual(_verification_level(request, hardware, "b9994"), "community")
+        request.runtime_lock = {
+            "runtime_build_id": "c" * 64,
+            "content_scope": "managed_package",
+            "provenance_strength": "checksum_verified",
+        }
+        self.assertEqual(_verification_level(request, hardware, "b9994"), "verified")
 
     def test_result_runtime_uses_recorded_wall_clock_interval(self):
         self.assertEqual(
@@ -216,6 +240,83 @@ class RunnerTests(unittest.TestCase):
         validation = self.read_json(os.path.join(output_dir, "validation.json"))
         self.assertEqual(validation["comparison_grade"], "comparable")
 
+    def test_local_native_run_records_path_free_exact_runtime_receipt(self):
+        from infergrade.models import CapabilityExecution, FidelityExecution
+
+        output_dir = os.path.join(self.tempdir, "runtime-receipt")
+        runtime_dir = os.path.join(self.tempdir, "llama-runtime")
+        os.makedirs(runtime_dir)
+        paths = {}
+        for role, name in (("cli", "llama-cli"), ("server", "llama-server"), ("perplexity", "llama-perplexity")):
+            path = os.path.join(runtime_dir, name)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\necho %s\n" % role)
+            os.chmod(path, 0o755)
+            paths[role] = path
+        request = RunRequest(
+            model="Qwen/Qwen3.5-4B",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            output_dir=output_dir,
+            execution_mode="local_native",
+            llama_cpp_cli_path=paths["cli"],
+            llama_cpp_server_path=paths["server"],
+            llama_cpp_perplexity_path=paths["perplexity"],
+            simulate=False,
+        )
+        with mock.patch("infergrade.runner.get_adapter") as get_adapter_mock, mock.patch(
+            "infergrade.runner.capture_environment",
+            return_value={"accelerator_type": "metal", "accelerator_count": 1},
+        ):
+            adapter = get_adapter_mock.return_value
+            adapter.default_backend_flags.return_value = []
+            adapter.resolve_version.return_value = "version: 9994"
+            adapter.runtime_metadata.return_value = {
+                "native_binary": paths["cli"],
+                "native_server_binary": paths["server"],
+            }
+            adapter.run_capability.return_value = CapabilityExecution(
+                use_case="general_assistant", suite_id=None, suite_ids=[], benchmark_tier="canary",
+                benchmark_group_ids=[], benchmark_check_ids=[], components=[], score=None,
+                score_method=None, component_scores={}, confidence=None, status="skipped",
+            )
+            adapter.run_fidelity.return_value = FidelityExecution(state="not_yet_measured")
+            adapter.run_deployment_profile.return_value = DeploymentExecution(
+                profile_id="interactive_chat_v1",
+                metrics={
+                    "ttft_p50_ms": 100.0, "ttft_p95_ms": 110.0,
+                    "latency_p50_ms": 400.0, "latency_p95_ms": 450.0,
+                    "decode_tokens_per_second_p50": 50.0, "decode_tokens_per_second_p95": 48.0,
+                    "request_throughput_per_minute": 150.0, "peak_vram_mb": 0.0,
+                    "load_time_ms": 250.0, "oom_or_failure_rate": 0.0,
+                    "deployment_confidence": 0.5,
+                },
+                status="completed",
+            )
+            run_infergrade(request)
+
+        record = self.read_json(os.path.join(output_dir, "results", "interactive_chat_v1.json"))
+        receipt = record["execution"]["runtime_receipt"]
+        self.assertEqual(receipt["receipt_version"], "infergrade_runtime_receipt_v1")
+        self.assertEqual(receipt["verification"]["postrun"], "passed")
+        self.assertNotIn("files", receipt)
+        self.assertEqual(len(receipt["role_files"]), 3)
+        self.assertTrue(record["verification"]["backend_version_pinned"])
+        self.assertEqual(record["verification"]["verification_level"], "community")
+        self.assertIn("managed_runtime_provenance", record["verification"]["missing_requirements"])
+        self.assertNotIn(self.tempdir, json.dumps(receipt, sort_keys=True))
+        progress = self.read_json(os.path.join(output_dir, "progress.json"))
+        self.assertEqual(progress["runtime_lock"]["runtime_build_id"], receipt["runtime_build_id"])
+        backend_config = self.read_json(os.path.join(output_dir, "provenance", "backend_config.json"))
+        self.assertEqual(backend_config["runtime_metadata"]["native_binary"], "llama-cli")
+        manifest = self.read_json(os.path.join(output_dir, "manifest.json"))
+        self.assertEqual(manifest["files"]["runtime_receipt"], "artifacts/receipts/runtime_receipt.json")
+        full_receipt = self.read_json(os.path.join(output_dir, manifest["files"]["runtime_receipt"]))
+        self.assertEqual(len(full_receipt["role_files"]), 3)
+        self.assertGreaterEqual(len(full_receipt["files"]), len(full_receipt["role_files"]))
+        self.assertNotIn(self.tempdir, json.dumps(full_receipt, sort_keys=True))
+
     def test_model_preflight_failure_aborts_before_capability_cases(self):
         output_dir = os.path.join(self.tempdir, "preflight-failure")
         request = RunRequest(
@@ -230,6 +331,9 @@ class RunnerTests(unittest.TestCase):
         with mock.patch("infergrade.runner.get_adapter") as get_adapter_mock, mock.patch(
             "infergrade.runner.capture_environment",
             return_value={"accelerator_type": "metal", "accelerator_count": 1},
+        ), mock.patch(
+            "infergrade.runner.resolve_runtime_lock",
+            return_value=None,
         ):
             adapter = get_adapter_mock.return_value
             adapter.default_backend_flags.return_value = []

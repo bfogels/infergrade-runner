@@ -8,6 +8,12 @@ InferGrade needs one contract for the runtime path that produced, or is expected
 
 The selector is not a marketing support claim. It is a structured compatibility and provenance record with an explicit support tier, probe result, fallback boundary, and claim boundary.
 
+The selector is also not execution authority. It describes requirements and
+compatibility. For a real native run, Runner resolves it together with local
+operator preferences into one exact `runtime_build_id` and a private
+per-attempt lock. Result records then carry a compact `runtime_receipt`; Hub
+must not choose a local path or replace that receipt with a runtime label.
+
 ## Inputs
 
 The field plan follows the active roadmap v0.3.0 runtime-selector scope and the CUDA feasibility decision in `infergrade-hub/docs/cuda_feasibility_report.md`:
@@ -148,6 +154,47 @@ Fallbacks must be explicit and non-silent:
 - A user-selected binary may be used only when the selector records `delivery.mode: "user_selected"` and preserves the claim boundary.
 - Container fallback from native is allowed only when the user or run config explicitly chose container execution.
 - Hub may show an alternate path as a recovery action, but the resulting run gets a new selector.
+- Runtime fallback may occur only before evidence measurement begins and must
+  create a new attempt lock. Resume always reuses the saved lock. After
+  measurement starts, another runtime requires a new attempt rather than an
+  in-place selector update.
+
+## Exact Runtime Receipt
+
+`execution.runtime_receipt` is the evidence binding produced after a successful
+native run. It records:
+
+- an immutable, qualified `runtime_build_id` derived from the platform, runtime
+  interface, content scope, and normalized execution-tree file manifest.
+  Executable role assertions are deliberately excluded from this digest;
+- the per-attempt `runtime_lock_id`;
+- runtime origin, maturity, provenance strength, and bounded registry/source
+  evidence (including a separately keyed source assertion) as separate
+  dimensions;
+- the exact CLI/server/perplexity role digests without absolute local paths;
+- the declared content-scope file count and manifest digest; and
+- successful pre-launch and post-run verification with silent substitution
+  explicitly disabled.
+
+The complete declared-scope manifest is emitted and uploaded once as a bounded
+receipt artifact. For
+managed packages this covers the full package. For advanced local binaries it
+covers only the explicitly selected binary set and does not claim every dynamic
+library on the host. Result rows
+use the compact projection so multi-profile bundles do not duplicate every
+library entry. Different build ids remain distinct evidence setup facts; any
+future cross-build comparison policy must be dimension-specific rather than a
+generic runtime-equivalence cohort.
+
+An exact local fingerprint is useful but is not equivalent to managed supply
+chain provenance. Native llama.cpp evidence can reach `verified` only when the
+receipt covers a managed package and its archive was checksum-verified or
+independently signed. A selected local binary set can still prove stable bytes,
+but its verification level tops out at `community`.
+
+Managed provenance comes from the Runner build registry, not a mutable
+`selected_runtime.json` label alone. A missing, malformed, or legacy registry
+claim is treated as `selected_binary_set` plus `local_fingerprint_only`.
 
 ## Initial Selector Matrix
 

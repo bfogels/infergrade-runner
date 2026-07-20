@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infergrade.dev/schemas/runtime_receipt_artifact.schema.json",
+  "title": "InferGrade Full Runtime Receipt Artifact",
+  "type": "object",
+  "required": [
+    "receipt_version",
+    "runtime_lock_id",
+    "runtime_build_id",
+    "runtime_family",
+    "runtime_interface",
+    "content_scope",
+    "origin",
+    "provenance_strength",
+    "provenance_evidence",
+    "locked_roles",
+    "content_manifest_file_count",
+    "content_manifest_sha256",
+    "role_files",
+    "files",
+    "verification"
+  ],
+  "properties": {
+    "receipt_version": { "$ref": "runtime_receipt.schema.json#/properties/receipt_version" },
+    "runtime_lock_id": { "$ref": "runtime_receipt.schema.json#/properties/runtime_lock_id" },
+    "runtime_build_id": { "$ref": "runtime_receipt.schema.json#/properties/runtime_build_id" },
+    "runtime_family": { "$ref": "runtime_receipt.schema.json#/properties/runtime_family" },
+    "runtime_interface": { "$ref": "runtime_receipt.schema.json#/properties/runtime_interface" },
+    "content_scope": { "$ref": "runtime_receipt.schema.json#/properties/content_scope" },
+    "origin": { "$ref": "runtime_receipt.schema.json#/properties/origin" },
+    "maturity": { "$ref": "runtime_receipt.schema.json#/properties/maturity" },
+    "provenance_strength": { "$ref": "runtime_receipt.schema.json#/properties/provenance_strength" },
+    "provenance_evidence": { "$ref": "runtime_receipt.schema.json#/properties/provenance_evidence" },
+    "locked_roles": { "$ref": "runtime_receipt.schema.json#/properties/locked_roles" },
+    "content_manifest_file_count": { "$ref": "runtime_receipt.schema.json#/properties/content_manifest_file_count" },
+    "content_manifest_sha256": { "$ref": "runtime_receipt.schema.json#/properties/content_manifest_sha256" },
+    "role_files": { "$ref": "runtime_receipt.schema.json#/properties/role_files" },
+    "files": {
+      "description": "Complete path-free manifest for the declared content scope.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "required": ["relative_path", "kind", "mode", "size_bytes", "sha256", "roles"],
+        "properties": {
+          "relative_path": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "kind": { "const": "regular" },
+          "mode": { "type": "integer", "minimum": 0, "maximum": 511 },
+          "size_bytes": { "type": "integer", "minimum": 0, "maximum": 1125899906842624 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "roles": {
+            "type": "array",
+            "items": { "enum": ["cli", "server", "perplexity"] },
+            "maxItems": 3,
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "verification": { "$ref": "runtime_receipt.schema.json#/properties/verification" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "provenance_evidence": {
+            "properties": { "kind": { "const": "managed_registry" } },
+            "required": ["kind"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "content_scope": { "const": "managed_package" },
+          "origin": { "const": "managed_download" },
+          "provenance_strength": { "enum": ["checksum_verified", "independently_signed"] }
+        }
+      },
+      "else": {
+        "properties": {
+          "content_scope": { "const": "selected_binary_set" },
+          "provenance_strength": { "const": "local_fingerprint_only" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "locked_roles": { "contains": { "const": "cli" } } } },
+      "then": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "cli" } } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "locked_roles": { "contains": { "const": "server" } } } },
+      "then": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "server" } } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "locked_roles": { "contains": { "const": "perplexity" } } } },
+      "then": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "perplexity" } } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "cli" } } }
+            }
+          }
+        }
+      },
+      "then": { "properties": { "locked_roles": { "contains": { "const": "cli" } } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "server" } } }
+            }
+          }
+        }
+      },
+      "then": { "properties": { "locked_roles": { "contains": { "const": "server" } } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "role_files": {
+            "contains": {
+              "type": "object",
+              "required": ["roles"],
+              "properties": { "roles": { "contains": { "const": "perplexity" } } }
+            }
+          }
+        }
+      },
+      "then": { "properties": { "locked_roles": { "contains": { "const": "perplexity" } } } }
+    }
+  ],
+  "additionalProperties": false
+}
