@@ -350,10 +350,26 @@ class RuntimeLockTests(unittest.TestCase):
         self.assertEqual(_canonical_sha256(identity), fixture["runtime_build_id"])
 
     def test_platform_arch_matches_rust_names(self):
-        with mock.patch("infergrade.runtime_locks.platform.machine", return_value="arm64"):
+        with mock.patch("infergrade.runtime_locks._detect_cpu_architecture", return_value="arm64"):
             self.assertEqual(_normalized_platform_arch(), "aarch64")
-        with mock.patch("infergrade.runtime_locks.platform.machine", return_value="AMD64"):
+        with mock.patch("infergrade.runtime_locks._detect_cpu_architecture", return_value="AMD64"):
             self.assertEqual(_normalized_platform_arch(), "x86_64")
+
+    def test_managed_runtime_identity_uses_host_architecture_under_rosetta(self):
+        with mock.patch("infergrade.runtime_locks._detect_cpu_architecture", return_value="arm64"):
+            managed_root = self._write_managed_selection(self.runtime_a)
+        request = self._request()
+        request.llama_cpp_cli_path = None
+        request.llama_cpp_server_path = None
+        request.llama_cpp_perplexity_path = None
+
+        with mock.patch("infergrade.runtime_locks.platform.machine", return_value="x86_64"):
+            with mock.patch("infergrade.runtime_locks._detect_cpu_architecture", return_value="arm64"):
+                lock, summary = resolve_runtime_lock(request, "bundle-rosetta-host")
+
+        self.assertEqual(summary["runtime_build_id"], managed_root.name)
+        self.assertEqual(summary["content_scope"], "managed_package")
+        self.assertEqual(lock["origin"], "managed_download")
 
     def test_runtime_build_identity_excludes_role_assertions(self):
         role_paths = {
