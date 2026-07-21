@@ -119,6 +119,7 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
 
         CATALOG.verify_root(production_root)
         self.assertEqual(production_root["signed"]["roles"]["root"]["threshold"], 2)
+        self.assertEqual(len(production_root["signed"]["roles"]["root"]["keyids"]), 3)
         self.assertNotEqual(production_root["signed"]["keys"], active_root["signed"]["keys"])
 
 

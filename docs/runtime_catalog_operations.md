@@ -12,7 +12,7 @@ until all four production role files replace it together.
 
 - Runner embeds the initial root and verifies root, timestamp, snapshot, and
   targets roles with Ed25519 threshold signatures.
-- Root is 2-of-2. Timestamp, snapshot, and targets use distinct online keys.
+- Root is 2-of-3. Timestamp, snapshot, and targets use distinct online keys.
 - Metadata has explicit size ceilings, monotonic versions, expiries, and exact
   length/SHA-256 references. Target archives also have exact length/SHA-256.
 - Publisher namespaces and allowed origins are root policy. A specialized
@@ -74,9 +74,10 @@ an explicit incident note; metadata alone cannot safely repair a lost root.
 The production root replaces the unreleased review root at version 1. It does
 not preserve the review keys in the public trust chain.
 
-1. Create `root-1` on the encrypted primary offline device. Create `root-2` in
-   a separate encrypted recovery location. Never place both root private keys
-   on the same mounted filesystem.
+1. Create `root-1` on the encrypted primary offline device, `root-2` in a
+   separate encrypted secure-file vault, and `root-3` in a separate
+   end-to-end-encrypted password vault. Never place two root private keys on
+   the same mounted filesystem.
 2. Create timestamp, snapshot, and targets keys in protected operational
    custody. Export only their public descriptors to the ceremony workspace.
 3. Run `init-key` once per key. A private key path must be outside the repo;
@@ -86,8 +87,10 @@ not preserve the review keys in the public trust chain.
 5. Run `sign-root` once in each root custody location. Each command verifies
    that its private key matches the named public key and produces a detached
    signature bound to the payload SHA-256.
-6. Run `assemble-root` with both detached signatures. It verifies both Ed25519
-   signatures and the fixed 2-of-2 threshold before writing `root.json`.
+6. Run `assemble-root` with detached signatures from at least two custodians.
+   The initial production root carries all three signatures. The command
+   verifies Ed25519 signatures and the fixed 2-of-3 threshold before writing
+   `root.json`.
 7. Unmount offline custody. Run `build-online` with the assembled root and only
    the three operational keys. Verify the complete role chain before release.
 
@@ -100,14 +103,17 @@ private-key contents into a shell argument, log, issue, CI output, or chat.
 - `root-1`: encrypted removable media, normally unmounted.
 - `root-2`: a distinct encrypted recovery device or secure-file vault under a
   separate account. It must not be a second folder on the `root-1` device.
+- `root-3`: a distinct end-to-end-encrypted password vault under a separate
+  account. Store its compact PKCS#8 DER encoding as a private password item,
+  never as a shared-family credential.
 - timestamp: protected automation secret; the only role eligible for routine
   unattended refresh.
 - snapshot and targets: protected release-environment secrets requiring manual
   approval. A catalog content change uses these roles, but not root.
-- Loss of either root key makes the 2-of-2 old threshold unavailable. Recovery
-  requires a Runner release with a new trust anchor; the surviving key alone
-  cannot authorize a replacement. Each custodian therefore needs an encrypted,
-  independently tested backup before production release.
+- Loss of one root key leaves the 2-of-3 threshold available. Rotate the lost
+  key with the two surviving custodians. Loss of two root keys requires a
+  Runner release with a new trust anchor; one surviving key cannot authorize a
+  replacement.
 - Suspected online-role compromise freezes publication and rotates that role by
   a new root. Suspected root compromise requires a Runner trust-anchor release
   and incident disclosure.

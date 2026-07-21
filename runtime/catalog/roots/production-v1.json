@@ -2,11 +2,15 @@
   "signatures": [
     {
       "keyid": "root-1",
-      "sig_hex": "e9acb1e30c47d65572ad475905c9c0b9f27a58d32b65c63c28d6929c22cfd4e27216543ef505a8bf4df9da2347cb555391f574a11a3dbcfc5a6e3ea794b95b09"
+      "sig_hex": "2b3a79cd9f9ae5b9f488f3e49bf2a303a2cc0f62c42e61735fc2d87b7cedfe8f539a640315628813175c429327f559c0b248efc82a18ce4128d35d39454d110a"
     },
     {
       "keyid": "root-2",
-      "sig_hex": "3c218c21b736b1bb4fe2099cf34c5c50cca1f4026d2dd7f2ea4b71072977c7af7460150839451adc336622623a272e5447518b710876d928d61f7beb4491020e"
+      "sig_hex": "b575acfa888d3ae195727a4cce1f71f8e8dd94a5b0f65a42c64b8cf6f9c832e557615efeab0dd6e0c46f838790261b4979e7cad0ba166ead919ce48def860505"
+    },
+    {
+      "keyid": "root-3",
+      "sig_hex": "238c91b0ee298234a6270adf0535096e6d84ca8f1c7f7fd3b30d6c6f0ca5b8370dfcec52587727d695a2c6855242e76116f0adfb16160edf638939a0d918620e"
     }
   ],
   "signed": {
@@ -20,6 +24,10 @@
       "root-2": {
         "keytype": "ed25519",
         "public_key_hex": "54af500cf3b068844553e92eb804342b1cf278c84339d334e2eac705bf998162"
+      },
+      "root-3": {
+        "keytype": "ed25519",
+        "public_key_hex": "b7267d74ce72825863f2154623432c60944f0b847389bf5aa05ecefb1e00c602"
       },
       "snapshot": {
         "keytype": "ed25519",
@@ -46,7 +54,8 @@
       "root": {
         "keyids": [
           "root-1",
-          "root-2"
+          "root-2",
+          "root-3"
         ],
         "threshold": 2
       },

@@ -16,7 +16,8 @@ from pathlib import Path
 
 
 SPEC_VERSION = "infergrade_runtime_catalog_v1"
-KEY_NAMES = ("root-1", "root-2", "timestamp", "snapshot", "targets")
+ROOT_KEY_NAMES = ("root-1", "root-2", "root-3")
+KEY_NAMES = ROOT_KEY_NAMES + ("timestamp", "snapshot", "targets")
 ONLINE_KEY_NAMES = ("timestamp", "snapshot", "targets")
 ED25519_DER_PREFIX = bytes.fromhex("302a300506032b6570032100")
 
@@ -157,7 +158,7 @@ def prepare_root(source_path, public_key_paths, output):
         "expires_unix": source["expires_unix"]["root"],
         "keys": keys,
         "roles": {
-            "root": {"keyids": ["root-1", "root-2"], "threshold": 2},
+            "root": {"keyids": list(ROOT_KEY_NAMES), "threshold": 2},
             "timestamp": {"keyids": ["timestamp"], "threshold": 1},
             "snapshot": {"keyids": ["snapshot"], "threshold": 1},
             "targets": {"keyids": ["targets"], "threshold": 1},
@@ -169,8 +170,8 @@ def prepare_root(source_path, public_key_paths, output):
 
 
 def sign_root(payload_path, key_name, private_key, output):
-    if key_name not in ("root-1", "root-2"):
-        raise SystemExit("Only root-1 or root-2 may sign a root payload.")
+    if key_name not in ROOT_KEY_NAMES:
+        raise SystemExit("Only a configured root key may sign a root payload.")
     signed = json.loads(payload_path.read_text(encoding="utf-8"))
     expected = signed["keys"][key_name]["public_key_hex"]
     if public_key_hex(private_key) != expected:
@@ -192,8 +193,8 @@ def verify_root(root):
     root_role = signed.get("roles", {}).get("root", {})
     keyids = root_role.get("keyids", [])
     threshold = root_role.get("threshold")
-    if threshold != 2 or keyids != ["root-1", "root-2"]:
-        raise SystemExit("Runtime catalog root must use the expected 2-of-2 policy.")
+    if threshold != 2 or keyids != list(ROOT_KEY_NAMES):
+        raise SystemExit("Runtime catalog root must use the expected 2-of-3 policy.")
     payload = canonical_bytes(signed)
     valid = set()
     for signature in root.get("signatures", []):
@@ -346,10 +347,10 @@ def main():
     prepare.add_argument("--output", required=True, type=Path)
     sign = subparsers.add_parser("sign-root", help="create one detached root signature")
     sign.add_argument("--payload", required=True, type=Path)
-    sign.add_argument("--key-name", required=True, choices=("root-1", "root-2"))
+    sign.add_argument("--key-name", required=True, choices=ROOT_KEY_NAMES)
     sign.add_argument("--private-key", required=True, type=Path)
     sign.add_argument("--output", required=True, type=Path)
-    assemble = subparsers.add_parser("assemble-root", help="verify and assemble the 2-of-2 root")
+    assemble = subparsers.add_parser("assemble-root", help="verify and assemble the 2-of-3 root")
     assemble.add_argument("--payload", required=True, type=Path)
     assemble.add_argument("--signature", required=True, action="append", type=Path)
     assemble.add_argument("--output", required=True, type=Path)
