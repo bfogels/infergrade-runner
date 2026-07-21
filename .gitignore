@@ -2,6 +2,9 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env
+*.pem
+*.key
+.runtime-catalog-ceremony/
 .infergrade-api/
 build/
 dist/
