@@ -2,9 +2,10 @@
   "catalog_version": "infergrade_runtime_trust_catalog_v1",
   "root_key_ids": [
     "root-1",
-    "root-2"
+    "root-2",
+    "root-3"
   ],
-  "signing_environment": "review_candidate",
+  "signing_environment": "production",
   "targets": [
     {
       "archive_sha256": "022469e0b22f4b84dcd0a323867d7f5a31dae21894931ee6a24a35abd2a60359",
@@ -47,6 +48,6 @@
       ]
     }
   ],
-  "targets_metadata_sha256": "144032414dd4655ce0b0277274473b7bad5311ae1f989b5dbbfb3e0770d3aaa5",
-  "targets_metadata_version": 6
+  "targets_metadata_sha256": "eb4912550786aca77731b4742f58a841496aedf7954a0a54b8005989a6683137",
+  "targets_metadata_version": 7
 }

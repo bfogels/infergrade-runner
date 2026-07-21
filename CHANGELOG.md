@@ -7,6 +7,12 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.39 (contract 0.3.24)
+
+- Counts EvalPlus completion-normalization failures as wrong model answers when
+  the evaluator keeps them in its denominator, while preserving their raw
+  output and failure disclosure. Runtime or adapter generation failures still
+  make capability evidence partial, degraded, or failed.
 - Adds a rollback-protected, role-separated signed runtime catalog with exact
   build consent, bounded downloads, atomic last-known-good activation,
   revocation, and deterministic rollback to an installed immutable build.
@@ -16,6 +22,9 @@ incremental changes only — see the git history.
 - Publishes contract 0.3.24 runtime trust metadata while keeping build identity,
   compatibility evidence, origin, maturity, support tier, and provenance
   strength as separate facts.
+- Activates a production-signed catalog generation under a recoverable 2-of-3
+  offline root, with targets/snapshot authority isolated from unattended
+  timestamp refresh and no root private key stored in GitHub.
 
 ## 0.3.38 (contract 0.3.23)
 

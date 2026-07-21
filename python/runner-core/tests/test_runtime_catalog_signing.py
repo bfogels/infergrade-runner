@@ -233,7 +233,7 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "exact configured role policy"):
             CATALOG.verify_root({"signed": signed, "signatures": []})
 
-    def test_staged_production_root_meets_threshold_and_is_not_active_early(self):
+    def test_active_production_generation_matches_the_staged_root_and_source(self):
         production_root = json.loads(
             (REPO_ROOT / "runtime/catalog/roots/production-v1.json").read_text()
         )
@@ -244,7 +244,7 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
         CATALOG.verify_root(production_root)
         self.assertEqual(production_root["signed"]["roles"]["root"]["threshold"], 2)
         self.assertEqual(len(production_root["signed"]["roles"]["root"]["keyids"]), 3)
-        self.assertNotEqual(production_root["signed"]["keys"], active_root["signed"]["keys"])
+        self.assertEqual(production_root, active_root)
         source = json.loads(
             (REPO_ROOT / "runtime/catalog/catalog-source.json").read_text()
         )
@@ -252,10 +252,19 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
             (REPO_ROOT / "runtime/catalog/signed/targets.json").read_text()
         )
         self.assertEqual(source["signing_environment"], "production")
-        self.assertEqual(active_targets["signed"]["signing_environment"], "review_candidate")
-        self.assertGreater(
+        self.assertEqual(active_targets["signed"]["signing_environment"], "production")
+        self.assertEqual(
             source["versions"]["targets"], active_targets["signed"]["version"]
         )
+        with tempfile.TemporaryDirectory() as temporary:
+            CATALOG.assemble_generation(
+                REPO_ROOT / "runtime/catalog/signed/root.json",
+                REPO_ROOT / "runtime/catalog/signed/timestamp.json",
+                REPO_ROOT / "runtime/catalog/signed/snapshot.json",
+                REPO_ROOT / "runtime/catalog/signed/targets.json",
+                Path(temporary) / "verified",
+                Path(temporary) / "runtime_trust_catalog.json",
+            )
 
 
 if __name__ == "__main__":

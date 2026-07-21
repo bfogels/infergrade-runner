@@ -973,6 +973,35 @@ mod tests {
     }
 
     #[test]
+    fn production_catalog_generation_verifies_with_the_embedded_trust_anchor() {
+        let root = include_bytes!("../../../runtime/catalog/signed/root.json");
+        let timestamp = include_bytes!("../../../runtime/catalog/signed/timestamp.json");
+        let snapshot = include_bytes!("../../../runtime/catalog/signed/snapshot.json");
+        let targets = include_bytes!("../../../runtime/catalog/signed/targets.json");
+        let catalog = verify_runtime_catalog(
+            RuntimeCatalogFiles {
+                root,
+                timestamp,
+                snapshot,
+                targets,
+            },
+            Some(root),
+            None,
+            1_785_000_000,
+        )
+        .expect("production catalog generation must verify");
+
+        assert_eq!(catalog.versions.root, 1);
+        assert_eq!(catalog.versions.timestamp, 7);
+        assert_eq!(catalog.versions.snapshot, 7);
+        assert_eq!(catalog.versions.targets, 7);
+        assert_eq!(catalog.signing_environment, "production");
+        assert!(catalog
+            .targets
+            .contains_key("infergrade/llama-cpp/b10069/macos-arm64.tar.gz"));
+    }
+
+    #[test]
     fn rejects_tamper_expiry_rollback_and_wrong_platform() {
         let (root, timestamp, snapshot, mut targets) = fixture();
         targets.push(b' ');
