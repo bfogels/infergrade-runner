@@ -70,8 +70,8 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
         assembled = self.root / "root.json"
         CATALOG.assemble_root(payload, signatures, assembled)
 
-        (self.private / "root-1.pem").unlink()
-        (self.private / "root-2.pem").unlink()
+        for name in CATALOG.ROOT_KEY_NAMES:
+            (self.private / (name + ".pem")).unlink()
         output = self.root / "signed"
         projection = self.root / "projection.json"
         CATALOG.build_online(self.source, assembled, self.private, output, projection)
@@ -108,6 +108,31 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
                 self.private / "root-2.pem",
                 self.root / "bad-signature.json",
             )
+
+    def test_root_policy_rejects_reused_keys_and_online_role_remapping(self):
+        duplicate = json.loads((self.public / "root-2.json").read_text())
+        duplicate["keyid"] = "root-3"
+        (self.public / "root-3.json").write_text(json.dumps(duplicate))
+        with self.assertRaisesRegex(SystemExit, "distinct public keys"):
+            self.prepare_payload()
+
+        CATALOG.create_key(
+            "root-3",
+            self.root / "replacement-private" / "root-3.pem",
+            self.root / "replacement-public" / "root-3.json",
+        )
+        payload = self.root / "root-payload.json"
+        descriptors = [
+            self.root / "replacement-public" / "root-3.json"
+            if name == "root-3"
+            else self.public / (name + ".json")
+            for name in CATALOG.KEY_NAMES
+        ]
+        CATALOG.prepare_root(self.source, descriptors, payload)
+        signed = json.loads(payload.read_text())
+        signed["roles"]["targets"] = {"keyids": ["timestamp"], "threshold": 1}
+        with self.assertRaisesRegex(SystemExit, "exact configured role policy"):
+            CATALOG.verify_root({"signed": signed, "signatures": []})
 
     def test_staged_production_root_meets_threshold_and_is_not_active_early(self):
         production_root = json.loads(

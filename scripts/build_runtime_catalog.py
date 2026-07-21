@@ -20,6 +20,7 @@ ROOT_KEY_NAMES = ("root-1", "root-2", "root-3")
 KEY_NAMES = ROOT_KEY_NAMES + ("timestamp", "snapshot", "targets")
 ONLINE_KEY_NAMES = ("timestamp", "snapshot", "targets")
 ED25519_DER_PREFIX = bytes.fromhex("302a300506032b6570032100")
+LOWER_HEX = frozenset("0123456789abcdef")
 
 
 def canonical_bytes(value):
@@ -135,7 +136,7 @@ def load_public_key(path, expected_name=None):
     if name not in KEY_NAMES or value.get("keytype") != "ed25519":
         raise SystemExit("Invalid runtime catalog public-key descriptor: %s" % path)
     key_hex = value.get("public_key_hex", "")
-    if len(key_hex) != 64:
+    if len(key_hex) != 64 or any(character not in LOWER_HEX for character in key_hex):
         raise SystemExit("Invalid Ed25519 public key in %s" % path)
     return name, {"keytype": "ed25519", "public_key_hex": key_hex}
 
@@ -151,6 +152,9 @@ def prepare_root(source_path, public_key_paths, output):
     missing = sorted(set(KEY_NAMES) - set(keys))
     if missing:
         raise SystemExit("Missing public key descriptors: %s" % ", ".join(missing))
+    public_values = [value["public_key_hex"] for value in keys.values()]
+    if len(set(public_values)) != len(public_values):
+        raise SystemExit("Runtime catalog roles must use distinct public keys.")
     signed = {
         "_type": "root",
         "spec_version": SPEC_VERSION,
@@ -190,16 +194,38 @@ def verify_root(root):
     signed = root.get("signed", {})
     if signed.get("_type") != "root" or signed.get("spec_version") != SPEC_VERSION:
         raise SystemExit("Invalid runtime catalog root payload.")
-    root_role = signed.get("roles", {}).get("root", {})
-    keyids = root_role.get("keyids", [])
-    threshold = root_role.get("threshold")
-    if threshold != 2 or keyids != list(ROOT_KEY_NAMES):
-        raise SystemExit("Runtime catalog root must use the expected 2-of-3 policy.")
+    keys = signed.get("keys", {})
+    if set(keys) != set(KEY_NAMES):
+        raise SystemExit("Runtime catalog root must contain the exact configured key set.")
+    public_values = []
+    for keyid in KEY_NAMES:
+        key = keys.get(keyid, {})
+        key_hex = key.get("public_key_hex", "")
+        if (
+            key.get("keytype") != "ed25519"
+            or len(key_hex) != 64
+            or any(character not in LOWER_HEX for character in key_hex)
+        ):
+            raise SystemExit("Runtime catalog root contains an invalid key: %s" % keyid)
+        public_values.append(key_hex)
+    if len(set(public_values)) != len(public_values):
+        raise SystemExit("Runtime catalog root roles must use distinct public keys.")
+    roles = signed.get("roles", {})
+    expected_roles = {
+        "root": {"keyids": list(ROOT_KEY_NAMES), "threshold": 2},
+        "timestamp": {"keyids": ["timestamp"], "threshold": 1},
+        "snapshot": {"keyids": ["snapshot"], "threshold": 1},
+        "targets": {"keyids": ["targets"], "threshold": 1},
+    }
+    if roles != expected_roles:
+        raise SystemExit("Runtime catalog root must use the exact configured role policy.")
+    keyids = roles["root"]["keyids"]
+    threshold = roles["root"]["threshold"]
     payload = canonical_bytes(signed)
     valid = set()
     for signature in root.get("signatures", []):
         keyid = signature.get("keyid")
-        key = signed.get("keys", {}).get(keyid, {})
+        key = keys.get(keyid, {})
         if keyid in keyids and verify_signature(
             key.get("public_key_hex", ""), payload, signature.get("sig_hex", "")
         ):
