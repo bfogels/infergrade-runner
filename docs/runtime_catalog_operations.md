@@ -1,7 +1,8 @@
 # Signed Runtime Catalog Operations
 
-Status: review-candidate metadata. The checked-in generation proves the
-mechanism and pins llama.cpp b10069; it is not production-signed yet.
+Status: production signing input staged; active metadata remains review
+candidate. `catalog-source.json` prepares version 7 for production signing and
+pins llama.cpp b10069, but it is not production-signed yet.
 
 The assembled public production trust anchor is preserved at
 `runtime/catalog/roots/production-v1.json`. It is not active merely because it
@@ -33,15 +34,23 @@ until all four production role files replace it together.
    cohorts.
 3. Edit `runtime/catalog/catalog-source.json`. Bump targets, snapshot, and
    timestamp versions; never rewrite an existing version.
-4. Build metadata with `scripts/build_runtime_catalog.py build-online`, keeping
-   all private keys outside the repository. Generate
-   `schemas/runtime_trust_catalog.json` in the same command. Routine builds use
-   only the timestamp, snapshot, and targets keys; root private keys must not be
-   mounted or otherwise available.
+4. Dispatch `.github/workflows/runtime-catalog-release.yml` from `main`. The
+   manually approved `runtime-catalog-release` job receives only targets and
+   snapshot keys. Its public partial artifact is passed to a separate
+   `runtime-catalog-timestamp` job, which receives only the timestamp key and
+   emits one complete verified generation plus its trust projection. Root
+   private keys must not be mounted or otherwise available. `build-online`
+   remains a local review helper; CI uses the split-role commands so no job can
+   observe all three operational keys.
 5. Verify the role chain and install in a clean cache. Exercise tamper, expiry,
    rollback, wrong-platform, oversized-target, consent, and rollback tests.
 6. Publish all four role files as one reviewed generation. Hub serves the exact
    imported files with ETags; partial publication is not a valid release.
+
+The release workflow deliberately uploads a review artifact; it does not push,
+merge, deploy, or make the catalog active. Import all four role files and the
+projection in one reviewed change, then deploy Hub atomically. A successful
+workflow run proves signing and chain verification, not publication.
 
 ## Offline and rollback behavior
 
@@ -91,8 +100,9 @@ not preserve the review keys in the public trust chain.
    The initial production root carries all three signatures. The command
    verifies Ed25519 signatures and the fixed 2-of-3 threshold before writing
    `root.json`.
-7. Unmount offline custody. Run `build-online` with the assembled root and only
-   the three operational keys. Verify the complete role chain before release.
+7. Unmount offline custody. Stage the assembled public root, then use the split
+   protected workflows for operational signing. Verify the complete role chain
+   before release; no workflow or machine should need a root key for this step.
 
 Example command shapes are available from
 `python3 scripts/build_runtime_catalog.py <command> --help`. Do not paste
@@ -117,6 +127,23 @@ private-key contents into a shell argument, log, issue, CI output, or chat.
 - Suspected online-role compromise freezes publication and rotates that role by
   a new root. Suspected root compromise requires a Runner trust-anchor release
   and incident disclosure.
+
+### Online workflow boundaries
+
+- Both signing workflows refuse non-`main` refs and explicitly check out the
+  trusted `main` revision with persisted Git credentials disabled.
+- `runtime-catalog-release` is a manual content-authority surface. Its job can
+  change targets and snapshot, but never receives timestamp or root keys.
+- `runtime-catalog-timestamp` may run unattended. Its refresh job can only
+  increment timestamp metadata over the already-signed snapshot bytes. It never
+  receives targets, snapshot, or root keys.
+- `.github/workflows/runtime-catalog-timestamp-refresh.yml` checks expiry daily.
+  It signs a 21-day timestamp refresh when fewer than 14 days remain and uploads
+  a complete verified artifact for coordinated Runner/Hub promotion. Fewer than
+  seven days remaining is a failing Actions alert.
+- Refresh artifacts are not live publication. Until the coordinated import and
+  Hub deployment are automated and separately protected, an owner must promote
+  the artifact before the served timestamp expires.
 
 ## Production gate
 

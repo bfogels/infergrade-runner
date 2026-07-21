@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 
 
@@ -60,7 +61,7 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
         )
         return payload
 
-    def test_detached_root_signatures_assemble_and_online_build_needs_no_root_keys(self):
+    def assemble_root(self):
         payload = self.prepare_payload()
         signatures = []
         for name in ("root-1", "root-2"):
@@ -69,6 +70,10 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
             signatures.append(signature)
         assembled = self.root / "root.json"
         CATALOG.assemble_root(payload, signatures, assembled)
+        return assembled
+
+    def test_detached_root_signatures_assemble_and_online_build_needs_no_root_keys(self):
+        assembled = self.assemble_root()
 
         for name in CATALOG.ROOT_KEY_NAMES:
             (self.private / (name + ".pem")).unlink()
@@ -84,6 +89,100 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
             json.loads(projection.read_text())["signing_environment"],
             "production",
         )
+
+    def test_split_online_roles_assemble_and_timestamp_refresh_needs_one_key(self):
+        assembled = self.assemble_root()
+        partial = self.root / "partial"
+        CATALOG.build_targets_snapshot(
+            self.source,
+            assembled,
+            self.private / "targets.pem",
+            self.private / "snapshot.pem",
+            partial,
+        )
+        first_timestamp = partial / "timestamp.json"
+        CATALOG.build_timestamp(
+            self.source,
+            assembled,
+            partial / "snapshot.json",
+            self.private / "timestamp.pem",
+            first_timestamp,
+        )
+        complete = self.root / "complete"
+        CATALOG.assemble_generation(
+            partial / "root.json",
+            first_timestamp,
+            partial / "snapshot.json",
+            partial / "targets.json",
+            complete,
+            self.root / "projection.json",
+        )
+
+        for name in CATALOG.ROOT_KEY_NAMES + ("snapshot", "targets"):
+            (self.private / (name + ".pem")).unlink()
+        refreshed = self.root / "timestamp-refreshed.json"
+        CATALOG.refresh_timestamp(
+            complete / "root.json",
+            complete / "snapshot.json",
+            complete / "timestamp.json",
+            self.private / "timestamp.pem",
+            int(time.time()) + 24 * 60 * 60,
+            refreshed,
+        )
+        self.assertEqual(
+            json.loads(refreshed.read_text())["signed"]["version"],
+            json.loads(first_timestamp.read_text())["signed"]["version"] + 1,
+        )
+        refreshed_generation = self.root / "refreshed"
+        CATALOG.assemble_generation(
+            complete / "root.json",
+            refreshed,
+            complete / "snapshot.json",
+            complete / "targets.json",
+            refreshed_generation,
+            previous_dir=complete,
+        )
+
+    def test_generation_rejects_same_version_content_change_and_wrong_timestamp_key(self):
+        assembled = self.assemble_root()
+        output = self.root / "signed"
+        CATALOG.build_online(self.source, assembled, self.private, output)
+        altered_source = json.loads(self.source.read_text())
+        altered_source["signing_environment"] = "altered"
+        altered_source_path = self.root / "altered-source.json"
+        altered_source_path.write_text(json.dumps(altered_source))
+        altered = self.root / "altered"
+        CATALOG.build_online(altered_source_path, assembled, self.private, altered)
+        with self.assertRaisesRegex(SystemExit, "without a version bump"):
+            CATALOG.assemble_generation(
+                altered / "root.json",
+                altered / "timestamp.json",
+                altered / "snapshot.json",
+                altered / "targets.json",
+                self.root / "bad-generation",
+                previous_dir=output,
+            )
+
+        with self.assertRaisesRegex(SystemExit, "does not match root role"):
+            CATALOG.refresh_timestamp(
+                output / "root.json",
+                output / "snapshot.json",
+                output / "timestamp.json",
+                self.private / "targets.pem",
+                int(time.time()) + 24 * 60 * 60,
+                self.root / "wrong-key-timestamp.json",
+            )
+
+        reformatted = self.root / "reformatted-targets.json"
+        reformatted.write_text(json.dumps(json.loads((output / "targets.json").read_text())))
+        with self.assertRaisesRegex(SystemExit, "targets.json reference"):
+            CATALOG.assemble_generation(
+                output / "root.json",
+                output / "timestamp.json",
+                output / "snapshot.json",
+                reformatted,
+                self.root / "reformatted-generation",
+            )
 
     def test_assemble_rejects_signature_for_a_changed_payload(self):
         payload = self.prepare_payload()
@@ -146,6 +245,17 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
         self.assertEqual(production_root["signed"]["roles"]["root"]["threshold"], 2)
         self.assertEqual(len(production_root["signed"]["roles"]["root"]["keyids"]), 3)
         self.assertNotEqual(production_root["signed"]["keys"], active_root["signed"]["keys"])
+        source = json.loads(
+            (REPO_ROOT / "runtime/catalog/catalog-source.json").read_text()
+        )
+        active_targets = json.loads(
+            (REPO_ROOT / "runtime/catalog/signed/targets.json").read_text()
+        )
+        self.assertEqual(source["signing_environment"], "production")
+        self.assertEqual(active_targets["signed"]["signing_environment"], "review_candidate")
+        self.assertGreater(
+            source["versions"]["targets"], active_targets["signed"]["version"]
+        )
 
 
 if __name__ == "__main__":
