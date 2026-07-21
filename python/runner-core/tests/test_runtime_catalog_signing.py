@@ -1,9 +1,11 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -265,6 +267,37 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
                 Path(temporary) / "verified",
                 Path(temporary) / "runtime_trust_catalog.json",
             )
+
+    def test_openssl_preflight_rejects_old_or_missing_binary_with_actionable_message(self):
+        CATALOG._validated_openssl_binary.cache_clear()
+        with mock.patch.dict(os.environ, {"OPENSSL_BIN": "missing-openssl"}, clear=False):
+            with mock.patch.object(CATALOG.shutil, "which", return_value=None):
+                with self.assertRaisesRegex(SystemExit, "Set OPENSSL_BIN"):
+                    CATALOG.openssl_binary()
+
+        CATALOG._validated_openssl_binary.cache_clear()
+        completed = CATALOG.subprocess.CompletedProcess(
+            ["/usr/bin/openssl", "version"],
+            0,
+            stdout=b"OpenSSL 1.1.1u  30 May 2023\n",
+            stderr=b"",
+        )
+        with mock.patch.dict(os.environ, {"OPENSSL_BIN": "/usr/bin/openssl"}, clear=False):
+            with mock.patch.object(CATALOG.shutil, "which", return_value="/usr/bin/openssl"):
+                with mock.patch.object(CATALOG.subprocess, "run", return_value=completed):
+                    with self.assertRaisesRegex(SystemExit, "OpenSSL 3.0 or newer"):
+                        CATALOG.openssl_binary()
+
+    def test_openssl_failure_surfaces_stderr(self):
+        failure = CATALOG.subprocess.CalledProcessError(
+            1,
+            ["openssl", "pkeyutl"],
+            stderr=b"operation not supported for this keytype",
+        )
+        with mock.patch.object(CATALOG, "openssl_binary", return_value="/usr/bin/openssl"):
+            with mock.patch.object(CATALOG.subprocess, "run", side_effect=failure):
+                with self.assertRaisesRegex(SystemExit, "operation not supported"):
+                    CATALOG.run_openssl(["pkeyutl"], operation="testing signing")
 
 
 if __name__ == "__main__":
