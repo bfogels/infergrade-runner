@@ -2,13 +2,13 @@
   "signatures": [
     {
       "keyid": "targets",
-      "sig_hex": "660d1a1c7758bb106c8b0b47120a05c4ecff05a3bf2f87b482e98cc454edc525d99956df3c73d00e64a772a2d961e8a1e8e31beeee4e6918a4caa3b98cf0700c"
+      "sig_hex": "b442a051639af4d1017402575167627ae816c5010ff304d87f37142eb457a7dceabd0a0ed74a2c1babedc213df345b2b3dc50f31e451cbbcc19a7942e15a5f06"
     }
   ],
   "signed": {
     "_type": "targets",
     "expires_unix": 1816041600,
-    "signing_environment": "review_candidate",
+    "signing_environment": "production",
     "spec_version": "infergrade_runtime_catalog_v1",
     "targets": {
       "infergrade/llama-cpp/b10069/macos-arm64.tar.gz": {
@@ -76,6 +76,6 @@
         "sha256": "022469e0b22f4b84dcd0a323867d7f5a31dae21894931ee6a24a35abd2a60359"
       }
     },
-    "version": 6
+    "version": 7
   }
 }

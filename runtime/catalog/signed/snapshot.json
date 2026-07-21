@@ -2,7 +2,7 @@
   "signatures": [
     {
       "keyid": "snapshot",
-      "sig_hex": "451c6bc5994b10b48c89785b4bc160be79c4d08c4bbec3204c91f2245feeb03d74c15ad950d6a59ae459da236e0a136aaececc0143b4ad717ce6f50e82bfdc03"
+      "sig_hex": "3cc85d3d74d1557800f1ef3310b0c7c656879872e86217ad0a20508d9c58be256c5b92f3489030bea8070d096a63d89cf5062ade7cc0641a2916366959fae00f"
     }
   ],
   "signed": {
@@ -10,12 +10,12 @@
     "expires_unix": 1792454400,
     "meta": {
       "targets.json": {
-        "length": 3712,
-        "sha256": "144032414dd4655ce0b0277274473b7bad5311ae1f989b5dbbfb3e0770d3aaa5",
-        "version": 6
+        "length": 3706,
+        "sha256": "eb4912550786aca77731b4742f58a841496aedf7954a0a54b8005989a6683137",
+        "version": 7
       }
     },
     "spec_version": "infergrade_runtime_catalog_v1",
-    "version": 6
+    "version": 7
   }
 }
