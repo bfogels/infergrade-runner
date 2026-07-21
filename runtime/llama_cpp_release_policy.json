@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy_version": "2026-07-14",
+  "policy_version": "2026-07-20",
   "upstream": {
     "repository": "ggml-org/llama.cpp",
     "latest_release_api": "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
@@ -12,7 +12,8 @@
     "stable_pin_review_after_days": 30,
     "automatic_candidate_discovery": true,
     "automatic_stable_promotion": false,
-    "runner_release_required": true,
+    "runner_release_required": false,
+    "candidate_delivery": "signed_runtime_catalog",
     "claim_boundary": "A newer upstream release is a candidate, not an InferGrade-supported runtime, until the compatibility gates pass."
   },
   "pins": [
@@ -47,7 +48,20 @@
       ]
     },
     {
-      "id": "macos_arm64_metal_candidate",
+      "id": "macos_arm64_metal_catalog_candidate",
+      "channel": "reviewed_candidate",
+      "kind": "release_tag",
+      "value": "b10069",
+      "upstream_published_at": "2026-07-20T00:00:00Z",
+      "locations": [
+        {
+          "path": "runtime/catalog/catalog-source.json",
+          "needle": "\"release\": \"b10069\""
+        }
+      ]
+    },
+    {
+      "id": "macos_arm64_metal_bundled_fallback_candidate",
       "channel": "reviewed_candidate",
       "kind": "release_tag",
       "value": "b9994",
@@ -121,6 +135,15 @@
       "sha256": "e8b6a059ba86947a44ace84d6e5679795bc41862c25c30513142588f0e9dba1d",
       "size_bytes": 5154939136,
       "purpose": "Exercise the newest Gemma architecture with Google's consumer-sized exact QAT GGUF.",
+      "hardware_scope": "owned_apple_silicon"
+    },
+    {
+      "id": "minicpm5_tokenizer",
+      "family": "MiniCPM5",
+      "artifact": "hf://openbmb/MiniCPM5-1B-GGUF/MiniCPM5-1B-Q4_K_M.gguf",
+      "revision": "87007042419d30c1d8f38ef065424ee33870831e",
+      "sha256": "81b64d05a23b17b34c475f42b3e72fbde62d4b92cc34541f7a8031d0752deafa",
+      "purpose": "Exercise the MiniCPM5 tokenizer and standard-depth assistant path.",
       "hardware_scope": "owned_apple_silicon"
     },
     {

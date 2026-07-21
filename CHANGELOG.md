@@ -11,6 +11,15 @@ incremental changes only — see the git history.
   the evaluator keeps them in its denominator, while preserving their raw
   output and failure disclosure. Runtime or adapter generation failures still
   make capability evidence partial, degraded, or failed.
+- Adds a rollback-protected, role-separated signed runtime catalog with exact
+  build consent, bounded downloads, atomic last-known-good activation,
+  revocation, and deterministic rollback to an installed immutable build.
+- Qualifies the llama.cpp b10069 macOS arm64 candidate against exact Gemma 4
+  E4B Q4_0 and MiniCPM5-1B Q4_K_M artifacts at standard benchmark depth,
+  without extending those assertions to generic runtime-equivalence cohorts.
+- Publishes contract 0.3.24 runtime trust metadata while keeping build identity,
+  compatibility evidence, origin, maturity, support tier, and provenance
+  strength as separate facts.
 
 ## 0.3.38 (contract 0.3.23)
 
