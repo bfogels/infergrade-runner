@@ -704,7 +704,7 @@ async fn reconcile_hub_run_handoff(api_url: String, run_id: String) -> Result<Va
     let response = execute_hub_json_request(&request)
         .await
         .map_err(|error| error.message().to_string())?;
-    Ok(hub_run_handoff_summary(&run_id, &response.body))
+    Ok(hub_run_handoff_summary(run_id, &response.body))
 }
 
 #[tauri::command]
