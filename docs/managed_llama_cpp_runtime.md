@@ -44,10 +44,11 @@ previously archived build without rewriting any active run lock:
 infergrade-runner runtime rollback --runtime-build-id <sha256>
 ```
 
-`runtime/catalog/signed/` is currently a review-candidate root. Its private
-keys live outside the repository. Before production distribution, the root keys
-must be rotated or formally backed up with an offline recovery ceremony and the
-timestamp role must have an automated refresh owner.
+`runtime/catalog/signed/` is currently a review-candidate root. Before
+production distribution, it will be replaced by a new production root version
+1 under the detached ceremony in `runtime_catalog_operations.md`; unreleased
+review keys will not enter the production trust chain. The timestamp role must
+also have an automated refresh owner.
 
 Preview the install plan:
 
