@@ -335,6 +335,40 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertNotIn("pull-requests: write", workflow)
         self.assertNotIn("issues: write", workflow)
 
+    def test_runtime_catalog_workflows_keep_online_role_authority_separate(self):
+        release = (ROOT / ".github" / "workflows" / "runtime-catalog-release.yml").read_text(
+            encoding="utf-8"
+        )
+        refresh = (
+            ROOT / ".github" / "workflows" / "runtime-catalog-timestamp-refresh.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("environment: runtime-catalog-release", release)
+        self.assertIn("environment: runtime-catalog-timestamp", release)
+        self.assertIn("environment: runtime-catalog-timestamp", refresh)
+        content_job, timestamp_job = release.split("  sign-timestamp:", 1)
+        self.assertIn("INFERGRADE_RUNTIME_TARGETS_PRIVATE_KEY", content_job)
+        self.assertIn("INFERGRADE_RUNTIME_SNAPSHOT_PRIVATE_KEY", content_job)
+        self.assertNotIn("INFERGRADE_RUNTIME_TIMESTAMP_PRIVATE_KEY", content_job)
+        self.assertIn("INFERGRADE_RUNTIME_TIMESTAMP_PRIVATE_KEY", timestamp_job)
+        self.assertNotIn("INFERGRADE_RUNTIME_TARGETS_PRIVATE_KEY", timestamp_job)
+        self.assertNotIn("INFERGRADE_RUNTIME_SNAPSHOT_PRIVATE_KEY", timestamp_job)
+        self.assertIn("INFERGRADE_RUNTIME_TIMESTAMP_PRIVATE_KEY", refresh)
+        self.assertNotIn("INFERGRADE_RUNTIME_TARGETS_PRIVATE_KEY", refresh)
+        self.assertNotIn("INFERGRADE_RUNTIME_SNAPSHOT_PRIVATE_KEY", refresh)
+        for workflow in (release, refresh):
+            self.assertIn("if: github.ref == 'refs/heads/main'", workflow)
+            self.assertIn("ref: main", workflow)
+            self.assertIn("persist-credentials: false", workflow)
+            self.assertIn("permissions:\n  contents: read", workflow)
+            self.assertNotIn("contents: write", workflow)
+            self.assertNotIn("pull_request_target", workflow)
+        self.assertIn("build-targets-snapshot", release)
+        self.assertIn("build-timestamp", release)
+        self.assertIn("assemble-generation", release)
+        self.assertIn("refresh-timestamp", refresh)
+        self.assertIn("check-expiry", refresh)
+
     def test_publish_container_workflow_defaults_to_version_file_at_runtime(self):
         workflow = (ROOT / ".github" / "workflows" / "publish-containers.yml").read_text(encoding="utf-8")
 
