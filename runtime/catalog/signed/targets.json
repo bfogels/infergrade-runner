@@ -1,0 +1,81 @@
+{
+  "signatures": [
+    {
+      "keyid": "targets",
+      "sig_hex": "660d1a1c7758bb106c8b0b47120a05c4ecff05a3bf2f87b482e98cc454edc525d99956df3c73d00e64a772a2d961e8a1e8e31beeee4e6918a4caa3b98cf0700c"
+    }
+  ],
+  "signed": {
+    "_type": "targets",
+    "expires_unix": 1816041600,
+    "signing_environment": "review_candidate",
+    "spec_version": "infergrade_runtime_catalog_v1",
+    "targets": {
+      "infergrade/llama-cpp/b10069/macos-arm64.tar.gz": {
+        "custom": {
+          "arch": "aarch64",
+          "archive_url": "https://github.com/ggml-org/llama.cpp/releases/download/b10069/llama-b10069-bin-macos-arm64.tar.gz",
+          "binary_names": {
+            "cli": "llama-cli",
+            "perplexity": "llama-perplexity",
+            "server": "llama-server"
+          },
+          "build_manifest_files_sha256": "5e710674f822b91ca7ad0870589480e4590da040c137ccd006d250418a791433",
+          "compatibility_status": "exact_artifact_standard_depth_validated",
+          "content_manifest_sha256": "2dae0e1a9486f2b8ad98bcf4d57f71a36e8f95ce7144da8476ba3b6d4d88987c",
+          "expected_binaries": [
+            "llama-cli",
+            "llama-server",
+            "llama-perplexity"
+          ],
+          "maturity": "reviewed_candidate",
+          "origin": "upstream_official",
+          "provenance": "Official upstream macOS arm64 archive, exact SHA-256 reviewed and pinned by the signed InferGrade runtime catalog. Catalog signing authenticates the assertion; it is not an upstream artifact signature.",
+          "provenance_strength": "checksum_verified",
+          "publisher": "infergrade",
+          "rollback_runtime_build_id": "b14147180c7fb885c76496ffc052e14d1c8fddaccf47839b7b5d983b386683eb",
+          "rollback_runtime_id": "llama-cpp-b9050-macos-arm64-metal",
+          "runtime_build_id": "b57a9b1cde1365fe7714081da036402dcdb5b86ec5595e45e1cde49b701ef9a5",
+          "runtime_family": "llama.cpp",
+          "runtime_id": "llama-cpp-b10069-macos-arm64-metal",
+          "runtime_interface": "llama_cpp_cli_server_v1",
+          "support_tier": "candidate",
+          "system": "macos",
+          "upstream": {
+            "project": "llama.cpp",
+            "release": "b10069",
+            "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b10069"
+          },
+          "validation_assertions": [
+            {
+              "assertion_id": "minicpm5-1b-q4-k-m-standard-20260721",
+              "benchmark_depth": "standard",
+              "bundle_id": "qb_20260721_022016_9966df7f",
+              "model_artifact_sha256": "81b64d05a23b17b34c475f42b3e72fbde62d4b92cc34541f7a8031d0752deafa",
+              "model_id": "openbmb/MiniCPM5-1B-GGUF",
+              "model_revision": "87007042419d30c1d8f38ef065424ee33870831e",
+              "published": false,
+              "quantization_label": "Q4_K_M",
+              "result_status": "valid_comparable"
+            },
+            {
+              "assertion_id": "gemma4-e4b-q4-0-standard-20260721",
+              "benchmark_depth": "standard",
+              "bundle_id": "qb_20260721_022953_0d4ae607",
+              "model_artifact_sha256": "e8b6a059ba86947a44ace84d6e5679795bc41862c25c30513142588f0e9dba1d",
+              "model_id": "google/gemma-4-E4B-it-qat-q4_0-gguf",
+              "model_revision": "7edc6763a77bbca236126a361613b834c5ea0f7a",
+              "published": false,
+              "quantization_label": "Q4_0",
+              "result_status": "valid_comparable"
+            }
+          ],
+          "version_label": "llama.cpp b10069"
+        },
+        "length": 10600037,
+        "sha256": "022469e0b22f4b84dcd0a323867d7f5a31dae21894931ee6a24a35abd2a60359"
+      }
+    },
+    "version": 6
+  }
+}

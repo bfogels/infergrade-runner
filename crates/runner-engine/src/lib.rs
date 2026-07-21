@@ -4,6 +4,7 @@ mod events;
 mod hub_client;
 mod pairing;
 mod profile;
+mod runtime_catalog;
 mod token_store;
 mod worker_protocol;
 
@@ -26,6 +27,55 @@ pub use pairing::{
     reset_pairing_state, PairingCompletion, PairingInput, PairingRedeemRequest,
 };
 pub use profile::{MemoryProfileStore, ProfileStore, RunnerProfile, SanitizedRunnerProfile};
+pub use runtime_catalog::{
+    activate_runtime_catalog, load_active_runtime_catalog, refresh_runtime_catalog_from_url,
+    verify_runtime_catalog, CatalogVersions, RuntimeCatalog, RuntimeCatalogActivation,
+    RuntimeCatalogFiles,
+};
+
+pub const DEFAULT_RUNTIME_CATALOG_URL: &str = "https://api.infergrade.com/runtime-catalog/";
+pub const PINNED_RUNTIME_CATALOG_ROOT: &[u8] =
+    include_bytes!("../../../runtime/catalog/signed/root.json");
+
+pub fn default_runtime_catalog_cache_root() -> Result<PathBuf, String> {
+    Ok(runtime_cache_root()?.join("llama.cpp").join("catalog"))
+}
+
+pub fn refresh_default_runtime_catalog(catalog_url: Option<&str>) -> Result<Value, String> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "system clock is before Unix epoch".to_string())?
+        .as_secs();
+    let activation = refresh_runtime_catalog_from_url(
+        catalog_url.unwrap_or(DEFAULT_RUNTIME_CATALOG_URL),
+        &default_runtime_catalog_cache_root()?,
+        PINNED_RUNTIME_CATALOG_ROOT,
+        now,
+    )?;
+    serde_json::to_value(activation)
+        .map_err(|error| format!("could not render runtime catalog status: {error}"))
+}
+
+pub fn install_active_runtime_catalog_target(
+    target_name: &str,
+    consent_runtime_build_id: &str,
+) -> Result<Value, String> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "system clock is before Unix epoch".to_string())?
+        .as_secs();
+    let activation = load_active_runtime_catalog(
+        &default_runtime_catalog_cache_root()?,
+        PINNED_RUNTIME_CATALOG_ROOT,
+        now,
+    )?;
+    install_runtime_catalog_target(
+        &activation.catalog,
+        target_name,
+        consent_runtime_build_id,
+        None,
+    )
+}
 pub use token_store::{MemoryTokenStore, TokenStore};
 pub use worker_protocol::{
     claim_run_job_payload, runner_heartbeat_payload, runner_register_payload, ClaimRunJobRequest,
@@ -1985,6 +2035,196 @@ pub fn install_managed_llama_cpp_runtime(
     install_managed_llama_cpp_runtime_from_manifest_entry(entry, options)
 }
 
+/// Install one already-verified catalog target after exact-build consent.
+/// Raw receipt or target claims must never enter this path directly.
+pub fn install_runtime_catalog_target(
+    catalog: &RuntimeCatalog,
+    target_name: &str,
+    consent_runtime_build_id: &str,
+    archive_bytes: Option<Vec<u8>>,
+) -> Result<Value, String> {
+    let target = catalog.install_target(
+        target_name,
+        env::consts::OS,
+        env::consts::ARCH,
+        consent_runtime_build_id,
+    )?;
+    let custom = target
+        .get("custom")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "runtime catalog target is missing custom metadata".to_string())?;
+    let expected_length = target
+        .get("length")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "runtime catalog target is missing length".to_string())?;
+    let expected_archive_sha256 = target
+        .get("sha256")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "runtime catalog target is missing sha256".to_string())?;
+    if let Some(bytes) = archive_bytes.as_ref() {
+        if bytes.len() as u64 != expected_length {
+            return Err("runtime catalog target archive length mismatch".to_string());
+        }
+        if sha256_hex(bytes) != expected_archive_sha256 {
+            return Err("runtime catalog target archive digest mismatch".to_string());
+        }
+    }
+    let required = |key: &str| -> Result<&str, String> {
+        custom
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("runtime catalog target is missing {key}"))
+    };
+    let runtime_id = required("runtime_id")?;
+    let rollback_selection = ensure_rollback_selection(required("rollback_runtime_build_id")?)?;
+    let entry = json!({
+        "runtime_id": runtime_id,
+        "version_label": custom.get("version_label").cloned().unwrap_or_else(|| json!(runtime_id)),
+        "channel": required("maturity")?,
+        "backend": "llama.cpp",
+        "rollback_runtime_id": required("rollback_runtime_id")?,
+        "upstream": custom.get("upstream").cloned().unwrap_or_else(|| json!({"project": "llama.cpp"})),
+        "platform": {"system": required("system")?, "arch": required("arch")?},
+        "provenance": custom.get("provenance").cloned().unwrap_or_else(|| json!("Runtime archive authenticated by the signed InferGrade catalog and exact SHA-256.")),
+        "archive": {
+            "url": required("archive_url")?,
+            "sha256": expected_archive_sha256,
+            "size_bytes": expected_length,
+        },
+        "expected_binaries": custom.get("expected_binaries").cloned().unwrap_or_else(|| json!(["llama-cli", "llama-server"])),
+        "binary_names": custom.get("binary_names").cloned().unwrap_or_else(|| json!({
+            "cli": "llama-cli", "server": "llama-server", "perplexity": "llama-perplexity"
+        })),
+        "download": {"requires_explicit_user_action": true},
+        "catalog_assertion": {
+            "spec_version": runtime_catalog::RUNTIME_CATALOG_SPEC_VERSION,
+            "targets_version": catalog.versions.targets,
+            "targets_sha256": catalog.targets_sha256,
+            "target_name": target_name,
+            "publisher": required("publisher")?,
+        }
+    });
+    let result = install_managed_llama_cpp_runtime_from_manifest_entry(
+        entry,
+        ManagedRuntimeInstallOptions {
+            runtime_id: Some(runtime_id.to_string()),
+            archive_bytes,
+        },
+    )?;
+    let validate_install = || -> Result<(), String> {
+        let actual_build_id = result
+            .pointer("/selection/runtime_build/runtime_build_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let expected_build_id = required("runtime_build_id")?;
+        if actual_build_id != expected_build_id {
+            return Err(format!(
+                "runtime catalog build identity mismatch: expected {expected_build_id}, got {actual_build_id}"
+            ));
+        }
+        let manifest_path = result
+            .pointer("/selection/runtime_build/manifest_path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                "installed runtime is missing its immutable build manifest".to_string()
+            })?;
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(manifest_path).map_err(|error| {
+                format!("could not read installed runtime build manifest: {error}")
+            })?)
+            .map_err(|error| format!("installed runtime build manifest is invalid: {error}"))?;
+        let files = manifest
+            .pointer("/identity/files")
+            .ok_or_else(|| "installed runtime build manifest is missing files".to_string())?;
+        let actual_content_manifest = runtime_build_id_from_identity(files)?;
+        let expected_content_manifest = required("build_manifest_files_sha256")?;
+        if actual_content_manifest != expected_content_manifest {
+            return Err(format!(
+                "runtime catalog content manifest mismatch: expected {expected_content_manifest}, got {actual_content_manifest}"
+            ));
+        }
+        Ok(())
+    };
+    if let Err(error) = validate_install() {
+        write_selected_llama_cpp_runtime(&rollback_selection)?;
+        return Err(error);
+    }
+    Ok(result)
+}
+
+fn runtime_selection_history_root() -> Result<PathBuf, String> {
+    Ok(runtime_cache_root()?
+        .join("llama.cpp")
+        .join("selection-history"))
+}
+
+fn archive_runtime_selection(selection: &Value) -> Result<(), String> {
+    let Some(build_id) = selection
+        .pointer("/runtime_build/runtime_build_id")
+        .and_then(Value::as_str)
+    else {
+        return Ok(());
+    };
+    let history_root = runtime_selection_history_root()?;
+    fs::create_dir_all(&history_root)
+        .map_err(|error| format!("could not create runtime selection history: {error}"))?;
+    let path = history_root.join(format!("{build_id}.json"));
+    if path.exists() {
+        return Ok(());
+    }
+    let bytes = serde_json::to_vec_pretty(selection)
+        .map_err(|error| format!("could not serialize runtime selection history: {error}"))?;
+    let temporary = path.with_extension(format!("json.tmp-{}", std::process::id()));
+    fs::write(&temporary, [bytes.as_slice(), b"\n"].concat())
+        .map_err(|error| format!("could not write runtime selection history: {error}"))?;
+    fs::rename(&temporary, &path)
+        .map_err(|error| format!("could not activate runtime selection history: {error}"))
+}
+
+fn ensure_rollback_selection(runtime_build_id: &str) -> Result<Value, String> {
+    let selected = load_selected_llama_cpp_runtime();
+    if selected
+        .pointer("/selection/runtime_build/runtime_build_id")
+        .and_then(Value::as_str)
+        == Some(runtime_build_id)
+    {
+        let selection = selected
+            .get("selection")
+            .cloned()
+            .ok_or_else(|| "selected runtime record is incomplete".to_string())?;
+        archive_runtime_selection(&selection)?;
+        return Ok(selection);
+    }
+    let path = runtime_selection_history_root()?.join(format!("{runtime_build_id}.json"));
+    let selection: Value = serde_json::from_slice(&fs::read(&path).map_err(|_| {
+        format!("catalog runtime requires installed rollback build {runtime_build_id}")
+    })?)
+    .map_err(|error| format!("runtime rollback selection is invalid: {error}"))?;
+    let root = managed_runtime_root_for_selection(&selection)?
+        .ok_or_else(|| "runtime rollback selection is not a managed immutable build".to_string())?;
+    if !root.is_dir() {
+        return Err(format!(
+            "runtime rollback build {runtime_build_id} is not installed"
+        ));
+    }
+    Ok(selection)
+}
+
+/// Select an exact previously archived immutable build. Active run locks are
+/// separate files and are never rewritten by this preference rollback.
+pub fn rollback_selected_llama_cpp_runtime(runtime_build_id: &str) -> Result<Value, String> {
+    let selection = ensure_rollback_selection(runtime_build_id)?;
+    let path = write_selected_llama_cpp_runtime(&selection)?;
+    Ok(json!({
+        "status": "selected",
+        "runtime_build_id": runtime_build_id,
+        "path": path.display().to_string(),
+        "message": "Selected runtime rolled back to the exact installed immutable build. Active run locks were not changed."
+    }))
+}
+
 fn managed_runtime_root_for_selection(selection: &Value) -> Result<Option<PathBuf>, String> {
     if selection.get("source").and_then(Value::as_str) != Some("managed_download") {
         return Ok(None);
@@ -2086,6 +2326,14 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         Some(bytes) => bytes,
         None => fetch_runtime_archive(archive_url)?,
     };
+    if let Some(expected_size) = entry.pointer("/archive/size_bytes").and_then(Value::as_u64) {
+        if bytes.len() as u64 != expected_size {
+            return Err(format!(
+                "managed runtime archive length mismatch: expected {expected_size}, got {}",
+                bytes.len()
+            ));
+        }
+    }
     let actual_sha256 = sha256_hex(&bytes);
     if actual_sha256 != expected_sha256 {
         return Err(format!(
@@ -2240,6 +2488,7 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
             "checksum_verified": true,
             "independent_signature_verified": false,
         },
+        "catalog_assertion": entry.get("catalog_assertion").cloned().unwrap_or(Value::Null),
     });
     let build_manifest_bytes = serde_json::to_vec_pretty(&build_manifest)
         .map_err(|error| format!("could not serialize runtime build manifest: {error}"))?;
@@ -2312,6 +2561,7 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
             "checksum_verified": true,
             "independent_signature_verified": false,
         },
+        "catalog_assertion": entry.get("catalog_assertion").cloned().unwrap_or(Value::Null),
         "binaries": {
             "cli": installed_cli.display().to_string(),
             "server": installed_server.display().to_string(),
@@ -2349,6 +2599,16 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
 
 fn write_selected_llama_cpp_runtime(selection: &Value) -> Result<PathBuf, String> {
     let selected_path = selected_llama_cpp_runtime_path()?;
+    if let Ok(existing) = fs::read(&selected_path) {
+        if let Ok(existing) = serde_json::from_slice::<Value>(&existing) {
+            if let Some(existing_selection) = existing
+                .get("selection")
+                .or_else(|| (existing.get("runtime_id").is_some()).then_some(&existing))
+            {
+                archive_runtime_selection(existing_selection)?;
+            }
+        }
+    }
     fs::create_dir_all(selected_path.parent().ok_or_else(|| {
         format!(
             "could not resolve selected runtime directory for `{}`",
