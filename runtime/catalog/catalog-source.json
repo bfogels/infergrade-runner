@@ -1,0 +1,89 @@
+{
+  "versions": {
+    "root": 1,
+    "timestamp": 6,
+    "snapshot": 6,
+    "targets": 6
+  },
+  "expires_unix": {
+    "root": 1942272000,
+    "timestamp": 1787184000,
+    "snapshot": 1792454400,
+    "targets": 1816041600
+  },
+  "signing_environment": "review_candidate",
+  "publisher_policies": {
+    "infergrade": {
+      "target_prefix": "infergrade/",
+      "allowed_origins": [
+        "upstream_official"
+      ]
+    }
+  },
+  "targets": {
+    "infergrade/llama-cpp/b10069/macos-arm64.tar.gz": {
+      "length": 10600037,
+      "sha256": "022469e0b22f4b84dcd0a323867d7f5a31dae21894931ee6a24a35abd2a60359",
+      "custom": {
+        "runtime_build_id": "b57a9b1cde1365fe7714081da036402dcdb5b86ec5595e45e1cde49b701ef9a5",
+        "build_manifest_files_sha256": "5e710674f822b91ca7ad0870589480e4590da040c137ccd006d250418a791433",
+        "content_manifest_sha256": "2dae0e1a9486f2b8ad98bcf4d57f71a36e8f95ce7144da8476ba3b6d4d88987c",
+        "rollback_runtime_build_id": "b14147180c7fb885c76496ffc052e14d1c8fddaccf47839b7b5d983b386683eb",
+        "rollback_runtime_id": "llama-cpp-b9050-macos-arm64-metal",
+        "runtime_id": "llama-cpp-b10069-macos-arm64-metal",
+        "runtime_family": "llama.cpp",
+        "runtime_interface": "llama_cpp_cli_server_v1",
+        "version_label": "llama.cpp b10069",
+        "system": "macos",
+        "arch": "aarch64",
+        "origin": "upstream_official",
+        "maturity": "reviewed_candidate",
+        "support_tier": "candidate",
+        "compatibility_status": "exact_artifact_standard_depth_validated",
+        "provenance_strength": "checksum_verified",
+        "publisher": "infergrade",
+        "validation_assertions": [
+          {
+            "assertion_id": "minicpm5-1b-q4-k-m-standard-20260721",
+            "model_id": "openbmb/MiniCPM5-1B-GGUF",
+            "model_revision": "87007042419d30c1d8f38ef065424ee33870831e",
+            "model_artifact_sha256": "81b64d05a23b17b34c475f42b3e72fbde62d4b92cc34541f7a8031d0752deafa",
+            "quantization_label": "Q4_K_M",
+            "bundle_id": "qb_20260721_022016_9966df7f",
+            "benchmark_depth": "standard",
+            "result_status": "valid_comparable",
+            "published": false
+          },
+          {
+            "assertion_id": "gemma4-e4b-q4-0-standard-20260721",
+            "model_id": "google/gemma-4-E4B-it-qat-q4_0-gguf",
+            "model_revision": "7edc6763a77bbca236126a361613b834c5ea0f7a",
+            "model_artifact_sha256": "e8b6a059ba86947a44ace84d6e5679795bc41862c25c30513142588f0e9dba1d",
+            "quantization_label": "Q4_0",
+            "bundle_id": "qb_20260721_022953_0d4ae607",
+            "benchmark_depth": "standard",
+            "result_status": "valid_comparable",
+            "published": false
+          }
+        ],
+        "archive_url": "https://github.com/ggml-org/llama.cpp/releases/download/b10069/llama-b10069-bin-macos-arm64.tar.gz",
+        "expected_binaries": [
+          "llama-cli",
+          "llama-server",
+          "llama-perplexity"
+        ],
+        "binary_names": {
+          "cli": "llama-cli",
+          "server": "llama-server",
+          "perplexity": "llama-perplexity"
+        },
+        "upstream": {
+          "project": "llama.cpp",
+          "release": "b10069",
+          "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b10069"
+        },
+        "provenance": "Official upstream macOS arm64 archive, exact SHA-256 reviewed and pinned by the signed InferGrade runtime catalog. Catalog signing authenticates the assertion; it is not an upstream artifact signature."
+      }
+    }
+  }
+}
