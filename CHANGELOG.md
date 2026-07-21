@@ -7,6 +7,10 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+- Counts EvalPlus completion-normalization failures as wrong model answers when
+  the evaluator keeps them in its denominator, while preserving their raw
+  output and failure disclosure. Runtime or adapter generation failures still
+  make capability evidence partial, degraded, or failed.
 - Adds a rollback-protected, role-separated signed runtime catalog with exact
   build consent, bounded downloads, atomic last-known-good activation,
   revocation, and deterministic rollback to an installed immutable build.
