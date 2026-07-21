@@ -535,6 +535,11 @@ def _capability_reason_codes(
         for benchmark_id in benchmark_ids
     ):
         codes.append("generation_failures_exhausted")
+    if any(
+        int((execution.benchmark_results or {}).get(benchmark_id, {}).get("model_output_failure_count") or 0) > 0
+        for benchmark_id in benchmark_ids
+    ):
+        codes.append("model_output_failures_scored_wrong")
     if not codes and planned_count:
         codes.append("benchmark_not_yet_run")
     if not codes:
@@ -608,11 +613,20 @@ def execute_capability_suite(
             if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:
                 summary["completion_normalization"] = _summarize_completion_normalization(predictions)
             summary["task_performance"] = _summarize_task_performance_rows(predictions)
-            failure_count = len([item for item in predictions if item.get("generation_status") != "completed"])
+            failed_predictions = [item for item in predictions if item.get("generation_status") != "completed"]
+            failure_count = len(failed_predictions)
+            model_output_failure_count = len(
+                [item for item in failed_predictions if item.get("generation_failure_kind") == "model_output"]
+            )
+            unscored_failure_count = failure_count - model_output_failure_count
             failure_severity = _generation_failure_severity(len(cases), failure_count)
+            unscored_failure_severity = _generation_failure_severity(len(cases), unscored_failure_count)
             summary["generation_failure_count"] = failure_count
             summary["generation_failure_rate"] = round(failure_count / float(len(cases)), 4) if cases else 0.0
             summary["generation_failure_severity"] = failure_severity
+            summary["model_output_failure_count"] = model_output_failure_count
+            summary["unscored_generation_failure_count"] = unscored_failure_count
+            summary["unscored_generation_failure_severity"] = unscored_failure_severity
             summary["completed_cases"] = len(cases) - failure_count
             summary["total_cases"] = len(cases)
             protocol_identity = _case_benchmark_protocol_identity(
@@ -623,7 +637,7 @@ def execute_capability_suite(
             )
             if protocol_identity:
                 summary["protocol_identity"] = protocol_identity
-            if failure_severity == "all_failed":
+            if unscored_failure_severity == "all_failed":
                 summary["status"] = "failed"
                 summary["error"] = (
                     "All generations failed before evaluation completed. "
@@ -631,17 +645,26 @@ def execute_capability_suite(
                 )
                 if isinstance(summary.get("primary_metric"), dict):
                     summary["primary_metric"]["value"] = None
-            elif failure_severity == "dominant":
+            elif unscored_failure_severity == "dominant":
                 summary["status"] = "degraded"
                 summary["warning"] = (
                     "Most generations failed before evaluation completed. "
                     "Treat this capability benchmark as degraded rather than a healthy score."
                 )
-            elif failure_severity == "partial":
+            elif unscored_failure_severity == "partial":
                 summary["status"] = "partial"
                 summary["warning"] = (
                     "Some generations failed before evaluation completed. "
                     "Treat this capability benchmark as partial rather than a complete score."
+                )
+            elif model_output_failure_count:
+                summary["warning"] = (
+                    "%d model response%s could not be normalized and %s scored as wrong."
+                    % (
+                        model_output_failure_count,
+                        "" if model_output_failure_count == 1 else "s",
+                        "was" if model_output_failure_count == 1 else "were",
+                    )
                 )
             write_json(os.path.join(benchmark_dir, "summary.json"), summary)
             capability_run_path = None
@@ -705,12 +728,12 @@ def execute_capability_suite(
                 benchmark_artifacts[benchmark_id]["capability_run_path"] = capability_run_path
             primary_value = summary.get("primary_metric", {}).get("value")
             summary_status = str(summary.get("status") or "")
-            if primary_value is not None and failure_severity == "none" and summary_status == "completed":
+            if primary_value is not None and unscored_failure_severity == "none" and summary_status == "completed":
                 component_scores[benchmark_id] = round(float(primary_value), 6)
                 completed += 1
-            elif failure_severity in {"dominant", "partial"} or summary_status in {"degraded", "partial"}:
+            elif unscored_failure_severity in {"dominant", "partial"} or summary_status in {"degraded", "partial"}:
                 degraded += 1
-            elif failure_severity == "all_failed":
+            elif unscored_failure_severity == "all_failed":
                 hard_failed += 1
         except Exception as exc:
             failure_summary = {
@@ -2079,6 +2102,7 @@ def _generate_predictions(
             continue
         generated: Dict[str, Any] = {}
         normalization = None
+        generation_failure_kind = None
         raw_completion = None
         try:
             generation_prompt = _generation_prompt_for_case(spec, case)
@@ -2096,12 +2120,16 @@ def _generate_predictions(
                 if normalization.get("error"):
                     status = "failed"
                     error = normalization["error"]
+                    generation_failure_kind = "model_output"
             performance = _task_performance_fields(generated)
         except Exception as exc:
             text = ""
             status = "failed"
             error = str(exc)
+            generation_failure_kind = "runtime"
             performance = _task_performance_fields({})
+        if status != "completed" and generation_failure_kind is None:
+            generation_failure_kind = "generation"
         record = {
             "case_id": case_id,
             "benchmark_id": spec.benchmark_id,
@@ -2110,6 +2138,8 @@ def _generate_predictions(
             **performance,
             "generation_preset_id": request.generation_preset,
         }
+        if generation_failure_kind:
+            record["generation_failure_kind"] = generation_failure_kind
         if generated.get("prompt_transform"):
             record["generation_prompt_transform"] = generated["prompt_transform"]
         if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:

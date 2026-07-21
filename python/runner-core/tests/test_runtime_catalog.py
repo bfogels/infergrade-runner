@@ -73,7 +73,7 @@ class RuntimeCatalogContractTests(unittest.TestCase):
             "runtime/qualification/llama-cpp-b10069-macos-arm64.json"
         )
 
-        self.assertEqual(projection["signing_environment"], "review_candidate")
+        self.assertEqual(projection["signing_environment"], "production")
         self.assertEqual(target["maturity"], "reviewed_candidate")
         self.assertEqual(target["support_tier"], "candidate")
         self.assertEqual(

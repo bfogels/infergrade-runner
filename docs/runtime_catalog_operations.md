@@ -1,13 +1,14 @@
 # Signed Runtime Catalog Operations
 
-Status: production signing input staged; active metadata remains review
-candidate. `catalog-source.json` prepares version 7 for production signing and
-pins llama.cpp b10069, but it is not production-signed yet.
+Status: production generation version 7 is checked in and cryptographically
+active for this source tree. It pins llama.cpp b10069. It is not distributed to
+users until a Runner release embeds the production root, and it is not served
+by Hub until Hub imports and deploys the same exact generation.
 
 The assembled public production trust anchor is preserved at
-`runtime/catalog/roots/production-v1.json`. It is not active merely because it
-is tracked: `runtime/catalog/signed/` remains the atomic active generation
-until all four production role files replace it together.
+`runtime/catalog/roots/production-v1.json`. `runtime/catalog/signed/` contains
+the same root plus the complete timestamp, snapshot, and targets chain; all
+four role files were imported together from signing run `29842843125`.
 
 ## Security model
 
@@ -147,15 +148,23 @@ private-key contents into a shell argument, log, issue, CI output, or chat.
 
 ## Production gate
 
-Before serving this catalog to released Runners:
+Completed production-source gates:
 
-- replace the review-candidate root with production root version 1 under two
-  separate offline custody locations;
-- assign an automated timestamp refresh and expiry monitor;
-- record the public catalog base URL and atomic upload owner;
-- run the release acceptance matrix from the architecture decision;
-- import the resulting exact trust projection into Hub and verify a real Result
-  shows one compact “InferGrade-pinned runtime” indicator.
+- production root version 1 carries all three signatures under the fixed 2-of-3
+  policy;
+- targets, snapshot, and timestamp version 7 were produced by split protected
+  environments and imported byte-for-byte from signing run `29842843125`;
+- scheduled timestamp refresh and expiry monitoring are assigned;
+- Runner verifies these exact production bytes, while the synthetic acceptance
+  matrix covers tamper, expiry, rollback, wrong platform, explicit consent, and
+  last-known-good offline behavior.
+
+Remaining delivery gates:
+
+- release a Runner that embeds this production root;
+- import the same exact role files and trust projection into Hub, deploy them
+  atomically at the public catalog URL, and verify ETags;
+- verify a real Result shows one compact “InferGrade-pinned runtime” indicator.
 
 The current b10069 candidate is qualified by two local, unpublished,
 standard-depth bundles: exact MiniCPM5-1B Q4_K_M and Gemma 4 E4B Q4_0
