@@ -2,11 +2,15 @@
   "signatures": [
     {
       "keyid": "root-1",
-      "sig_hex": "9e5deade8718481ef5660afe4dbaaedf56d14ebbb1067b85efbfa4c25b0db7923fa925478fd0c282584f1ebd4ac3c598ffcb9b158b28364cdddd6a83c84fdf03"
+      "sig_hex": "2b3a79cd9f9ae5b9f488f3e49bf2a303a2cc0f62c42e61735fc2d87b7cedfe8f539a640315628813175c429327f559c0b248efc82a18ce4128d35d39454d110a"
     },
     {
       "keyid": "root-2",
-      "sig_hex": "41b379a966969761f23d9c25043a039544057f2f5c2bdfb890aaa89bbf1f2b55aa2d7a8d2d8264f2c007493e744960ad17ffa4a2d274fc36e8a088ab64e95608"
+      "sig_hex": "b575acfa888d3ae195727a4cce1f71f8e8dd94a5b0f65a42c64b8cf6f9c832e557615efeab0dd6e0c46f838790261b4979e7cad0ba166ead919ce48def860505"
+    },
+    {
+      "keyid": "root-3",
+      "sig_hex": "238c91b0ee298234a6270adf0535096e6d84ca8f1c7f7fd3b30d6c6f0ca5b8370dfcec52587727d695a2c6855242e76116f0adfb16160edf638939a0d918620e"
     }
   ],
   "signed": {
@@ -15,23 +19,27 @@
     "keys": {
       "root-1": {
         "keytype": "ed25519",
-        "public_key_hex": "0079797117b7294798c7bf08e86da61b618dcb8c1c847f148219a0e429ca3ef8"
+        "public_key_hex": "912c463243f5a712208417c15b452491ccbcddba9fe7145b6c53a9a285fa1c63"
       },
       "root-2": {
         "keytype": "ed25519",
-        "public_key_hex": "931368f96f563e24987f69f22aeae9ffe4034c43bbe128d3c8bd57482cef9e2e"
+        "public_key_hex": "54af500cf3b068844553e92eb804342b1cf278c84339d334e2eac705bf998162"
+      },
+      "root-3": {
+        "keytype": "ed25519",
+        "public_key_hex": "b7267d74ce72825863f2154623432c60944f0b847389bf5aa05ecefb1e00c602"
       },
       "snapshot": {
         "keytype": "ed25519",
-        "public_key_hex": "a51fa28324e987355465c57db57f204268b6eb94f2ce2950a59487bad30cc1e4"
+        "public_key_hex": "794839b2422d633caede4057a496fd9bb4982aa97457cb3abeb2246def8d2b5d"
       },
       "targets": {
         "keytype": "ed25519",
-        "public_key_hex": "d375dbcc102fc91d415200298598570002d559dab03f57251e0a77e8532a70a1"
+        "public_key_hex": "d5afcb8ccf3cf22009e7b5f6a41b98d3a3fa377cac41a66ca9a1cc0a659a3bbf"
       },
       "timestamp": {
         "keytype": "ed25519",
-        "public_key_hex": "08e603eb0da3066856337f0118b6c6426695b4db10815851d7e7cc4061fd94f9"
+        "public_key_hex": "2fa98cc6ff0531479a2edf436bf4c9846bcb6db140536fc9dada311c6d7f5d63"
       }
     },
     "publisher_policies": {
@@ -46,7 +54,8 @@
       "root": {
         "keyids": [
           "root-1",
-          "root-2"
+          "root-2",
+          "root-3"
         ],
         "threshold": 2
       },
