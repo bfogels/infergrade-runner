@@ -848,6 +848,29 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    struct ScopedEnvVar {
+        name: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl ScopedEnvVar {
+        fn set_path(name: &'static str, value: &std::path::Path) -> Self {
+            let previous = env::var_os(name);
+            env::set_var(name, value);
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                env::set_var(self.name, previous);
+            } else {
+                env::remove_var(self.name);
+            }
+        }
+    }
+
     fn write_test_llama_binary(path: &std::path::Path) {
         #[cfg(windows)]
         std::fs::write(
@@ -975,8 +998,7 @@ mod tests {
             if cfg!(windows) { ".cmd" } else { "" }
         ));
         write_test_llama_binary(&runtime_path);
-        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
-        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let _cache_env = ScopedEnvVar::set_path("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
 
         let output = command_runtime(&[
             "select-existing".to_string(),
@@ -1001,11 +1023,6 @@ mod tests {
             .unwrap_or("")
             .contains("No download or install command was run"));
 
-        if let Some(previous_cache_dir) = previous_cache_dir {
-            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
-        } else {
-            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
-        }
         let _ = std::fs::remove_file(runtime_path);
         let _ = std::fs::remove_dir_all(runtime_cache_dir);
     }
@@ -1215,6 +1232,7 @@ mod tests {
 
     #[test]
     fn first_run_auto_requires_selected_or_explicit_llama_runtime() {
+        let _guard = env_test_lock().lock().expect("env lock");
         let model_path = env::temp_dir().join(format!(
             "infergrade-runner-cli-missing-runtime-model-{}.gguf",
             std::process::id()
@@ -1224,8 +1242,7 @@ mod tests {
             std::process::id()
         ));
         std::fs::write(&model_path, b"fake gguf path validation only").expect("model file");
-        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
-        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let _cache_env = ScopedEnvVar::set_path("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
         let error = command_first_run(&[
             "--model".to_string(),
             model_path.display().to_string(),
@@ -1238,11 +1255,6 @@ mod tests {
         assert!(error.contains("No selected llama.cpp runtime"));
         assert!(error.contains("--runtime-path"));
 
-        if let Some(previous_cache_dir) = previous_cache_dir {
-            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
-        } else {
-            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
-        }
         let _ = std::fs::remove_file(model_path);
         let _ = std::fs::remove_dir_all(runtime_cache_dir);
     }
@@ -1324,8 +1336,7 @@ mod tests {
         ));
         std::fs::write(&model_path, b"fake gguf path validation only").expect("model file");
         write_test_llama_binary(&runtime_path);
-        let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
-        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
+        let _cache_env = ScopedEnvVar::set_path("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
         select_existing_llama_cpp_runtime(
             Some("llama-cpp-managed-test"),
             Some(runtime_path.clone()),
@@ -1346,11 +1357,6 @@ mod tests {
         assert_eq!(output["mode"], "llama_cpp");
         assert_eq!(output["result"]["runtime_id"], "llama-cpp-managed-test");
 
-        if let Some(previous_cache_dir) = previous_cache_dir {
-            env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", previous_cache_dir);
-        } else {
-            env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR");
-        }
         let _ = std::fs::remove_file(model_path);
         let _ = std::fs::remove_file(runtime_path);
         let _ = std::fs::remove_dir_all(runtime_cache_dir);

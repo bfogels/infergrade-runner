@@ -221,6 +221,14 @@ export function shouldClearCompletedHandoff({ phase = "", runId = "", handoffRun
   return String(phase || "").trim().toLowerCase() === "complete" && Boolean(runId) && runId === handoffRunId;
 }
 
+export function isTerminalHandoffStatus(status = "") {
+  return ["completed", "failed", "cancelled"].includes(String(status || "").trim().toLowerCase());
+}
+
+export function shouldAppendAssignmentEventLog(previousType = "", nextType = "") {
+  return nextType !== "assignment_idle" || previousType !== "assignment_idle";
+}
+
 export function isCredentialCanceled(message = "") {
   return /cancelled|canceled|user interaction|user.*cancel/i.test(String(message || ""));
 }

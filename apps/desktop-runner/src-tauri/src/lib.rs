@@ -4,7 +4,7 @@ use infergrade_runner_engine::{
     build_support_summary, complete_pairing_response, desktop_environment,
     execute_hub_json_request, hostname,
     install_managed_llama_cpp_runtime as engine_install_managed_llama_cpp_runtime,
-    llama_cpp_runtime_plan as engine_llama_cpp_runtime_plan, native_first_run_bundle_payload,
+    llama_cpp_runtime_status as engine_llama_cpp_runtime_status, native_first_run_bundle_payload,
     normalize_api_url, pairing_error_detail, pairing_status_payload, preferred_execution_mode,
     profile_string, redact_listener_text, redact_worker_response,
     remove_selected_llama_cpp_runtime as engine_remove_selected_llama_cpp_runtime,
@@ -12,7 +12,7 @@ use infergrade_runner_engine::{
     run_native_first_run_with_events as engine_run_native_first_run_with_events,
     runner_id_from_profile,
     select_existing_llama_cpp_runtime as engine_select_existing_llama_cpp_runtime,
-    selected_llama_cpp_runtime_path, worker_request_url, write_native_first_run_artifact,
+    validate_hub_path_id, worker_request_url, write_native_first_run_artifact,
     write_native_first_run_bundle_payload, HubMethod, LlamaCppRuntime,
     ManagedRuntimeInstallOptions, NativeFirstRunBundleOptions, NativeFirstRunInput,
     NativeFirstRunResult, PairingInput, ProfileStore, RunnerError, RunnerEvent, RunnerProfile,
@@ -236,17 +236,6 @@ fn desktop_model_cache_status_payload() -> Result<Value, String> {
         "artifact_bytes": artifact_bytes,
         "artifacts": artifacts,
     }))
-}
-
-fn selected_llama_cpp_runtime() -> Value {
-    match selected_llama_cpp_runtime_path()
-        .ok()
-        .and_then(|path| fs::read_to_string(path).ok())
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-    {
-        Some(selection) => json!({"status": "selected", "selection": selection}),
-        None => json!({"status": "not_selected", "selection": Value::Null}),
-    }
 }
 
 fn load_runner_profile() -> Result<Option<Value>, String> {
@@ -683,7 +672,39 @@ fn reset_runner_pairing() -> Result<Value, String> {
 
 #[tauri::command]
 fn llama_cpp_runtime_plan() -> Value {
-    engine_llama_cpp_runtime_plan(selected_llama_cpp_runtime())
+    engine_llama_cpp_runtime_status()
+}
+
+fn hub_run_handoff_summary(run_id: &str, body: &Value) -> Value {
+    let status = body
+        .pointer("/run/status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    json!({
+        "run_id": run_id,
+        "status": status,
+        "terminal": matches!(status, "completed" | "failed" | "cancelled"),
+    })
+}
+
+#[tauri::command]
+async fn reconcile_hub_run_handoff(api_url: String, run_id: String) -> Result<Value, String> {
+    let run_id =
+        validate_hub_path_id(&run_id, "run_id").map_err(|error| error.message().to_string())?;
+    let token = load_runner_token_value()?
+        .ok_or_else(|| "Pair with Hub before checking an assigned run.".to_string())?;
+    let request = build_hub_json_request(
+        HubMethod::Get,
+        &api_url,
+        &format!("/v1/runs/{run_id}"),
+        None,
+        Some(&token),
+    )
+    .map_err(|error| error.message().to_string())?;
+    let response = execute_hub_json_request(&request)
+        .await
+        .map_err(|error| error.message().to_string())?;
+    Ok(hub_run_handoff_summary(run_id, &response.body))
 }
 
 #[tauri::command]
@@ -1308,6 +1329,7 @@ pub fn run() {
             stop_runner_listener,
             reset_runner_pairing,
             llama_cpp_runtime_plan,
+            reconcile_hub_run_handoff,
             install_managed_llama_cpp_runtime,
             remove_selected_llama_cpp_runtime,
             select_existing_llama_cpp_runtime,
@@ -2250,5 +2272,28 @@ mod tests {
         assert_eq!(response["capabilities"]["run_token_supported"], true);
         assert!(!combined.contains("qbhr_secret_token"));
         assert!(!combined.contains("Authorization"));
+    }
+
+    #[test]
+    fn hub_handoff_summary_marks_only_terminal_run_states_terminal() {
+        for status in ["completed", "failed", "cancelled"] {
+            let summary = hub_run_handoff_summary(
+                "run_terminal",
+                &json!({
+                    "run": {"status": status}
+                }),
+            );
+            assert_eq!(summary["run_id"], "run_terminal");
+            assert_eq!(summary["status"], status);
+            assert_eq!(summary["terminal"], true);
+        }
+
+        let queued = hub_run_handoff_summary(
+            "run_queued",
+            &json!({
+                "run": {"status": "queued"}
+            }),
+        );
+        assert_eq!(queued["terminal"], false);
     }
 }

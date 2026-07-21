@@ -6,8 +6,10 @@ import {
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
+  isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
   shouldClearCompletedHandoff,
+  shouldAppendAssignmentEventLog,
   userSafeStartFailure,
   userSafeTokenFailure,
   userSafeUpdateFailure,
@@ -117,6 +119,7 @@ let runnerListenerEventsReady = false;
 let firstRunEventsReady = false;
 let runnerStartupLines = [];
 let runnerStartupWaiters = [];
+let lastAssignmentEventType = "";
 let pendingUpdate = null;
 let lastNormalizedApiUrl = "https://api.infergrade.com/";
 let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp jobs.";
@@ -1124,11 +1127,14 @@ async function ensureRunnerListenerEvents() {
     const payload = event?.payload || {};
     if (payload.type === "assignment_update" || payload.type === "assignment_idle") {
       renderAssignmentFromListenerEvent(payload);
-      appendLog(
-        payload.type === "assignment_idle"
-          ? "No Hub assignment is currently queued for this Runner."
-          : `Hub assignment ${payload.phase || "update"}: ${payload.description || payload.run_id || "work updated"}.`
-      );
+      if (shouldAppendAssignmentEventLog(lastAssignmentEventType, payload.type)) {
+        appendLog(
+          payload.type === "assignment_idle"
+            ? "No Hub assignment is currently queued for this Runner."
+            : `Hub assignment ${payload.phase || "update"}: ${payload.description || payload.run_id || "work updated"}.`
+        );
+      }
+      lastAssignmentEventType = payload.type;
       return;
     }
     if (payload.type === "stdout" || payload.type === "stderr") {
@@ -1589,7 +1595,13 @@ function runtimePlanSummary(plan = {}) {
   const selected = plan.selected_runtime || {};
   const selectedChannel = plan.selected_channel || {};
   const updatePolicy = plan.update_policy || {};
-  const selectedText = selected.status === "selected" ? "Selected runtime is recorded." : "No managed runtime is selected yet.";
+  const selectedText = selected.status === "stale"
+    ? "The selected executable is missing. Replace it with the managed runtime or select an installed llama.cpp binary."
+    : selected.status === "invalid"
+      ? "The selected runtime record is invalid. Replace it before benchmarking."
+      : selected.status === "selected"
+        ? "Selected runtime is recorded."
+        : "No managed runtime is selected yet.";
   const runtimeText = plan.message || "No install command was run. Review the runtime plan before selecting a runtime.";
   const lane = recommended.platform?.human || recommended.platform_label || recommended.platform || recommended.accelerator || "this machine";
   const channel = selectedChannel.label
@@ -1647,6 +1659,7 @@ async function inspectRuntimePlan() {
   }
   const plan = await invoke("llama_cpp_runtime_plan");
   llamaRuntimeReadiness = runtimePlanSummary(plan);
+  llamaRuntimeAvailable = plan?.native_runtime_status === "available";
   renderLocalReadinessChecklist();
   appendLog(`llama.cpp runtime plan: ${JSON.stringify(plan)}`);
   return plan;
@@ -1813,11 +1826,17 @@ async function initFirstRunDeepLinkHandoff() {
   if (!isTauriRuntime()) {
     return;
   }
+  await reconcileCurrentHandoff().catch((error) => {
+    appendLog(`Could not confirm saved Hub handoff status: ${error.message || error}`);
+  });
   try {
     const { getCurrent, onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
     const startHandoff = firstRunHandoffFromDeepLinks(await getCurrent());
     if (startHandoff.runId) {
       applyFirstRunHandoff(startHandoff);
+      await reconcileCurrentHandoff().catch((error) => {
+        appendLog(`Could not confirm Hub handoff status: ${error.message || error}`);
+      });
       appendLog(`Received Hub first-run handoff for run ${startHandoff.runId}.`);
     }
     await onOpenUrl((urls) => {
@@ -1828,10 +1847,37 @@ async function initFirstRunDeepLinkHandoff() {
       applyFirstRunHandoff(handoff);
       setStatus("Hub run handoff received", "good");
       appendLog(`Received Hub first-run handoff for run ${handoff.runId}.`);
+      reconcileCurrentHandoff().catch((error) => {
+        appendLog(`Could not confirm Hub handoff status: ${error.message || error}`);
+      });
     });
   } catch (error) {
     appendLog(`Could not initialize Hub first-run handoff links: ${error.message || error}`);
   }
+}
+
+async function reconcileCurrentHandoff() {
+  const runId = currentFirstRunUploadRunId();
+  if (!runId) {
+    return null;
+  }
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  const result = await invoke("reconcile_hub_run_handoff", {
+    apiUrl: normalizeDesktopApiUrl(form.elements.apiUrl.value),
+    runId,
+  });
+  if (result?.run_id === runId && (result.terminal === true || isTerminalHandoffStatus(result.status))) {
+    const terminalStatus = String(result.status || "finished").toLowerCase();
+    clearFirstRunHandoff();
+    if (firstRunHandoffStatus) {
+      firstRunHandoffStatus.textContent = `The previous Hub run is ${terminalStatus}. Start a new run from Hub to continue.`;
+    }
+    appendLog(`Cleared terminal Hub handoff ${runId} (${terminalStatus}).`);
+  }
+  return result;
 }
 
 function readFirstRunUploadRunId() {
@@ -1991,6 +2037,7 @@ async function startRunner({ confirmStarted = false } = {}) {
 
   setRunnerButtonsDisabled("start", true);
   setStatus("Starting", "warning");
+  lastAssignmentEventType = "";
 
   const invoke = await loadTauriInvoke();
   if (!invoke) {
@@ -2506,7 +2553,9 @@ initFirstRunDeepLinkHandoff().catch((error) => appendLog(`Could not initialize f
 renderReleaseStatus().catch((error) => appendLog(`Could not render release status: ${error.message || error}`));
 refreshRunnerCliVersion().catch((error) => appendLog(`Could not check Runner CLI version: ${error.message || error}`));
 checkRunnerStartupSelfTest().catch((error) => appendLog(`Could not run startup self-test: ${error.message || error}`));
-checkDesktopReadiness().catch((error) => appendLog(`Could not check desktop readiness: ${error.message || error}`));
+checkDesktopReadiness()
+  .then(() => inspectRuntimePlan())
+  .catch((error) => appendLog(`Could not check desktop runtime readiness: ${error.message || error}`));
 refreshModelCache().catch((error) => appendLog(`Could not inspect model cache: ${error.message || error}`));
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
 setStatus("Idle", "idle");

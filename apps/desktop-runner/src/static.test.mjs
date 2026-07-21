@@ -197,6 +197,9 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(js.includes("Replacing the selected llama.cpp runtime with the managed runtime. Local binaries are not deleted."));
   assert.equal(js.includes("executeSidecar(runtimeCommandArgs([\"--select-existing\"])"), false);
   assert.ok(rust.includes("fn llama_cpp_runtime_plan"));
+  assert.ok(rust.includes("engine_llama_cpp_runtime_status()"));
+  assert.ok(js.includes('plan?.native_runtime_status === "available"'));
+  assert.ok(js.includes("The selected executable is missing."));
   assert.ok(rust.includes("runtime_id: Option<String>"));
   assert.ok(rust.includes("fn install_managed_llama_cpp_runtime"));
   assert.ok(rust.includes("engine_install_managed_llama_cpp_runtime"));
@@ -434,6 +437,11 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("Capability benchmark (.+?)"));
   assert.ok(js.includes("Runner is executing Hub-assigned benchmark checks."));
   assert.ok(js.includes("No Hub assignment is currently queued for this Runner."));
+  assert.ok(js.includes("shouldAppendAssignmentEventLog(lastAssignmentEventType, payload.type)"));
+  assert.ok(js.includes('invoke("reconcile_hub_run_handoff"'));
+  assert.ok(js.includes("clearFirstRunHandoff();"));
+  assert.ok(rust.includes("async fn reconcile_hub_run_handoff"));
+  assert.ok(rust.includes('matches!(status, "completed" | "failed" | "cancelled")'));
   assert.ok(rust.includes('const DESKTOP_EVENT_PREFIX: &str = "INFERGRADE_DESKTOP_EVENT "'));
   assert.ok(rust.includes("fn desktop_assignment_event_from_line"));
   assert.ok(rust.includes("fn listener_events_from_output"));
