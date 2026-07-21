@@ -10,8 +10,10 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -270,6 +272,37 @@ def envelope(signed, signer, private_key):
     }
 
 
+def verify_role(root, role_name, value):
+    signed = value.get("signed", {})
+    if (
+        signed.get("_type") != role_name
+        or signed.get("spec_version") != SPEC_VERSION
+        or not isinstance(signed.get("version"), int)
+        or signed["version"] < 1
+        or not isinstance(signed.get("expires_unix"), int)
+        or signed["expires_unix"] < 1
+    ):
+        raise SystemExit("Invalid runtime catalog %s payload." % role_name)
+    role = root["signed"]["roles"][role_name]
+    allowed = set(role["keyids"])
+    payload = canonical_bytes(signed)
+    valid = set()
+    seen = set()
+    for signature in value.get("signatures", []):
+        keyid = signature.get("keyid")
+        if keyid in seen:
+            raise SystemExit("Duplicate runtime catalog %s signature." % role_name)
+        seen.add(keyid)
+        if keyid not in allowed:
+            raise SystemExit("Unexpected signer for runtime catalog %s." % role_name)
+        key = root["signed"]["keys"][keyid]
+        if verify_signature(key["public_key_hex"], payload, signature.get("sig_hex", "")):
+            valid.add(keyid)
+    if len(valid) < role["threshold"]:
+        raise SystemExit("Runtime catalog %s signature threshold was not met." % role_name)
+    return signed
+
+
 def meta_reference(version, payload):
     return {
         "version": version,
@@ -278,21 +311,22 @@ def meta_reference(version, payload):
     }
 
 
-def build_online(source_path, root_path, key_dir, output_dir, trust_projection=None):
+def require_matching_online_key(root, role_name, private_key):
+    if public_key_hex(private_key) != root["signed"]["keys"][role_name]["public_key_hex"]:
+        raise SystemExit("Online private key does not match root role: %s" % role_name)
+
+
+def build_targets_snapshot(
+    source_path, root_path, targets_private_key, snapshot_private_key, output_dir
+):
     source = json.loads(source_path.read_text(encoding="utf-8"))
     root = json.loads(root_path.read_text(encoding="utf-8"))
     verify_root(root)
     root_signed = root["signed"]
     if source["versions"]["root"] != root_signed["version"]:
         raise SystemExit("Source root version does not match the assembled root.")
-    online_keys = {}
-    for name in ONLINE_KEY_NAMES:
-        path = key_dir / (name + ".pem")
-        if not path.is_file():
-            raise SystemExit("Missing online signing key: %s" % path)
-        if public_key_hex(path) != root_signed["keys"][name]["public_key_hex"]:
-            raise SystemExit("Online private key does not match root role: %s" % name)
-        online_keys[name] = path
+    require_matching_online_key(root, "targets", targets_private_key)
+    require_matching_online_key(root, "snapshot", snapshot_private_key)
     versions = source["versions"]
     expiry = source["expires_unix"]
     signing_environment = source.get("signing_environment", "review_candidate")
@@ -302,7 +336,7 @@ def build_online(source_path, root_path, key_dir, output_dir, trust_projection=N
             "expires_unix": expiry["targets"], "signing_environment": signing_environment,
             "targets": source["targets"],
         },
-        "targets", online_keys["targets"],
+        "targets", targets_private_key,
     )
     targets_bytes = encoded(targets)
     snapshot = envelope(
@@ -311,53 +345,202 @@ def build_online(source_path, root_path, key_dir, output_dir, trust_projection=N
             "expires_unix": expiry["snapshot"],
             "meta": {"targets.json": meta_reference(versions["targets"], targets_bytes)},
         },
-        "snapshot", online_keys["snapshot"],
+        "snapshot", snapshot_private_key,
     )
-    snapshot_bytes = encoded(snapshot)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "root.json").write_bytes(encoded(root))
+    (output_dir / "targets.json").write_bytes(targets_bytes)
+    (output_dir / "snapshot.json").write_bytes(encoded(snapshot))
+
+
+def build_timestamp(source_path, root_path, snapshot_path, private_key, output):
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    root = json.loads(root_path.read_text(encoding="utf-8"))
+    snapshot_bytes = snapshot_path.read_bytes()
+    snapshot = json.loads(snapshot_bytes)
+    verify_root(root)
+    snapshot_signed = verify_role(root, "snapshot", snapshot)
+    require_matching_online_key(root, "timestamp", private_key)
+    if source["versions"]["snapshot"] != snapshot_signed["version"]:
+        raise SystemExit("Source snapshot version does not match signed snapshot metadata.")
+    versions = source["versions"]
+    expiry = source["expires_unix"]
     timestamp = envelope(
         {
             "_type": "timestamp", "spec_version": SPEC_VERSION, "version": versions["timestamp"],
             "expires_unix": expiry["timestamp"],
             "meta": {"snapshot.json": meta_reference(versions["snapshot"], snapshot_bytes)},
         },
-        "timestamp", online_keys["timestamp"],
+        "timestamp", private_key,
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(encoded(timestamp))
+
+
+def verify_meta_reference(container, name, version, payload):
+    expected = meta_reference(version, payload)
+    actual = container.get("meta", {}).get(name)
+    if actual != expected:
+        raise SystemExit("Runtime catalog %s reference does not match signed bytes." % name)
+
+
+def verify_generation(
+    root, timestamp, snapshot, targets, previous_dir=None,
+    snapshot_bytes=None, targets_bytes=None,
+):
+    verify_root(root)
+    targets_signed = verify_role(root, "targets", targets)
+    snapshot_signed = verify_role(root, "snapshot", snapshot)
+    timestamp_signed = verify_role(root, "timestamp", timestamp)
+    targets_bytes = targets_bytes if targets_bytes is not None else encoded(targets)
+    snapshot_bytes = snapshot_bytes if snapshot_bytes is not None else encoded(snapshot)
+    verify_meta_reference(
+        snapshot_signed, "targets.json", targets_signed["version"], targets_bytes
+    )
+    verify_meta_reference(
+        timestamp_signed, "snapshot.json", snapshot_signed["version"], snapshot_bytes
+    )
+    if previous_dir:
+        previous = {
+            name: json.loads((previous_dir / (name + ".json")).read_text(encoding="utf-8"))
+            for name in ("root", "timestamp", "snapshot", "targets")
+        }
+        verify_root(previous["root"])
+        if previous["root"]["signed"] != root["signed"]:
+            raise SystemExit("Runtime catalog generation changed root outside root rotation.")
+        for name, current in (
+            ("timestamp", timestamp), ("snapshot", snapshot), ("targets", targets)
+        ):
+            old = previous[name]
+            old_version = old["signed"]["version"]
+            new_version = current["signed"]["version"]
+            if new_version < old_version:
+                raise SystemExit("Runtime catalog %s version rolled back." % name)
+            if new_version == old_version and canonical_bytes(current) != canonical_bytes(old):
+                raise SystemExit(
+                    "Runtime catalog %s bytes changed without a version bump." % name
+                )
+    return targets_signed, targets_bytes
+
+
+def write_trust_projection(root, targets_signed, targets_bytes, output):
+    projected_targets = []
+    for name, target in sorted(targets_signed["targets"].items()):
+        custom = target["custom"]
+        projected_targets.append(
+            {
+                "target_name": name, "runtime_build_id": custom["runtime_build_id"],
+                "content_manifest_sha256": custom["content_manifest_sha256"],
+                "archive_sha256": target["sha256"], "runtime_family": custom["runtime_family"],
+                "runtime_interface": custom["runtime_interface"], "origin": custom["origin"],
+                "maturity": custom["maturity"], "support_tier": custom["support_tier"],
+                "compatibility_status": custom["compatibility_status"],
+                "provenance_strength": custom["provenance_strength"], "publisher": custom["publisher"],
+                "validation_assertions": custom["validation_assertions"],
+                "revoked": bool(custom.get("revoked", False)),
+                "revocation_reason": custom.get("revocation_reason"),
+            }
+        )
+    projection = {
+        "catalog_version": "infergrade_runtime_trust_catalog_v1",
+        "targets_metadata_version": targets_signed["version"],
+        "targets_metadata_sha256": hashlib.sha256(targets_bytes).hexdigest(),
+        "root_key_ids": root["signed"]["roles"]["root"]["keyids"],
+        "signing_environment": targets_signed.get("signing_environment", "review_candidate"),
+        "targets": projected_targets,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(encoded(projection))
+
+
+def assemble_generation(
+    root_path, timestamp_path, snapshot_path, targets_path, output_dir,
+    trust_projection=None, previous_dir=None,
+):
+    timestamp_bytes = timestamp_path.read_bytes()
+    snapshot_bytes = snapshot_path.read_bytes()
+    targets_bytes = targets_path.read_bytes()
+    values = {
+        "root": json.loads(root_path.read_text(encoding="utf-8")),
+        "timestamp": json.loads(timestamp_bytes),
+        "snapshot": json.loads(snapshot_bytes),
+        "targets": json.loads(targets_bytes),
+    }
+    targets_signed, verified_targets_bytes = verify_generation(
+        values["root"], values["timestamp"], values["snapshot"], values["targets"],
+        previous_dir, snapshot_bytes, targets_bytes,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
-    for name, value in (
-        ("root.json", root),
-        ("timestamp.json", timestamp),
-        ("snapshot.json", snapshot),
-        ("targets.json", targets),
+    for name, source in (
+        ("root.json", root_path), ("timestamp.json", timestamp_path),
+        ("snapshot.json", snapshot_path), ("targets.json", targets_path),
     ):
-        (output_dir / name).write_bytes(encoded(value))
+        shutil.copyfile(source, output_dir / name)
     if trust_projection:
-        projected_targets = []
-        for name, target in sorted(source["targets"].items()):
-            custom = target["custom"]
-            projected_targets.append(
-                {
-                    "target_name": name, "runtime_build_id": custom["runtime_build_id"],
-                    "content_manifest_sha256": custom["content_manifest_sha256"],
-                    "archive_sha256": target["sha256"], "runtime_family": custom["runtime_family"],
-                    "runtime_interface": custom["runtime_interface"], "origin": custom["origin"],
-                    "maturity": custom["maturity"], "support_tier": custom["support_tier"],
-                    "compatibility_status": custom["compatibility_status"],
-                    "provenance_strength": custom["provenance_strength"], "publisher": custom["publisher"],
-                    "validation_assertions": custom["validation_assertions"],
-                    "revoked": bool(custom.get("revoked", False)),
-                    "revocation_reason": custom.get("revocation_reason"),
-                }
-            )
-        projection = {
-            "catalog_version": "infergrade_runtime_trust_catalog_v1",
-            "targets_metadata_version": versions["targets"],
-            "targets_metadata_sha256": hashlib.sha256(targets_bytes).hexdigest(),
-            "root_key_ids": root_signed["roles"]["root"]["keyids"],
-            "signing_environment": signing_environment,
-            "targets": projected_targets,
-        }
-        trust_projection.parent.mkdir(parents=True, exist_ok=True)
-        trust_projection.write_bytes(encoded(projection))
+        write_trust_projection(
+            values["root"], targets_signed, verified_targets_bytes, trust_projection
+        )
+
+
+def build_online(source_path, root_path, key_dir, output_dir, trust_projection=None):
+    with tempfile.TemporaryDirectory() as temporary:
+        partial = Path(temporary)
+        build_targets_snapshot(
+            source_path, root_path, key_dir / "targets.pem", key_dir / "snapshot.pem", partial
+        )
+        build_timestamp(
+            source_path, root_path, partial / "snapshot.json", key_dir / "timestamp.pem",
+            partial / "timestamp.json",
+        )
+        assemble_generation(
+            partial / "root.json", partial / "timestamp.json", partial / "snapshot.json",
+            partial / "targets.json", output_dir, trust_projection,
+        )
+
+
+def refresh_timestamp(root_path, snapshot_path, current_path, private_key, expires_unix, output):
+    now = int(time.time())
+    if expires_unix <= now or expires_unix > now + 31 * 24 * 60 * 60:
+        raise SystemExit("Timestamp refresh expiry must be within the next 31 days.")
+    root = json.loads(root_path.read_text(encoding="utf-8"))
+    snapshot_bytes = snapshot_path.read_bytes()
+    snapshot = json.loads(snapshot_bytes)
+    current = json.loads(current_path.read_text(encoding="utf-8"))
+    verify_root(root)
+    snapshot_signed = verify_role(root, "snapshot", snapshot)
+    current_signed = verify_role(root, "timestamp", current)
+    verify_meta_reference(
+        current_signed, "snapshot.json", snapshot_signed["version"], snapshot_bytes
+    )
+    require_matching_online_key(root, "timestamp", private_key)
+    refreshed = envelope(
+        {
+            "_type": "timestamp", "spec_version": SPEC_VERSION,
+            "version": current_signed["version"] + 1, "expires_unix": expires_unix,
+            "meta": {"snapshot.json": meta_reference(snapshot_signed["version"], snapshot_bytes)},
+        },
+        "timestamp", private_key,
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(encoded(refreshed))
+
+
+def check_expiry(catalog_dir, warning_seconds, critical_seconds):
+    now = int(time.time())
+    rows = []
+    for role in ("root", "timestamp", "snapshot", "targets"):
+        value = json.loads((catalog_dir / (role + ".json")).read_text(encoding="utf-8"))
+        expires = value["signed"]["expires_unix"]
+        remaining = expires - now
+        status = "ok"
+        if remaining <= critical_seconds:
+            status = "critical"
+        elif remaining <= warning_seconds:
+            status = "warning"
+        rows.append({"role": role, "expires_unix": expires, "seconds_remaining": remaining, "status": status})
+    print(json.dumps({"checked_unix": now, "roles": rows}, sort_keys=True))
+    if any(row["status"] == "critical" for row in rows):
+        raise SystemExit("Runtime catalog metadata is inside the critical expiry window.")
 
 
 def main():
@@ -388,6 +571,48 @@ def main():
     online.add_argument("--key-dir", required=True, type=Path)
     online.add_argument("--output-dir", required=True, type=Path)
     online.add_argument("--trust-projection", type=Path)
+    content = subparsers.add_parser(
+        "build-targets-snapshot",
+        help="sign targets and snapshot with only their two online keys",
+    )
+    content.add_argument("--source", required=True, type=Path)
+    content.add_argument("--root", required=True, type=Path)
+    content.add_argument("--targets-private-key", required=True, type=Path)
+    content.add_argument("--snapshot-private-key", required=True, type=Path)
+    content.add_argument("--output-dir", required=True, type=Path)
+    timestamp = subparsers.add_parser(
+        "build-timestamp", help="sign timestamp with only the timestamp key"
+    )
+    timestamp.add_argument("--source", required=True, type=Path)
+    timestamp.add_argument("--root", required=True, type=Path)
+    timestamp.add_argument("--snapshot", required=True, type=Path)
+    timestamp.add_argument("--timestamp-private-key", required=True, type=Path)
+    timestamp.add_argument("--output", required=True, type=Path)
+    generation = subparsers.add_parser(
+        "assemble-generation", help="verify and assemble one complete signed generation"
+    )
+    generation.add_argument("--root", required=True, type=Path)
+    generation.add_argument("--timestamp", required=True, type=Path)
+    generation.add_argument("--snapshot", required=True, type=Path)
+    generation.add_argument("--targets", required=True, type=Path)
+    generation.add_argument("--output-dir", required=True, type=Path)
+    generation.add_argument("--trust-projection", type=Path)
+    generation.add_argument("--previous-dir", type=Path)
+    refresh = subparsers.add_parser(
+        "refresh-timestamp", help="increment and refresh timestamp without content-role keys"
+    )
+    refresh.add_argument("--root", required=True, type=Path)
+    refresh.add_argument("--snapshot", required=True, type=Path)
+    refresh.add_argument("--current-timestamp", required=True, type=Path)
+    refresh.add_argument("--timestamp-private-key", required=True, type=Path)
+    refresh.add_argument("--expires-unix", required=True, type=int)
+    refresh.add_argument("--output", required=True, type=Path)
+    expiry = subparsers.add_parser(
+        "check-expiry", help="report metadata expiry and fail inside the critical window"
+    )
+    expiry.add_argument("--catalog-dir", required=True, type=Path)
+    expiry.add_argument("--warning-seconds", type=int, default=14 * 24 * 60 * 60)
+    expiry.add_argument("--critical-seconds", type=int, default=7 * 24 * 60 * 60)
     args = parser.parse_args()
     repo_root = Path(__file__).resolve().parents[1]
     if args.command == "init-key":
@@ -409,6 +634,45 @@ def main():
             args.source, args.root, require_external_path(repo_root, args.key_dir),
             args.output_dir, args.trust_projection,
         )
+    elif args.command == "build-targets-snapshot":
+        build_targets_snapshot(
+            args.source,
+            args.root,
+            require_external_path(repo_root, args.targets_private_key),
+            require_external_path(repo_root, args.snapshot_private_key),
+            args.output_dir,
+        )
+    elif args.command == "build-timestamp":
+        build_timestamp(
+            args.source,
+            args.root,
+            args.snapshot,
+            require_external_path(repo_root, args.timestamp_private_key),
+            args.output,
+        )
+    elif args.command == "assemble-generation":
+        assemble_generation(
+            args.root,
+            args.timestamp,
+            args.snapshot,
+            args.targets,
+            args.output_dir,
+            args.trust_projection,
+            args.previous_dir,
+        )
+    elif args.command == "refresh-timestamp":
+        refresh_timestamp(
+            args.root,
+            args.snapshot,
+            args.current_timestamp,
+            require_external_path(repo_root, args.timestamp_private_key),
+            args.expires_unix,
+            args.output,
+        )
+    elif args.command == "check-expiry":
+        if args.critical_seconds < 0 or args.warning_seconds < args.critical_seconds:
+            raise SystemExit("Expiry windows must be non-negative and warning >= critical.")
+        check_expiry(args.catalog_dir, args.warning_seconds, args.critical_seconds)
 
 
 if __name__ == "__main__":

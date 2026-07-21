@@ -1,0 +1,154 @@
+name: Runtime Catalog Release Candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-catalog-release
+  cancel-in-progress: false
+
+jobs:
+  trusted-main:
+    name: Require trusted main revision
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Reject a dispatch from any other revision
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+  sign-content:
+    name: Sign targets and snapshot
+    needs: trusted-main
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: runtime-catalog-release
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Verify trusted source and production intent
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = "main"
+          python3 - <<'PY'
+          import json
+          source = json.load(open("runtime/catalog/catalog-source.json", encoding="utf-8"))
+          if source.get("signing_environment") != "production":
+              raise SystemExit("catalog-source.json is not marked for production signing")
+          PY
+
+      - name: Sign targets and snapshot
+        env:
+          TARGETS_PRIVATE_KEY: ${{ secrets.INFERGRADE_RUNTIME_TARGETS_PRIVATE_KEY }}
+          SNAPSHOT_PRIVATE_KEY: ${{ secrets.INFERGRADE_RUNTIME_SNAPSHOT_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_dir="$RUNNER_TEMP/runtime-catalog-release-keys"
+          mkdir -p "$key_dir"
+          trap 'rm -rf "$key_dir"' EXIT
+          test -n "$TARGETS_PRIVATE_KEY"
+          test -n "$SNAPSHOT_PRIVATE_KEY"
+          printf '%s' "$TARGETS_PRIVATE_KEY" > "$key_dir/targets.pem"
+          printf '%s' "$SNAPSHOT_PRIVATE_KEY" > "$key_dir/snapshot.pem"
+          python3 scripts/build_runtime_catalog.py build-targets-snapshot \
+            --source runtime/catalog/catalog-source.json \
+            --root runtime/catalog/roots/production-v1.json \
+            --targets-private-key "$key_dir/targets.pem" \
+            --snapshot-private-key "$key_dir/snapshot.pem" \
+            --output-dir runtime-catalog-partial
+
+      - name: Upload public partial metadata
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-catalog-partial-${{ github.run_id }}
+          path: runtime-catalog-partial/
+          if-no-files-found: error
+          retention-days: 2
+
+  sign-timestamp:
+    name: Sign timestamp and verify generation
+    needs: sign-content
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: runtime-catalog-timestamp
+    steps:
+      - name: Check out the same trusted main commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Verify trusted source revision
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = "main"
+
+      - name: Download public partial metadata
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: runtime-catalog-partial-${{ github.run_id }}
+          path: runtime-catalog-partial
+
+      - name: Sign timestamp
+        env:
+          TIMESTAMP_PRIVATE_KEY: ${{ secrets.INFERGRADE_RUNTIME_TIMESTAMP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_dir="$RUNNER_TEMP/runtime-catalog-timestamp-key"
+          mkdir -p "$key_dir"
+          trap 'rm -rf "$key_dir"' EXIT
+          test -n "$TIMESTAMP_PRIVATE_KEY"
+          printf '%s' "$TIMESTAMP_PRIVATE_KEY" > "$key_dir/timestamp.pem"
+          python3 scripts/build_runtime_catalog.py build-timestamp \
+            --source runtime/catalog/catalog-source.json \
+            --root runtime-catalog-partial/root.json \
+            --snapshot runtime-catalog-partial/snapshot.json \
+            --timestamp-private-key "$key_dir/timestamp.pem" \
+            --output runtime-catalog-partial/timestamp.json
+
+      - name: Assemble and verify complete generation
+        run: |
+          set -euo pipefail
+          previous=()
+          if cmp -s runtime/catalog/roots/production-v1.json runtime/catalog/signed/root.json; then
+            previous=(--previous-dir runtime/catalog/signed)
+          fi
+          python3 scripts/build_runtime_catalog.py assemble-generation \
+            --root runtime-catalog-partial/root.json \
+            --timestamp runtime-catalog-partial/timestamp.json \
+            --snapshot runtime-catalog-partial/snapshot.json \
+            --targets runtime-catalog-partial/targets.json \
+            --output-dir runtime-catalog-generation \
+            --trust-projection runtime-catalog-generation/runtime_trust_catalog.json \
+            "${previous[@]}"
+          python3 scripts/build_runtime_catalog.py check-expiry \
+            --catalog-dir runtime-catalog-generation \
+            --warning-seconds 1209600 \
+            --critical-seconds 604800
+          (cd runtime-catalog-generation && sha256sum *.json > SHA256SUMS)
+
+      - name: Upload complete verified generation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-catalog-generation-${{ github.run_id }}
+          path: runtime-catalog-generation/
+          if-no-files-found: error
+          retention-days: 14

@@ -1,9 +1,9 @@
 {
   "versions": {
     "root": 1,
-    "timestamp": 6,
-    "snapshot": 6,
-    "targets": 6
+    "timestamp": 7,
+    "snapshot": 7,
+    "targets": 7
   },
   "expires_unix": {
     "root": 1942272000,
@@ -11,7 +11,7 @@
     "snapshot": 1792454400,
     "targets": 1816041600
   },
-  "signing_environment": "review_candidate",
+  "signing_environment": "production",
   "publisher_policies": {
     "infergrade": {
       "target_prefix": "infergrade/",
