@@ -7,9 +7,11 @@ targets, snapshot, and timestamp metadata use separate online-role keys.
 """
 
 import argparse
+import functools
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -23,6 +25,56 @@ KEY_NAMES = ROOT_KEY_NAMES + ("timestamp", "snapshot", "targets")
 ONLINE_KEY_NAMES = ("timestamp", "snapshot", "targets")
 ED25519_DER_PREFIX = bytes.fromhex("302a300506032b6570032100")
 LOWER_HEX = frozenset("0123456789abcdef")
+OPENSSL_MINIMUM_VERSION = (3, 0)
+
+
+@functools.lru_cache(maxsize=4)
+def _validated_openssl_binary(configured, path_value):
+    candidate = configured or "openssl"
+    resolved = shutil.which(candidate, path=path_value)
+    if not resolved:
+        raise SystemExit(
+            "OpenSSL 3.0 or newer is required for runtime catalog signing, but "
+            "%r was not found. Set OPENSSL_BIN to an OpenSSL 3 executable." % candidate
+        )
+    result = subprocess.run(
+        [resolved, "version"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    output = (result.stdout or result.stderr or b"").decode("utf-8", errors="replace").strip()
+    match = re.match(r"^OpenSSL\s+(\d+)\.(\d+)(?:\.\d+)?", output)
+    if result.returncode != 0 or not match or tuple(map(int, match.groups())) < OPENSSL_MINIMUM_VERSION:
+        raise SystemExit(
+            "OpenSSL 3.0 or newer is required for Ed25519 runtime catalog signing; "
+            "%s reports %r. Set OPENSSL_BIN to an OpenSSL 3 executable."
+            % (resolved, output or "no version")
+        )
+    return resolved
+
+
+def openssl_binary():
+    return _validated_openssl_binary(
+        os.environ.get("OPENSSL_BIN", "").strip(),
+        os.environ.get("PATH", ""),
+    )
+
+
+def run_openssl(arguments, *, operation, stdout=subprocess.DEVNULL):
+    try:
+        return subprocess.run(
+            [openssl_binary(), *arguments],
+            check=True,
+            stdout=stdout,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or b"").decode("utf-8", errors="replace").strip()
+        raise SystemExit(
+            "OpenSSL failed while %s: %s"
+            % (operation, detail or "exit status %s" % error.returncode)
+        ) from error
 
 
 def canonical_bytes(value):
@@ -51,11 +103,9 @@ def create_key(key_name, private_key, public_key):
             raise SystemExit("Refusing to overwrite existing key material: %s" % path)
         path.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(private_key.parent, 0o700)
-    subprocess.run(
-        ["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(private_key)],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+    run_openssl(
+        ["genpkey", "-algorithm", "ED25519", "-out", str(private_key)],
+        operation="generating %s" % key_name,
     )
     os.chmod(private_key, 0o600)
     public_key.write_bytes(
@@ -71,11 +121,10 @@ def create_key(key_name, private_key, public_key):
 
 
 def public_key_hex(path):
-    result = subprocess.run(
-        ["openssl", "pkey", "-in", str(path), "-pubout", "-outform", "DER"],
-        check=True,
+    result = run_openssl(
+        ["pkey", "-in", str(path), "-pubout", "-outform", "DER"],
+        operation="reading the Ed25519 public key from %s" % path,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
     )
     if not result.stdout.startswith(ED25519_DER_PREFIX) or len(result.stdout) != 44:
         raise SystemExit("OpenSSL returned an invalid Ed25519 public key for %s" % path)
@@ -86,14 +135,12 @@ def sign_bytes(path, payload):
     with tempfile.NamedTemporaryFile() as source, tempfile.NamedTemporaryFile() as signature:
         source.write(payload)
         source.flush()
-        subprocess.run(
+        run_openssl(
             [
-                "openssl", "pkeyutl", "-sign", "-rawin", "-inkey", str(path),
+                "pkeyutl", "-sign", "-rawin", "-inkey", str(path),
                 "-in", source.name, "-out", signature.name,
             ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            operation="signing runtime catalog metadata with %s" % path,
         )
         signature.seek(0)
         return signature.read().hex()
@@ -118,7 +165,7 @@ def verify_signature(public_key, payload, signature_hex):
                 signature_file.flush()
                 result = subprocess.run(
                     [
-                        "openssl", "pkeyutl", "-verify", "-rawin", "-pubin",
+                        openssl_binary(), "pkeyutl", "-verify", "-rawin", "-pubin",
                         "-keyform", "DER", "-inkey", key_file.name, "-in",
                         source.name, "-sigfile", signature_file.name,
                     ],
