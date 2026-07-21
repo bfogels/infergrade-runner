@@ -1,0 +1,75 @@
+{
+  "signatures": [
+    {
+      "keyid": "root-1",
+      "sig_hex": "e9acb1e30c47d65572ad475905c9c0b9f27a58d32b65c63c28d6929c22cfd4e27216543ef505a8bf4df9da2347cb555391f574a11a3dbcfc5a6e3ea794b95b09"
+    },
+    {
+      "keyid": "root-2",
+      "sig_hex": "3c218c21b736b1bb4fe2099cf34c5c50cca1f4026d2dd7f2ea4b71072977c7af7460150839451adc336622623a272e5447518b710876d928d61f7beb4491020e"
+    }
+  ],
+  "signed": {
+    "_type": "root",
+    "expires_unix": 1942272000,
+    "keys": {
+      "root-1": {
+        "keytype": "ed25519",
+        "public_key_hex": "912c463243f5a712208417c15b452491ccbcddba9fe7145b6c53a9a285fa1c63"
+      },
+      "root-2": {
+        "keytype": "ed25519",
+        "public_key_hex": "54af500cf3b068844553e92eb804342b1cf278c84339d334e2eac705bf998162"
+      },
+      "snapshot": {
+        "keytype": "ed25519",
+        "public_key_hex": "794839b2422d633caede4057a496fd9bb4982aa97457cb3abeb2246def8d2b5d"
+      },
+      "targets": {
+        "keytype": "ed25519",
+        "public_key_hex": "d5afcb8ccf3cf22009e7b5f6a41b98d3a3fa377cac41a66ca9a1cc0a659a3bbf"
+      },
+      "timestamp": {
+        "keytype": "ed25519",
+        "public_key_hex": "2fa98cc6ff0531479a2edf436bf4c9846bcb6db140536fc9dada311c6d7f5d63"
+      }
+    },
+    "publisher_policies": {
+      "infergrade": {
+        "allowed_origins": [
+          "upstream_official"
+        ],
+        "target_prefix": "infergrade/"
+      }
+    },
+    "roles": {
+      "root": {
+        "keyids": [
+          "root-1",
+          "root-2"
+        ],
+        "threshold": 2
+      },
+      "snapshot": {
+        "keyids": [
+          "snapshot"
+        ],
+        "threshold": 1
+      },
+      "targets": {
+        "keyids": [
+          "targets"
+        ],
+        "threshold": 1
+      },
+      "timestamp": {
+        "keyids": [
+          "timestamp"
+        ],
+        "threshold": 1
+      }
+    },
+    "spec_version": "infergrade_runtime_catalog_v1",
+    "version": 1
+  }
+}

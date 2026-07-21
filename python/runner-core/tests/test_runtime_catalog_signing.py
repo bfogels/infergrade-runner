@@ -109,6 +109,18 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
                 self.root / "bad-signature.json",
             )
 
+    def test_staged_production_root_meets_threshold_and_is_not_active_early(self):
+        production_root = json.loads(
+            (REPO_ROOT / "runtime/catalog/roots/production-v1.json").read_text()
+        )
+        active_root = json.loads(
+            (REPO_ROOT / "runtime/catalog/signed/root.json").read_text()
+        )
+
+        CATALOG.verify_root(production_root)
+        self.assertEqual(production_root["signed"]["roles"]["root"]["threshold"], 2)
+        self.assertNotEqual(production_root["signed"]["keys"], active_root["signed"]["keys"])
+
 
 if __name__ == "__main__":
     unittest.main()

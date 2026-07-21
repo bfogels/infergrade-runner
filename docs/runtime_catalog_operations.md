@@ -3,6 +3,11 @@
 Status: review-candidate metadata. The checked-in generation proves the
 mechanism and pins llama.cpp b10069; it is not production-signed yet.
 
+The assembled public production trust anchor is preserved at
+`runtime/catalog/roots/production-v1.json`. It is not active merely because it
+is tracked: `runtime/catalog/signed/` remains the atomic active generation
+until all four production role files replace it together.
+
 ## Security model
 
 - Runner embeds the initial root and verifies root, timestamp, snapshot, and
