@@ -108,6 +108,9 @@ not preserve the review keys in the public trust chain.
 Example command shapes are available from
 `python3 scripts/build_runtime_catalog.py <command> --help`. Do not paste
 private-key contents into a shell argument, log, issue, CI output, or chat.
+The signing helper requires OpenSSL 3.0 or newer and checks the resolved binary
+before any key operation. Set `OPENSSL_BIN` to an explicit OpenSSL 3 executable
+when the operator's `PATH` contains an older OpenSSL or LibreSSL first.
 
 ### Custody and recovery
 
