@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infergrade.dev/schemas/runtime_trust_catalog.schema.json",
+  "title": "InferGrade Runtime Trust Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "catalog_version",
+    "targets_metadata_version",
+    "targets_metadata_sha256",
+    "root_key_ids",
+    "signing_environment",
+    "targets"
+  ],
+  "properties": {
+    "catalog_version": { "const": "infergrade_runtime_trust_catalog_v1" },
+    "targets_metadata_version": { "type": "integer", "minimum": 1 },
+    "targets_metadata_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "root_key_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+    "signing_environment": { "enum": ["review_candidate", "production"] },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target_name",
+          "runtime_build_id",
+          "content_manifest_sha256",
+          "archive_sha256",
+          "runtime_family",
+          "runtime_interface",
+          "origin",
+          "maturity",
+          "support_tier",
+          "compatibility_status",
+          "provenance_strength",
+          "publisher",
+          "validation_assertions",
+          "revoked"
+        ],
+        "properties": {
+          "target_name": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "runtime_build_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "content_manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "archive_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "runtime_family": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "runtime_interface": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "origin": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "maturity": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "support_tier": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "compatibility_status": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "provenance_strength": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "publisher": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "validation_assertions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "assertion_id",
+                "model_id",
+                "model_revision",
+                "model_artifact_sha256",
+                "quantization_label",
+                "bundle_id",
+                "benchmark_depth",
+                "result_status",
+                "published"
+              ],
+              "properties": {
+                "assertion_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+                "model_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+                "model_revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+                "model_artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                "quantization_label": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "bundle_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+                "benchmark_depth": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "result_status": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "published": { "type": "boolean" }
+              }
+            }
+          },
+          "revoked": { "type": "boolean" },
+          "revocation_reason": { "type": ["string", "null"], "maxLength": 512 }
+        }
+      }
+    }
+  }
+}

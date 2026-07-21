@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import shutil
@@ -66,7 +67,7 @@ class RuntimeLockTests(unittest.TestCase):
             llama_cpp_perplexity_path=str(root / "llama-perplexity"),
         )
 
-    def _write_managed_selection(self, source_root: Path) -> Path:
+    def _write_managed_selection(self, source_root: Path, catalog_assertion: bool = False) -> Path:
         staging_root = self.cache / "managed-staging"
         shutil.copytree(source_root, staging_root)
         role_paths = {
@@ -105,6 +106,14 @@ class RuntimeLockTests(unittest.TestCase):
                 "independent_signature_verified": False,
             },
         }
+        if catalog_assertion:
+            assertion["catalog_assertion"] = {
+                "spec_version": "infergrade_runtime_catalog_v1",
+                "targets_version": 3,
+                "targets_sha256": "b" * 64,
+                "target_name": "infergrade/llama-cpp/test.tar.gz",
+                "publisher": "infergrade",
+            }
         source_assertion_id = _canonical_sha256(assertion)
         source_assertion_path = (
             self.cache
@@ -178,6 +187,56 @@ class RuntimeLockTests(unittest.TestCase):
         if os.name != "nt":
             self.assertEqual(stat.S_IMODE(lock_path.stat().st_mode), 0o600)
         self.assertEqual(request.llama_cpp_cli_path, str((managed_root / "llama-cli").resolve()))
+
+    def test_signed_catalog_assertion_preserves_full_managed_package_receipt(self):
+        self._write_managed_selection(self.runtime_a, catalog_assertion=True)
+        request = self._request()
+        request.llama_cpp_cli_path = None
+        request.llama_cpp_server_path = None
+        request.llama_cpp_perplexity_path = None
+
+        lock, summary = resolve_runtime_lock(request, "bundle-catalog-managed")
+        receipt = finalize_runtime_receipt(lock)
+
+        self.assertEqual(summary["content_scope"], "managed_package")
+        self.assertEqual(receipt["origin"], "managed_download")
+        self.assertEqual(receipt["content_manifest_file_count"], 4)
+        self.assertEqual(receipt["provenance_strength"], "checksum_verified")
+
+    def test_signed_catalog_revocation_blocks_new_lock_without_mutating_existing_bytes(self):
+        managed_root = self._write_managed_selection(self.runtime_a, catalog_assertion=True)
+        selection = json.loads(selected_llama_cpp_runtime_path().read_text(encoding="utf-8"))
+        build_id = selection["runtime_build"]["runtime_build_id"]
+        generation = "4-revoked"
+        targets_path = self.cache / "llama.cpp" / "catalog" / "generations" / generation / "targets.json"
+        targets_path.parent.mkdir(parents=True, exist_ok=True)
+        targets_bytes = json.dumps({
+            "signed": {
+                "version": 4,
+                "targets": {
+                    "infergrade/llama-cpp/test.tar.gz": {
+                        "custom": {"runtime_build_id": build_id, "revoked": True}
+                    }
+                },
+            },
+            "signatures": [],
+        }).encode("utf-8")
+        targets_path.write_bytes(targets_bytes)
+        active_path = self.cache / "llama.cpp" / "catalog" / "active.json"
+        active_path.write_text(json.dumps({
+            "generation": generation,
+            "targets_sha256": hashlib.sha256(targets_bytes).hexdigest(),
+        }), encoding="utf-8")
+        request = self._request()
+        request.llama_cpp_cli_path = None
+        request.llama_cpp_server_path = None
+        request.llama_cpp_perplexity_path = None
+
+        with self.assertRaisesRegex(RuntimeError, "revoked build"):
+            resolve_runtime_lock(request, "bundle-revoked")
+
+        self.assertTrue(managed_root.is_dir())
+        self.assertFalse((self.cache / "llama.cpp" / "locks").exists())
 
     def test_untrusted_managed_selection_is_downgraded_to_local_fingerprint(self):
         path = selected_llama_cpp_runtime_path()

@@ -1,14 +1,16 @@
 use infergrade_runner_engine::{
-    build_run_bundle_upload_request, build_run_claim_request, build_run_completion_request,
-    build_support_summary, container_runtime_readiness, execute_hub_json_request,
-    install_managed_llama_cpp_runtime, llama_cpp_runtime_plan, llama_cpp_runtime_status,
-    load_selected_llama_cpp_runtime, managed_llama_cpp_runtime_channels,
+    activate_runtime_catalog, build_run_bundle_upload_request, build_run_claim_request,
+    build_run_completion_request, build_support_summary, container_runtime_readiness,
+    execute_hub_json_request, install_active_runtime_catalog_target,
+    install_managed_llama_cpp_runtime, install_runtime_catalog_target, llama_cpp_runtime_plan,
+    llama_cpp_runtime_status, load_selected_llama_cpp_runtime, managed_llama_cpp_runtime_channels,
     managed_llama_cpp_runtime_manifest, native_first_run_bundle_payload, normalize_api_url,
+    refresh_default_runtime_catalog, rollback_selected_llama_cpp_runtime,
     run_native_first_run_with_events, select_existing_llama_cpp_runtime,
     write_native_first_run_artifact, write_native_first_run_bundle_payload, LlamaCppRuntime,
     ManagedRuntimeInstallOptions, NativeCommandRuntime, NativeFirstRunBundleOptions,
     NativeFirstRunInput, NativeFirstRunResult, NativeFirstRunRuntime, NativeRuntimeOutput,
-    RunnerEvent,
+    RunnerEvent, RuntimeCatalogFiles,
 };
 use serde_json::{json, Value};
 use std::env;
@@ -17,7 +19,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const HELP_TEXT: &str =
-    "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime list                               Show the managed llama.cpp runtime manifest as JSON\n    runtime channels                           Show managed/local/experimental runtime channel policy as JSON\n    runtime status                             Show selected/detected/managed runtime status as JSON\n    runtime install [--runtime-id <id>]        Explicitly download, verify, extract, smoke, and select a managed llama.cpp runtime\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    support summary [--first-run-artifact <path>] [--error <text>]\n                                               Print a secret-free support summary with runtime, pairing, first-run, and upload recovery hints\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence. The runner token is read from INFERGRADE_HUB_TOKEN by default;\n                                               override with --runner-token-env <VAR>, --runner-token-stdin, or (last resort, leaks via ps) --runner-token <token>.\n                                               --run-token <token> is a deprecated alias of --runner-token.\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nArchitecture note: this Rust CLI plus runner-engine is the supported entry point. The desktop app shell is Rust, but the long-running listener still bridges to the Python runner-core during migration.";
+    "InferGrade Runner CLI\n\nUSAGE:\n    infergrade-runner <command>\n\nCOMMANDS:\n    doctor [--api-url <url>]                   Validate shared runner-engine basics\n    runtime plan                               Show native runtime plan as JSON\n    runtime list                               Show the managed llama.cpp runtime manifest as JSON\n    runtime channels                           Show managed/local/experimental runtime channel policy as JSON\n    runtime status                             Show selected/detected/managed runtime status as JSON\n    runtime install [--runtime-id <id>]        Explicitly download, verify, extract, smoke, and select a managed llama.cpp runtime\n    runtime catalog-refresh [--url <https-url>]\n                                               Refresh signed metadata or use unexpired last-known-good metadata\n    runtime catalog-use --target <name> --consent-build <sha256>\n                                               Download and select one exact signed-catalog runtime\n    runtime catalog-verify --catalog-dir <dir> --pinned-root <file> --cache-dir <dir>\n                                               Verify and atomically cache signed runtime metadata\n    runtime catalog-install --catalog-dir <dir> --pinned-root <file> --cache-dir <dir> --target <name> --consent-build <sha256> [--archive <file>]\n                                               Install one local signed-catalog runtime after exact-build consent\n    runtime rollback --runtime-build-id <sha256>\n                                               Re-select an exact installed immutable rollback build\n    runtime select-existing --runtime-path <path>\n                                               Record an existing llama.cpp runtime without running an install command\n    containers check                           Check optional Docker/Podman sandbox support\n    support summary [--first-run-artifact <path>] [--error <text>]\n                                               Print a secret-free support summary with runtime, pairing, first-run, and upload recovery hints\n    first-run --model <path> --runtime auto --no-upload [--runtime-path <path>] [--output-dir <dir>] [--json|--jsonl]\n                                               Run the built-in native llama.cpp first-run adapter locally\n    first-run --model <path> --runtime auto --upload --run-id <id> [--api-url <url>] [--runtime-path <path>] [--output-dir <dir>]\n                                               Upload native first-run evidence. The runner token is read from INFERGRADE_HUB_TOKEN by default;\n                                               override with --runner-token-env <VAR>, --runner-token-stdin, or (last resort, leaks via ps) --runner-token <token>.\n                                               --run-token <token> is a deprecated alias of --runner-token.\n    first-run --model <path> --no-upload --dry-run [--output-dir <dir>] [--json|--jsonl]\n                                               Validate and render the native first-run contract\n    first-run --model <path> --no-upload --runtime-command <path> [--output-dir <dir>] [--json|--jsonl]\n                                               Run an explicit native command adapter\n    help                                       Show this help\n\nArchitecture note: this Rust CLI plus runner-engine is the supported entry point. The desktop app shell is Rust, but the long-running listener still bridges to the Python runner-core during migration.";
 
 fn print_help() {
     println!("{HELP_TEXT}");
@@ -84,6 +86,73 @@ fn command_runtime(args: &[String]) -> Result<Value, String> {
                 archive_bytes: None,
             })
         }
+        Some("catalog-refresh") => {
+            let mut url = None;
+            let mut index = 1;
+            while index < args.len() {
+                match args[index].as_str() {
+                    "--url" => {
+                        index += 1;
+                        url = args.get(index).map(String::as_str);
+                        if url.is_none() {
+                            return Err("--url requires a value".to_string());
+                        }
+                    }
+                    other => {
+                        return Err(format!("unknown runtime catalog-refresh option: {other}"))
+                    }
+                }
+                index += 1;
+            }
+            refresh_default_runtime_catalog(url)
+        }
+        Some("catalog-use") => {
+            let mut target = None;
+            let mut consent_build = None;
+            let mut index = 1;
+            while index < args.len() {
+                match args[index].as_str() {
+                    "--target" => {
+                        index += 1;
+                        target = args.get(index).cloned();
+                    }
+                    "--consent-build" => {
+                        index += 1;
+                        consent_build = args.get(index).cloned();
+                    }
+                    other => return Err(format!("unknown runtime catalog-use option: {other}")),
+                }
+                index += 1;
+            }
+            install_active_runtime_catalog_target(
+                target
+                    .as_deref()
+                    .ok_or_else(|| "--target is required".to_string())?,
+                consent_build
+                    .as_deref()
+                    .ok_or_else(|| "--consent-build is required".to_string())?,
+            )
+        }
+        Some("catalog-verify") | Some("catalog-install") => command_runtime_catalog(args),
+        Some("rollback") => {
+            let mut build_id = None;
+            let mut index = 1;
+            while index < args.len() {
+                match args[index].as_str() {
+                    "--runtime-build-id" => {
+                        index += 1;
+                        build_id = args.get(index).cloned();
+                    }
+                    other => return Err(format!("unknown runtime rollback option: {other}")),
+                }
+                index += 1;
+            }
+            rollback_selected_llama_cpp_runtime(
+                build_id
+                    .as_deref()
+                    .ok_or_else(|| "--runtime-build-id requires a value".to_string())?,
+            )
+        }
         Some("select-existing") => {
             let mut runtime_path: Option<PathBuf> = None;
             let mut runtime_id: Option<String> = None;
@@ -119,6 +188,87 @@ fn command_runtime(args: &[String]) -> Result<Value, String> {
                 .to_string(),
         ),
     }
+}
+
+fn command_runtime_catalog(args: &[String]) -> Result<Value, String> {
+    let install = args.first().map(String::as_str) == Some("catalog-install");
+    let mut catalog_dir: Option<PathBuf> = None;
+    let mut pinned_root: Option<PathBuf> = None;
+    let mut cache_dir: Option<PathBuf> = None;
+    let mut target: Option<String> = None;
+    let mut consent_build: Option<String> = None;
+    let mut archive: Option<PathBuf> = None;
+    let mut index = 1;
+    while index < args.len() {
+        let value = |index: &mut usize, option: &str| -> Result<&String, String> {
+            *index += 1;
+            args.get(*index)
+                .ok_or_else(|| format!("{option} requires a value"))
+        };
+        match args[index].as_str() {
+            "--catalog-dir" => {
+                catalog_dir = Some(PathBuf::from(value(&mut index, "--catalog-dir")?))
+            }
+            "--pinned-root" => {
+                pinned_root = Some(PathBuf::from(value(&mut index, "--pinned-root")?))
+            }
+            "--cache-dir" => cache_dir = Some(PathBuf::from(value(&mut index, "--cache-dir")?)),
+            "--target" => target = Some(value(&mut index, "--target")?.to_string()),
+            "--consent-build" => {
+                consent_build = Some(value(&mut index, "--consent-build")?.to_string())
+            }
+            "--archive" => archive = Some(PathBuf::from(value(&mut index, "--archive")?)),
+            other => return Err(format!("unknown runtime catalog option: {other}")),
+        }
+        index += 1;
+    }
+    let catalog_dir = catalog_dir.ok_or_else(|| "--catalog-dir is required".to_string())?;
+    let pinned_root_path = pinned_root.ok_or_else(|| "--pinned-root is required".to_string())?;
+    let cache_dir = cache_dir.ok_or_else(|| "--cache-dir is required".to_string())?;
+    let read = |name: &str| {
+        std::fs::read(catalog_dir.join(name))
+            .map_err(|error| format!("could not read catalog {name}: {error}"))
+    };
+    let root = read("root.json")?;
+    let timestamp = read("timestamp.json")?;
+    let snapshot = read("snapshot.json")?;
+    let targets = read("targets.json")?;
+    let pinned_root = std::fs::read(pinned_root_path)
+        .map_err(|error| format!("could not read pinned root: {error}"))?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "system clock is before Unix epoch".to_string())?
+        .as_secs();
+    let activation = activate_runtime_catalog(
+        &cache_dir,
+        RuntimeCatalogFiles {
+            root: &root,
+            timestamp: &timestamp,
+            snapshot: &snapshot,
+            targets: &targets,
+        },
+        &pinned_root,
+        now,
+    )?;
+    if !install {
+        return serde_json::to_value(activation)
+            .map_err(|error| format!("could not render runtime catalog status: {error}"));
+    }
+    let archive_bytes = archive
+        .map(|path| {
+            std::fs::read(path).map_err(|error| format!("could not read runtime archive: {error}"))
+        })
+        .transpose()?;
+    install_runtime_catalog_target(
+        &activation.catalog,
+        target
+            .as_deref()
+            .ok_or_else(|| "--target is required".to_string())?,
+        consent_build
+            .as_deref()
+            .ok_or_else(|| "--consent-build is required".to_string())?,
+        archive_bytes,
+    )
 }
 
 fn command_containers(args: &[String]) -> Result<Value, String> {
@@ -790,6 +940,26 @@ mod tests {
         ])
         .expect_err("unknown managed runtime rejected before download");
         assert!(error.contains("unknown managed llama.cpp runtime"));
+    }
+
+    #[test]
+    fn runtime_catalog_commands_require_https_and_exact_build_consent() {
+        assert!(HELP_TEXT.contains("runtime catalog-refresh"));
+        assert!(HELP_TEXT.contains("--consent-build <sha256>"));
+        let insecure = command_runtime(&[
+            "catalog-refresh".to_string(),
+            "--url".to_string(),
+            "http://example.test/runtime-catalog/".to_string(),
+        ])
+        .expect_err("insecure catalog URL rejected before network access");
+        assert!(insecure.contains("must use HTTPS"));
+        let missing_consent = command_runtime(&[
+            "catalog-use".to_string(),
+            "--target".to_string(),
+            "infergrade/llama-cpp/test.tar.gz".to_string(),
+        ])
+        .expect_err("catalog install requires exact build consent");
+        assert!(missing_consent.contains("--consent-build is required"));
     }
 
     #[test]

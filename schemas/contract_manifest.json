@@ -1,5 +1,5 @@
 {
-  "contract_version": "0.3.23",
+  "contract_version": "0.3.24",
   "publisher": "infergrade-runner",
   "ontology_source": "schemas/json/model_ontology.schema.json",
   "schema_files": [
@@ -14,6 +14,7 @@
     "schemas/json/run_request.schema.json",
     "schemas/json/runtime_receipt.schema.json",
     "schemas/json/runtime_receipt_artifact.schema.json",
+    "schemas/json/runtime_trust_catalog.schema.json",
     "schemas/json/runtime_selector.schema.json"
   ],
   "example_files": [
@@ -27,7 +28,12 @@
     "schemas/examples/run_request.standard.yaml"
   ],
   "catalog_files": [
-    "schemas/capability_catalog.json"
+    "schemas/capability_catalog.json",
+    "schemas/runtime_trust_catalog.json",
+    "runtime/catalog/signed/root.json",
+    "runtime/catalog/signed/timestamp.json",
+    "runtime/catalog/signed/snapshot.json",
+    "runtime/catalog/signed/targets.json"
   ],
   "policy_files": [
     "schemas/policies/artifact_memory_fit_policy.v1.json"
@@ -39,6 +45,7 @@
     "docs/local_benchmark_methodology.md",
     "docs/local_capability_score.md",
     "docs/managed_llama_cpp_runtime.md",
+    "docs/runtime_catalog_operations.md",
     "docs/schema_draft.md",
     "docs/windows_nvidia_cuda_beta.md",
     "docs/coverage_expansion_v0_3_5.md"

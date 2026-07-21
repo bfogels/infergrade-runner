@@ -244,6 +244,36 @@ def _package_root(paths: Dict[str, Path], selection_metadata: Dict[str, Any]) ->
     registry_runtime_id = assertion.get("runtime_id")
     assertion_maturity = assertion.get("maturity")
     assertion_provenance = assertion.get("provenance")
+    catalog_assertion = assertion.get("catalog_assertion")
+    base_assertion_keys = {
+        "assertion_version",
+        "runtime_build_id",
+        "runtime_id",
+        "origin",
+        "maturity",
+        "provenance",
+        "archive",
+    }
+    catalog_assertion_valid = catalog_assertion is None or (
+        isinstance(catalog_assertion, dict)
+        and set(catalog_assertion)
+        == {
+            "spec_version",
+            "targets_version",
+            "targets_sha256",
+            "target_name",
+            "publisher",
+        }
+        and catalog_assertion.get("spec_version") == "infergrade_runtime_catalog_v1"
+        and isinstance(catalog_assertion.get("targets_version"), int)
+        and not isinstance(catalog_assertion.get("targets_version"), bool)
+        and catalog_assertion.get("targets_version") > 0
+        and _SHA256_PATTERN.fullmatch(str(catalog_assertion.get("targets_sha256") or ""))
+        and isinstance(catalog_assertion.get("target_name"), str)
+        and 0 < len(catalog_assertion.get("target_name")) <= 512
+        and isinstance(catalog_assertion.get("publisher"), str)
+        and 0 < len(catalog_assertion.get("publisher")) <= 128
+    )
     if (
         registry.get("registry_version") != "infergrade_runtime_build_registry_v1"
         or registry.get("runtime_build_id") != build_id
@@ -251,15 +281,8 @@ def _package_root(paths: Dict[str, Path], selection_metadata: Dict[str, Any]) ->
         or not isinstance(identity, dict)
         or _canonical_sha256(identity) != build_id
         or assertion.get("assertion_version") != "infergrade_runtime_source_assertion_v1"
-        or set(assertion) != {
-            "assertion_version",
-            "runtime_build_id",
-            "runtime_id",
-            "origin",
-            "maturity",
-            "provenance",
-            "archive",
-        }
+        or set(assertion) not in (base_assertion_keys, base_assertion_keys | {"catalog_assertion"})
+        or not catalog_assertion_valid
         or assertion.get("runtime_build_id") != build_id
         or _canonical_sha256(assertion) != source_assertion_id
         or assertion.get("origin") != "managed_download"
@@ -299,7 +322,51 @@ def _package_root(paths: Dict[str, Path], selection_metadata: Dict[str, Any]) ->
     selection_metadata["channel"] = assertion_maturity
     selection_metadata["provenance"] = assertion_provenance
     selection_metadata["source_assertion_id"] = source_assertion_id
+    _reject_revoked_catalog_build(catalog_assertion, build_id)
     return expected_root
+
+
+def _reject_revoked_catalog_build(catalog_assertion: Any, runtime_build_id: str) -> None:
+    """Block new locks for an explicitly revoked target; active locks are untouched."""
+    if not isinstance(catalog_assertion, dict):
+        return
+    catalog_root = llama_cpp_runtime_dir() / "catalog"
+    active_path = catalog_root / "active.json"
+    if not active_path.is_file():
+        # Offline operation with no refreshed policy keeps installed bytes usable.
+        return
+    try:
+        active = json.loads(active_path.read_text(encoding="utf-8"))
+        generation = str(active.get("generation") or "")
+        if not generation or "/" in generation or ".." in generation or "\\" in generation:
+            raise ValueError("unsafe active generation")
+        targets_path = catalog_root / "generations" / generation / "targets.json"
+        targets_bytes = targets_path.read_bytes()
+        if hashlib.sha256(targets_bytes).hexdigest() != active.get("targets_sha256"):
+            raise ValueError("targets digest mismatch")
+        envelope = json.loads(targets_bytes.decode("utf-8"))
+        targets_version = int((envelope.get("signed") or {}).get("version") or 0)
+        if targets_version < int(catalog_assertion.get("targets_version") or 0):
+            raise ValueError("catalog version rollback")
+        target_name = catalog_assertion.get("target_name")
+        target = ((envelope.get("signed") or {}).get("targets") or {}).get(target_name)
+        custom = (target or {}).get("custom") or {}
+        if custom.get("runtime_build_id") != runtime_build_id:
+            raise ValueError("catalog target build mismatch")
+        if custom.get("revoked") is True or custom.get("maturity") == "revoked":
+            raise RuntimeError(
+                "Cannot start a new run: the signed runtime catalog revoked build %s. "
+                "An already-active run keeps its immutable lock; select a reviewed replacement for new work."
+                % runtime_build_id
+            )
+    except RuntimeError:
+        raise
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            "Cannot validate the active signed runtime policy for a new run: %s. "
+            "Refresh the runtime catalog or select a non-catalog rollback build."
+            % error
+        )
 
 
 def _assert_records_bounded(records: List[Dict[str, Any]]) -> None:
