@@ -650,6 +650,8 @@ fn verify_target(
         "runtime_id",
         "runtime_family",
         "runtime_interface",
+        "rollback_runtime_id",
+        "archive_url",
         "system",
         "arch",
         "origin",
@@ -660,6 +662,43 @@ fn verify_target(
         "publisher",
     ] {
         required_string(custom, field)?;
+    }
+    let archive_url = Url::parse(required_string(custom, "archive_url")?)
+        .map_err(|_| format!("runtime catalog target `{name}` has an invalid archive URL"))?;
+    if archive_url.scheme() != "https"
+        || archive_url.host_str().is_none()
+        || !archive_url.username().is_empty()
+        || archive_url.password().is_some()
+    {
+        return Err(format!(
+            "runtime catalog target `{name}` archive URL must be credential-free HTTPS"
+        ));
+    }
+    let expected_binaries = custom
+        .get("expected_binaries")
+        .and_then(Value::as_array)
+        .filter(|values| !values.is_empty() && values.len() <= 16)
+        .ok_or_else(|| format!("runtime catalog target `{name}` has invalid expected binaries"))?;
+    for binary in expected_binaries {
+        let binary = binary.as_str().unwrap_or("");
+        if binary.is_empty() || binary.len() > 128 || binary.contains('/') || binary.contains('\\')
+        {
+            return Err(format!(
+                "runtime catalog target `{name}` has an unsafe expected binary"
+            ));
+        }
+    }
+    let binary_names = custom
+        .get("binary_names")
+        .and_then(Value::as_object)
+        .ok_or_else(|| format!("runtime catalog target `{name}` has no binary_names"))?;
+    for role in ["cli", "server"] {
+        let binary = required_string(binary_names, role)?;
+        if binary.len() > 128 || binary.contains('/') || binary.contains('\\') {
+            return Err(format!(
+                "runtime catalog target `{name}` has an unsafe {role} binary name"
+            ));
+        }
     }
     let publisher = required_string(custom, "publisher")?;
     let policy = publisher_policies
@@ -819,6 +858,8 @@ mod tests {
                 "runtime_id": "llama-cpp-b10069-macos-arm64-metal",
                 "runtime_family": "llama.cpp",
                 "runtime_interface": "llama_cpp_cli_server_v1",
+                "rollback_runtime_id": "llama-cpp-stable",
+                "archive_url": "https://example.test/llama-b10069.tar.gz",
                 "system": "macos",
                 "arch": "aarch64",
                 "origin": "upstream_official",
@@ -827,6 +868,8 @@ mod tests {
                 "compatibility_status": "exact_artifact_validated",
                 "provenance_strength": "independently_signed",
                 "publisher": "infergrade",
+                "expected_binaries": ["llama-cli", "llama-server"],
+                "binary_names": {"cli": "llama-cli", "server": "llama-server"},
                 "validation_assertions": [{
                     "assertion_id": "fixture-validation",
                     "model_id": "example/model",
