@@ -1,0 +1,84 @@
+{
+  "qualification_version": "infergrade_runtime_qualification_v1",
+  "qualified_at": "2026-07-21",
+  "status": "valid_comparable",
+  "claim_scope": "exact_artifacts_on_recorded_hardware_only",
+  "runtime": {
+    "catalog_target": "infergrade/llama-cpp/b10069/macos-arm64.tar.gz",
+    "catalog_targets_metadata_version": 6,
+    "catalog_targets_metadata_sha256": "144032414dd4655ce0b0277274473b7bad5311ae1f989b5dbbfb3e0770d3aaa5",
+    "runtime_build_id": "b57a9b1cde1365fe7714081da036402dcdb5b86ec5595e45e1cde49b701ef9a5",
+    "content_manifest_sha256": "2dae0e1a9486f2b8ad98bcf4d57f71a36e8f95ce7144da8476ba3b6d4d88987c",
+    "content_manifest_file_count": 61,
+    "archive_sha256": "022469e0b22f4b84dcd0a323867d7f5a31dae21894931ee6a24a35abd2a60359",
+    "origin": "upstream_official",
+    "maturity": "reviewed_candidate",
+    "support_tier": "candidate",
+    "provenance_strength": "checksum_verified",
+    "signing_environment": "review_candidate"
+  },
+  "hardware": {
+    "hardware_class": "apple_silicon",
+    "accelerator_model": "Apple M1 Pro",
+    "memory_gb": 16,
+    "accelerator_api": "metal"
+  },
+  "benchmark": {
+    "depth": "standard",
+    "protocol_registry_version": "2026-07-capability-protocol-3.1",
+    "profile": "interactive_chat_v1",
+    "checks": [
+      "ifeval",
+      "multiturn_chat_memory_v1",
+      "perplexity_reference_v1"
+    ],
+    "profile_measured_iterations": 5
+  },
+  "assertions": [
+    {
+      "model_id": "openbmb/MiniCPM5-1B-GGUF",
+      "model_revision": "87007042419d30c1d8f38ef065424ee33870831e",
+      "model_artifact_sha256": "81b64d05a23b17b34c475f42b3e72fbde62d4b92cc34541f7a8031d0752deafa",
+      "quantization_label": "Q4_K_M",
+      "bundle_id": "qb_20260721_022016_9966df7f",
+      "result_id": "qb_20260721_022016_9966df7f_interactive_chat_v1",
+      "comparison_grade": "comparable",
+      "bundle_valid": true,
+      "receipt_prelaunch": "passed",
+      "receipt_postrun": "passed",
+      "ifeval_prompt_strict_accuracy": 0.18,
+      "multiturn_constraint_retention_accuracy": 0.875,
+      "perplexity": 108.0203,
+      "decode_tokens_per_second_p50": 157.81,
+      "ttft_p50_ms": 34.31,
+      "peak_memory_mb": 848.27
+    },
+    {
+      "model_id": "google/gemma-4-E4B-it-qat-q4_0-gguf",
+      "model_revision": "7edc6763a77bbca236126a361613b834c5ea0f7a",
+      "model_artifact_sha256": "e8b6a059ba86947a44ace84d6e5679795bc41862c25c30513142588f0e9dba1d",
+      "quantization_label": "Q4_0",
+      "bundle_id": "qb_20260721_022953_0d4ae607",
+      "result_id": "qb_20260721_022953_0d4ae607_interactive_chat_v1",
+      "comparison_grade": "comparable",
+      "bundle_valid": true,
+      "receipt_prelaunch": "passed",
+      "receipt_postrun": "passed",
+      "ifeval_prompt_strict_accuracy": 0.65,
+      "multiturn_constraint_retention_accuracy": 1.0,
+      "perplexity": 117.8219,
+      "decode_tokens_per_second_p50": 43.97,
+      "ttft_p50_ms": 200.94,
+      "peak_memory_mb": 5198.69
+    }
+  ],
+  "publication": {
+    "status": "local_only",
+    "published": false
+  },
+  "limitations": [
+    "This validates only the two exact model artifacts and recorded benchmark scope.",
+    "It does not establish generic GGUF, architecture-family, or cross-platform equivalence.",
+    "Review-candidate catalog signing does not confer production distribution trust."
+  ]
+}

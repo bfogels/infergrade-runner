@@ -19,6 +19,37 @@ infergrade-runner runtime status
 infergrade-runner runtime install
 ```
 
+Reviewed runtime candidates can also be delivered through the signed catalog
+without a Runner release. Catalog metadata uses separate root, timestamp,
+snapshot, and targets roles with Ed25519 thresholds, expiry, monotonic versions,
+exact metadata and archive length/digests, publisher namespaces, and revocation.
+The install command names the exact consented build; it will not accept blanket
+consent or silently change the active selection:
+
+```bash
+infergrade-runner runtime catalog-verify \
+  --catalog-dir <metadata-dir> --pinned-root <root.json> --cache-dir <cache-dir>
+infergrade-runner runtime catalog-install \
+  --catalog-dir <metadata-dir> --pinned-root <root.json> --cache-dir <cache-dir> \
+  --target <target-name> --consent-build <runtime-build-sha256>
+```
+
+Metadata refresh activates one complete verified generation atomically. An
+unexpired last-known-good generation remains usable during network failure;
+expired metadata cannot authorize a new install. Already-installed immutable
+builds and active per-run locks continue offline. Exact rollback re-selects a
+previously archived build without rewriting any active run lock:
+
+```bash
+infergrade-runner runtime rollback --runtime-build-id <sha256>
+```
+
+`runtime/catalog/signed/` is currently a review-candidate root. Before
+production distribution, it will be replaced by a new production root version
+1 under the detached ceremony in `runtime_catalog_operations.md`; unreleased
+review keys will not enter the production trust chain. The timestamp role must
+also have an automated refresh owner.
+
 Preview the install plan:
 
 ```bash
@@ -99,9 +130,13 @@ infergrade-runner runtime install
   protocol exists, retention is deliberately conservative.
 - Explicit CLI paths and `INFERGRADE_LLAMA_CPP_*` environment variables override managed selection.
 - Doctor reports whether native binaries came from `custom_path`, `environment_path`, `managed_runtime`, or `system_path`.
-- The Rust manifest includes macOS Apple Silicon `llama.cpp` GitHub release assets with pinned SHA-256 digests, expected binaries, compatibility notes, and rollback metadata. b9050 remains InferGrade Stable; b9994 is an explicit reviewed upstream candidate until the complete compatibility matrix is recorded.
+- The Rust manifest includes macOS Apple Silicon `llama.cpp` GitHub release assets with pinned SHA-256 digests, expected binaries, compatibility notes, and rollback metadata. b9050 remains InferGrade Stable; signed-catalog b10069 is a reviewed candidate with exact MiniCPM5 and Gemma 4 qualification only.
 - Rust managed runtime install is explicit: it downloads only after a user command/action, verifies SHA-256, extracts into the InferGrade runtime cache, checks expected binaries, runs a version smoke, and writes the selected runtime record.
 - The upstream GitHub release asset digest is useful, but it is not an independent signature. Do not describe the runtime as independently signed until a signature lane exists.
+- A signed InferGrade catalog authenticates InferGrade's target assertion; it
+  does not transform an upstream checksum-only archive into an upstream-signed
+  artifact. Build identity, compatibility evidence, origin, maturity,
+  provenance strength, and support policy remain separate facts.
 - Existing local binaries remain an advanced path. Their exact selected binary
   set is fingerprinted and locked, but it carries `local_fingerprint_only`
   provenance rather than a managed-package or signature claim.

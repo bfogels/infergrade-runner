@@ -1,0 +1,134 @@
+name: Runtime Catalog Timestamp Refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Sign a refresh even when timestamp has more than 14 days remaining"
+        type: boolean
+        default: false
+        required: false
+  schedule:
+    - cron: "41 8 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-catalog-timestamp-refresh
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Inspect active production metadata
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      active: ${{ steps.policy.outputs.active }}
+      due: ${{ steps.policy.outputs.due }}
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Inspect production activation and refresh window
+        id: policy
+        env:
+          FORCE_REFRESH: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          import json
+          import os
+          import time
+          from pathlib import Path
+
+          output = Path(os.environ["GITHUB_OUTPUT"])
+          active_root = Path("runtime/catalog/signed/root.json").read_bytes()
+          production_root = Path("runtime/catalog/roots/production-v1.json").read_bytes()
+          targets = json.load(open("runtime/catalog/signed/targets.json", encoding="utf-8"))
+          timestamp = json.load(open("runtime/catalog/signed/timestamp.json", encoding="utf-8"))
+          active = active_root == production_root and targets["signed"].get("signing_environment") == "production"
+          remaining = timestamp["signed"]["expires_unix"] - int(time.time())
+          forced = os.environ.get("FORCE_REFRESH", "false").lower() == "true"
+          due = active and (forced or remaining <= 14 * 24 * 60 * 60)
+          with output.open("a", encoding="utf-8") as handle:
+              handle.write(f"active={'true' if active else 'false'}\n")
+              handle.write(f"due={'true' if due else 'false'}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write(f"Active production catalog: **{active}**  \n")
+              handle.write(f"Timestamp seconds remaining: **{remaining}**  \n")
+              handle.write(f"Refresh due: **{due}**\n")
+          PY
+
+      - name: Monitor expiry
+        if: steps.policy.outputs.active == 'true'
+        run: |
+          python3 scripts/build_runtime_catalog.py assemble-generation \
+            --root runtime/catalog/signed/root.json \
+            --timestamp runtime/catalog/signed/timestamp.json \
+            --snapshot runtime/catalog/signed/snapshot.json \
+            --targets runtime/catalog/signed/targets.json \
+            --output-dir "$RUNNER_TEMP/verified-runtime-catalog"
+          python3 scripts/build_runtime_catalog.py check-expiry \
+            --catalog-dir runtime/catalog/signed \
+            --warning-seconds 1209600 \
+            --critical-seconds 604800
+
+  refresh:
+    name: Sign timestamp-only refresh
+    needs: inspect
+    if: needs.inspect.outputs.active == 'true' && needs.inspect.outputs.due == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: runtime-catalog-timestamp
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Sign timestamp-only refresh
+        env:
+          TIMESTAMP_PRIVATE_KEY: ${{ secrets.INFERGRADE_RUNTIME_TIMESTAMP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          umask 077
+          key_dir="$RUNNER_TEMP/runtime-catalog-timestamp-key"
+          mkdir -p "$key_dir"
+          trap 'rm -rf "$key_dir"' EXIT
+          test -n "$TIMESTAMP_PRIVATE_KEY"
+          printf '%s' "$TIMESTAMP_PRIVATE_KEY" > "$key_dir/timestamp.pem"
+          expires_unix="$(python3 -c 'import time; print(int(time.time()) + 21 * 24 * 60 * 60)')"
+          python3 scripts/build_runtime_catalog.py refresh-timestamp \
+            --root runtime/catalog/signed/root.json \
+            --snapshot runtime/catalog/signed/snapshot.json \
+            --current-timestamp runtime/catalog/signed/timestamp.json \
+            --timestamp-private-key "$key_dir/timestamp.pem" \
+            --expires-unix "$expires_unix" \
+            --output runtime-catalog-refresh/timestamp.json
+
+      - name: Verify timestamp-only generation
+        run: |
+          python3 scripts/build_runtime_catalog.py assemble-generation \
+            --root runtime/catalog/signed/root.json \
+            --timestamp runtime-catalog-refresh/timestamp.json \
+            --snapshot runtime/catalog/signed/snapshot.json \
+            --targets runtime/catalog/signed/targets.json \
+            --output-dir runtime-catalog-refresh/complete \
+            --trust-projection runtime-catalog-refresh/runtime_trust_catalog.json \
+            --previous-dir runtime/catalog/signed
+          (cd runtime-catalog-refresh/complete && sha256sum *.json > SHA256SUMS)
+
+      - name: Upload verified refresh for coordinated promotion
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-catalog-timestamp-refresh-${{ github.run_id }}
+          path: runtime-catalog-refresh/
+          if-no-files-found: error
+          retention-days: 14

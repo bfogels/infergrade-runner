@@ -51,9 +51,9 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
 
     def test_new_upstream_release_is_advisory_candidate(self):
         latest = {
-            "tag_name": "b10001",
+            "tag_name": "b10100",
             "published_at": "2026-07-15T05:29:11Z",
-            "html_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b10001",
+            "html_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b10100",
         }
         report = self.module.build_report(
             self.policy,
@@ -62,14 +62,14 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
         )
         self.assertTrue(report["candidate_available"])
         self.assertFalse(report["stable_promotion_automatic"])
-        self.assertTrue(report["runner_release_required"])
+        self.assertFalse(report["runner_release_required"])
         self.assertTrue(any(pin["review_due"] for pin in report["pins"] if pin["channel"] == "infergrade_stable"))
 
     def test_tracked_reviewed_candidate_is_not_reported_as_new(self):
         latest = {
-            "tag_name": "b9994",
-            "published_at": "2026-07-14T05:29:11Z",
-            "html_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b9994",
+            "tag_name": "b10069",
+            "published_at": "2026-07-20T00:00:00Z",
+            "html_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b10069",
         }
         report = self.module.build_report(self.policy, latest_release=latest)
         self.assertFalse(report["candidate_available"])
@@ -83,9 +83,9 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
 
     def test_default_cli_succeeds_when_upstream_is_newer(self):
         latest = {
-            "tag_name": "b10001",
+            "tag_name": "b10100",
             "published_at": "2026-07-15T05:29:11Z",
-            "html_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b10001",
+            "html_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b10100",
         }
         with tempfile.TemporaryDirectory() as tmp:
             latest_path = pathlib.Path(tmp) / "latest.json"
