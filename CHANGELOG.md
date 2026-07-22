@@ -7,6 +7,17 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+- Validates a direct-answer protocol on the first MMLU-Pro case, retries
+  affected Gemma 4 and Qwen 3.5/3.6 models with a recorded 512-token answer
+  budget, and stops early when the recovered protocol still cannot emit a
+  scoreable answer shape.
+- Accepts the prompt-requested `Final answer letter: X` terminal shape under
+  scoring policy `exact_multiple_choice_letter_accuracy_v4` while preserving
+  visible reasoning and strict malformed-output quarantine.
+- Resolves an installed signed-catalog runtime by exact artifact assertion for
+  each run without mutating the user's global runtime preference.
+- Publishes contract 0.3.25 for the revised MMLU-Pro scoring identity.
+
 ## 0.3.41 (contract 0.3.24)
 
 - Publishes Desktop artifacts through draft-first, immutable `vX.Y.Z` GitHub

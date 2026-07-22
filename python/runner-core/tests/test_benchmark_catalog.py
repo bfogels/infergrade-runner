@@ -627,7 +627,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(metadata["benchmark_checks"][0]["primary_score_metric"], "accuracy")
         self.assertEqual(
             metadata["score_policies"][0]["score_policy_id"],
-            "exact_multiple_choice_letter_accuracy_v3",
+            "exact_multiple_choice_letter_accuracy_v4",
         )
 
     def test_benchmark_scope_summary_empty_selection_uses_computed_confidence(self):

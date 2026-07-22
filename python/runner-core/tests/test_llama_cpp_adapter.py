@@ -668,7 +668,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
                 {"role": "user", "content": "Give five bullets."},
             ],
         )
-        self.assertEqual(transform["id"], "qwen_chat_template_disable_thinking_v1")
+        self.assertEqual(transform["id"], "qwen_chat_template_disable_thinking_v2")
         self.assertEqual(transform["placement"], "structured_messages")
 
     def test_server_command_requests_runtime_memory_telemetry(self):
@@ -708,7 +708,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
                 {"role": "user", "content": "Reply exactly READY."},
             ],
         )
-        self.assertEqual(transform["id"], "gemma4_chat_template_disable_thinking_v1")
+        self.assertEqual(transform["id"], "gemma4_chat_template_disable_thinking_v2")
 
     @mock.patch.object(LlamaCppAdapter, "_generate_native_server_text")
     def test_gemma4_direct_answer_capability_uses_native_chat_server(self, server_generate_mock):
@@ -738,7 +738,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
         for case in (_reasoning_exact_answer_cases()[0], _coding_static_repair_cases()[0]):
             messages, transform = _prepare_llama_server_chat(request, case["prompt"])
             self.assertEqual(messages, [{"role": "user", "content": case["prompt"].strip()}])
-            self.assertEqual(transform["state"], "chat_template_enable_thinking_false_single_user_prompt")
+            self.assertEqual(transform["state"], "chat_template_disable_thinking_with_zero_budget_single_user_prompt")
 
     @mock.patch("infergrade.adapters.llama_cpp.tempfile.NamedTemporaryFile")
     @mock.patch.object(LlamaCppAdapter, "_native_server_path", side_effect=RuntimeError("server unavailable"))
@@ -810,9 +810,10 @@ class LlamaCppAdapterTests(unittest.TestCase):
         sent = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
         self.assertFalse(sent["cache_prompt"])
         self.assertEqual(sent["chat_template_kwargs"], {"enable_thinking": False})
+        self.assertEqual(sent["thinking_budget_tokens"], 0)
 
     def test_direct_answer_deployment_rejects_empty_but_keeps_visible_fixed_budget_output(self):
-        transform = {"id": "qwen_chat_template_disable_thinking_v1"}
+        transform = {"id": "qwen_chat_template_disable_thinking_v2"}
         with self.assertRaisesRegex(RuntimeError, "without visible answer"):
             _validate_direct_answer_server_completion(
                 {"text": "", "final_payload": {"stop_type": "stop"}},

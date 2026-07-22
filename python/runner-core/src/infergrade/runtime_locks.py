@@ -90,14 +90,87 @@ def _sibling(cli: Optional[Path], role: str) -> Optional[Path]:
     return _resolve_file(str(cli.parent / (_ROLE_DEFAULTS[role] + suffix)))
 
 
+def _active_exact_artifact_target(request: Any) -> Optional[Tuple[str, Dict[str, Any], Dict[str, Any]]]:
+    """Return the active signed target that explicitly validates this artifact."""
+    artifact_sha256 = str(getattr(request, "quant_artifact_sha256", None) or "")
+    if not _SHA256_PATTERN.fullmatch(artifact_sha256):
+        return None
+    catalog_root = llama_cpp_runtime_dir() / "catalog"
+    try:
+        active = json.loads((catalog_root / "active.json").read_text(encoding="utf-8"))
+        generation = str(active.get("generation") or "")
+        if not generation or "/" in generation or ".." in generation or "\\" in generation:
+            return None
+        targets_path = catalog_root / "generations" / generation / "targets.json"
+        targets_bytes = targets_path.read_bytes()
+        if hashlib.sha256(targets_bytes).hexdigest() != active.get("targets_sha256"):
+            return None
+        envelope = json.loads(targets_bytes.decode("utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    expected_system = "macos" if platform.system().lower() == "darwin" else platform.system().lower()
+    expected_arch = _detect_cpu_architecture().lower()
+    expected_arches = {expected_arch, platform.machine().lower()}
+    if expected_arch in {"arm64", "aarch64"}:
+        expected_arches.update({"arm64", "aarch64"})
+    candidates = []
+    for name, target in ((envelope.get("signed") or {}).get("targets") or {}).items():
+        custom = dict((target or {}).get("custom") or {})
+        if custom.get("revoked") is True or custom.get("maturity") == "revoked":
+            continue
+        if str(custom.get("system") or "").lower() != expected_system:
+            continue
+        target_arch = str(custom.get("arch") or "").lower()
+        if target_arch not in expected_arches:
+            continue
+        assertions = list(custom.get("validation_assertions") or [])
+        if not any(
+            isinstance(assertion, dict)
+            and assertion.get("model_artifact_sha256") == artifact_sha256
+            and assertion.get("result_status") == "valid_comparable"
+            for assertion in assertions
+        ):
+            continue
+        maturity_rank = {"stable": 3, "reviewed": 2, "reviewed_candidate": 1, "candidate": 0}.get(
+            str(custom.get("maturity") or ""), 0
+        )
+        candidates.append((maturity_rank, str(name), dict(target), custom))
+    if not candidates:
+        return None
+    _rank, name, target, custom = max(candidates, key=lambda item: (item[0], item[1]))
+    return name, target, custom
+
+
+def _installed_exact_artifact_runtime(request: Any) -> Optional[Dict[str, Any]]:
+    match = _active_exact_artifact_target(request)
+    if match is None:
+        return None
+    _name, _target, custom = match
+    build_id = str(custom.get("runtime_build_id") or "")
+    selected = selected_llama_cpp_runtime() or {}
+    selected_build_id = str(((selected.get("runtime_build") or {}).get("runtime_build_id") or ""))
+    if selected_build_id == build_id:
+        return selected
+    history_path = llama_cpp_runtime_dir() / "selection-history" / (build_id + ".json")
+    try:
+        candidate = json.loads(history_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    candidate_build_id = str(((candidate.get("runtime_build") or {}).get("runtime_build_id") or ""))
+    return candidate if candidate_build_id == build_id else None
+
+
 def _resolve_role_paths(request: Any) -> Tuple[Dict[str, Path], Dict[str, Any]]:
     selected = selected_llama_cpp_runtime() or {}
-    selected_binaries = selected.get("binaries") if isinstance(selected.get("binaries"), dict) else {}
     explicit = {
         role: getattr(request, field, None)
         for role, field in _ROLE_REQUEST_FIELDS.items()
     }
     environment = {role: os.environ.get(name) for role, name in _ROLE_ENV.items()}
+    exact_runtime = None if any(explicit.values()) or any(environment.values()) else _installed_exact_artifact_runtime(request)
+    if exact_runtime:
+        selected = exact_runtime
+    selected_binaries = selected.get("binaries") if isinstance(selected.get("binaries"), dict) else {}
 
     if any(explicit.values()):
         source = "operator_paths"
@@ -106,7 +179,7 @@ def _resolve_role_paths(request: Any) -> Tuple[Dict[str, Path], Dict[str, Any]]:
         source = "environment_paths"
         preferred = environment
     elif selected_binaries:
-        source = str(selected.get("source") or "selected_preference")
+        source = "managed_download" if exact_runtime else str(selected.get("source") or "selected_preference")
         preferred = {role: selected_binaries.get(role) for role in _ROLE_DEFAULTS}
     else:
         source = "system_path"
@@ -141,6 +214,7 @@ def _resolve_role_paths(request: Any) -> Tuple[Dict[str, Path], Dict[str, Any]]:
             (selected.get("archive") or {}).get("independent_signature_verified")
         ) if isinstance(selected.get("archive"), dict) else False,
         "managed_runtime_build": selected.get("runtime_build") if isinstance(selected.get("runtime_build"), dict) else None,
+        "selection_reason": "signed_exact_artifact_match" if exact_runtime else "selected_preference",
     }
 
 
@@ -361,7 +435,8 @@ def _assert_runtime_request_compatibility(
 ) -> None:
     """Require positive catalog evidence for architectures known to need specialized builds."""
     architecture = infer_llama_cpp_architecture(request)
-    if architecture not in _EXACT_ARTIFACT_RUNTIME_ARCHITECTURES:
+    exact_target = _active_exact_artifact_target(request)
+    if architecture not in _EXACT_ARTIFACT_RUNTIME_ARCHITECTURES and exact_target is None:
         return
     # Explicit operator paths remain a deliberate candidate lane. Their exact
     # bytes are locked and model-load preflight still runs before benchmarks.
@@ -369,6 +444,19 @@ def _assert_runtime_request_compatibility(
         return
     build = dict(selection_metadata.get("managed_runtime_build") or {})
     runtime_build_id = str(build.get("runtime_build_id") or "")
+    if exact_target is not None:
+        target_name, _target, target_custom = exact_target
+        expected_build_id = str(target_custom.get("runtime_build_id") or "")
+        if runtime_build_id != expected_build_id:
+            raise RuntimeError(
+                "Cannot use managed runtime '%s' for artifact %s: the signed catalog requires exact runtime target '%s'. "
+                "Install that target with explicit download consent; InferGrade will then select it automatically for this run."
+                % (
+                    selection_metadata.get("runtime_id") or runtime_build_id,
+                    str(getattr(request, "quant_artifact_sha256", None) or "unknown"),
+                    target_name,
+                )
+            )
     catalog_assertion = selection_metadata.get("catalog_assertion")
     if not isinstance(catalog_assertion, dict):
         raise RuntimeError(

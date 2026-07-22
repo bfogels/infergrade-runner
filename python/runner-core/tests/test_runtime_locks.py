@@ -170,6 +170,9 @@ class RuntimeLockTests(unittest.TestCase):
                         "infergrade/llama-cpp/test.tar.gz": {
                             "custom": {
                                 "runtime_build_id": build_id,
+                                "system": "macos" if sys.platform == "darwin" else sys.platform,
+                                "arch": "aarch64" if os.uname().machine in {"arm64", "aarch64"} else os.uname().machine,
+                                "maturity": "reviewed_candidate",
                                 "validation_assertions": list(assertions or []),
                             }
                         }
@@ -277,6 +280,49 @@ class RuntimeLockTests(unittest.TestCase):
 
         self.assertEqual(summary["content_scope"], "managed_package")
         self.assertEqual(lock["runtime_id"], "managed-a")
+
+    def test_exact_artifact_match_uses_installed_catalog_runtime_without_mutating_preference(self):
+        self._write_managed_selection(self.runtime_a, catalog_assertion=True)
+        selection_path = selected_llama_cpp_runtime_path()
+        exact_selection = json.loads(selection_path.read_text(encoding="utf-8"))
+        build_id = exact_selection["runtime_build"]["runtime_build_id"]
+        artifact_sha256 = "e" * 64
+        self._write_active_catalog(
+            build_id,
+            assertions=[
+                {
+                    "model_artifact_sha256": artifact_sha256,
+                    "result_status": "valid_comparable",
+                }
+            ],
+        )
+        history_path = self.cache / "llama.cpp" / "selection-history" / (build_id + ".json")
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_path.write_text(json.dumps(exact_selection), encoding="utf-8")
+        global_preference = {
+            "runtime_id": "unrelated-global-preference",
+            "source": "selected_preference",
+            "binaries": {
+                "cli": str(self.runtime_b / "llama-cli"),
+                "server": str(self.runtime_b / "llama-server"),
+                "perplexity": str(self.runtime_b / "llama-perplexity"),
+            },
+        }
+        selection_path.write_text(json.dumps(global_preference), encoding="utf-8")
+        request = self._request()
+        request.llama_cpp_cli_path = None
+        request.llama_cpp_server_path = None
+        request.llama_cpp_perplexity_path = None
+        request.ontology_hints = {"architecture": "qwen35"}
+        request.quant_artifact_sha256 = artifact_sha256
+
+        lock, _summary = resolve_runtime_lock(request, "bundle-exact-auto-selection")
+
+        self.assertEqual(lock["runtime_id"], "managed-a")
+        self.assertEqual(
+            json.loads(selection_path.read_text(encoding="utf-8"))["runtime_id"],
+            "unrelated-global-preference",
+        )
 
     def test_specialized_architecture_allows_explicit_candidate_runtime_for_preflight(self):
         request = self._request(self.runtime_a)

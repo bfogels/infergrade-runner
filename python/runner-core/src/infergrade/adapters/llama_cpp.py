@@ -439,7 +439,7 @@ class LlamaCppAdapter(BaseAdapter):
         ):
             raise RuntimeError(
                 "Qwen3.6 direct-answer generation requires the local_native llama-server chat path so "
-                "InferGrade can pass chat_template_kwargs.enable_thinking=false. The /no_think prompt "
+                "InferGrade can pass chat_template_kwargs.enable_thinking=false plus thinking_budget_tokens=0. The /no_think prompt "
                 "switch used by older Qwen models is not valid evidence for Qwen3.6."
             )
         if (
@@ -2040,6 +2040,7 @@ def _stream_server_chat_completion(base_url: str, messages: List[Dict[str, str]]
         "stream": True,
         "cache_prompt": False,
         "chat_template_kwargs": {"enable_thinking": False},
+        "thinking_budget_tokens": 0,
     }
     request = urllib_request.Request(
         "%s/v1/chat/completions" % base_url,
@@ -2257,9 +2258,9 @@ def _prepare_llama_server_chat(
     if not (architecture.startswith("qwen3") or architecture == "gemma4"):
         return None, None
     transform_id = (
-        "gemma4_chat_template_disable_thinking_v1"
+        "gemma4_chat_template_disable_thinking_v2"
         if architecture == "gemma4"
-        else "qwen_chat_template_disable_thinking_v1"
+        else "qwen_chat_template_disable_thinking_v2"
     )
     raw = str(prompt or "")
     assistant_marker = "\nAssistant:"
@@ -2272,7 +2273,7 @@ def _prepare_llama_server_chat(
         return [{"role": "user", "content": raw.strip()}], {
             "id": transform_id,
             "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
-            "state": "chat_template_enable_thinking_false_single_user_prompt",
+            "state": "chat_template_disable_thinking_with_zero_budget_single_user_prompt",
             "placement": "structured_messages",
         }
     system_content = raw[:user_index].strip()
@@ -2286,7 +2287,7 @@ def _prepare_llama_server_chat(
     return messages, {
         "id": transform_id,
         "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
-        "state": "chat_template_enable_thinking_false",
+        "state": "chat_template_disable_thinking_with_zero_budget",
         "placement": "structured_messages",
     }
 
