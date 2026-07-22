@@ -1,14 +1,14 @@
 # Signed Runtime Catalog Operations
 
-Status: production generation version 7 is checked in and cryptographically
-active for this source tree. It pins llama.cpp b10069. It is not distributed to
-users until a Runner release embeds the production root, and it is not served
-by Hub until Hub imports and deploys the same exact generation.
+Status: production generation version 8 is checked in and cryptographically
+active for this source tree. It pins upstream llama.cpp b10069 and the exact
+Prism Bonsai runtime. Runner 0.3.42 embeds the unchanged production root and can
+verify this generation after Hub imports and deploys the same exact metadata.
 
 The assembled public production trust anchor is preserved at
 `runtime/catalog/roots/production-v1.json`. `runtime/catalog/signed/` contains
 the same root plus the complete timestamp, snapshot, and targets chain; all
-four role files were imported together from signing run `29842843125`.
+four role files were imported together from signing run `29943352625`.
 
 ## Security model
 
@@ -20,7 +20,7 @@ four role files were imported together from signing run `29842843125`.
 - Publisher namespaces and allowed origins are root policy. A specialized
   publisher cannot replace an InferGrade target or claim an unauthorized
   origin.
-- One target records build identity, receipt-manifest identity, distribution
+- Each target records build identity, receipt-manifest identity, distribution
   origin, distribution maturity, provenance strength, compatibility assertions,
   and support policy as separate fields.
 - Catalog signing authenticates InferGrade's assertion. It is not evidence that
@@ -155,8 +155,8 @@ Completed production-source gates:
 
 - production root version 1 carries all three signatures under the fixed 2-of-3
   policy;
-- targets, snapshot, and timestamp version 7 were produced by split protected
-  environments and imported byte-for-byte from signing run `29842843125`;
+- targets, snapshot, and timestamp version 8 were produced by split protected
+  environments and imported byte-for-byte from signing run `29943352625`;
 - scheduled timestamp refresh and expiry monitoring are assigned;
 - Runner verifies these exact production bytes, while the synthetic acceptance
   matrix covers tamper, expiry, rollback, wrong platform, explicit consent, and
@@ -164,13 +164,12 @@ Completed production-source gates:
 
 Remaining delivery gates:
 
-- release a Runner that embeds this production root;
 - import the same exact role files and trust projection into Hub, deploy them
   atomically at the public catalog URL, and verify ETags;
 - verify a real Result shows one compact “InferGrade-pinned runtime” indicator.
 
-The current b10069 candidate is qualified by two local, unpublished,
-standard-depth bundles: exact MiniCPM5-1B Q4_K_M and Gemma 4 E4B Q4_0
-artifacts on Apple M1 Pro Metal. The machine-readable record is
-`runtime/qualification/llama-cpp-b10069-macos-arm64.json`; it deliberately
-does not claim family-wide or cross-platform compatibility.
+The b10069 target is qualified by exact local, unpublished standard-depth
+MiniCPM5-1B Q4_K_M, Gemma 4 E4B Q4_0, and Gemma 4 12B Q4_K_M bundles. The
+Prism target is separately qualified only for exact Bonsai-27B Q1_0 without
+optional DSpark acceleration. The records under `runtime/qualification/`
+deliberately do not claim family-wide or cross-platform compatibility.
