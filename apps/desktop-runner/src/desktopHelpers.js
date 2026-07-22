@@ -173,6 +173,41 @@ export function userSafeUpdateFailure(_message = "") {
   return "Update status is unavailable. You can still pair and start the Runner.";
 }
 
+export function assignmentFailureRecovery(message = "") {
+  const detail = String(message || "").trim();
+  const runtimeMatch = detail.match(/requires exact runtime target '([^']+)' \(runtime build ([0-9a-f]{64})\)/i);
+  if (runtimeMatch) {
+    return {
+      kind: "install_reviewed_runtime",
+      description: `This model needs a reviewed specialized runtime (${runtimeMatch[2].slice(0, 12).toLowerCase()}…). Install it here, then retry the benchmark from Hub.`,
+      checkName: "Specialized runtime required",
+      requiredRuntime: { targetName: runtimeMatch[1], runtimeBuildId: runtimeMatch[2].toLowerCase() },
+    };
+  }
+  if (/no valid exact-artifact compatibility assertion/i.test(detail)) {
+    return {
+      kind: "choose_reviewed_artifact",
+      description: "InferGrade does not have a reviewed runtime for this exact specialized GGUF. Open Hub and choose the reviewed model alternative, then retry.",
+      checkName: "Choose reviewed artifact in Hub",
+      requiredRuntime: null,
+    };
+  }
+  if (/curl failed while downloading|artifact download|http (?:get|error)|\b(?:404|403)\b/i.test(detail)) {
+    return {
+      kind: "retry_artifact_download",
+      description: "The model download did not complete. Check the artifact in Hub, reconnect Hugging Face if it is gated, then retry.",
+      checkName: "Model download failed",
+      requiredRuntime: null,
+    };
+  }
+  return {
+    kind: "unknown",
+    description: detail,
+    checkName: "See logs for recovery detail",
+    requiredRuntime: null,
+  };
+}
+
 export function hubAuthenticationFailure(message = "") {
   const text = String(message || "");
   if (/runner_token_expired|runner token (?:has )?expired/i.test(text)) {
