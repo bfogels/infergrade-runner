@@ -5,7 +5,6 @@ import re
 import shlex
 import shutil
 import socket
-import struct
 import subprocess
 import tempfile
 import threading
@@ -22,6 +21,11 @@ from infergrade.container_runtime import (
     sample_total_gpu_memory_used_mb,
 )
 from infergrade.images import install_image
+from infergrade.gguf import (
+    infer_llama_cpp_architecture,
+    normalize_architecture,
+    read_gguf_architecture,
+)
 from infergrade.models import DeploymentExecution, FidelityExecution, RunRequest
 from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
 from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cpp_runtime
@@ -2193,82 +2197,13 @@ def _try_resolve_native_binary(explicit: Optional[str], env_name: str, default: 
     return managed_llama_cpp_binary_path("perplexity") or shutil.which(default)
 
 
-def _read_exact(handle, length: int) -> bytes:
-    payload = handle.read(length)
-    if len(payload) != length:
-        raise ValueError("Unexpected end of GGUF metadata.")
-    return payload
-
-
-def _read_u32(handle) -> int:
-    return struct.unpack("<I", _read_exact(handle, 4))[0]
-
-
-def _read_u64(handle) -> int:
-    return struct.unpack("<Q", _read_exact(handle, 8))[0]
-
-
-def _read_gguf_string(handle) -> str:
-    length = _read_u64(handle)
-    if length > 1024 * 1024:
-        raise ValueError("GGUF metadata string is unexpectedly large.")
-    return _read_exact(handle, length).decode("utf-8", errors="replace")
-
-
-def _skip_gguf_value(handle, value_type: int) -> None:
-    fixed_width = {
-        0: 1,  # uint8
-        1: 1,  # int8
-        2: 2,  # uint16
-        3: 2,  # int16
-        4: 4,  # uint32
-        5: 4,  # int32
-        6: 4,  # float32
-        7: 1,  # bool
-        10: 8,  # uint64
-        11: 8,  # int64
-        12: 8,  # float64
-    }
-    if value_type in fixed_width:
-        _read_exact(handle, fixed_width[value_type])
-        return
-    if value_type == 8:
-        _read_gguf_string(handle)
-        return
-    if value_type == 9:
-        item_type = _read_u32(handle)
-        count = _read_u64(handle)
-        if count > 100000:
-            raise ValueError("GGUF metadata array is unexpectedly large.")
-        for _ in range(count):
-            _skip_gguf_value(handle, item_type)
-        return
-    raise ValueError("Unsupported GGUF metadata value type: %s" % value_type)
-
-
 def _read_gguf_architecture(path: str) -> Optional[str]:
-    try:
-        with open(path, "rb") as handle:
-            if _read_exact(handle, 4) != b"GGUF":
-                return None
-            _read_u32(handle)  # version
-            _read_u64(handle)  # tensor_count
-            metadata_count = _read_u64(handle)
-            if metadata_count > 100000:
-                return None
-            for _ in range(metadata_count):
-                key = _read_gguf_string(handle)
-                value_type = _read_u32(handle)
-                if key == "general.architecture" and value_type == 8:
-                    return _normalize_architecture(_read_gguf_string(handle))
-                _skip_gguf_value(handle, value_type)
-    except (OSError, struct.error, UnicodeDecodeError, ValueError):
-        return None
-    return None
+    """Compatibility wrapper for callers that inspect adapter metadata helpers."""
+    return read_gguf_architecture(path)
 
 
 def _normalize_architecture(value: str) -> str:
-    return str(value or "").strip().lower().replace("-", "").replace("_", "")
+    return normalize_architecture(value)
 
 
 def _prepare_llama_prompt(
@@ -2357,41 +2292,7 @@ def _prepare_llama_server_chat(
 
 
 def _infer_llama_cpp_architecture(request: RunRequest) -> Optional[str]:
-    hints = dict(request.ontology_hints or {})
-    explicit = (
-        hints.get("architecture")
-        or hints.get("model_architecture")
-        or hints.get("gguf_architecture")
-        or hints.get("llama_cpp_architecture")
-    )
-    if explicit:
-        return _normalize_architecture(str(explicit))
-
-    artifact = request.quant_artifact_resolved_path or request.quant_artifact
-    if artifact and os.path.isfile(artifact) and artifact.lower().endswith(".gguf"):
-        architecture = _read_gguf_architecture(artifact)
-        if architecture:
-            return architecture
-
-    candidates = [
-        request.model,
-        hints.get("family_name"),
-        request.quant_artifact_filename,
-        request.quant_artifact,
-    ]
-    for candidate in candidates:
-        normalized = re.sub(r"[^a-z0-9]+", "", str(candidate or "").lower())
-        if "qwen35" in normalized:
-            return "qwen35"
-        if "qwen3" in normalized:
-            return "qwen3"
-        if "gemma4" in normalized:
-            return "gemma4"
-        if "gemma3" in normalized:
-            return "gemma3"
-        if "gemma2" in normalized:
-            return "gemma2"
-    return None
+    return infer_llama_cpp_architecture(request)
 
 
 def _uses_native_direct_answer_server(request: RunRequest) -> bool:

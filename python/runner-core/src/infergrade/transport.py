@@ -14,6 +14,7 @@ from urllib import request as urllib_request
 
 from infergrade.pairing import load_runner_profile
 from infergrade.run_configs import build_run_config_document
+from infergrade.tls import verified_https_context
 from infergrade.utils import env_value, read_json
 
 
@@ -115,7 +116,7 @@ def _json_request(
         body = json.dumps(payload).encode("utf-8")
     req = urllib_request.Request(url, data=body, headers=headers, method=method.upper())
     try:
-        with urllib_request.urlopen(req) as response:
+        with urllib_request.urlopen(req, context=verified_https_context(url)) as response:
             status = response.getcode()
             text = response.read().decode("utf-8")
     except urllib_error.HTTPError as exc:

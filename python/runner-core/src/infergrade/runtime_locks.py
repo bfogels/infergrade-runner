@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from infergrade.environment import _detect_cpu_architecture
+from infergrade.gguf import infer_llama_cpp_architecture
 from infergrade.runtimes import llama_cpp_runtime_dir, selected_llama_cpp_runtime
 from infergrade.utils import utcnow_iso
 
@@ -42,6 +43,7 @@ _ROLE_ENV = {
     "server": "INFERGRADE_LLAMA_CPP_SERVER",
     "perplexity": "INFERGRADE_LLAMA_CPP_PERPLEXITY",
 }
+_EXACT_ARTIFACT_RUNTIME_ARCHITECTURES = {"dspark"}
 
 
 def _sha256_file(path: Path) -> str:
@@ -322,8 +324,84 @@ def _package_root(paths: Dict[str, Path], selection_metadata: Dict[str, Any]) ->
     selection_metadata["channel"] = assertion_maturity
     selection_metadata["provenance"] = assertion_provenance
     selection_metadata["source_assertion_id"] = source_assertion_id
+    selection_metadata["catalog_assertion"] = catalog_assertion
     _reject_revoked_catalog_build(catalog_assertion, build_id)
     return expected_root
+
+
+def _active_catalog_target_custom(catalog_assertion: Dict[str, Any], runtime_build_id: str) -> Dict[str, Any]:
+    catalog_root = llama_cpp_runtime_dir() / "catalog"
+    active_path = catalog_root / "active.json"
+    if not active_path.is_file():
+        raise RuntimeError("the active signed runtime catalog is unavailable")
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    generation = str(active.get("generation") or "")
+    if not generation or "/" in generation or ".." in generation or "\\" in generation:
+        raise RuntimeError("the active signed runtime catalog generation is invalid")
+    targets_path = catalog_root / "generations" / generation / "targets.json"
+    targets_bytes = targets_path.read_bytes()
+    if hashlib.sha256(targets_bytes).hexdigest() != active.get("targets_sha256"):
+        raise RuntimeError("the active signed runtime catalog digest does not match")
+    envelope = json.loads(targets_bytes.decode("utf-8"))
+    targets_version = int((envelope.get("signed") or {}).get("version") or 0)
+    if targets_version < int(catalog_assertion.get("targets_version") or 0):
+        raise RuntimeError("the active signed runtime catalog is older than the installed runtime assertion")
+    target_name = str(catalog_assertion.get("target_name") or "")
+    target = ((envelope.get("signed") or {}).get("targets") or {}).get(target_name)
+    custom = dict((target or {}).get("custom") or {})
+    if custom.get("runtime_build_id") != runtime_build_id:
+        raise RuntimeError("the signed runtime target no longer identifies the installed build")
+    return custom
+
+
+def _assert_runtime_request_compatibility(
+    request: Any,
+    selection_metadata: Dict[str, Any],
+    managed_root: Optional[Path],
+) -> None:
+    """Require positive catalog evidence for architectures known to need specialized builds."""
+    architecture = infer_llama_cpp_architecture(request)
+    if architecture not in _EXACT_ARTIFACT_RUNTIME_ARCHITECTURES:
+        return
+    # Explicit operator paths remain a deliberate candidate lane. Their exact
+    # bytes are locked and model-load preflight still runs before benchmarks.
+    if managed_root is None:
+        return
+    build = dict(selection_metadata.get("managed_runtime_build") or {})
+    runtime_build_id = str(build.get("runtime_build_id") or "")
+    catalog_assertion = selection_metadata.get("catalog_assertion")
+    if not isinstance(catalog_assertion, dict):
+        raise RuntimeError(
+            "Cannot use the selected managed runtime for GGUF architecture '%s': it has no signed exact-artifact compatibility assertion. "
+            "Install a reviewed specialized runtime or explicitly select a candidate runtime for local preflight."
+            % architecture
+        )
+    try:
+        custom = _active_catalog_target_custom(catalog_assertion, runtime_build_id)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, RuntimeError) as error:
+        raise RuntimeError(
+            "Cannot use the selected managed runtime for GGUF architecture '%s': %s. "
+            "Refresh the signed runtime catalog or explicitly select a reviewed specialized runtime."
+            % (architecture, error)
+        ) from error
+    artifact_sha256 = str(getattr(request, "quant_artifact_sha256", None) or "")
+    assertions = list(custom.get("validation_assertions") or [])
+    exact = next(
+        (
+            assertion
+            for assertion in assertions
+            if isinstance(assertion, dict)
+            and assertion.get("model_artifact_sha256") == artifact_sha256
+            and assertion.get("result_status") == "valid_comparable"
+        ),
+        None,
+    )
+    if exact is None:
+        raise RuntimeError(
+            "Cannot use managed runtime '%s' for GGUF architecture '%s': the signed catalog has no valid exact-artifact compatibility assertion for %s. "
+            "InferGrade will not guess that a general llama.cpp build supports this specialized architecture."
+            % (selection_metadata.get("runtime_id") or runtime_build_id, architecture, artifact_sha256 or "the resolved artifact")
+        )
 
 
 def _reject_revoked_catalog_build(catalog_assertion: Any, runtime_build_id: str) -> None:
@@ -564,6 +642,7 @@ def resolve_runtime_lock(
     else:
         paths, selection_metadata = _resolve_role_paths(request)
         root = _package_root(paths, selection_metadata)
+        _assert_runtime_request_compatibility(request, selection_metadata, root)
         content_scope = "managed_package" if root else "selected_binary_set"
         records = _package_records(root, paths) if root else _role_records(paths)
         _assert_records_bounded(records)

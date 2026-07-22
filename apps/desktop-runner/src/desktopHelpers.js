@@ -229,6 +229,57 @@ export function shouldAppendAssignmentEventLog(previousType = "", nextType = "")
   return nextType !== "assignment_idle" || previousType !== "assignment_idle";
 }
 
+export function desktopReadinessPresentation({
+  paired = false,
+  listening = false,
+  runtimeAvailable = false,
+  hubVerified = false,
+} = {}) {
+  if (!paired) {
+    return {
+      ready: false,
+      title: "Connect this machine",
+      message: "Pair with Hub using a one-time code before this Runner accepts assigned work.",
+      hubFact: "Pair with Hub",
+      hubFactState: "blocked",
+    };
+  }
+  if (!runtimeAvailable) {
+    return {
+      ready: false,
+      title: "Runtime needed",
+      message: "Pairing is saved. Select a llama.cpp runtime before this machine runs assigned work.",
+      hubFact: hubVerified ? "Hub verified" : "Hub check needed",
+      hubFactState: hubVerified ? "ready" : "warning",
+    };
+  }
+  if (!hubVerified) {
+    return {
+      ready: false,
+      title: "Verify Hub connection",
+      message: "Pairing and runtime are available. Run the readiness check to verify Hub access.",
+      hubFact: "Hub check needed",
+      hubFactState: "warning",
+    };
+  }
+  if (!listening) {
+    return {
+      ready: false,
+      title: "Ready to listen",
+      message: "Readiness checks passed. Start listening when this machine should accept assigned work.",
+      hubFact: "Hub verified",
+      hubFactState: "ready",
+    };
+  }
+  return {
+    ready: true,
+    title: "Ready",
+    message: "Connected to Hub. Backend verified. Waiting for assigned work.",
+    hubFact: "Hub verified",
+    hubFactState: "ready",
+  };
+}
+
 export function isCredentialCanceled(message = "") {
   return /cancelled|canceled|user interaction|user.*cancel/i.test(String(message || ""));
 }

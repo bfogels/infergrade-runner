@@ -14,6 +14,7 @@ from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 from infergrade.models import RunRequest
+from infergrade.tls import verified_https_context
 from infergrade.utils import ensure_dir, stable_hash
 
 
@@ -379,7 +380,9 @@ def _download_remote_artifact(
 ) -> None:
     """Download a remote artifact, falling back to curl when stdlib transport fails."""
     try:
-        with urllib_request.urlopen(_request_for_url(download_url)) as response, open(destination_path, "wb") as handle:
+        with urllib_request.urlopen(
+            _request_for_url(download_url), context=verified_https_context(download_url)
+        ) as response, open(destination_path, "wb") as handle:
             content_length = response.headers.get("Content-Length") if getattr(response, "headers", None) else None
             if expected_size_bytes is not None and content_length is not None:
                 try:
@@ -526,7 +529,7 @@ def _fetch_huggingface_siblings(repo_id: str) -> list:
     """Fetch sibling filenames for a Hugging Face model, using curl when needed."""
     url = "https://huggingface.co/api/models/%s" % urllib_parse.quote(repo_id, safe="/")
     try:
-        with urllib_request.urlopen(_request_for_url(url)) as response:
+        with urllib_request.urlopen(_request_for_url(url), context=verified_https_context(url)) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except Exception as exc:
         if not _should_fallback_to_curl(exc):

@@ -1616,6 +1616,123 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(reasoning["lane"], "reference")
         self.assertEqual(reasoning["confidence_label"], "sampled_reference")
 
+    def test_mmlu_dominant_malformed_output_is_quarantined_from_capability_score(self):
+        def fake_prepare(spec, benchmark_dir, tier):
+            cases = [
+                {
+                    "case_id": "mmlu_pro/%d" % index,
+                    "task_id": "mmlu_pro/%d" % index,
+                    "category": "other",
+                    "prompt": "Question %d" % index,
+                    "answer": "A",
+                }
+                for index in range(4)
+            ]
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for case in cases:
+                    handle.write(json.dumps(case) + "\n")
+            with open(os.path.join(benchmark_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "benchmark_id": "mmlu_pro_reference_v1",
+                        "dataset_revision": "fixture",
+                        "sample_policy": "fixture",
+                        "category_count": 1,
+                    },
+                    handle,
+                )
+
+        def fake_evaluate(spec, benchmark_dir):
+            return {
+                "benchmark_id": spec.benchmark_id,
+                "display_name": spec.display_name,
+                "status": "completed",
+                "primary_metric": {"name": "accuracy", "value": 0.25},
+                "metrics": {
+                    "accuracy": 0.25,
+                    "correct_count": 1,
+                    "total_count": 4,
+                    "invalid_count": 3,
+                },
+                "case_results": [
+                    {
+                        "case_id": "mmlu_pro/%d" % index,
+                        "task_id": "mmlu_pro/%d" % index,
+                        "category": "other",
+                        "expected": "A",
+                        "predicted": "A" if index == 0 else None,
+                        "correct": index == 0,
+                    }
+                    for index in range(4)
+                ],
+                "scoring_policy": "exact_multiple_choice_letter_accuracy_v3",
+            }
+
+        adapter = mock.Mock()
+        adapter.generate_text.return_value = {
+            "text": "<|channel>analysis<|channel> still reasoning",
+            "status": "completed",
+            "error": None,
+            "output_tokens": 64,
+        }
+        request = RunRequest(
+            model="google/gemma-4-12b",
+            backend="llama.cpp",
+            tier="gold",
+            use_case="reasoning",
+            output_dir=self.tempdir,
+            benchmark_check_ids=["mmlu_pro_reference_v1"],
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                with mock.patch("infergrade.capabilities.container_image_identity", return_value={}):
+                    execution = execute_capability_suite(adapter, request)
+
+        result = execution.benchmark_results["mmlu_pro_reference_v1"]
+        self.assertEqual(execution.status, "not_comparable")
+        self.assertNotIn("mmlu_pro_reference_v1", execution.component_scores)
+        self.assertIsNone(result["primary_metric"]["value"])
+        self.assertEqual(result["output_shape_gate"]["status"], "blocked")
+        self.assertEqual(result["output_shape_gate"]["strict_primary_metric"]["value"], 0.25)
+        self.assertEqual(result["output_shape_gate"]["runtime_control_token_count"], 4)
+        self.assertEqual(result["output_shape_gate"]["answer_budget_exhaustion_count"], 4)
+        artifact_path = execution.artifacts["mmlu_pro_reference_v1"]["capability_run_path"]
+        with open(artifact_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["summary"]["state"], "not_comparable")
+        self.assertIsNone(artifact["summary"]["score"])
+        self.assertEqual(artifact["summary"]["not_comparable_count"], 4)
+        self.assertTrue(all(task["state"] == "not_comparable" for task in artifact["tasks"]))
+        with open(execution.artifacts["_summary"]["capability_summary_path"], "r", encoding="utf-8") as handle:
+            capability_summary = json.load(handle)
+        reasoning = next(
+            item for item in capability_summary["surfaces"] if item["surface"] == "local_reasoning_capability"
+        )
+        self.assertEqual(reasoning["state"], "not_comparable")
+        public_summary = summarize_capability_execution(request, execution)
+        self.assertEqual(public_summary["capability_state"], "not_comparable")
+        self.assertIn("output_shape_gate_blocked", public_summary["capability_reason_codes"])
+
+    def test_mmlu_isolated_malformed_output_remains_strictly_scored_wrong(self):
+        spec = CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"]
+        predictions = [
+            {"generation_status": "completed", "completion": "A"},
+            {"generation_status": "completed", "completion": "explanation without a letter"},
+        ]
+        summary = {
+            "primary_metric": {"name": "accuracy", "value": 0.5},
+            "metrics": {"total_count": 2, "invalid_count": 1},
+        }
+
+        from infergrade.capabilities import _mmlu_output_shape_gate
+
+        gate = _mmlu_output_shape_gate(spec, predictions, summary)
+
+        self.assertEqual(gate["status"], "passed")
+        self.assertEqual(gate["malformed_output_rate"], 0.5)
+        self.assertEqual(gate["strict_primary_metric"]["value"], 0.5)
+
     def test_mmlu_pro_artifact_distinguishes_wrong_malformed_and_generation_failed_tasks(self):
         def fake_prepare(spec, benchmark_dir, tier):
             cases = [

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   assignmentClockTransition,
   assignmentTitleFromRunId,
+  desktopReadinessPresentation,
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
@@ -68,6 +69,31 @@ test("logs assignment idle once per idle transition", () => {
   assert.equal(shouldAppendAssignmentEventLog("assignment_idle", "assignment_idle"), false);
   assert.equal(shouldAppendAssignmentEventLog("assignment_idle", "assignment_update"), true);
   assert.equal(shouldAppendAssignmentEventLog("assignment_update", "assignment_idle"), true);
+});
+
+test("requires an authenticated Hub check before presenting the Runner as ready", () => {
+  assert.deepEqual(
+    desktopReadinessPresentation({ paired: true, listening: true, runtimeAvailable: true, hubVerified: false }),
+    {
+      ready: false,
+      title: "Verify Hub connection",
+      message: "Pairing and runtime are available. Run the readiness check to verify Hub access.",
+      hubFact: "Hub check needed",
+      hubFactState: "warning",
+    }
+  );
+  assert.equal(
+    desktopReadinessPresentation({ paired: true, listening: true, runtimeAvailable: true, hubVerified: true }).ready,
+    true
+  );
+  assert.equal(
+    desktopReadinessPresentation({ paired: true, listening: false, runtimeAvailable: true, hubVerified: true }).title,
+    "Ready to listen"
+  );
+  assert.equal(
+    desktopReadinessPresentation({ paired: true, listening: true, runtimeAvailable: false, hubVerified: true }).title,
+    "Runtime needed"
+  );
 });
 
 test("normalizes hosted and local desktop API URLs before sidecar invocation", () => {
