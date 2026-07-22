@@ -2,7 +2,7 @@
   "signatures": [
     {
       "keyid": "targets",
-      "sig_hex": "b442a051639af4d1017402575167627ae816c5010ff304d87f37142eb457a7dceabd0a0ed74a2c1babedc213df345b2b3dc50f31e451cbbcc19a7942e15a5f06"
+      "sig_hex": "eac27fd28448b878f09f5733c3e9da590942268a39293571330e50ce365f3536565ee4cd7c0ca4678d65d935944de63a9c1b64a92da47b1f13167de300934308"
     }
   ],
   "signed": {
@@ -68,14 +68,78 @@
               "published": false,
               "quantization_label": "Q4_0",
               "result_status": "valid_comparable"
+            },
+            {
+              "assertion_id": "gemma4-12b-q4-k-m-standard-20260722",
+              "benchmark_depth": "standard",
+              "bundle_id": "qb_20260722_161200_f40ca06a",
+              "model_artifact_sha256": "0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42",
+              "model_id": "google/gemma-4-12B-it",
+              "model_revision": "fc034cfff751157913579611efad8462ac1be606",
+              "published": false,
+              "quantization_label": "Q4_K_M",
+              "result_status": "valid_comparable"
             }
           ],
           "version_label": "llama.cpp b10069"
         },
         "length": 10600037,
         "sha256": "022469e0b22f4b84dcd0a323867d7f5a31dae21894931ee6a24a35abd2a60359"
+      },
+      "infergrade/prism-llama-cpp/prism-b9596-9fcaed7/macos-arm64.tar.gz": {
+        "custom": {
+          "arch": "aarch64",
+          "archive_url": "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b9596-9fcaed7/llama-prism-b9596-9fcaed7-bin-macos-arm64.tar.gz",
+          "binary_names": {
+            "cli": "llama-cli",
+            "perplexity": "llama-perplexity",
+            "server": "llama-server"
+          },
+          "build_manifest_files_sha256": "a4488af41082d14cbccb099c2a3b7ceba2ab981854b3e26ac57e7aadb90cb53b",
+          "compatibility_status": "exact_artifact_standard_depth_validated",
+          "content_manifest_sha256": "892aeaaa1e4e9893ddaa93fb61aa90c7a6b900ccb7b35cbd59fba0c57c98af6e",
+          "expected_binaries": [
+            "llama-cli",
+            "llama-server",
+            "llama-perplexity"
+          ],
+          "maturity": "reviewed_candidate",
+          "origin": "upstream_official",
+          "provenance": "Official PrismML fork macOS arm64 archive, exact SHA-256 reviewed and staged for the signed InferGrade runtime catalog. Catalog signing authenticates the InferGrade assertion; it is not an upstream artifact signature.",
+          "provenance_strength": "checksum_verified",
+          "publisher": "infergrade",
+          "rollback_runtime_build_id": "b57a9b1cde1365fe7714081da036402dcdb5b86ec5595e45e1cde49b701ef9a5",
+          "rollback_runtime_id": "llama-cpp-b10069-macos-arm64-metal",
+          "runtime_build_id": "142a189ab18d0847bdc29134db2ffd34b8352743308c783ea740e57e77c7eeb2",
+          "runtime_family": "llama.cpp-prism",
+          "runtime_id": "llama-prism-b9596-9fcaed7-macos-arm64-metal",
+          "runtime_interface": "llama_cpp_cli_server_v1",
+          "support_tier": "candidate",
+          "system": "macos",
+          "upstream": {
+            "project": "PrismML llama.cpp",
+            "release": "prism-b9596-9fcaed7",
+            "release_url": "https://github.com/PrismML-Eng/llama.cpp/releases/tag/prism-b9596-9fcaed7"
+          },
+          "validation_assertions": [
+            {
+              "assertion_id": "bonsai-27b-q1-0-standard-20260722",
+              "benchmark_depth": "standard",
+              "bundle_id": "qb_20260722_160059_6fe34e09",
+              "model_artifact_sha256": "17ef842e47450caeb8eaa3ebfbbab5d2f2278b62b79be107985fb69a2f819aa0",
+              "model_id": "prism-ml/Bonsai-27B-gguf",
+              "model_revision": "f10afb355f104535e3e3e98cf7ab7795c72bd292",
+              "published": false,
+              "quantization_label": "Q1_0",
+              "result_status": "valid_comparable"
+            }
+          ],
+          "version_label": "Prism llama.cpp b9596-9fcaed7"
+        },
+        "length": 11169620,
+        "sha256": "9c14bcd00024f547f07eca9fd1f1a1b4bde68f6ce26e5b2f76738b6920eb3b24"
       }
     },
-    "version": 7
+    "version": 8
   }
 }

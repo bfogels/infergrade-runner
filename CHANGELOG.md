@@ -7,6 +7,11 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+- Activates production runtime catalog generation 8 with separate exact target
+  assertions for upstream llama.cpp b10069 and the Prism Bonsai runtime; this
+  metadata update uses the unchanged production root and does not broaden either
+  target beyond its recorded model, benchmark, and hardware qualifications.
+
 ## 0.3.42 (contract 0.3.25)
 
 - Validates a direct-answer protocol on the first MMLU-Pro case, retries

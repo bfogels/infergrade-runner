@@ -5,8 +5,8 @@
   "claim_scope": "exact_artifacts_on_recorded_hardware_only",
   "runtime": {
     "catalog_target": "infergrade/llama-cpp/b10069/macos-arm64.tar.gz",
-    "catalog_targets_metadata_version": 7,
-    "catalog_targets_metadata_sha256": "eb4912550786aca77731b4742f58a841496aedf7954a0a54b8005989a6683137",
+    "catalog_targets_metadata_version": 8,
+    "catalog_targets_metadata_sha256": "633f26e6602b925bf735d1fd1029bec9d1c802903b860cda16511fbc56090eb7",
     "runtime_build_id": "b57a9b1cde1365fe7714081da036402dcdb5b86ec5595e45e1cde49b701ef9a5",
     "content_manifest_sha256": "2dae0e1a9486f2b8ad98bcf4d57f71a36e8f95ce7144da8476ba3b6d4d88987c",
     "content_manifest_file_count": 61,

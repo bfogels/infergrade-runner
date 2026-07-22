@@ -5,7 +5,7 @@
     "snapshot": 8,
     "targets": 8
   },
-  "activation_status": "staged_candidate",
+  "activation_status": "active",
   "expires_unix": {
     "root": 1942272000,
     "timestamp": 1787184000,

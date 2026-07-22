@@ -992,13 +992,16 @@ mod tests {
         .expect("production catalog generation must verify");
 
         assert_eq!(catalog.versions.root, 1);
-        assert_eq!(catalog.versions.timestamp, 7);
-        assert_eq!(catalog.versions.snapshot, 7);
-        assert_eq!(catalog.versions.targets, 7);
+        assert_eq!(catalog.versions.timestamp, 8);
+        assert_eq!(catalog.versions.snapshot, 8);
+        assert_eq!(catalog.versions.targets, 8);
         assert_eq!(catalog.signing_environment, "production");
         assert!(catalog
             .targets
             .contains_key("infergrade/llama-cpp/b10069/macos-arm64.tar.gz"));
+        assert!(catalog
+            .targets
+            .contains_key("infergrade/prism-llama-cpp/prism-b9596-9fcaed7/macos-arm64.tar.gz"));
     }
 
     #[test]

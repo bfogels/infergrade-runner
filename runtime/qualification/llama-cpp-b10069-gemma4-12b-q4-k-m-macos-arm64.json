@@ -6,7 +6,9 @@
   "runtime": {
     "catalog_target": "infergrade/llama-cpp/b10069/macos-arm64.tar.gz",
     "catalog_source_version": 8,
-    "catalog_activation_status": "staged_candidate",
+    "catalog_activation_status": "active",
+    "catalog_targets_metadata_version": 8,
+    "catalog_targets_metadata_sha256": "633f26e6602b925bf735d1fd1029bec9d1c802903b860cda16511fbc56090eb7",
     "runtime_build_id": "b57a9b1cde1365fe7714081da036402dcdb5b86ec5595e45e1cde49b701ef9a5",
     "content_manifest_sha256": "2dae0e1a9486f2b8ad98bcf4d57f71a36e8f95ce7144da8476ba3b6d4d88987c",
     "content_manifest_file_count": 61,
@@ -16,7 +18,7 @@
     "support_tier": "candidate",
     "provenance_strength": "checksum_verified",
     "signing_environment": "production",
-    "signed_catalog_assertion_state": "staged_not_active"
+    "signed_catalog_assertion_state": "production_active"
   },
   "hardware": {
     "hardware_class": "apple_silicon",
@@ -67,6 +69,6 @@
     "This validates only the exact Gemma 4 12B Q4_K_M artifact on the recorded Apple M1 Pro hardware.",
     "The 12% score is a direct-answer MMLU-Pro sampled-reference result; it is not a global reasoning or intelligence score.",
     "The result proves completion-shape recovery and comparability, not that constrained direct answers recover chain-of-thought performance.",
-    "The new exact-artifact assertion is staged source metadata and is not active signed-catalog trust until the complete generation is signed and promoted."
+    "Production catalog signing authenticates this exact target assertion; it does not broaden model, benchmark, or hardware compatibility."
   ]
 }

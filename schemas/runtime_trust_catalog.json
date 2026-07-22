@@ -44,10 +44,50 @@
           "published": false,
           "quantization_label": "Q4_0",
           "result_status": "valid_comparable"
+        },
+        {
+          "assertion_id": "gemma4-12b-q4-k-m-standard-20260722",
+          "benchmark_depth": "standard",
+          "bundle_id": "qb_20260722_161200_f40ca06a",
+          "model_artifact_sha256": "0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42",
+          "model_id": "google/gemma-4-12B-it",
+          "model_revision": "fc034cfff751157913579611efad8462ac1be606",
+          "published": false,
+          "quantization_label": "Q4_K_M",
+          "result_status": "valid_comparable"
+        }
+      ]
+    },
+    {
+      "archive_sha256": "9c14bcd00024f547f07eca9fd1f1a1b4bde68f6ce26e5b2f76738b6920eb3b24",
+      "compatibility_status": "exact_artifact_standard_depth_validated",
+      "content_manifest_sha256": "892aeaaa1e4e9893ddaa93fb61aa90c7a6b900ccb7b35cbd59fba0c57c98af6e",
+      "maturity": "reviewed_candidate",
+      "origin": "upstream_official",
+      "provenance_strength": "checksum_verified",
+      "publisher": "infergrade",
+      "revocation_reason": null,
+      "revoked": false,
+      "runtime_build_id": "142a189ab18d0847bdc29134db2ffd34b8352743308c783ea740e57e77c7eeb2",
+      "runtime_family": "llama.cpp-prism",
+      "runtime_interface": "llama_cpp_cli_server_v1",
+      "support_tier": "candidate",
+      "target_name": "infergrade/prism-llama-cpp/prism-b9596-9fcaed7/macos-arm64.tar.gz",
+      "validation_assertions": [
+        {
+          "assertion_id": "bonsai-27b-q1-0-standard-20260722",
+          "benchmark_depth": "standard",
+          "bundle_id": "qb_20260722_160059_6fe34e09",
+          "model_artifact_sha256": "17ef842e47450caeb8eaa3ebfbbab5d2f2278b62b79be107985fb69a2f819aa0",
+          "model_id": "prism-ml/Bonsai-27B-gguf",
+          "model_revision": "f10afb355f104535e3e3e98cf7ab7795c72bd292",
+          "published": false,
+          "quantization_label": "Q1_0",
+          "result_status": "valid_comparable"
         }
       ]
     }
   ],
-  "targets_metadata_sha256": "eb4912550786aca77731b4742f58a841496aedf7954a0a54b8005989a6683137",
-  "targets_metadata_version": 7
+  "targets_metadata_sha256": "633f26e6602b925bf735d1fd1029bec9d1c802903b860cda16511fbc56090eb7",
+  "targets_metadata_version": 8
 }
