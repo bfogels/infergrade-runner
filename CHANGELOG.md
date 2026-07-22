@@ -7,6 +7,16 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.41 (contract 0.3.24)
+
+- Publishes Desktop artifacts through draft-first, immutable `vX.Y.Z` GitHub
+  releases instead of replacing assets on a mutable release tag.
+- Moves new Desktop installs to GitHub's latest-version redirect while keeping
+  updater archives, signatures, manifests, checksums, and installers bound to
+  one immutable versioned release.
+- Fails the protected release workflow on non-`main` dispatches, source/version
+  or tag drift, already-published releases, or missing GitHub immutability.
+
 ## 0.3.40 (contract 0.3.24)
 
 - Reconciles stale Hub handoffs, suppresses repeated idle-listener messages,
