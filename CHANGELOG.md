@@ -7,6 +7,19 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.40 (contract 0.3.24)
+
+- Reconciles stale Hub handoffs, suppresses repeated idle-listener messages,
+  recovers missing selected runtimes, and isolates managed-runtime cache state
+  so a deleted test executable cannot remain selected.
+- Quarantines capability protocol failures that affect enough cases to make a
+  score misleading, while preserving case-level diagnostics for review.
+- Requires specialized model architectures to match exact runtime compatibility
+  evidence before execution instead of inheriting broad family support.
+- Uses the native macOS trust store for Runner network access, validates public
+  release image availability before desktop signing, and reports authenticated
+  Hub access separately from basic network reachability in Desktop readiness.
+
 ## 0.3.39 (contract 0.3.24)
 
 - Counts EvalPlus completion-normalization failures as wrong model answers when
