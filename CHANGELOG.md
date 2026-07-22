@@ -32,6 +32,9 @@ incremental changes only — see the git history.
   generation is reviewed and atomically promoted.
 - Honors `--resume` and `--output` when `infergrade run` reads a request file,
   so checkpointed long runs can continue instead of restarting.
+- Detects expired or revoked Hub pairing while listening, stops the stale
+  listener, and offers an in-app re-pair action instead of leaving the Desktop
+  Runner in a misleading connected state.
 - Publishes contract 0.3.25 for the revised MMLU-Pro scoring identity.
 
 ## 0.3.41 (contract 0.3.24)
