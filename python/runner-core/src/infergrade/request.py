@@ -10,6 +10,7 @@ from urllib import request as urllib_request
 
 from infergrade.benchmark_catalog import normalize_request_selection
 from infergrade.models import RunRequest
+from infergrade.tls import verified_https_context
 
 
 # Conservative regex for a docker-style image reference. Accepts the common
@@ -146,7 +147,7 @@ def request_from_file(path: str, simulate: bool = True) -> RunRequest:
 
 def request_from_url(url: str, simulate: bool = True) -> RunRequest:
     """Load a JSON request document from a remote URL."""
-    with urllib_request.urlopen(url) as response:
+    with urllib_request.urlopen(url, context=verified_https_context(url)) as response:
         payload = response.read().decode("utf-8")
     data = json.loads(payload)
     data = sanitize_hub_supplied_payload(data)

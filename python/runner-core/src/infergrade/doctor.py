@@ -23,6 +23,7 @@ from infergrade.environment import capture_environment
 from infergrade.images import docker_image_exists, local_build_command
 from infergrade.models import RunRequest
 from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cpp_runtime
+from infergrade.tls import tls_trust_configuration, verified_https_context
 
 
 DEFAULT_BACKEND_IMAGES = {
@@ -459,20 +460,20 @@ def _python_version_check() -> Dict[str, Any]:
 def _api_health_check(api_url: str) -> Dict[str, Any]:
     url = api_url.rstrip("/") + "/healthz"
     try:
-        with urllib_request.urlopen(url) as response:
+        with urllib_request.urlopen(url, context=verified_https_context(url)) as response:
             payload = response.read().decode("utf-8")
     except urllib_error.URLError as exc:
         return _check(
             "api_health",
             "error",
             "InferGrade API is not reachable.",
-            {"api_url": api_url, "error": str(exc)},
+            {"api_url": api_url, "error": str(exc), "tls_trust": tls_trust_configuration()},
         )
     return _check(
         "api_health",
         "ok",
         "InferGrade API is reachable.",
-        {"api_url": api_url, "response": payload},
+        {"api_url": api_url, "response": payload, "tls_trust": tls_trust_configuration()},
     )
 
 

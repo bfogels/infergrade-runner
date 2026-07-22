@@ -69,13 +69,16 @@ complete. Ordinary pushes and documentation promotions do not publish desktop
 artifacts. The workflow:
 
 1. resolves the desktop app version from `VERSION`
-2. builds the source sidecar wrapper for the CI host's Rust target triple
-3. builds the macOS Apple Silicon desktop app
-4. verifies the protected release signing and notarization inputs before building user-downloadable artifacts
-5. signs and notarizes the Tauri updater archive and macOS bundle with the configured release credentials
-6. verifies the app bundle and DMG with `codesign`, Gatekeeper assessment, and stapled notarization-ticket checks
-7. renames the notarized DMG to the stable public asset `InferGrade.Runner.macOS-arm64.dmg`, then publishes it with the updater archive, updater signature, and updater manifest to the `desktop-runner-latest` GitHub release
-8. removes assets outside the exact checksummed release set, redownloads the published assets, rejects stale or extra files, verifies their checksum/updater relationship, and anonymously probes both the updater and stable installer URLs
+2. refuses a version override that differs from the checked-out `VERSION`, then anonymously verifies all five matching GHCR image tags before spending signing or build time
+3. builds the source sidecar wrapper for the CI host's Rust target triple
+4. builds the macOS Apple Silicon desktop app
+5. verifies the protected release signing and notarization inputs before building user-downloadable artifacts
+6. signs and notarizes the Tauri updater archive and macOS bundle with the configured release credentials
+7. verifies the app bundle and DMG with `codesign`, Gatekeeper assessment, and stapled notarization-ticket checks
+8. renames the notarized DMG to the stable public asset `InferGrade.Runner.macOS-arm64.dmg`, then publishes it with the updater archive, updater signature, and updater manifest to the `desktop-runner-latest` GitHub release
+9. removes assets outside the exact checksummed release set, redownloads the published assets, rejects stale or extra files, verifies their checksum/updater relationship, and anonymously probes both the updater and stable installer URLs
+
+The desktop release deliberately does not fall back to older capability images. Scorer and dataset containers are part of the benchmark protocol identity; publishing an app whose matching tags are missing would either break selected benchmarks or silently change their evidence basis.
 
 The same workflow also runs unsigned Windows and Linux package smoke jobs. Those jobs build NSIS/MSI artifacts on `windows-latest` and AppImage/`.deb` artifacts on `ubuntu-22.04`, write `SHA256SUMS` manifests for the emitted packages, then upload them as GitHub Actions artifacts for maintainer inspection. They are package-readiness gates only; they do not publish to the desktop release tag and they do not replace Windows Authenticode signing, Linux install/launch validation, or platform-specific support notes.
 

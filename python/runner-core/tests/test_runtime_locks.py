@@ -158,6 +158,38 @@ class RuntimeLockTests(unittest.TestCase):
         )
         return root
 
+    def _write_active_catalog(self, build_id: str, assertions=None) -> None:
+        generation = "3-active"
+        targets_path = self.cache / "llama.cpp" / "catalog" / "generations" / generation / "targets.json"
+        targets_path.parent.mkdir(parents=True, exist_ok=True)
+        targets_bytes = json.dumps(
+            {
+                "signed": {
+                    "version": 3,
+                    "targets": {
+                        "infergrade/llama-cpp/test.tar.gz": {
+                            "custom": {
+                                "runtime_build_id": build_id,
+                                "validation_assertions": list(assertions or []),
+                            }
+                        }
+                    },
+                },
+                "signatures": [],
+            }
+        ).encode("utf-8")
+        targets_path.write_bytes(targets_bytes)
+        active_path = self.cache / "llama.cpp" / "catalog" / "active.json"
+        active_path.write_text(
+            json.dumps(
+                {
+                    "generation": generation,
+                    "targets_sha256": hashlib.sha256(targets_bytes).hexdigest(),
+                }
+            ),
+            encoding="utf-8",
+        )
+
     def test_managed_package_lock_fingerprints_full_package_without_public_paths(self):
         managed_root = self._write_managed_selection(self.runtime_a)
         request = self._request()
@@ -202,6 +234,59 @@ class RuntimeLockTests(unittest.TestCase):
         self.assertEqual(receipt["origin"], "managed_download")
         self.assertEqual(receipt["content_manifest_file_count"], 4)
         self.assertEqual(receipt["provenance_strength"], "checksum_verified")
+
+    def test_specialized_architecture_rejects_managed_runtime_without_exact_assertion(self):
+        self._write_managed_selection(self.runtime_a, catalog_assertion=True)
+        selection = json.loads(selected_llama_cpp_runtime_path().read_text(encoding="utf-8"))
+        build_id = selection["runtime_build"]["runtime_build_id"]
+        self._write_active_catalog(build_id)
+        request = self._request()
+        request.llama_cpp_cli_path = None
+        request.llama_cpp_server_path = None
+        request.llama_cpp_perplexity_path = None
+        request.ontology_hints = {"architecture": "dspark"}
+        request.quant_artifact_sha256 = "d" * 64
+
+        with self.assertRaisesRegex(RuntimeError, "no valid exact-artifact compatibility assertion"):
+            resolve_runtime_lock(request, "bundle-dspark-unproved")
+
+        self.assertFalse((self.cache / "llama.cpp" / "locks").exists())
+
+    def test_specialized_architecture_accepts_matching_signed_exact_assertion(self):
+        self._write_managed_selection(self.runtime_a, catalog_assertion=True)
+        selection = json.loads(selected_llama_cpp_runtime_path().read_text(encoding="utf-8"))
+        build_id = selection["runtime_build"]["runtime_build_id"]
+        artifact_sha256 = "d" * 64
+        self._write_active_catalog(
+            build_id,
+            assertions=[
+                {
+                    "model_artifact_sha256": artifact_sha256,
+                    "result_status": "valid_comparable",
+                }
+            ],
+        )
+        request = self._request()
+        request.llama_cpp_cli_path = None
+        request.llama_cpp_server_path = None
+        request.llama_cpp_perplexity_path = None
+        request.ontology_hints = {"architecture": "dspark"}
+        request.quant_artifact_sha256 = artifact_sha256
+
+        lock, summary = resolve_runtime_lock(request, "bundle-dspark-proved")
+
+        self.assertEqual(summary["content_scope"], "managed_package")
+        self.assertEqual(lock["runtime_id"], "managed-a")
+
+    def test_specialized_architecture_allows_explicit_candidate_runtime_for_preflight(self):
+        request = self._request(self.runtime_a)
+        request.ontology_hints = {"architecture": "dspark"}
+        request.quant_artifact_sha256 = "d" * 64
+
+        lock, summary = resolve_runtime_lock(request, "bundle-dspark-operator")
+
+        self.assertEqual(summary["content_scope"], "selected_binary_set")
+        self.assertEqual(lock["origin"], "operator_paths")
 
     def test_signed_catalog_revocation_blocks_new_lock_without_mutating_existing_bytes(self):
         managed_root = self._write_managed_selection(self.runtime_a, catalog_assertion=True)

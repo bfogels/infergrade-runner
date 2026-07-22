@@ -57,6 +57,15 @@ jobs:
           echo "DESKTOP_VERSION=$DESKTOP_VERSION" >> "$GITHUB_ENV"
           echo "RELEASE_NOTES=$RELEASE_NOTES" >> "$GITHUB_ENV"
 
+      - name: Verify matching public runtime and capability images
+        run: |
+          source_version="$(cat VERSION)"
+          if [ "$DESKTOP_VERSION" != "$source_version" ]; then
+            echo "::error::Desktop version $DESKTOP_VERSION does not match source VERSION $source_version."
+            exit 1
+          fi
+          INFERGRADE_IMAGE_TAG="$DESKTOP_VERSION" ./scripts/verify_release_images.sh
+
       - name: Check desktop app dependencies
         run: ./scripts/build_desktop_runner.sh --check-only
 

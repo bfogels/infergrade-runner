@@ -4,11 +4,14 @@ import test from "node:test";
 import {
   assignmentClockTransition,
   assignmentTitleFromRunId,
+  desktopReadinessPresentation,
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
+  isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
   shouldClearCompletedHandoff,
+  shouldAppendAssignmentEventLog,
   userSafeStartFailure,
   userSafeUpdateFailure,
   userSafeTokenFailure,
@@ -51,6 +54,46 @@ test("only a matching completed listener run clears its stored handoff", () => {
   assert.equal(shouldClearCompletedHandoff({ phase: "Complete", runId: "run_1", handoffRunId: "run_1" }), true);
   assert.equal(shouldClearCompletedHandoff({ phase: "Running", runId: "run_1", handoffRunId: "run_1" }), false);
   assert.equal(shouldClearCompletedHandoff({ phase: "Complete", runId: "run_2", handoffRunId: "run_1" }), false);
+});
+
+test("recognizes every terminal Hub handoff status", () => {
+  assert.equal(isTerminalHandoffStatus("completed"), true);
+  assert.equal(isTerminalHandoffStatus("failed"), true);
+  assert.equal(isTerminalHandoffStatus("cancelled"), true);
+  assert.equal(isTerminalHandoffStatus("running"), false);
+  assert.equal(isTerminalHandoffStatus("queued"), false);
+});
+
+test("logs assignment idle once per idle transition", () => {
+  assert.equal(shouldAppendAssignmentEventLog("", "assignment_idle"), true);
+  assert.equal(shouldAppendAssignmentEventLog("assignment_idle", "assignment_idle"), false);
+  assert.equal(shouldAppendAssignmentEventLog("assignment_idle", "assignment_update"), true);
+  assert.equal(shouldAppendAssignmentEventLog("assignment_update", "assignment_idle"), true);
+});
+
+test("requires an authenticated Hub check before presenting the Runner as ready", () => {
+  assert.deepEqual(
+    desktopReadinessPresentation({ paired: true, listening: true, runtimeAvailable: true, hubVerified: false }),
+    {
+      ready: false,
+      title: "Verify Hub connection",
+      message: "Pairing and runtime are available. Run the readiness check to verify Hub access.",
+      hubFact: "Hub check needed",
+      hubFactState: "warning",
+    }
+  );
+  assert.equal(
+    desktopReadinessPresentation({ paired: true, listening: true, runtimeAvailable: true, hubVerified: true }).ready,
+    true
+  );
+  assert.equal(
+    desktopReadinessPresentation({ paired: true, listening: false, runtimeAvailable: true, hubVerified: true }).title,
+    "Ready to listen"
+  );
+  assert.equal(
+    desktopReadinessPresentation({ paired: true, listening: true, runtimeAvailable: false, hubVerified: true }).title,
+    "Runtime needed"
+  );
 });
 
 test("normalizes hosted and local desktop API URLs before sidecar invocation", () => {
