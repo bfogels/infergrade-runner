@@ -39,6 +39,7 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.equal(html.includes("Connected to Hub. Backend verified. Waiting for assigned work."), false);
   assert.equal(html.includes("<h3 id=\"backend-title\">Verified on this Mac</h3>"), false);
   assert.ok(html.includes("data-listener-surface"));
+  assert.ok(html.includes("data-repair-pairing"));
   assert.ok(html.includes("Hub listener"));
   assert.ok(html.includes("Listening paused"));
   assert.ok(html.includes("Stop listening"));
@@ -78,6 +79,8 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(js.includes('document.querySelectorAll("[data-start-runner]")'));
   assert.ok(js.includes('document.querySelectorAll("[data-reset-pairing]")'));
   assert.ok(js.includes("setRunnerButtonsDisabled"));
+  assert.ok(js.includes('mockState === "pairing-expired"'));
+  assert.ok(js.includes("applyHubAuthenticationFailure"));
   assert.ok(js.includes('hubUrl.searchParams.set("tab", "setup")'));
   assert.ok(js.includes('hubUrl.searchParams.set("tab", "runs")'));
   assert.ok(js.includes('hubUrl.searchParams.set("run_id", currentAssignmentRunId)'));
