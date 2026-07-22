@@ -6,6 +6,9 @@ import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TARGET_NAME = "infergrade/llama-cpp/b10069/macos-arm64.tar.gz"
+BONSAI_TARGET_NAME = (
+    "infergrade/prism-llama-cpp/prism-b9596-9fcaed7/macos-arm64.tar.gz"
+)
 
 
 def load_json(relative_path):
@@ -85,6 +88,67 @@ class RuntimeCatalogContractTests(unittest.TestCase):
             "exact_artifacts_on_recorded_hardware_only",
         )
         self.assertFalse(qualification["publication"]["published"])
+
+    def test_bonsai_candidate_is_staged_without_overclaiming_active_trust(self):
+        source = load_json("runtime/catalog/catalog-source.json")
+        qualification = load_json(
+            "runtime/qualification/llama-prism-b9596-bonsai-q1-macos-arm64.json"
+        )
+        gemma4_qualification = load_json(
+            "runtime/qualification/llama-cpp-b10069-gemma4-12b-q4-k-m-macos-arm64.json"
+        )
+        active_targets = load_json("runtime/catalog/signed/targets.json")
+
+        self.assertEqual(source["activation_status"], "staged_candidate")
+        self.assertEqual(
+            source["versions"]["targets"], active_targets["signed"]["version"] + 1
+        )
+        self.assertNotIn(BONSAI_TARGET_NAME, active_targets["signed"]["targets"])
+        target = source["targets"][BONSAI_TARGET_NAME]
+        self.assertEqual(target["custom"]["runtime_family"], "llama.cpp-prism")
+        self.assertEqual(target["custom"]["support_tier"], "candidate")
+        self.assertEqual(
+            target["custom"]["compatibility_status"],
+            "exact_artifact_standard_depth_validated",
+        )
+        self.assertEqual(
+            qualification["runtime"]["catalog_activation_status"],
+            "staged_candidate",
+        )
+        self.assertEqual(
+            qualification["runtime"]["signed_catalog_state"], "not_yet_active"
+        )
+        self.assertEqual(
+            qualification["assertions"][0]["mmlu_pro_malformed_output_count"], 0
+        )
+        self.assertFalse(qualification["publication"]["published"])
+
+        upstream_target = source["targets"][TARGET_NAME]
+        assertions = {
+            item["model_artifact_sha256"]: item
+            for item in upstream_target["custom"]["validation_assertions"]
+        }
+        gemma4_sha256 = (
+            "0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42"
+        )
+        self.assertEqual(
+            assertions[gemma4_sha256]["bundle_id"],
+            "qb_20260722_161200_f40ca06a",
+        )
+        self.assertEqual(assertions[gemma4_sha256]["result_status"], "valid_comparable")
+        self.assertFalse(assertions[gemma4_sha256]["published"])
+        self.assertEqual(
+            gemma4_qualification["assertions"][0]["bundle_id"],
+            assertions[gemma4_sha256]["bundle_id"],
+        )
+        self.assertEqual(
+            gemma4_qualification["assertions"][0]["mmlu_pro_malformed_output_count"],
+            0,
+        )
+        self.assertEqual(
+            gemma4_qualification["runtime"]["signed_catalog_assertion_state"],
+            "staged_not_active",
+        )
 
 
 if __name__ == "__main__":

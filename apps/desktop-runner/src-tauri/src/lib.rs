@@ -3,6 +3,7 @@ use infergrade_runner_engine::{
     build_run_bundle_upload_request, build_run_claim_request, build_run_completion_request,
     build_support_summary, complete_pairing_response, desktop_environment,
     execute_hub_json_request, hostname,
+    install_active_runtime_catalog_target as engine_install_active_runtime_catalog_target,
     install_managed_llama_cpp_runtime as engine_install_managed_llama_cpp_runtime,
     llama_cpp_runtime_status as engine_llama_cpp_runtime_status, native_first_run_bundle_payload,
     normalize_api_url, pairing_error_detail, pairing_status_payload, preferred_execution_mode,
@@ -737,6 +738,20 @@ async fn install_managed_llama_cpp_runtime(runtime_id: Option<String>) -> Result
 }
 
 #[tauri::command]
+async fn install_required_runtime_catalog_target(
+    target_name: String,
+    consent_runtime_build_id: String,
+) -> Result<Value, String> {
+    let target_name = target_name.trim().to_string();
+    let consent_runtime_build_id = consent_runtime_build_id.trim().to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        engine_install_active_runtime_catalog_target(&target_name, &consent_runtime_build_id)
+    })
+    .await
+    .map_err(|error| format!("required runtime install task failed: {error}"))?
+}
+
+#[tauri::command]
 fn remove_selected_llama_cpp_runtime(remove_managed_files: Option<bool>) -> Result<Value, String> {
     engine_remove_selected_llama_cpp_runtime(remove_managed_files.unwrap_or(true))
 }
@@ -1331,6 +1346,7 @@ pub fn run() {
             llama_cpp_runtime_plan,
             reconcile_hub_run_handoff,
             install_managed_llama_cpp_runtime,
+            install_required_runtime_catalog_target,
             remove_selected_llama_cpp_runtime,
             select_existing_llama_cpp_runtime,
             desktop_model_cache_status,

@@ -9,6 +9,7 @@ from typing import Dict, Iterable, List, Optional
 DEFAULT_DATA_PATH = os.environ.get("MMLU_PRO_DATA_PATH", "/opt/mmlu_pro/test.jsonl")
 LETTERS = "ABCDEFGHIJ"
 ANSWER_PATTERNS = (
+    re.compile(r"\bfinal\s+answer\s+letter\s*:\s*([A-J])\b", re.IGNORECASE),
     re.compile(r"\b(?:answer|option|choice)\s*(?:is|:)?\s*\(?([A-J])\)?\b", re.IGNORECASE),
     re.compile(r"^\s*\(?([A-J])\)?(?:[\).:]|\s*$)", re.IGNORECASE),
 )
@@ -244,7 +245,7 @@ def evaluate(output_dir: str) -> None:
             },
             "category_metrics": category_metrics,
             "case_results": case_results,
-            "scoring_policy": "exact_multiple_choice_letter_accuracy_v3",
+            "scoring_policy": "exact_multiple_choice_letter_accuracy_v4",
         }
     if error:
         payload["error"] = error

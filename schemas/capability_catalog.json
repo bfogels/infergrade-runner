@@ -573,7 +573,8 @@
       "default_inclusion_status": "not_quick_default",
       "fixture_or_dataset_revision_status": "pinned_dataset_revision",
       "harness_status": "container_harness_implemented",
-      "scoring_policy_id": "exact_multiple_choice_letter_accuracy_v3",
+      "scoring_policy_id": "exact_multiple_choice_letter_accuracy_v4",
+      "generation_constraint_id": "mmlu_choice_a_j_grammar_v1",
       "sample_policy": "Pinned MMLU-Pro snapshot with canary, sampled local reference, and deeper/full reference limits.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "container_for_prepare_and_scoring",
@@ -822,7 +823,7 @@
       "score_method": "primary_metric_value_v1"
     },
     {
-      "score_policy_id": "exact_multiple_choice_letter_accuracy_v3",
+      "score_policy_id": "exact_multiple_choice_letter_accuracy_v4",
       "display_name": "Strict answer-letter accuracy with empty-think normalization",
       "description": "Use strict answer-letter accuracy after removing only a leading empty thinking wrapper and trailing runtime terminal markers. Completed malformed answers score incorrect; generation failures remain unscored execution failures.",
       "score_method": "primary_metric_value_v1"
@@ -1349,7 +1350,7 @@
       "score_floor": 0.0,
       "primary_score_weight": 0.8,
       "higher_is_better": true,
-      "score_policy_id": "exact_multiple_choice_letter_accuracy_v3",
+      "score_policy_id": "exact_multiple_choice_letter_accuracy_v4",
       "score_breakdown_fields": [
         "correct_count",
         "total_count",

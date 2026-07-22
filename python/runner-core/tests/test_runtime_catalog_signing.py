@@ -253,11 +253,26 @@ class RuntimeCatalogSigningTests(unittest.TestCase):
         active_targets = json.loads(
             (REPO_ROOT / "runtime/catalog/signed/targets.json").read_text()
         )
+        active_snapshot = json.loads(
+            (REPO_ROOT / "runtime/catalog/signed/snapshot.json").read_text()
+        )
+        active_timestamp = json.loads(
+            (REPO_ROOT / "runtime/catalog/signed/timestamp.json").read_text()
+        )
         self.assertEqual(source["signing_environment"], "production")
         self.assertEqual(active_targets["signed"]["signing_environment"], "production")
-        self.assertEqual(
-            source["versions"]["targets"], active_targets["signed"]["version"]
-        )
+        active_versions = {
+            "root": active_root["signed"]["version"],
+            "timestamp": active_timestamp["signed"]["version"],
+            "snapshot": active_snapshot["signed"]["version"],
+            "targets": active_targets["signed"]["version"],
+        }
+        if source.get("activation_status") == "staged_candidate":
+            self.assertEqual(source["versions"]["root"], active_versions["root"])
+            for role in ("timestamp", "snapshot", "targets"):
+                self.assertEqual(source["versions"][role], active_versions[role] + 1)
+        else:
+            self.assertEqual(source["versions"], active_versions)
         with tempfile.TemporaryDirectory() as temporary:
             CATALOG.assemble_generation(
                 REPO_ROOT / "runtime/catalog/signed/root.json",

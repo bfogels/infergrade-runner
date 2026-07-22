@@ -11,6 +11,7 @@ sys.path.insert(0, "python/runner-core/src")
 from infergrade import __version__
 from infergrade.capabilities import (
     CAPABILITY_BENCHMARKS,
+    _generate_predictions,
     _generation_prompt_for_case,
     _host_mount_path,
     _normalize_evalplus_completion,
@@ -1567,7 +1568,7 @@ class CapabilityTests(unittest.TestCase):
                     "other": {"accuracy": 0.0, "correct_count": 0, "total_count": 1},
                 },
                 "case_results": case_results,
-                "scoring_policy": "exact_multiple_choice_letter_accuracy_v3",
+                "scoring_policy": "exact_multiple_choice_letter_accuracy_v4",
             }
 
         request = RunRequest(
@@ -1615,6 +1616,91 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(reasoning["state"], "scored")
         self.assertEqual(reasoning["lane"], "reference")
         self.assertEqual(reasoning["confidence_label"], "sampled_reference")
+
+    @mock.patch("infergrade.gguf.infer_llama_cpp_architecture", return_value="gemma4")
+    def test_mmlu_protocol_canary_recovers_budget_then_reuses_it(self, _architecture_mock):
+        class _RecoveringAdapter(object):
+            def __init__(self):
+                self.max_tokens = []
+
+            def generate_text(self, request, prompt, max_tokens):
+                self.max_tokens.append(max_tokens)
+                if len(self.max_tokens) == 1:
+                    return {
+                        "text": "<|channel|>analysis without a final answer",
+                        "status": "completed",
+                        "output_tokens": 64,
+                        "token_budget_exhausted": True,
+                    }
+                return {"text": "B", "status": "completed", "output_tokens": 1}
+
+        adapter = _RecoveringAdapter()
+        request = RunRequest(
+            model="google/gemma-4-12b",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="reasoning",
+            benchmark_check_ids=["mmlu_pro_reference_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        cases = [
+            {"case_id": "mmlu/1", "task_id": "mmlu/1", "prompt": "Question one"},
+            {"case_id": "mmlu/2", "task_id": "mmlu/2", "prompt": "Question two"},
+        ]
+
+        predictions = _generate_predictions(
+            adapter,
+            request,
+            CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"],
+            cases,
+        )
+
+        self.assertEqual(adapter.max_tokens, [64, 512, 512])
+        self.assertEqual(len(predictions), 2)
+        self.assertEqual(predictions[0]["direct_answer_protocol_recovery"]["status"], "recovered")
+        self.assertNotIn("initial_completion", predictions[0]["direct_answer_protocol_recovery"])
+
+    @mock.patch("infergrade.gguf.infer_llama_cpp_architecture", return_value="gemma4")
+    def test_mmlu_protocol_canary_fails_fast_when_recovery_cannot_emit_answer(self, _architecture_mock):
+        class _BrokenAdapter(object):
+            def __init__(self):
+                self.calls = 0
+
+            def generate_text(self, request, prompt, max_tokens):
+                self.calls += 1
+                return {
+                    "text": "<|channel|>analysis only",
+                    "status": "completed",
+                    "output_tokens": max_tokens,
+                    "token_budget_exhausted": True,
+                }
+
+        adapter = _BrokenAdapter()
+        request = RunRequest(
+            model="google/gemma-4-12b",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="reasoning",
+            benchmark_check_ids=["mmlu_pro_reference_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        cases = [
+            {"case_id": "mmlu/1", "task_id": "mmlu/1", "prompt": "Question one"},
+            {"case_id": "mmlu/2", "task_id": "mmlu/2", "prompt": "Question two"},
+        ]
+
+        predictions = _generate_predictions(
+            adapter,
+            request,
+            CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"],
+            cases,
+        )
+
+        self.assertEqual(adapter.calls, 2)
+        self.assertEqual(len(predictions), 1)
+        self.assertEqual(predictions[0]["direct_answer_protocol_recovery"]["status"], "failed")
 
     def test_mmlu_dominant_malformed_output_is_quarantined_from_capability_score(self):
         def fake_prepare(spec, benchmark_dir, tier):
@@ -1665,7 +1751,7 @@ class CapabilityTests(unittest.TestCase):
                     }
                     for index in range(4)
                 ],
-                "scoring_policy": "exact_multiple_choice_letter_accuracy_v3",
+                "scoring_policy": "exact_multiple_choice_letter_accuracy_v4",
             }
 
         adapter = mock.Mock()
@@ -1695,14 +1781,15 @@ class CapabilityTests(unittest.TestCase):
         self.assertIsNone(result["primary_metric"]["value"])
         self.assertEqual(result["output_shape_gate"]["status"], "blocked")
         self.assertEqual(result["output_shape_gate"]["strict_primary_metric"]["value"], 0.25)
-        self.assertEqual(result["output_shape_gate"]["runtime_control_token_count"], 4)
-        self.assertEqual(result["output_shape_gate"]["answer_budget_exhaustion_count"], 4)
+        self.assertEqual(adapter.generate_text.call_count, 2)
+        self.assertEqual(result["output_shape_gate"]["runtime_control_token_count"], 1)
+        self.assertEqual(result["output_shape_gate"]["answer_budget_exhaustion_count"], 1)
         artifact_path = execution.artifacts["mmlu_pro_reference_v1"]["capability_run_path"]
         with open(artifact_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)
         self.assertEqual(artifact["summary"]["state"], "not_comparable")
         self.assertIsNone(artifact["summary"]["score"])
-        self.assertEqual(artifact["summary"]["not_comparable_count"], 4)
+        self.assertEqual(artifact["summary"]["not_comparable_count"], 1)
         self.assertTrue(all(task["state"] == "not_comparable" for task in artifact["tasks"]))
         with open(execution.artifacts["_summary"]["capability_summary_path"], "r", encoding="utf-8") as handle:
             capability_summary = json.load(handle)
