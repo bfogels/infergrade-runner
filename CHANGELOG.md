@@ -7,10 +7,17 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.43 (contract 0.3.25)
+
 - Activates production runtime catalog generation 8 with separate exact target
   assertions for upstream llama.cpp b10069 and the Prism Bonsai runtime; this
   metadata update uses the unchanged production root and does not broaden either
   target beyond its recorded model, benchmark, and hardware qualifications.
+- Turns exact specialized-runtime failures into an in-app install-and-retry path
+  while directing unsupported specialized artifacts back to a reviewed Hub
+  alternative instead of guessing runtime equivalence.
+- Classifies model download failures with retry and gated-artifact access
+  guidance instead of exposing raw HTTP or curl errors as the only recovery.
 
 ## 0.3.42 (contract 0.3.25)
 
