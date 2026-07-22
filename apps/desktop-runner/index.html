@@ -43,10 +43,12 @@
 
         <section class="primary-surface" aria-label="Runner readiness">
           <div class="ready-column">
-            <div class="ready-mark" aria-hidden="true">
+            <div class="ready-mark" data-ready-mark data-state="warning" aria-hidden="true">
               <svg viewBox="0 0 96 96">
                 <circle cx="48" cy="48" r="43" fill="none" stroke="currentColor" stroke-width="3" />
-                <path d="m29 50 13 13 27-31" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="7" />
+                <path class="ready-mark-check" d="m29 50 13 13 27-31" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="7" />
+                <path class="ready-mark-warning" d="M48 27v28m0 13h.01" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="7" />
+                <path class="ready-mark-error" d="m34 34 28 28m0-28L34 62" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="7" />
               </svg>
             </div>
             <h2 data-primary-state-title>Connect this machine</h2>
@@ -58,6 +60,7 @@
             </div>
             <div class="primary-actions">
               <button type="button" data-readiness-check>Run readiness check</button>
+              <button type="button" data-repair-pairing>Pair again</button>
               <button type="button" class="button-secondary" data-open-hub data-hub-target="home">Open Hub</button>
             </div>
           </div>
@@ -199,6 +202,7 @@
           </div>
           <div class="assignment-actions">
             <button type="button" data-assignment-start-listening hidden>Start listening</button>
+            <button type="button" data-assignment-install-runtime hidden>Install required runtime</button>
             <button type="button" class="button-secondary" data-open-hub data-hub-target="assignment">Open in Hub</button>
             <button type="button" class="button-secondary" data-view-logs>View logs</button>
           </div>

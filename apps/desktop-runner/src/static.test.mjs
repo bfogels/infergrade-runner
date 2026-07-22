@@ -39,6 +39,7 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.equal(html.includes("Connected to Hub. Backend verified. Waiting for assigned work."), false);
   assert.equal(html.includes("<h3 id=\"backend-title\">Verified on this Mac</h3>"), false);
   assert.ok(html.includes("data-listener-surface"));
+  assert.ok(html.includes("data-repair-pairing"));
   assert.ok(html.includes("Hub listener"));
   assert.ok(html.includes("Listening paused"));
   assert.ok(html.includes("Stop listening"));
@@ -78,6 +79,8 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(js.includes('document.querySelectorAll("[data-start-runner]")'));
   assert.ok(js.includes('document.querySelectorAll("[data-reset-pairing]")'));
   assert.ok(js.includes("setRunnerButtonsDisabled"));
+  assert.ok(js.includes('mockState === "pairing-expired"'));
+  assert.ok(js.includes("applyHubAuthenticationFailure"));
   assert.ok(js.includes('hubUrl.searchParams.set("tab", "setup")'));
   assert.ok(js.includes('hubUrl.searchParams.set("tab", "runs")'));
   assert.ok(js.includes('hubUrl.searchParams.set("run_id", currentAssignmentRunId)'));
@@ -413,6 +416,7 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.equal(html.includes("Leave blank to use the selected llama.cpp runtime"), false);
   assert.ok(html.includes("data-assignment-progress-bar"));
   assert.ok(html.includes("data-assignment-start-listening"));
+  assert.ok(html.includes("data-assignment-install-runtime"));
   assert.ok(js.includes("assignmentTitleFromRunId"));
   assert.ok(js.includes("waitingForListener: !childProcess"));
   assert.ok(js.includes('assignmentTime.textContent = "Not started"'));
@@ -426,6 +430,9 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("Runner claimed Hub-assigned work and is preparing local execution."));
   assert.ok(js.includes("Handoff received"));
   assert.ok(js.includes("Start listening to claim this run"));
+  assert.ok(js.includes("install_required_runtime_catalog_target"));
+  assert.ok(js.includes("Specialized runtime required"));
+  assert.ok(rust.includes("engine_install_active_runtime_catalog_target"));
   assert.ok(js.includes("currentHandoffRunId"));
   assert.equal(js.includes("Waiting for local runtime and model readiness"), false);
   assert.ok(js.includes('payload.type === "assignment_update" || payload.type === "assignment_idle"'));

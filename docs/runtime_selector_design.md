@@ -158,6 +158,11 @@ Fallbacks must be explicit and non-silent:
   create a new attempt lock. Resume always reuses the saved lock. After
   measurement starts, another runtime requires a new attempt rather than an
   in-place selector update.
+- When the active signed catalog contains a valid exact-artifact assertion and
+  that immutable build is already installed, Runner binds that build for the
+  run without changing the user's global runtime preference. If it is not
+  installed, Runner names the exact catalog target and requires explicit
+  download consent; it does not try the globally selected general runtime.
 
 ## Exact Runtime Receipt
 

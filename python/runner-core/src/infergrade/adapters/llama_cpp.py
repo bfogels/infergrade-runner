@@ -439,7 +439,7 @@ class LlamaCppAdapter(BaseAdapter):
         ):
             raise RuntimeError(
                 "Qwen3.6 direct-answer generation requires the local_native llama-server chat path so "
-                "InferGrade can pass chat_template_kwargs.enable_thinking=false. The /no_think prompt "
+                "InferGrade can pass chat_template_kwargs.enable_thinking=false plus thinking_budget_tokens=0. The /no_think prompt "
                 "switch used by older Qwen models is not valid evidence for Qwen3.6."
             )
         if (
@@ -2040,7 +2040,10 @@ def _stream_server_chat_completion(base_url: str, messages: List[Dict[str, str]]
         "stream": True,
         "cache_prompt": False,
         "chat_template_kwargs": {"enable_thinking": False},
+        "thinking_budget_tokens": 0,
     }
+    if _uses_mmlu_choice_grammar(messages):
+        payload["grammar"] = "root ::= [A-J]"
     request = urllib_request.Request(
         "%s/v1/chat/completions" % base_url,
         data=json.dumps(payload).encode("utf-8"),
@@ -2257,9 +2260,9 @@ def _prepare_llama_server_chat(
     if not (architecture.startswith("qwen3") or architecture == "gemma4"):
         return None, None
     transform_id = (
-        "gemma4_chat_template_disable_thinking_v1"
+        "gemma4_chat_template_disable_thinking_v2"
         if architecture == "gemma4"
-        else "qwen_chat_template_disable_thinking_v1"
+        else "qwen_chat_template_disable_thinking_v2"
     )
     raw = str(prompt or "")
     assistant_marker = "\nAssistant:"
@@ -2269,12 +2272,15 @@ def _prepare_llama_server_chat(
     if user_index < 0 or assistant_index < 0 or user_index >= assistant_index:
         if not raw.strip():
             raise RuntimeError("Direct-answer prompt is empty")
-        return [{"role": "user", "content": raw.strip()}], {
+        transform = {
             "id": transform_id,
             "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
-            "state": "chat_template_enable_thinking_false_single_user_prompt",
+            "state": "chat_template_disable_thinking_with_zero_budget_single_user_prompt",
             "placement": "structured_messages",
         }
+        if _is_mmlu_choice_prompt(raw):
+            transform["generation_constraint"] = "mmlu_choice_a_j_grammar_v1"
+        return [{"role": "user", "content": raw.strip()}], transform
     system_content = raw[:user_index].strip()
     user_content = raw[user_index + len(user_marker) : assistant_index].strip()
     if not user_content:
@@ -2286,9 +2292,25 @@ def _prepare_llama_server_chat(
     return messages, {
         "id": transform_id,
         "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
-        "state": "chat_template_enable_thinking_false",
+        "state": "chat_template_disable_thinking_with_zero_budget",
         "placement": "structured_messages",
     }
+
+
+def _is_mmlu_choice_prompt(prompt: str) -> bool:
+    text = str(prompt or "")
+    return (
+        "Answer the following multiple-choice question." in text
+        and "Final answer letter:" in text
+        and "\nA. " in text
+    )
+
+
+def _uses_mmlu_choice_grammar(messages: List[Dict[str, str]]) -> bool:
+    return any(
+        message.get("role") == "user" and _is_mmlu_choice_prompt(str(message.get("content") or ""))
+        for message in messages
+    )
 
 
 def _infer_llama_cpp_architecture(request: RunRequest) -> Optional[str]:

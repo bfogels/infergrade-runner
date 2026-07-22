@@ -414,7 +414,7 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertEqual(summary["metrics"]["invalid_count"], 0)
         self.assertEqual(summary["metrics"]["correct_count"], 25)
         self.assertEqual(summary["primary_metric"], {"name": "accuracy", "value": 1.0})
-        self.assertEqual(summary["scoring_policy"], "exact_multiple_choice_letter_accuracy_v3")
+        self.assertEqual(summary["scoring_policy"], "exact_multiple_choice_letter_accuracy_v4")
 
     def test_mmlu_pro_terminal_normalization_does_not_hide_extra_output(self):
         module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
@@ -425,6 +425,10 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertIsNone(module._prediction_letter("<think>reasoning</think>\nB [end of text]"))
         self.assertIsNone(module._prediction_letter("B extra output [end of text]"))
         self.assertIsNone(module._prediction_letter("[end of text] B"))
+        self.assertEqual(
+            module._prediction_letter("Reasoning remains visible. Final answer letter: B"),
+            "B",
+        )
 
     def test_mmlu_pro_all_malformed_completed_predictions_score_zero(self):
         module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")

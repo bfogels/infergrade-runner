@@ -363,7 +363,11 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
 def _request_from_args(args: argparse.Namespace):
     """Resolve a RunRequest from either a request file or direct CLI flags."""
     if args.request_file:
-        return request_from_file(args.request_file, simulate=not args.real_run)
+        request = request_from_file(args.request_file, simulate=not args.real_run)
+        request.resume = bool(args.resume)
+        if args.output:
+            request.output_dir = args.output
+        return request
     missing = [name for name in ("model", "backend", "tier") if getattr(args, name) is None]
     if missing:
         raise SystemExit("Missing required arguments for run: %s" % ", ".join(missing))

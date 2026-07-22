@@ -30,6 +30,7 @@ CODING_STATIC_REPAIR_FIXTURE_REVISION = "2026-05-coding-static-preview"
 REASONING_EXACT_ANSWER_FIXTURE_REVISION = "2026-05-reasoning-exact-preview"
 _DOMINANT_GENERATION_FAILURE_RATE = 0.5
 _DOMINANT_MALFORMED_OUTPUT_RATE = 0.5
+_DIRECT_ANSWER_RECOVERY_MAX_TOKENS = 512
 _RUNTIME_CONTROL_TOKEN = re.compile(
     r"(?:<\|(?:channel|turn|think|start|end)[^>]*\|?>|<channel\|>|<\|channel>)",
     re.IGNORECASE,
@@ -40,6 +41,15 @@ _CODE_FENCE = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 _CODE_FENCE_MARKER = re.compile(r"^[ \t]*```", re.MULTILINE)
+_MMLU_ANSWER = re.compile(
+    r"(?:\bfinal\s+answer\s+letter\s*:\s*[A-J]\b|\b(?:answer|option|choice)\s*(?:is|:)?\s*\(?[A-J]\)?\b|^\s*\(?[A-J]\)?(?:[\).:]|\s*$))",
+    re.IGNORECASE,
+)
+_MMLU_TERMINAL_MARKER = re.compile(
+    r"(?:\[end of text\]|<\|end_of_text\|>|<\|endoftext\|>|</s>)\s*$",
+    re.IGNORECASE,
+)
+_MMLU_EMPTY_THINK_PREFIX = re.compile(r"^\s*<think>\s*</think>\s*", re.IGNORECASE)
 
 
 def _released_capability_image(image_name: str) -> str:
@@ -1515,7 +1525,7 @@ def _write_mmlu_pro_capability_run_artifact(
             "fixture_revision": str(metadata.get("sample_policy") or "mmlu_pro_snapshot"),
             "dataset_revision": metadata.get("dataset_revision"),
             "scorer_type": "multiple_choice",
-            "scoring_policy": summary.get("scoring_policy") or "exact_multiple_choice_letter_accuracy_v3",
+            "scoring_policy": summary.get("scoring_policy") or "exact_multiple_choice_letter_accuracy_v4",
             "repetitions": 1,
             "sample_policy": metadata.get("sample_policy"),
             "category_count": metadata.get("category_count"),
@@ -2074,6 +2084,11 @@ def _case_checkpoint_fingerprint(
                 "execution_mode": spec.execution_mode,
                 "container_image": spec.container_image,
                 "container_args": list(spec.container_args),
+                "generation_protocol": (
+                    "mmlu_choice_a_j_grammar_v1"
+                    if spec.benchmark_id == "mmlu_pro_reference_v1"
+                    else "default_generation_v1"
+                ),
             },
             "cases": cases,
         },
@@ -2173,6 +2188,38 @@ def remove_capability_case_checkpoints(output_dir: str) -> int:
     return removed
 
 
+def _mmlu_completion_has_answer_shape(value: Any) -> bool:
+    """Mirror the scorer's accepted answer shapes for recovery decisions only."""
+    text = str(value or "").strip()
+    while text and _MMLU_TERMINAL_MARKER.search(text):
+        text = _MMLU_TERMINAL_MARKER.sub("", text).rstrip()
+    text = _MMLU_EMPTY_THINK_PREFIX.sub("", text, count=1)
+    return bool(_MMLU_ANSWER.search(text))
+
+
+def _direct_answer_recovery_reason(spec: CapabilityBenchmarkSpec, generated: Dict[str, Any]) -> Optional[str]:
+    if spec.benchmark_id != "mmlu_pro_reference_v1" or generated.get("status", "completed") != "completed":
+        return None
+    text = str(generated.get("text") or "")
+    if _mmlu_completion_has_answer_shape(text):
+        return None
+    if _RUNTIME_CONTROL_TOKEN.search(text):
+        return "runtime_control_tokens_before_answer"
+    if generated.get("token_budget_exhausted") is True:
+        return "answer_budget_exhausted"
+    output_tokens = generated.get("output_tokens")
+    if isinstance(output_tokens, int) and output_tokens >= spec.generation_max_tokens:
+        return "answer_budget_exhausted"
+    return "model_specific_template_shape_mismatch"
+
+
+def _supports_direct_answer_recovery(request: RunRequest) -> bool:
+    from infergrade.gguf import infer_llama_cpp_architecture
+
+    architecture = str(infer_llama_cpp_architecture(request) or "")
+    return architecture.startswith(("qwen35", "qwen36")) or architecture == "gemma4"
+
+
 def _generate_predictions(
     adapter,
     request: RunRequest,
@@ -2189,11 +2236,17 @@ def _generate_predictions(
     else:
         _initialize_case_checkpoint(checkpoint_path, checkpoint_fingerprint, spec, total_cases)
         completed_checkpoint = {}
+    adaptive_max_tokens = spec.generation_max_tokens
+    protocol_canary_complete = spec.benchmark_id != "mmlu_pro_reference_v1"
     for index, case in enumerate(cases, start=1):
         case_id = case.get("case_id") or case.get("task_id") or stable_hash(case, length=12)
         checkpoint_prediction = completed_checkpoint.get(str(case_id))
         if checkpoint_prediction is not None:
             predictions.append(checkpoint_prediction)
+            recovery = checkpoint_prediction.get("direct_answer_protocol_recovery") or {}
+            if recovery.get("status") == "recovered":
+                adaptive_max_tokens = int(recovery.get("effective_max_tokens") or adaptive_max_tokens)
+                protocol_canary_complete = True
             if progress_callback:
                 progress_callback(
                     {
@@ -2213,13 +2266,36 @@ def _generate_predictions(
         normalization = None
         generation_failure_kind = None
         raw_completion = None
+        protocol_recovery = None
         try:
             generation_prompt = _generation_prompt_for_case(spec, case)
             generated = adapter.generate_text(
                 request=request,
                 prompt=generation_prompt,
-                max_tokens=spec.generation_max_tokens,
+                max_tokens=adaptive_max_tokens,
             )
+            if not protocol_canary_complete and _supports_direct_answer_recovery(request):
+                recovery_reason = _direct_answer_recovery_reason(spec, generated)
+                if recovery_reason:
+                    initial = dict(generated)
+                    generated = adapter.generate_text(
+                        request=request,
+                        prompt=generation_prompt,
+                        max_tokens=_DIRECT_ANSWER_RECOVERY_MAX_TOKENS,
+                    )
+                    recovered = _direct_answer_recovery_reason(spec, generated) is None
+                    protocol_recovery = {
+                        "policy_id": "direct_answer_protocol_recovery_v1",
+                        "status": "recovered" if recovered else "failed",
+                        "reason": recovery_reason,
+                        "initial_max_tokens": adaptive_max_tokens,
+                        "effective_max_tokens": _DIRECT_ANSWER_RECOVERY_MAX_TOKENS,
+                        "initial_completion_sha256": stable_hash(str(initial.get("text") or ""), length=64),
+                        "initial_output_tokens": initial.get("output_tokens"),
+                    }
+                    if recovered:
+                        adaptive_max_tokens = _DIRECT_ANSWER_RECOVERY_MAX_TOKENS
+                protocol_canary_complete = True
             text = generated.get("text", "")
             status = generated.get("status", "completed")
             error = generated.get("error")
@@ -2251,6 +2327,8 @@ def _generate_predictions(
             record["generation_failure_kind"] = generation_failure_kind
         if generated.get("prompt_transform"):
             record["generation_prompt_transform"] = generated["prompt_transform"]
+        if protocol_recovery:
+            record["direct_answer_protocol_recovery"] = protocol_recovery
         if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:
             record["benchmark_prompt_transform"] = "evalplus_code_only_v1"
             record["raw_completion"] = raw_completion
@@ -2263,6 +2341,15 @@ def _generate_predictions(
             record["completion"] = text
         _append_case_checkpoint(checkpoint_path, record)
         predictions.append(record)
+        if (
+            spec.benchmark_id == "mmlu_pro_reference_v1"
+            and record.get("direct_answer_protocol_recovery", {}).get("status") == "failed"
+        ):
+            # One failed, model-specific protocol canary is sufficient to
+            # quarantine this run. Do not spend hundreds of generations on a
+            # template/budget combination already proven unable to emit an
+            # answer shape the scorer can consume.
+            break
         if progress_callback:
             progress_callback(
                 {

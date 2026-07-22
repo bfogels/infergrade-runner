@@ -7,6 +7,36 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.42 (contract 0.3.25)
+
+- Validates a direct-answer protocol on the first MMLU-Pro case, retries
+  affected Gemma 4 and Qwen 3.5/3.6 models with a recorded 512-token answer
+  budget, and stops early when the recovered protocol still cannot emit a
+  scoreable answer shape.
+- Constrains MMLU-Pro chat generation to one A-J option letter on compatible
+  llama.cpp servers, preventing reasoning text from consuming the answer
+  budget while retaining the recorded recovery path for compatibility.
+- Accepts the prompt-requested `Final answer letter: X` terminal shape under
+  scoring policy `exact_multiple_choice_letter_accuracy_v4` while preserving
+  strict malformed-output quarantine on unconstrained compatibility paths.
+- Requalifies the exact Gemma 4 12B Q4_K_M artifact at standard depth with
+  zero malformed MMLU-Pro outputs; the earlier 295/300-format-miss result stays
+  quarantined rather than being reused as capability evidence.
+- Resolves an installed signed-catalog runtime by exact artifact assertion for
+  each run without mutating the user's global runtime preference.
+- Offers a one-click Desktop install when an assigned model needs an absent
+  exact signed-catalog runtime, then binds that runtime on retry.
+- Stages the official Prism Bonsai macOS runtime as an exact-artifact candidate
+  after a receipt-bound standard-depth Q1_0 run passed all 100 output-shape
+  checks; the staged source remains inactive until a complete signed catalog
+  generation is reviewed and atomically promoted.
+- Honors `--resume` and `--output` when `infergrade run` reads a request file,
+  so checkpointed long runs can continue instead of restarting.
+- Detects expired or revoked Hub pairing while listening, stops the stale
+  listener, and offers an in-app re-pair action instead of leaving the Desktop
+  Runner in a misleading connected state.
+- Publishes contract 0.3.25 for the revised MMLU-Pro scoring identity.
+
 ## 0.3.41 (contract 0.3.24)
 
 - Publishes Desktop artifacts through draft-first, immutable `vX.Y.Z` GitHub

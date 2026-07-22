@@ -7,6 +7,7 @@ import {
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
+  hubAuthenticationFailure,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
   shouldClearCompletedHandoff,
@@ -57,6 +58,7 @@ const checkUpdateButton = document.querySelector("[data-check-update]");
 const installUpdateButton = document.querySelector("[data-install-update]");
 const relaunchUpdateButton = document.querySelector("[data-relaunch-update]");
 const readinessCheckButton = document.querySelector("[data-readiness-check]");
+const repairPairingButton = document.querySelector("[data-repair-pairing]");
 const openHubButtons = [...document.querySelectorAll("[data-open-hub]")];
 const viewLogsButton = document.querySelector("[data-view-logs]");
 const appVersion = document.querySelector("[data-app-version]");
@@ -85,13 +87,16 @@ const tokenState = document.querySelector("[data-token-state]");
 const logOutput = document.querySelector("[data-log-output]");
 const primaryStateTitle = document.querySelector("[data-primary-state-title]");
 const primaryStateMessage = document.querySelector("[data-primary-state-message]");
+const readyMark = document.querySelector("[data-ready-mark]");
 const hubUrlDisplay = document.querySelector("[data-hub-url-display]");
 const readinessFacts = new Map(
   [...document.querySelectorAll("[data-readiness-fact]")].map((node) => [node.dataset.readinessFact, node])
 );
 const backendRuntimeStatus = document.querySelector("[data-backend-runtime-status]");
 const backendTokenStatus = document.querySelector("[data-backend-token-status]");
+const backendTokenRow = document.querySelector('[data-backend-row="token"]');
 const backendReconnectStatus = document.querySelector("[data-backend-reconnect-status]");
+const backendReconnectRow = document.querySelector('[data-backend-row="reconnect"]');
 const backendContainerStatus = document.querySelector("[data-backend-container-status]");
 const backendTitle = document.querySelector("[data-backend-title]");
 const backendPlatformStatus = document.querySelector("[data-backend-platform-status]");
@@ -111,6 +116,7 @@ const assignmentTime = document.querySelector("[data-assignment-time]");
 const assignmentProgressBar = document.querySelector("[data-assignment-progress-bar]");
 const assignmentCheck = document.querySelector("[data-assignment-check]");
 const assignmentStartListeningButton = document.querySelector("[data-assignment-start-listening]");
+const assignmentInstallRuntimeButton = document.querySelector("[data-assignment-install-runtime]");
 
 let childProcess = null;
 let logLines = [];
@@ -138,9 +144,12 @@ let assignmentClockTimer = null;
 let currentAssignmentRemaining = "";
 let currentAssignmentRunId = "";
 let currentAssignmentPhase = "idle";
+let pendingRequiredRuntime = null;
 let currentHandoffRunId = "";
 let currentHandoffWorkerId = "";
 let previewStateApplied = false;
+let pairingAuthFailure = null;
+let currentStatusTone = "idle";
 
 function systemTheme() {
   if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
@@ -270,13 +279,22 @@ function renderPrimaryReadiness() {
     listening,
     runtimeAvailable: llamaRuntimeAvailable,
     hubVerified: hubConnectionVerified,
+    authFailure: pairingAuthFailure,
   });
   document.documentElement.dataset.paired = paired ? "true" : "false";
   document.documentElement.dataset.listening = listening ? "true" : "false";
+  document.documentElement.dataset.pairingRepair = pairingAuthFailure?.invalid ? "true" : "false";
   renderHubDisplay();
   setReadinessFact("hub", presentation.hubFact, presentation.hubFactState);
   setReadinessFact("runtime", llamaRuntimeAvailable ? "Metal ready" : "Runtime check needed", llamaRuntimeAvailable ? "ready" : "warning");
-  setReadinessFact("token", savedTokenAvailable ? "Token secure" : "Token missing", savedTokenAvailable ? "ready" : "blocked");
+  setReadinessFact(
+    "token",
+    pairingAuthFailure?.invalid ? "Pair again" : savedTokenAvailable ? "Token secure" : "Token missing",
+    pairingAuthFailure?.invalid || !savedTokenAvailable ? "blocked" : "ready"
+  );
+  if (readyMark) {
+    readyMark.dataset.state = presentation.ready ? "ready" : currentStatusTone === "error" ? "error" : "warning";
+  }
   if (primaryStateTitle) {
     primaryStateTitle.textContent = presentation.title;
   }
@@ -287,7 +305,9 @@ function renderPrimaryReadiness() {
     listenerTitle.textContent = listening ? "Listening for Hub" : "Listening paused";
   }
   if (listenerMessage) {
-    listenerMessage.textContent = listening
+    listenerMessage.textContent = pairingAuthFailure?.invalid
+      ? "Pair this machine again before it can accept Hub-assigned work."
+      : listening
       ? "This machine can receive Hub-assigned runs. Keep the app open while work is active."
       : "Pairing is saved. Start listening when this machine should accept Hub-assigned work.";
   }
@@ -298,10 +318,16 @@ function renderPrimaryReadiness() {
     backendRuntimeStatus.textContent = llamaRuntimeAvailable ? "ready" : "check";
   }
   if (backendTokenStatus) {
-    backendTokenStatus.textContent = savedTokenAvailable ? "secure" : "missing";
+    backendTokenStatus.textContent = pairingAuthFailure?.invalid ? "expired" : savedTokenAvailable ? "secure" : "missing";
+  }
+  if (backendTokenRow) {
+    backendTokenRow.dataset.state = pairingAuthFailure?.invalid ? "error" : savedTokenAvailable ? "ready" : "warning";
   }
   if (backendReconnectStatus) {
-    backendReconnectStatus.textContent = paired ? "ready" : "after pair";
+    backendReconnectStatus.textContent = pairingAuthFailure?.invalid ? "blocked" : paired ? "ready" : "after pair";
+  }
+  if (backendReconnectRow) {
+    backendReconnectRow.dataset.state = pairingAuthFailure?.invalid ? "error" : "";
   }
   if (backendContainerStatus) {
     const lowered = containerRuntimeReadiness.toLowerCase();
@@ -368,6 +394,7 @@ function formatBytes(value = 0) {
 }
 
 function renderAssignmentIdle() {
+  pendingRequiredRuntime = null;
   if (!assignmentPanel) {
     return;
   }
@@ -391,6 +418,9 @@ function renderAssignmentIdle() {
   }
   if (assignmentStartListeningButton) {
     assignmentStartListeningButton.hidden = true;
+  }
+  if (assignmentInstallRuntimeButton) {
+    assignmentInstallRuntimeButton.hidden = true;
   }
 }
 
@@ -449,6 +479,9 @@ function renderAssignmentActive({
   }
   if (assignmentStartListeningButton) {
     assignmentStartListeningButton.hidden = !waitingForListener;
+  }
+  if (assignmentInstallRuntimeButton) {
+    assignmentInstallRuntimeButton.hidden = !pendingRequiredRuntime;
   }
   if (assignmentCheck) {
     assignmentCheck.hidden = !checkName;
@@ -513,6 +546,13 @@ function applyPreviewStateFromUrl() {
     setRunnerButtonsDisabled("start", false);
     setRunnerButtonsDisabled("stop", true);
     setStatus("Pairing needed", "warning");
+  } else if (mockState === "pairing-expired") {
+    savedTokenAvailable = true;
+    runnerProfileAvailable = true;
+    childProcess = null;
+    llamaRuntimeAvailable = true;
+    applyHubAuthenticationFailure("runner_token_expired");
+    setStatus(pairingAuthFailure?.title || "Pairing expired", "error");
   } else if (mockAssignment === "paused") {
     savedTokenAvailable = true;
     runnerProfileAvailable = true;
@@ -694,12 +734,16 @@ function renderLocalReadinessChecklist() {
     nativeSuiteStatus.textContent = nativeSuiteReadiness;
   }
   if (hubConnectionStatus) {
-    hubConnectionStatus.textContent = hubConnectionVerified
-      ? `Verified: ${lastNormalizedApiUrl}`
-      : `Not yet verified: ${lastNormalizedApiUrl}`;
+    hubConnectionStatus.textContent = pairingAuthFailure?.invalid
+      ? `${pairingAuthFailure.title}: ${lastNormalizedApiUrl}`
+      : hubConnectionVerified
+        ? `Verified: ${lastNormalizedApiUrl}`
+        : `Not yet verified: ${lastNormalizedApiUrl}`;
   }
   if (pairingReadinessStatus) {
-    if (childProcess) {
+    if (pairingAuthFailure?.invalid) {
+      pairingReadinessStatus.textContent = `${pairingAuthFailure.title}. Pair this machine again to restore Hub access.`;
+    } else if (childProcess) {
       pairingReadinessStatus.textContent = "Paired and listening for Hub runs.";
     } else if (savedTokenAvailable && runnerProfileAvailable) {
       pairingReadinessStatus.textContent = savedTokenAvailable && runnerProfileAvailable
@@ -1019,6 +1063,7 @@ async function runReadinessCheck() {
     await checkDesktopReadiness();
     await inspectRuntimePlan();
     await verifyHubConnection();
+    pairingAuthFailure = null;
     await reconcileCurrentHandoff();
     lastReadinessCheckAt = new Date();
     if (llamaRuntimeAvailable) {
@@ -1029,9 +1074,12 @@ async function runReadinessCheck() {
       appendLog("Readiness check reached Hub, but a usable llama.cpp runtime is still required.");
     }
   } catch (error) {
-    setStatus("Needs attention", "error");
+    const authFailure = applyHubAuthenticationFailure(error);
+    setStatus(authFailure ? pairingAuthFailure?.title || "Pairing expired" : "Needs attention", "error");
     appendLog(`Readiness check failed: ${error.message || error}`);
-    throw error;
+    if (!authFailure) {
+      throw error;
+    }
   } finally {
     if (readinessCheckButton) {
       readinessCheckButton.disabled = false;
@@ -1061,6 +1109,7 @@ async function verifyHubConnection() {
     throw new Error("Hub did not confirm Runner registration and heartbeat.");
   }
   hubConnectionVerified = true;
+  pairingAuthFailure = null;
   if (pairingReadinessStatus) {
     pairingReadinessStatus.textContent = "Pairing and authenticated Hub access verified.";
   }
@@ -1317,6 +1366,7 @@ async function updateTokenState() {
 }
 
 function setStatus(status, tone = "idle") {
+  currentStatusTone = tone;
   if (statusText) {
     statusText.textContent = status;
   }
@@ -1324,6 +1374,24 @@ function setStatus(status, tone = "idle") {
     statusDot.dataset.tone = tone;
   }
   renderPrimaryReadiness();
+}
+
+function applyHubAuthenticationFailure(error) {
+  const failure = hubAuthenticationFailure(error?.message || error);
+  if (!failure.invalid) {
+    return false;
+  }
+  pairingAuthFailure = failure;
+  hubConnectionVerified = false;
+  setRunnerButtonsDisabled("start", true);
+  if (pairingReadinessStatus) {
+    pairingReadinessStatus.textContent = `${failure.title}. Pair this machine again to restore Hub access.`;
+  }
+  if (tokenState) {
+    tokenState.textContent = `${failure.title}. The saved token can no longer authenticate this machine.`;
+  }
+  renderLocalReadinessChecklist();
+  return true;
 }
 
 function redactSecrets(message) {
@@ -1448,8 +1516,13 @@ function renderAssignmentFromListenerLine(line = "") {
   if (!trimmed) {
     return false;
   }
+  if (applyHubAuthenticationFailure(trimmed)) {
+    setStatus(pairingAuthFailure?.title || "Pairing expired", "error");
+    return true;
+  }
   const claimed = trimmed.match(/^Claimed run ([^\.\s]+)\.?/);
   if (claimed) {
+    pendingRequiredRuntime = null;
     const runId = claimed[1];
     renderAssignmentActive({
       title: assignmentTitleFromRunId(runId),
@@ -1465,12 +1538,18 @@ function renderAssignmentFromListenerLine(line = "") {
   const failed = trimmed.match(/^Run ([^\.\s]+) failed: (.+)$/);
   if (failed) {
     const runId = failed[1];
+    const runtimeMatch = failed[2].match(/requires exact runtime target '([^']+)' \(runtime build ([0-9a-f]{64})\)/i);
+    pendingRequiredRuntime = runtimeMatch
+      ? { targetName: runtimeMatch[1], runtimeBuildId: runtimeMatch[2].toLowerCase() }
+      : null;
     renderAssignmentActive({
       title: assignmentTitleFromRunId(runId),
       phase: "Needs attention",
-      description: failed[2],
+      description: pendingRequiredRuntime
+        ? `This model needs a reviewed specialized runtime (${pendingRequiredRuntime.runtimeBuildId.slice(0, 12)}…). Install it here, then retry the benchmark from Hub.`
+        : failed[2],
       progress: 100,
-      checkName: "See logs for recovery detail",
+      checkName: pendingRequiredRuntime ? "Specialized runtime required" : "See logs for recovery detail",
       runId,
     });
     setStatus("Needs attention", "error");
@@ -1746,6 +1825,38 @@ async function installManagedRuntime({ reinstall = false } = {}) {
   llamaRuntimeAvailable = true;
   renderLocalReadinessChecklist();
   appendLog(`Installed managed llama.cpp runtime: ${JSON.stringify(result)}`);
+  return result;
+}
+
+async function installRequiredCatalogRuntime() {
+  if (!pendingRequiredRuntime) {
+    return null;
+  }
+  const required = { ...pendingRequiredRuntime };
+  assignmentInstallRuntimeButton.disabled = true;
+  llamaRuntimeReadiness = `Installing reviewed specialized runtime ${required.runtimeBuildId.slice(0, 12)}…`;
+  renderLocalReadinessChecklist();
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    throw new Error("Open the desktop app to install the required runtime.");
+  }
+  const result = await invoke("install_required_runtime_catalog_target", {
+    targetName: required.targetName,
+    consentRuntimeBuildId: required.runtimeBuildId,
+  });
+  pendingRequiredRuntime = null;
+  llamaRuntimeReadiness = managedRuntimeInstallSummary(result);
+  llamaRuntimeAvailable = true;
+  renderLocalReadinessChecklist();
+  renderAssignmentActive({
+    title: assignmentTitleFromRunId(currentAssignmentRunId),
+    phase: "Ready to retry",
+    description: "The required runtime is installed. Retry this benchmark from Hub; Runner will bind it automatically for this model.",
+    progress: 100,
+    checkName: "Specialized runtime ready",
+    runId: currentAssignmentRunId,
+  });
+  appendLog(`Installed required signed-catalog runtime: ${JSON.stringify(result)}`);
   return result;
 }
 
@@ -2154,6 +2265,7 @@ async function pairRunner() {
   pairState.textContent = "Redeeming pairing code...";
   try {
     hubConnectionVerified = false;
+    pairingAuthFailure = null;
     const output = await invoke("redeem_runner_pairing", {
       apiUrl,
       pairCode,
@@ -2195,6 +2307,8 @@ async function resetPairing() {
   }
   form.elements.pairCode.value = "";
   hubConnectionVerified = false;
+  pairingAuthFailure = null;
+  setRunnerButtonsDisabled("start", false);
   const invoke = await loadTauriInvoke();
   if (invoke) {
     const payload = await invoke("reset_runner_pairing");
@@ -2357,17 +2471,28 @@ resetPairingButtons.forEach((button) => button.addEventListener("click", () => {
 
 startButtons.forEach((button) => button.addEventListener("click", () => {
   startRunner().catch((error) => {
-    setStatus("Failed", "error");
-    setRunnerButtonsDisabled("start", false);
+    const authFailure = applyHubAuthenticationFailure(error);
+    setStatus(authFailure ? pairingAuthFailure?.title || "Pairing expired" : "Failed", "error");
+    setRunnerButtonsDisabled("start", authFailure);
     setRunnerButtonsDisabled("stop", true);
     appendLog(`Could not start Runner: ${error.message || error}`);
   });
 }));
 
+repairPairingButton?.addEventListener("click", () => {
+  resetPairing()
+    .then(() => openHub("setup"))
+    .catch((error) => {
+      setStatus("Pairing reset failed", "error");
+      appendLog(`Could not prepare pairing recovery: ${error.message || error}`);
+    });
+});
+
 assignmentStartListeningButton?.addEventListener("click", () => {
   startRunner().catch((error) => {
-    setStatus("Failed", "error");
-    setRunnerButtonsDisabled("start", false);
+    const authFailure = applyHubAuthenticationFailure(error);
+    setStatus(authFailure ? pairingAuthFailure?.title || "Pairing expired" : "Failed", "error");
+    setRunnerButtonsDisabled("start", authFailure);
     setRunnerButtonsDisabled("stop", true);
     appendLog(`Could not start Runner: ${error.message || error}`);
   });
@@ -2405,6 +2530,17 @@ runtimeInstallManagedButton?.addEventListener("click", () => {
     })
     .finally(() => {
       setRuntimeActionDisabled(false);
+    });
+});
+
+assignmentInstallRuntimeButton?.addEventListener("click", () => {
+  installRequiredCatalogRuntime()
+    .catch((error) => {
+      setStatus("Required runtime install failed", "error");
+      appendLog(`Could not install required signed-catalog runtime: ${error.message || error}`);
+    })
+    .finally(() => {
+      assignmentInstallRuntimeButton.disabled = false;
     });
 });
 
