@@ -2084,6 +2084,11 @@ def _case_checkpoint_fingerprint(
                 "execution_mode": spec.execution_mode,
                 "container_image": spec.container_image,
                 "container_args": list(spec.container_args),
+                "generation_protocol": (
+                    "mmlu_choice_a_j_grammar_v1"
+                    if spec.benchmark_id == "mmlu_pro_reference_v1"
+                    else "default_generation_v1"
+                ),
             },
             "cases": cases,
         },

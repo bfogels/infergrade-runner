@@ -11,6 +11,9 @@ incremental changes only — see the git history.
   affected Gemma 4 and Qwen 3.5/3.6 models with a recorded 512-token answer
   budget, and stops early when the recovered protocol still cannot emit a
   scoreable answer shape.
+- Constrains MMLU-Pro chat generation to one A-J option letter on compatible
+  llama.cpp servers, preventing reasoning text from consuming the answer
+  budget while retaining the recorded recovery path for compatibility.
 - Accepts the prompt-requested `Final answer letter: X` terminal shape under
   scoring policy `exact_multiple_choice_letter_accuracy_v4` while preserving
   visible reasoning and strict malformed-output quarantine.

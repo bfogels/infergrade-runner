@@ -671,6 +671,22 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(transform["id"], "qwen_chat_template_disable_thinking_v2")
         self.assertEqual(transform["placement"], "structured_messages")
 
+    def test_qwen3_mmlu_chat_records_choice_grammar_constraint(self):
+        request = RunRequest(
+            model="Qwen/Qwen3-4B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="standard",
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        messages, transform = _prepare_llama_server_chat(
+            request,
+            "Answer the following multiple-choice question.\n\nQuestion: 2 + 2?\n\nA. 3\nB. 4\n\nFinal answer letter:",
+        )
+
+        self.assertEqual(transform["generation_constraint"], "mmlu_choice_a_j_grammar_v1")
+        self.assertEqual(messages[0]["role"], "user")
+
     def test_server_command_requests_runtime_memory_telemetry(self):
         request = RunRequest(
             model="google/gemma-4-E4B-it",
@@ -811,6 +827,29 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertFalse(sent["cache_prompt"])
         self.assertEqual(sent["chat_template_kwargs"], {"enable_thinking": False})
         self.assertEqual(sent["thinking_budget_tokens"], 0)
+        self.assertNotIn("grammar", sent)
+
+    @mock.patch("infergrade.adapters.llama_cpp.urllib_request.urlopen")
+    def test_stream_chat_completion_constrains_mmlu_to_one_answer_letter(self, urlopen_mock):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.readline.side_effect = [
+            b'data: {"choices":[{"delta":{"content":"B"},"finish_reason":"stop"}]}\n',
+            b'data: [DONE]\n',
+        ]
+        urlopen_mock.return_value = response
+
+        _stream_server_chat_completion(
+            "http://127.0.0.1:8080",
+            [{
+                "role": "user",
+                "content": "Answer the following multiple-choice question.\n\nQuestion: 2 + 2?\n\nA. 3\nB. 4\n\nFinal answer letter:",
+            }],
+            64,
+        )
+
+        sent = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(sent["grammar"], "root ::= [A-J]")
 
     def test_direct_answer_deployment_rejects_empty_but_keeps_visible_fixed_budget_output(self):
         transform = {"id": "qwen_chat_template_disable_thinking_v2"}

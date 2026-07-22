@@ -574,6 +574,7 @@
       "fixture_or_dataset_revision_status": "pinned_dataset_revision",
       "harness_status": "container_harness_implemented",
       "scoring_policy_id": "exact_multiple_choice_letter_accuracy_v4",
+      "generation_constraint_id": "mmlu_choice_a_j_grammar_v1",
       "sample_policy": "Pinned MMLU-Pro snapshot with canary, sampled local reference, and deeper/full reference limits.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "container_for_prepare_and_scoring",
