@@ -29,6 +29,11 @@ ASSISTANT_COMPOSITIONAL_FIXTURE_REVISION = "2026-07-assistant-compositional-v2"
 CODING_STATIC_REPAIR_FIXTURE_REVISION = "2026-05-coding-static-preview"
 REASONING_EXACT_ANSWER_FIXTURE_REVISION = "2026-05-reasoning-exact-preview"
 _DOMINANT_GENERATION_FAILURE_RATE = 0.5
+_DOMINANT_MALFORMED_OUTPUT_RATE = 0.5
+_RUNTIME_CONTROL_TOKEN = re.compile(
+    r"(?:<\|(?:channel|turn|think|start|end)[^>]*\|?>|<channel\|>|<\|channel>)",
+    re.IGNORECASE,
+)
 _TERMINAL_GENERATION_MARKER = re.compile(r"\s*\[end of text\]\s*$", re.IGNORECASE)
 _CODE_FENCE = re.compile(
     r"^[ \t]*```[ \t]*([A-Za-z0-9_-]*)[ \t]*\r?\n(.*?)^[ \t]*```[ \t]*$",
@@ -435,6 +440,67 @@ def _benchmark_counts_as_scored(summary: Dict[str, Any]) -> bool:
     return _benchmark_primary_metric_value(summary) is not None and str((summary or {}).get("status") or "") == "completed"
 
 
+def _mmlu_output_shape_gate(
+    spec: CapabilityBenchmarkSpec,
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Quarantine systemic protocol mismatch without forgiving isolated misses.
+
+    MMLU-Pro intentionally scores occasional malformed completed answers as
+    wrong.  When malformed output dominates the sample, however, the result is
+    evidence that the model/runtime/prompt protocol did not produce answerable
+    rows—not evidence that the model has near-zero reasoning capability.
+    """
+    if spec.benchmark_id != "mmlu_pro_reference_v1":
+        return {"status": "not_applicable", "policy_id": "mmlu_output_shape_gate_v1"}
+    metrics = dict(summary.get("metrics") or {})
+    case_results = list(summary.get("case_results") or [])
+    malformed_count = metrics.get("malformed_output_count", metrics.get("invalid_count"))
+    if not isinstance(malformed_count, int) or isinstance(malformed_count, bool):
+        malformed_count = len([item for item in case_results if item.get("predicted") is None])
+    evaluated_count = metrics.get("total_count")
+    if not isinstance(evaluated_count, int) or isinstance(evaluated_count, bool):
+        evaluated_count = len(case_results)
+    malformed_rate = round(malformed_count / float(evaluated_count), 6) if evaluated_count else 0.0
+    completed_predictions = [item for item in predictions if item.get("generation_status") == "completed"]
+    control_token_count = len(
+        [
+            item
+            for item in completed_predictions
+            if _RUNTIME_CONTROL_TOKEN.search(str(item.get("completion") or item.get("response") or ""))
+        ]
+    )
+    token_limit_count = len(
+        [
+            item
+            for item in completed_predictions
+            if isinstance(item.get("output_tokens"), int)
+            and item.get("output_tokens") >= spec.generation_max_tokens
+        ]
+    )
+    blocked = bool(evaluated_count and malformed_rate > _DOMINANT_MALFORMED_OUTPUT_RATE)
+    reason_codes = []
+    if blocked:
+        reason_codes.append("dominant_malformed_output")
+        if control_token_count:
+            reason_codes.append("runtime_control_tokens_observed")
+        if token_limit_count:
+            reason_codes.append("answer_budget_exhaustion_observed")
+    return {
+        "status": "blocked" if blocked else "passed",
+        "policy_id": "mmlu_output_shape_gate_v1",
+        "threshold": {"metric": "malformed_output_rate", "operator": ">", "value": _DOMINANT_MALFORMED_OUTPUT_RATE},
+        "evaluated_count": evaluated_count,
+        "malformed_output_count": malformed_count,
+        "malformed_output_rate": malformed_rate,
+        "runtime_control_token_count": control_token_count,
+        "answer_budget_exhaustion_count": token_limit_count,
+        "reason_codes": reason_codes,
+        "strict_primary_metric": dict(summary.get("primary_metric") or {}),
+    }
+
+
 def _component_report_for_benchmark(
     request: RunRequest,
     benchmark_id: str,
@@ -490,6 +556,8 @@ def _capability_state_for_request(
         return "failed"
     if execution.status == "partial":
         return "partial"
+    if execution.status == "not_comparable":
+        return "not_comparable"
     if execution.status in ("completed", "simulated") and execution.score is not None:
         return "scored"
     if scored_count:
@@ -518,6 +586,8 @@ def _capability_reason_codes(
         codes.append("benchmark_suite_scored")
     if execution.status == "partial" or (planned_count and scored_count and scored_count < planned_count):
         codes.append("partial_coverage")
+    if execution.status == "not_comparable":
+        codes.append("capability_not_comparable")
     if any(
         str((execution.benchmark_results or {}).get(benchmark_id, {}).get("status")) == "failed"
         for benchmark_id in benchmark_ids
@@ -540,6 +610,12 @@ def _capability_reason_codes(
         for benchmark_id in benchmark_ids
     ):
         codes.append("model_output_failures_scored_wrong")
+    if any(
+        str(((execution.benchmark_results or {}).get(benchmark_id, {}).get("output_shape_gate") or {}).get("status"))
+        == "blocked"
+        for benchmark_id in benchmark_ids
+    ):
+        codes.append("output_shape_gate_blocked")
     if not codes and planned_count:
         codes.append("benchmark_not_yet_run")
     if not codes:
@@ -585,6 +661,7 @@ def execute_capability_suite(
     task_performance_rows: List[Dict[str, Any]] = []
     completed = 0
     degraded = 0
+    noncomparable = 0
     hard_failed = 0
 
     for benchmark_id in benchmark_ids:
@@ -629,6 +706,9 @@ def execute_capability_suite(
             summary["unscored_generation_failure_severity"] = unscored_failure_severity
             summary["completed_cases"] = len(cases) - failure_count
             summary["total_cases"] = len(cases)
+            output_shape_gate = _mmlu_output_shape_gate(spec, predictions, summary)
+            if output_shape_gate["status"] != "not_applicable":
+                summary["output_shape_gate"] = output_shape_gate
             protocol_identity = _case_benchmark_protocol_identity(
                 spec,
                 cases,
@@ -666,6 +746,14 @@ def execute_capability_suite(
                         "was" if model_output_failure_count == 1 else "were",
                     )
                 )
+            if output_shape_gate["status"] == "blocked" and unscored_failure_severity != "all_failed":
+                summary["status"] = "not_comparable"
+                summary["warning"] = (
+                    "Most completed responses did not match the answer protocol. "
+                    "InferGrade preserved the strict raw result but quarantined it from capability scoring."
+                )
+                if isinstance(summary.get("primary_metric"), dict):
+                    summary["primary_metric"]["value"] = None
             write_json(os.path.join(benchmark_dir, "summary.json"), summary)
             capability_run_path = None
             if spec.execution_mode == "native":
@@ -712,7 +800,11 @@ def execute_capability_suite(
                             else (
                                 "Capability benchmark %s completed with degraded generation quality."
                                 if summary.get("status") == "degraded"
-                                else "Capability benchmark %s completed."
+                                else (
+                                    "Capability benchmark %s was quarantined as not comparable."
+                                    if summary.get("status") == "not_comparable"
+                                    else "Capability benchmark %s completed."
+                                )
                             )
                         ) % spec.display_name,
                     }
@@ -731,6 +823,8 @@ def execute_capability_suite(
             if primary_value is not None and unscored_failure_severity == "none" and summary_status == "completed":
                 component_scores[benchmark_id] = round(float(primary_value), 6)
                 completed += 1
+            elif summary_status == "not_comparable":
+                noncomparable += 1
             elif unscored_failure_severity in {"dominant", "partial"} or summary_status in {"degraded", "partial"}:
                 degraded += 1
             elif unscored_failure_severity == "all_failed":
@@ -768,6 +862,8 @@ def execute_capability_suite(
     status = "failed"
     if completed == len(benchmark_ids):
         status = "completed"
+    elif noncomparable == len(benchmark_ids):
+        status = "not_comparable"
     elif completed > 0 or degraded > 0:
         status = "partial"
     elif hard_failed == len(benchmark_ids):
@@ -1325,10 +1421,15 @@ def _write_mmlu_pro_capability_run_artifact(
         result = case_results.get(task_id, {})
         generation_status = str(prediction.get("generation_status") or "")
         predicted = result.get("predicted")
+        gate_blocked = str((summary.get("output_shape_gate") or {}).get("status")) == "blocked"
         if generation_status != "completed":
             task_state = "failed"
             task_score = None
             error_class = "generation_failed"
+        elif gate_blocked:
+            task_state = "not_comparable"
+            task_score = None
+            error_class = "systemic_output_protocol_mismatch"
         elif predicted is None:
             task_state = "scored"
             task_score = 0.0
@@ -1431,10 +1532,11 @@ def _write_mmlu_pro_capability_run_artifact(
             ),
             "partial_count": summary.get("generation_failure_count") or 0,
             "skipped_count": 0,
-            "not_comparable_count": 0,
+            "not_comparable_count": len([task for task in tasks if task["state"] == "not_comparable"]),
             **_artifact_summary_performance(summary.get("task_performance")),
             "category_metrics": dict(summary.get("category_metrics") or {}),
             "malformed_output_count": metrics.get("malformed_output_count", metrics.get("invalid_count")),
+            "output_shape_gate": dict(summary.get("output_shape_gate") or {}),
         },
         "tasks": tasks,
         "artifacts": {
@@ -1822,6 +1924,11 @@ def _mmlu_pro_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
             "This setup attempted the pinned MMLU-Pro sampled reference protocol.",
             "The artifact preserves generation, malformed-output, or scoring failures without turning them into a broad reasoning score.",
         ]
+    elif state == "not_comparable":
+        supported = [
+            "This setup attempted the pinned MMLU-Pro sampled reference protocol, but most outputs did not match its answer format.",
+            "The strict raw responses and malformed-output diagnostics are preserved without publishing a capability score.",
+        ]
     else:
         supported = [
             "This artifact records that the pinned MMLU-Pro sampled reference protocol was not yet scored.",
@@ -1866,6 +1973,8 @@ def _capability_artifact_state(status: Any, score: Any, generation_failure_sever
         return "partial"
     if str(status or "") == "failed":
         return "failed"
+    if str(status or "") == "not_comparable":
+        return "not_comparable"
     if str(status or "") in {"degraded", "partial"}:
         return "partial"
     if score is not None:
