@@ -1,0 +1,95 @@
+name: Sync main back to develop
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: sync-main-to-develop
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  sync:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SYNC_BRANCH: automation/sync-main-to-develop-${{ github.run_id }}
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch long-lived branches
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main +refs/heads/develop:refs/remotes/origin/develop
+
+      - name: Classify synchronization path
+        id: plan
+        run: echo "mode=$(python3 scripts/branch_sync_plan.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Record already synchronized state
+        if: steps.plan.outputs.mode == 'already_synced'
+        run: echo "develop already contains the released main ancestry."
+
+      - name: Open ancestry-only synchronization PR
+        if: steps.plan.outputs.mode == 'ancestry_pr'
+        run: |
+          pr_url=$(gh pr list --state open --base develop --head main --json url --jq '.[0].url // empty')
+          if [ -z "$pr_url" ]; then
+            pr_url=$(gh pr create \
+              --base develop \
+              --head main \
+              --title "Sync released main ancestry back into develop" \
+              --body "Automated ancestry-only synchronization after a main promotion. No force-push and no branch deletion.")
+          fi
+          gh pr merge "$pr_url" --auto --merge
+
+      - name: Prepare diverged integration branch
+        if: steps.plan.outputs.mode == 'integration_pr'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --create "$SYNC_BRANCH" origin/develop
+          if ! git merge --no-ff --no-edit origin/main; then
+            git merge --abort || true
+            title="Automated main-to-develop sync blocked"
+            existing=$(gh issue list --state open --search "${title} in:title" --json url --jq '.[0].url // empty')
+            if [ -z "$existing" ]; then
+              gh issue create \
+                --title "$title" \
+                --body "The trusted main workflow could not merge main into a temporary branch based on develop. Resolve the branch conflict manually; neither long-lived branch was rewritten. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            fi
+            exit 1
+          fi
+
+      - name: Publish diverged integration branch
+        if: steps.plan.outputs.mode == 'integration_pr'
+        run: |
+          git push --set-upstream origin "$SYNC_BRANCH"
+          pr_url=$(gh pr create \
+            --base develop \
+            --head "$SYNC_BRANCH" \
+            --title "Sync released main changes back into develop" \
+            --body "Automated conflict-free integration of released main ancestry into develop. Protected CI and secret-scan checks were dispatched for this exact integration commit.")
+          echo "pr_url=$pr_url" >> "$GITHUB_ENV"
+
+      - name: Dispatch protected checks for diverged integration
+        if: steps.plan.outputs.mode == 'integration_pr'
+        run: |
+          gh workflow run ci.yml --ref "$SYNC_BRANCH"
+          gh workflow run secret-scan.yml --ref "$SYNC_BRANCH"
+
+      - name: Enable automatic merge after protected checks
+        if: steps.plan.outputs.mode == 'integration_pr'
+        run: gh pr merge "$pr_url" --auto --merge --delete-branch
