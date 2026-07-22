@@ -85,7 +85,7 @@ test("desktop onboarding exposes paste-code pairing, reset, and bundled runner s
   assert.ok(js.includes('document.documentElement.dataset.listening = listening ? "true" : "false";'));
   assert.ok(js.includes('setStatus(childProcess ? "Listening" : pairedForUi() ? "Paused" : "Pairing needed"'));
   assert.ok(js.includes("childProcess = { preview: true };"));
-  assert.ok(js.includes("Paired with Hub. Start listening when this machine should accept assigned work."));
+  assert.ok(helpers.includes("Start listening when this machine should accept assigned work."));
   assert.ok(js.includes('listen("runner-listener-event"'));
   assert.equal(js.includes('Command.sidecar(SIDECAR_NAME, ["start"'), false);
   assert.equal(js.includes('invoke("load_runner_token"'), false);
@@ -162,6 +162,8 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(html.includes("data-hub-connection-status"));
   assert.ok(html.includes("data-pairing-readiness-status"));
   assert.ok(html.includes("data-runtime-llama-status"));
+  assert.ok(html.includes("Model preflight"));
+  assert.ok(html.includes("After assignment · before scoring"));
   assert.ok(html.includes("data-runtime-install-managed"));
   assert.ok(html.includes("data-runtime-reinstall-managed"));
   assert.ok(html.includes("data-runtime-remove-selected"));
@@ -246,7 +248,9 @@ test("desktop runtime panel keeps readiness truthful and Docker optional", () =>
   assert.ok(js.includes("Desktop readiness fallback"));
   assert.ok(js.includes("Open the desktop app to verify local execution readiness."));
   assert.ok(js.includes("Local execution readiness is available for Hub-assigned work."));
-  assert.ok(js.includes("Connected to Hub. Run a readiness check to verify the local backend before assigned work starts."));
+  assert.ok(readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8").includes("Run the readiness check to verify Hub access."));
+  assert.ok(js.includes('invoke("worker_protocol_ping"'));
+  assert.ok(js.includes("Assigned-model compatibility will be checked before benchmark scoring begins."));
   assert.ok(js.includes('invoke("desktop_sidecar_diagnostic", { args })'));
   assert.ok(js.includes('runDesktopSidecarDiagnostic(["desktop-readiness"])'));
   assert.ok(js.includes('runDesktopSidecarDiagnostic(["desktop-self-test"])'));
@@ -258,10 +262,13 @@ test("desktop runtime panel keeps readiness truthful and Docker optional", () =>
 
 test("desktop readiness copy does not overclaim when native runtime is missing", () => {
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const helpers = readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8");
 
   assert.ok(js.includes("runtime === \"available\""));
   assert.ok(js.includes("Select a native runtime before assigned local work"));
-  assert.ok(js.includes("const verified = paired && listening && llamaRuntimeAvailable;"));
+  assert.ok(js.includes("desktopReadinessPresentation"));
+  assert.ok(js.includes("hubVerified: hubConnectionVerified"));
+  assert.ok(helpers.includes("Pairing is saved. Select a llama.cpp runtime"));
   assert.ok(js.includes("lastReadinessCheckAt = new Date();"));
   assert.ok(js.includes("if (!payload.status)"));
   assert.equal(js.includes("Docker not found. Native benchmarks are available; advanced sandboxed benchmarks are disabled.\";"), false);

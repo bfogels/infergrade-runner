@@ -3,6 +3,7 @@ import packageInfo from "../package.json";
 import {
   assignmentClockTransition,
   assignmentTitleFromRunId,
+  desktopReadinessPresentation,
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
@@ -129,6 +130,7 @@ let modelPathReadiness = "Hub assigns model artifacts when work is queued.";
 let llamaRuntimeAvailable = false;
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
+let hubConnectionVerified = false;
 let lastFirstRunPayload = null;
 let lastReadinessCheckAt = null;
 let assignmentStartedAt = null;
@@ -263,24 +265,23 @@ function renderLastCheckLabel() {
 function renderPrimaryReadiness() {
   const paired = pairedForUi();
   const listening = Boolean(childProcess);
-  const verified = paired && listening && llamaRuntimeAvailable;
+  const presentation = desktopReadinessPresentation({
+    paired,
+    listening,
+    runtimeAvailable: llamaRuntimeAvailable,
+    hubVerified: hubConnectionVerified,
+  });
   document.documentElement.dataset.paired = paired ? "true" : "false";
   document.documentElement.dataset.listening = listening ? "true" : "false";
   renderHubDisplay();
-  setReadinessFact("hub", paired ? "Hub paired" : "Pair with Hub", paired ? "ready" : "blocked");
+  setReadinessFact("hub", presentation.hubFact, presentation.hubFactState);
   setReadinessFact("runtime", llamaRuntimeAvailable ? "Metal ready" : "Runtime check needed", llamaRuntimeAvailable ? "ready" : "warning");
   setReadinessFact("token", savedTokenAvailable ? "Token secure" : "Token missing", savedTokenAvailable ? "ready" : "blocked");
   if (primaryStateTitle) {
-    primaryStateTitle.textContent = verified ? "Ready" : paired ? listening ? "Listening" : "Listening paused" : "Connect this machine";
+    primaryStateTitle.textContent = presentation.title;
   }
   if (primaryStateMessage) {
-    primaryStateMessage.textContent = verified
-      ? "Connected to Hub. Backend verified. Waiting for assigned work."
-      : paired && listening
-        ? "Connected to Hub. Run a readiness check to verify the local backend before assigned work starts."
-      : paired
-        ? "Paired with Hub. Start listening when this machine should accept assigned work."
-      : "Pair with Hub using a one-time code before this Runner accepts assigned work.";
+    primaryStateMessage.textContent = presentation.message;
   }
   if (listenerTitle) {
     listenerTitle.textContent = listening ? "Listening for Hub" : "Listening paused";
@@ -500,6 +501,7 @@ function applyPreviewStateFromUrl() {
     setRunnerButtonsDisabled("start", true);
     setRunnerButtonsDisabled("stop", false);
     llamaRuntimeAvailable = true;
+    hubConnectionVerified = true;
     llamaRuntimeReadiness = "Managed Metal runtime verified.";
     nativeSuiteReadiness = "Backend readiness check passed for local native execution.";
     containerRuntimeReadiness = "Docker not found. Native runtime checks can continue; optional sandboxed support is disabled.";
@@ -692,7 +694,9 @@ function renderLocalReadinessChecklist() {
     nativeSuiteStatus.textContent = nativeSuiteReadiness;
   }
   if (hubConnectionStatus) {
-    hubConnectionStatus.textContent = `Hub API: ${lastNormalizedApiUrl}`;
+    hubConnectionStatus.textContent = hubConnectionVerified
+      ? `Verified: ${lastNormalizedApiUrl}`
+      : `Not yet verified: ${lastNormalizedApiUrl}`;
   }
   if (pairingReadinessStatus) {
     if (childProcess) {
@@ -872,7 +876,6 @@ function renderDesktopReadiness(payload = {}) {
     renderLocalReadinessChecklist();
     return;
   }
-  lastReadinessCheckAt = new Date();
   if (backendTitle) {
     backendTitle.textContent = "Local backend";
   }
@@ -1007,11 +1010,24 @@ async function runReadinessCheck() {
   }
   setStatus("Checking readiness", "warning");
   try {
+    readApiUrl();
+    await updateTokenState();
+    if (!pairedForUi()) {
+      throw new Error("Pair with Hub before running the readiness check.");
+    }
     await checkRunnerStartupSelfTest();
     await checkDesktopReadiness();
     await inspectRuntimePlan();
-    setStatus(childProcess ? "Listening" : pairedForUi() ? "Paused" : "Pairing needed", childProcess ? "good" : "warning");
-    appendLog("Readiness check finished.");
+    await verifyHubConnection();
+    await reconcileCurrentHandoff();
+    lastReadinessCheckAt = new Date();
+    if (llamaRuntimeAvailable) {
+      setStatus(childProcess ? "Ready" : "Ready to listen", "good");
+      appendLog("Readiness check passed. Assigned-model compatibility will be checked before benchmark scoring begins.");
+    } else {
+      setStatus("Runtime needed", "warning");
+      appendLog("Readiness check reached Hub, but a usable llama.cpp runtime is still required.");
+    }
   } catch (error) {
     setStatus("Needs attention", "error");
     appendLog(`Readiness check failed: ${error.message || error}`);
@@ -1022,6 +1038,35 @@ async function runReadinessCheck() {
     }
     renderLocalReadinessChecklist();
   }
+}
+
+async function verifyHubConnection() {
+  const activePhase = String(currentAssignmentPhase || "").trim().toLowerCase();
+  if (childProcess && currentAssignmentRunId && ["preparing", "running", "uploading"].includes(activePhase)) {
+    hubConnectionVerified = true;
+    appendLog("Hub connection verified by the active assignment; readiness did not replace its busy heartbeat.");
+    renderLocalReadinessChecklist();
+    return { status: "observed_active_assignment", runner_id: currentAssignmentRunId };
+  }
+  hubConnectionVerified = false;
+  renderLocalReadinessChecklist();
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    throw new Error("Open the desktop app to verify Hub access.");
+  }
+  const result = await invoke("worker_protocol_ping", {
+    apiUrl: readApiUrl(),
+  });
+  if (result?.status !== "sent") {
+    throw new Error("Hub did not confirm Runner registration and heartbeat.");
+  }
+  hubConnectionVerified = true;
+  if (pairingReadinessStatus) {
+    pairingReadinessStatus.textContent = "Pairing and authenticated Hub access verified.";
+  }
+  appendLog(`Hub connection verified for ${result.runner_id || "this Runner"}.`);
+  renderLocalReadinessChecklist();
+  return result;
 }
 
 async function openExternalUrl(url) {
@@ -1126,7 +1171,9 @@ async function ensureRunnerListenerEvents() {
   await listen("runner-listener-event", (event) => {
     const payload = event?.payload || {};
     if (payload.type === "assignment_update" || payload.type === "assignment_idle") {
+      hubConnectionVerified = true;
       renderAssignmentFromListenerEvent(payload);
+      renderLocalReadinessChecklist();
       if (shouldAppendAssignmentEventLog(lastAssignmentEventType, payload.type)) {
         appendLog(
           payload.type === "assignment_idle"
@@ -1219,6 +1266,9 @@ async function updateTokenState() {
       hasToken = status?.token?.status === "present";
       savedTokenAvailable = hasToken;
       runnerProfileAvailable = status?.profile?.status === "present";
+      if (!savedTokenAvailable || !runnerProfileAvailable) {
+        hubConnectionVerified = false;
+      }
       const profile = status?.profile?.profile || {};
       if (tokenState) {
         if (runnerProfileAvailable && hasToken) {
@@ -1238,6 +1288,7 @@ async function updateTokenState() {
   } catch (error) {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
+    hubConnectionVerified = false;
     if (tokenState) {
       tokenState.textContent = userSafeTokenFailure(error.message || error);
     }
@@ -1574,6 +1625,9 @@ async function listenerStartPlan(apiUrl) {
 
 function readApiUrl() {
   const normalized = normalizeDesktopApiUrl(form.elements.apiUrl.value);
+  if (normalized !== lastNormalizedApiUrl) {
+    hubConnectionVerified = false;
+  }
   form.elements.apiUrl.value = normalized;
   lastNormalizedApiUrl = normalized;
   renderHubDisplay();
@@ -2047,6 +2101,10 @@ async function startRunner({ confirmStarted = false } = {}) {
     return;
   }
 
+  await reconcileCurrentHandoff().catch((error) => {
+    appendLog(`Could not confirm saved Hub handoff before listening: ${error.message || error}`);
+  });
+
   await ensureRunnerListenerEvents();
   runnerStartupLines = [];
   const output = await invoke("start_runner_listener", {
@@ -2095,6 +2153,7 @@ async function pairRunner() {
   setRunnerButtonsDisabled("start", true);
   pairState.textContent = "Redeeming pairing code...";
   try {
+    hubConnectionVerified = false;
     const output = await invoke("redeem_runner_pairing", {
       apiUrl,
       pairCode,
@@ -2135,6 +2194,7 @@ async function resetPairing() {
     setRunnerButtonsDisabled("stop", true);
   }
   form.elements.pairCode.value = "";
+  hubConnectionVerified = false;
   const invoke = await loadTauriInvoke();
   if (invoke) {
     const payload = await invoke("reset_runner_pairing");
