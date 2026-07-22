@@ -449,12 +449,14 @@ def _assert_runtime_request_compatibility(
         expected_build_id = str(target_custom.get("runtime_build_id") or "")
         if runtime_build_id != expected_build_id:
             raise RuntimeError(
-                "Cannot use managed runtime '%s' for artifact %s: the signed catalog requires exact runtime target '%s'. "
+                "Cannot use managed runtime '%s' for artifact %s: the signed catalog requires exact runtime target '%s' "
+                "(runtime build %s). "
                 "Install that target with explicit download consent; InferGrade will then select it automatically for this run."
                 % (
                     selection_metadata.get("runtime_id") or runtime_build_id,
                     str(getattr(request, "quant_artifact_sha256", None) or "unknown"),
                     target_name,
+                    expected_build_id,
                 )
             )
     catalog_assertion = selection_metadata.get("catalog_assertion")

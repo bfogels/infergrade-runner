@@ -324,6 +324,32 @@ class RuntimeLockTests(unittest.TestCase):
             "unrelated-global-preference",
         )
 
+    def test_exact_artifact_match_names_install_target_and_consent_build_when_missing(self):
+        self._write_managed_selection(self.runtime_a, catalog_assertion=False)
+        required_build_id = "f" * 64
+        artifact_sha256 = "e" * 64
+        self._write_active_catalog(
+            required_build_id,
+            assertions=[
+                {
+                    "model_artifact_sha256": artifact_sha256,
+                    "result_status": "valid_comparable",
+                }
+            ],
+        )
+        request = self._request()
+        request.llama_cpp_cli_path = None
+        request.llama_cpp_server_path = None
+        request.llama_cpp_perplexity_path = None
+        request.quant_artifact_sha256 = artifact_sha256
+
+        with self.assertRaises(RuntimeError) as raised:
+            resolve_runtime_lock(request, "bundle-exact-install-needed")
+
+        message = str(raised.exception)
+        self.assertIn("infergrade/llama-cpp/test.tar.gz", message)
+        self.assertIn(required_build_id, message)
+
     def test_specialized_architecture_allows_explicit_candidate_runtime_for_preflight(self):
         request = self._request(self.runtime_a)
         request.ontology_hints = {"architecture": "dspark"}

@@ -111,6 +111,7 @@ const assignmentTime = document.querySelector("[data-assignment-time]");
 const assignmentProgressBar = document.querySelector("[data-assignment-progress-bar]");
 const assignmentCheck = document.querySelector("[data-assignment-check]");
 const assignmentStartListeningButton = document.querySelector("[data-assignment-start-listening]");
+const assignmentInstallRuntimeButton = document.querySelector("[data-assignment-install-runtime]");
 
 let childProcess = null;
 let logLines = [];
@@ -138,6 +139,7 @@ let assignmentClockTimer = null;
 let currentAssignmentRemaining = "";
 let currentAssignmentRunId = "";
 let currentAssignmentPhase = "idle";
+let pendingRequiredRuntime = null;
 let currentHandoffRunId = "";
 let currentHandoffWorkerId = "";
 let previewStateApplied = false;
@@ -368,6 +370,7 @@ function formatBytes(value = 0) {
 }
 
 function renderAssignmentIdle() {
+  pendingRequiredRuntime = null;
   if (!assignmentPanel) {
     return;
   }
@@ -391,6 +394,9 @@ function renderAssignmentIdle() {
   }
   if (assignmentStartListeningButton) {
     assignmentStartListeningButton.hidden = true;
+  }
+  if (assignmentInstallRuntimeButton) {
+    assignmentInstallRuntimeButton.hidden = true;
   }
 }
 
@@ -449,6 +455,9 @@ function renderAssignmentActive({
   }
   if (assignmentStartListeningButton) {
     assignmentStartListeningButton.hidden = !waitingForListener;
+  }
+  if (assignmentInstallRuntimeButton) {
+    assignmentInstallRuntimeButton.hidden = !pendingRequiredRuntime;
   }
   if (assignmentCheck) {
     assignmentCheck.hidden = !checkName;
@@ -1450,6 +1459,7 @@ function renderAssignmentFromListenerLine(line = "") {
   }
   const claimed = trimmed.match(/^Claimed run ([^\.\s]+)\.?/);
   if (claimed) {
+    pendingRequiredRuntime = null;
     const runId = claimed[1];
     renderAssignmentActive({
       title: assignmentTitleFromRunId(runId),
@@ -1465,12 +1475,18 @@ function renderAssignmentFromListenerLine(line = "") {
   const failed = trimmed.match(/^Run ([^\.\s]+) failed: (.+)$/);
   if (failed) {
     const runId = failed[1];
+    const runtimeMatch = failed[2].match(/requires exact runtime target '([^']+)' \(runtime build ([0-9a-f]{64})\)/i);
+    pendingRequiredRuntime = runtimeMatch
+      ? { targetName: runtimeMatch[1], runtimeBuildId: runtimeMatch[2].toLowerCase() }
+      : null;
     renderAssignmentActive({
       title: assignmentTitleFromRunId(runId),
       phase: "Needs attention",
-      description: failed[2],
+      description: pendingRequiredRuntime
+        ? `This model needs a reviewed specialized runtime (${pendingRequiredRuntime.runtimeBuildId.slice(0, 12)}…). Install it here, then retry the benchmark from Hub.`
+        : failed[2],
       progress: 100,
-      checkName: "See logs for recovery detail",
+      checkName: pendingRequiredRuntime ? "Specialized runtime required" : "See logs for recovery detail",
       runId,
     });
     setStatus("Needs attention", "error");
@@ -1746,6 +1762,38 @@ async function installManagedRuntime({ reinstall = false } = {}) {
   llamaRuntimeAvailable = true;
   renderLocalReadinessChecklist();
   appendLog(`Installed managed llama.cpp runtime: ${JSON.stringify(result)}`);
+  return result;
+}
+
+async function installRequiredCatalogRuntime() {
+  if (!pendingRequiredRuntime) {
+    return null;
+  }
+  const required = { ...pendingRequiredRuntime };
+  assignmentInstallRuntimeButton.disabled = true;
+  llamaRuntimeReadiness = `Installing reviewed specialized runtime ${required.runtimeBuildId.slice(0, 12)}…`;
+  renderLocalReadinessChecklist();
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    throw new Error("Open the desktop app to install the required runtime.");
+  }
+  const result = await invoke("install_required_runtime_catalog_target", {
+    targetName: required.targetName,
+    consentRuntimeBuildId: required.runtimeBuildId,
+  });
+  pendingRequiredRuntime = null;
+  llamaRuntimeReadiness = managedRuntimeInstallSummary(result);
+  llamaRuntimeAvailable = true;
+  renderLocalReadinessChecklist();
+  renderAssignmentActive({
+    title: assignmentTitleFromRunId(currentAssignmentRunId),
+    phase: "Ready to retry",
+    description: "The required runtime is installed. Retry this benchmark from Hub; Runner will bind it automatically for this model.",
+    progress: 100,
+    checkName: "Specialized runtime ready",
+    runId: currentAssignmentRunId,
+  });
+  appendLog(`Installed required signed-catalog runtime: ${JSON.stringify(result)}`);
   return result;
 }
 
@@ -2405,6 +2453,17 @@ runtimeInstallManagedButton?.addEventListener("click", () => {
     })
     .finally(() => {
       setRuntimeActionDisabled(false);
+    });
+});
+
+assignmentInstallRuntimeButton?.addEventListener("click", () => {
+  installRequiredCatalogRuntime()
+    .catch((error) => {
+      setStatus("Required runtime install failed", "error");
+      appendLog(`Could not install required signed-catalog runtime: ${error.message || error}`);
+    })
+    .finally(() => {
+      assignmentInstallRuntimeButton.disabled = false;
     });
 });
 
