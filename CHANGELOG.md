@@ -16,11 +16,18 @@ incremental changes only — see the git history.
   budget while retaining the recorded recovery path for compatibility.
 - Accepts the prompt-requested `Final answer letter: X` terminal shape under
   scoring policy `exact_multiple_choice_letter_accuracy_v4` while preserving
-  visible reasoning and strict malformed-output quarantine.
+  strict malformed-output quarantine on unconstrained compatibility paths.
+- Requalifies the exact Gemma 4 12B Q4_K_M artifact at standard depth with
+  zero malformed MMLU-Pro outputs; the earlier 295/300-format-miss result stays
+  quarantined rather than being reused as capability evidence.
 - Resolves an installed signed-catalog runtime by exact artifact assertion for
   each run without mutating the user's global runtime preference.
 - Offers a one-click Desktop install when an assigned model needs an absent
   exact signed-catalog runtime, then binds that runtime on retry.
+- Stages the official Prism Bonsai macOS runtime as an exact-artifact candidate
+  after a receipt-bound standard-depth Q1_0 run passed all 100 output-shape
+  checks; the staged source remains inactive until a complete signed catalog
+  generation is reviewed and atomically promoted.
 - Honors `--resume` and `--output` when `infergrade run` reads a request file,
   so checkpointed long runs can continue instead of restarting.
 - Publishes contract 0.3.25 for the revised MMLU-Pro scoring identity.

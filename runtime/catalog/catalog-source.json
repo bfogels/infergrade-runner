@@ -1,10 +1,11 @@
 {
   "versions": {
     "root": 1,
-    "timestamp": 7,
-    "snapshot": 7,
-    "targets": 7
+    "timestamp": 8,
+    "snapshot": 8,
+    "targets": 8
   },
+  "activation_status": "staged_candidate",
   "expires_unix": {
     "root": 1942272000,
     "timestamp": 1787184000,
@@ -64,6 +65,17 @@
             "benchmark_depth": "standard",
             "result_status": "valid_comparable",
             "published": false
+          },
+          {
+            "assertion_id": "gemma4-12b-q4-k-m-standard-20260722",
+            "model_id": "google/gemma-4-12B-it",
+            "model_revision": "fc034cfff751157913579611efad8462ac1be606",
+            "model_artifact_sha256": "0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42",
+            "quantization_label": "Q4_K_M",
+            "bundle_id": "qb_20260722_161200_f40ca06a",
+            "benchmark_depth": "standard",
+            "result_status": "valid_comparable",
+            "published": false
           }
         ],
         "archive_url": "https://github.com/ggml-org/llama.cpp/releases/download/b10069/llama-b10069-bin-macos-arm64.tar.gz",
@@ -83,6 +95,59 @@
           "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b10069"
         },
         "provenance": "Official upstream macOS arm64 archive, exact SHA-256 reviewed and pinned by the signed InferGrade runtime catalog. Catalog signing authenticates the assertion; it is not an upstream artifact signature."
+      }
+    },
+    "infergrade/prism-llama-cpp/prism-b9596-9fcaed7/macos-arm64.tar.gz": {
+      "length": 11169620,
+      "sha256": "9c14bcd00024f547f07eca9fd1f1a1b4bde68f6ce26e5b2f76738b6920eb3b24",
+      "custom": {
+        "runtime_build_id": "142a189ab18d0847bdc29134db2ffd34b8352743308c783ea740e57e77c7eeb2",
+        "build_manifest_files_sha256": "a4488af41082d14cbccb099c2a3b7ceba2ab981854b3e26ac57e7aadb90cb53b",
+        "content_manifest_sha256": "892aeaaa1e4e9893ddaa93fb61aa90c7a6b900ccb7b35cbd59fba0c57c98af6e",
+        "rollback_runtime_build_id": "b57a9b1cde1365fe7714081da036402dcdb5b86ec5595e45e1cde49b701ef9a5",
+        "rollback_runtime_id": "llama-cpp-b10069-macos-arm64-metal",
+        "runtime_id": "llama-prism-b9596-9fcaed7-macos-arm64-metal",
+        "runtime_family": "llama.cpp-prism",
+        "runtime_interface": "llama_cpp_cli_server_v1",
+        "version_label": "Prism llama.cpp b9596-9fcaed7",
+        "system": "macos",
+        "arch": "aarch64",
+        "origin": "upstream_official",
+        "maturity": "reviewed_candidate",
+        "support_tier": "candidate",
+        "compatibility_status": "exact_artifact_standard_depth_validated",
+        "provenance_strength": "checksum_verified",
+        "publisher": "infergrade",
+        "validation_assertions": [
+          {
+            "assertion_id": "bonsai-27b-q1-0-standard-20260722",
+            "model_id": "prism-ml/Bonsai-27B-gguf",
+            "model_revision": "f10afb355f104535e3e3e98cf7ab7795c72bd292",
+            "model_artifact_sha256": "17ef842e47450caeb8eaa3ebfbbab5d2f2278b62b79be107985fb69a2f819aa0",
+            "quantization_label": "Q1_0",
+            "bundle_id": "qb_20260722_160059_6fe34e09",
+            "benchmark_depth": "standard",
+            "result_status": "valid_comparable",
+            "published": false
+          }
+        ],
+        "archive_url": "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b9596-9fcaed7/llama-prism-b9596-9fcaed7-bin-macos-arm64.tar.gz",
+        "expected_binaries": [
+          "llama-cli",
+          "llama-server",
+          "llama-perplexity"
+        ],
+        "binary_names": {
+          "cli": "llama-cli",
+          "server": "llama-server",
+          "perplexity": "llama-perplexity"
+        },
+        "upstream": {
+          "project": "PrismML llama.cpp",
+          "release": "prism-b9596-9fcaed7",
+          "release_url": "https://github.com/PrismML-Eng/llama.cpp/releases/tag/prism-b9596-9fcaed7"
+        },
+        "provenance": "Official PrismML fork macOS arm64 archive, exact SHA-256 reviewed and staged for the signed InferGrade runtime catalog. Catalog signing authenticates the InferGrade assertion; it is not an upstream artifact signature."
       }
     }
   }

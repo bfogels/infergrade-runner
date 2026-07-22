@@ -1,0 +1,80 @@
+{
+  "qualification_version": "infergrade_runtime_qualification_v1",
+  "qualified_at": "2026-07-22",
+  "status": "valid_comparable",
+  "claim_scope": "exact_artifact_on_recorded_hardware_only",
+  "runtime": {
+    "catalog_target": "infergrade/prism-llama-cpp/prism-b9596-9fcaed7/macos-arm64.tar.gz",
+    "catalog_source_version": 8,
+    "catalog_activation_status": "staged_candidate",
+    "runtime_build_id": "142a189ab18d0847bdc29134db2ffd34b8352743308c783ea740e57e77c7eeb2",
+    "build_manifest_files_sha256": "a4488af41082d14cbccb099c2a3b7ceba2ab981854b3e26ac57e7aadb90cb53b",
+    "content_manifest_sha256": "892aeaaa1e4e9893ddaa93fb61aa90c7a6b900ccb7b35cbd59fba0c57c98af6e",
+    "content_manifest_file_count": 87,
+    "archive_sha256": "9c14bcd00024f547f07eca9fd1f1a1b4bde68f6ce26e5b2f76738b6920eb3b24",
+    "origin": "upstream_official",
+    "maturity": "reviewed_candidate",
+    "support_tier": "candidate",
+    "provenance_strength": "checksum_verified",
+    "signing_environment": "production",
+    "signed_catalog_state": "not_yet_active"
+  },
+  "observed_receipt": {
+    "content_scope": "selected_binary_set",
+    "runtime_build_id": "7ea0a4ee1c1af26ad3e3af1bba07b426dcd4877fafe8f6e64f4ea94bc5683601",
+    "content_manifest_sha256": "965a4353693b73220b2f0b67c485fdc02f1ef193477f6925a021c4d96c4393c5",
+    "content_manifest_file_count": 3,
+    "prelaunch": "passed",
+    "postrun": "passed",
+    "silent_substitution_allowed": false
+  },
+  "hardware": {
+    "hardware_class": "apple_silicon",
+    "accelerator_model": "Apple M1 Pro",
+    "memory_gb": 16,
+    "accelerator_api": "metal"
+  },
+  "benchmark": {
+    "depth": "standard",
+    "protocol_registry_version": "2026-07-capability-protocol-3.1",
+    "profile": "interactive_chat_v1",
+    "checks": [
+      "mmlu_pro_reference_v1",
+      "interactive_chat_v1"
+    ],
+    "profile_measured_iterations": 5
+  },
+  "assertions": [
+    {
+      "model_id": "prism-ml/Bonsai-27B-gguf",
+      "model_revision": "f10afb355f104535e3e3e98cf7ab7795c72bd292",
+      "model_artifact_sha256": "17ef842e47450caeb8eaa3ebfbbab5d2f2278b62b79be107985fb69a2f819aa0",
+      "quantization_label": "Q1_0",
+      "bundle_id": "qb_20260722_160059_6fe34e09",
+      "result_id": "qb_20260722_160059_6fe34e09_interactive_chat_v1",
+      "comparison_grade": "comparable",
+      "bundle_valid": true,
+      "receipt_prelaunch": "passed",
+      "receipt_postrun": "passed",
+      "mmlu_pro_accuracy": 0.31,
+      "mmlu_pro_malformed_output_count": 0,
+      "mmlu_pro_output_shape_gate": "passed",
+      "mmlu_pro_decode_tokens_per_second_median": 23.3877,
+      "mmlu_pro_time_per_task_seconds_median": 2.886175,
+      "deployment_decode_tokens_per_second_p50": 14.79,
+      "deployment_latency_p50_ms": 12264.07,
+      "model_buffer_bytes": 3971250914,
+      "kv_cache_bytes": 268435456
+    }
+  ],
+  "publication": {
+    "status": "local_only",
+    "published": false
+  },
+  "limitations": [
+    "This validates only the exact Bonsai Q1_0 artifact on the recorded Apple M1 Pro hardware.",
+    "The primary Bonsai model ran without the optional DSpark speculative drafter; this does not validate DSpark acceleration.",
+    "The observed receipt binds the three executed Prism binaries. The full archive identity is a separately verified catalog-source assertion and is not yet active signed metadata.",
+    "It does not establish generic Prism-fork, GGUF, architecture-family, or cross-platform equivalence."
+  ]
+}
