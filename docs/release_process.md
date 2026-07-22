@@ -39,6 +39,17 @@ Pull requests to `main` may be version-neutral source promotions. When such a PR
 does change `VERSION`, CI still requires a forward version bump; an unchanged
 `VERSION` does not turn an ordinary promotion into a release.
 
+Every push to `main` also runs the trusted `sync-main-to-develop.yml`
+workflow. If `develop` is simply behind, the workflow opens an ancestry-only
+`main -> develop` PR and enables merge after the released commit's protected
+checks pass. If both branches advanced, it creates a temporary integration
+branch from `develop`, merges `main` there, dispatches the protected CI and
+secret-scan workflows for that exact commit, and auto-merges only after those
+checks pass. Conflicts create a visible maintenance issue; neither long-lived
+branch is force-pushed, and unreleased `develop` work is never merged into
+`main`. CI rejects new PRs into `develop` while this ancestry invariant is
+unsatisfied.
+
 Local equivalent:
 
 ```bash
