@@ -69,14 +69,14 @@ complete. Ordinary pushes and documentation promotions do not publish desktop
 artifacts. The workflow:
 
 1. resolves the desktop app version from `VERSION`
-2. refuses a version override that differs from the checked-out `VERSION`, then anonymously verifies all five matching GHCR image tags before spending signing or build time
+2. refuses a non-`main` dispatch, a version override that differs from the checked-out `VERSION`, or a `vX.Y.Z` tag that does not resolve to the dispatched commit, then anonymously verifies all five matching GHCR image tags before spending signing or build time
 3. builds the source sidecar wrapper for the CI host's Rust target triple
 4. builds the macOS Apple Silicon desktop app
 5. verifies the protected release signing and notarization inputs before building user-downloadable artifacts
 6. signs and notarizes the Tauri updater archive and macOS bundle with the configured release credentials
 7. verifies the app bundle and DMG with `codesign`, Gatekeeper assessment, and stapled notarization-ticket checks
-8. renames the notarized DMG to the stable public asset `InferGrade.Runner.macOS-arm64.dmg`, then publishes it with the updater archive, updater signature, and updater manifest to the `desktop-runner-latest` GitHub release
-9. removes assets outside the exact checksummed release set, redownloads the published assets, rejects stale or extra files, verifies their checksum/updater relationship, and anonymously probes both the updater and stable installer URLs
+8. renames the notarized DMG to the stable public asset `InferGrade.Runner.macOS-arm64.dmg`, creates or resumes the draft release for the exact `vX.Y.Z` tag, and uploads the DMG, updater archive, updater signature, updater manifest, and checksums
+9. removes draft assets outside the exact checksummed set, redownloads and verifies the draft, then publishes it as an immutable versioned GitHub release and anonymously probes the updater and installer through GitHub's `releases/latest` redirect
 
 The desktop release deliberately does not fall back to older capability images. Scorer and dataset containers are part of the benchmark protocol identity; publishing an app whose matching tags are missing would either break selected benchmarks or silently change their evidence basis.
 
@@ -134,11 +134,12 @@ secrets.
 
 ### Verify Published Desktop Artifacts
 
-After the protected workflow publishes `desktop-runner-latest`, download the release files into one directory and verify the local manifests:
+After the protected workflow publishes the immutable versioned Desktop release,
+download its files into one directory and verify the local manifests:
 
 ```bash
 scripts/verify_desktop_release_artifacts.py \
-  --directory /path/to/downloaded/desktop-runner-latest \
+  --directory /path/to/downloaded/vX.Y.Z \
   --require-dmg \
   --require-updater
 ```

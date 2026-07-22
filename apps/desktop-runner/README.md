@@ -90,13 +90,20 @@ Public release credentials should be configured only in the protected GitHub `re
 
 If CI reports that `APPLE_CERTIFICATE` could not be opened with `APPLE_CERTIFICATE_PASSWORD`, re-export the Developer ID Application certificate as a password-protected `.p12`, verify it locally with `openssl pkcs12 -passin env:APPLE_CERTIFICATE_PASSWORD`, then update the certificate and password secrets together in the protected GitHub release environment.
 
-The release workflow publishes the latest desktop release manifest at:
+The release workflow publishes a versioned, immutable GitHub release and exposes
+its updater manifest through GitHub's latest-release redirect:
 
 ```text
-https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-latest/infergrade-runner-desktop-latest.json
+https://github.com/bfogels/infergrade-runner/releases/latest/download/infergrade-runner-desktop-latest.json
 ```
 
-The workflow then performs an unauthenticated manifest read and archive `HEAD` check. A private repository or otherwise inaccessible release origin fails this gate even when an authenticated maintainer can see the assets; updater clients cannot use maintainer credentials.
+The workflow creates a draft for the exact `vX.Y.Z` tag, uploads and verifies the
+complete checksummed asset set, and only then publishes it. GitHub makes the
+published release immutable. The workflow then performs an unauthenticated
+manifest read and archive `HEAD` check through the latest-release redirect. A
+private repository or otherwise inaccessible release origin fails this gate even
+when an authenticated maintainer can see the assets; updater clients cannot use
+maintainer credentials.
 
 For nontechnical beta users, the macOS DMG should be Developer ID signed and notarized. Ad-hoc signed DMGs are appropriate for local development and internal smoke testing only.
 

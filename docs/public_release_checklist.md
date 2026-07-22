@@ -66,11 +66,13 @@ Do not paste replacement values into issues, PRs, docs, screenshots, or local co
 
 ## Published Artifact Verification
 
-After the protected desktop workflow publishes `desktop-runner-latest`, download the DMG, updater archive, updater `.sig`, updater manifest, and `SHA256SUMS` into one directory and run:
+After the protected desktop workflow publishes the immutable versioned release,
+download the DMG, updater archive, updater `.sig`, updater manifest, and
+`SHA256SUMS` into one directory and run:
 
 ```bash
 python3 ./scripts/verify_desktop_release_artifacts.py \
-  --directory /path/to/downloaded/desktop-runner-latest \
+  --directory /path/to/downloaded/vX.Y.Z \
   --require-dmg \
   --required-dmg-name InferGrade.Runner.macOS-arm64.dmg \
   --require-updater \

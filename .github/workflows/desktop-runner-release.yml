@@ -29,7 +29,6 @@ jobs:
     environment: release
     env:
       DESKTOP_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
-      RELEASE_TAG: desktop-runner-latest
       RELEASE_NOTES: ${{ github.event_name == 'workflow_dispatch' && inputs.notes || '' }}
       PUBLIC_DMG_NAME: InferGrade.Runner.macOS-arm64.dmg
     steps:
@@ -48,14 +47,37 @@ jobs:
 
       - name: Resolve release metadata
         run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Protected desktop releases must be dispatched from main, not $GITHUB_REF."
+            exit 1
+          fi
           if [ -z "$DESKTOP_VERSION" ]; then
             DESKTOP_VERSION="$(cat VERSION)"
+          fi
+          if [ "$DESKTOP_VERSION" != "$(cat VERSION)" ]; then
+            echo "::error::Requested desktop version $DESKTOP_VERSION does not match VERSION $(cat VERSION)."
+            exit 1
           fi
           if [ -z "$RELEASE_NOTES" ]; then
             RELEASE_NOTES="InferGrade Runner desktop update for ${GITHUB_SHA}."
           fi
           echo "DESKTOP_VERSION=$DESKTOP_VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=v$DESKTOP_VERSION" >> "$GITHUB_ENV"
           echo "RELEASE_NOTES=$RELEASE_NOTES" >> "$GITHUB_ENV"
+
+      - name: Verify immutable release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag_commit="$(gh api "repos/${{ github.repository }}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha')"
+          tag_type="$(gh api "repos/${{ github.repository }}/git/ref/tags/${RELEASE_TAG}" --jq '.object.type')"
+          if [ "$tag_type" = "tag" ]; then
+            tag_commit="$(gh api "repos/${{ github.repository }}/git/tags/${tag_commit}" --jq '.object.sha')"
+          fi
+          if [ "$tag_commit" != "$GITHUB_SHA" ]; then
+            echo "::error::$RELEASE_TAG resolves to $tag_commit, expected dispatched main commit $GITHUB_SHA."
+            exit 1
+          fi
 
       - name: Verify matching public runtime and capability images
         run: |
@@ -229,13 +251,24 @@ jobs:
             target/release/bundle/macos/*.tar.gz.sig \
             target/release/bundle/macos/infergrade-runner-desktop-latest.json
 
-      - name: Publish desktop release artifacts
+      - name: Create or resume versioned draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
-            gh release create "$RELEASE_TAG" --title "InferGrade Runner Desktop" --prerelease --notes "$RELEASE_NOTES"
-          gh release edit "$RELEASE_TAG" --title "InferGrade Runner Desktop" --notes "$RELEASE_NOTES" --prerelease
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')"
+            if [ "$is_draft" != "true" ]; then
+              echo "::error::$RELEASE_TAG is already published and immutable; refusing to replace its assets."
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" \
+              --draft \
+              --verify-tag \
+              --title "InferGrade Runner $RELEASE_TAG" \
+              --notes "$RELEASE_NOTES"
+          fi
+          gh release edit "$RELEASE_TAG" --title "InferGrade Runner $RELEASE_TAG" --notes "$RELEASE_NOTES"
           gh release upload "$RELEASE_TAG" \
             target/release/bundle/dmg/*.dmg \
             target/release/bundle/macos/*.tar.gz \
@@ -259,26 +292,45 @@ jobs:
             fi
           done
 
-      - name: Verify published desktop release
+      - name: Verify draft desktop release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          published_dir="$RUNNER_TEMP/desktop-runner-published"
-          mkdir -p "$published_dir"
-          gh release download "$RELEASE_TAG" --dir "$published_dir"
+          draft_dir="$RUNNER_TEMP/desktop-runner-draft"
+          mkdir -p "$draft_dir"
+          gh release download "$RELEASE_TAG" --dir "$draft_dir"
           python3 ./scripts/verify_desktop_release_artifacts.py \
-            --directory "$published_dir" \
+            --directory "$draft_dir" \
             --require-dmg \
             --required-dmg-name "$PUBLIC_DMG_NAME" \
             --require-updater \
             --reject-unexpected
+
+      - name: Publish immutable versioned desktop release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "$RELEASE_TAG" --draft=false --latest
+
+      - name: Verify published desktop release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          immutable="$(gh api "repos/${{ github.repository }}/releases/tags/${RELEASE_TAG}" --jq '.immutable')"
+          if [ "$immutable" != "true" ]; then
+            echo "::error::$RELEASE_TAG published without GitHub release immutability."
+            exit 1
+          fi
           python3 ./scripts/verify_desktop_update_endpoint.py \
             --url "https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/infergrade-runner-desktop-latest.json" \
+            --expected-version "$DESKTOP_VERSION"
+          python3 ./scripts/verify_desktop_update_endpoint.py \
+            --url "https://github.com/${{ github.repository }}/releases/latest/download/infergrade-runner-desktop-latest.json" \
             --expected-version "$DESKTOP_VERSION"
           public_dmg="$RUNNER_TEMP/$PUBLIC_DMG_NAME"
           curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
             --output "$public_dmg" \
-            "https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${PUBLIC_DMG_NAME}"
+            "https://github.com/${{ github.repository }}/releases/latest/download/${PUBLIC_DMG_NAME}"
           expected_dmg_sha="$(awk -F '  ' -v name="$PUBLIC_DMG_NAME" '$2 == name {print $1}' target/release/bundle/macos/SHA256SUMS)"
           actual_dmg_sha="$(shasum -a 256 "$public_dmg" | awk '{print $1}')"
           test -n "$expected_dmg_sha"

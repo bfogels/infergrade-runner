@@ -94,16 +94,23 @@ Do not ask users to bypass Gatekeeper. Build a new artifact from the protected d
 The macOS app reads the latest updater manifest from:
 
 ```text
-https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-latest/infergrade-runner-desktop-latest.json
+https://github.com/bfogels/infergrade-runner/releases/latest/download/infergrade-runner-desktop-latest.json
 ```
 
 The signed and notarized Apple Silicon installer has a stable public URL so the Hub can link directly to GitHub without proxying installer bytes:
 
 ```text
-https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-latest/InferGrade.Runner.macOS-arm64.dmg
+https://github.com/bfogels/infergrade-runner/releases/latest/download/InferGrade.Runner.macOS-arm64.dmg
 ```
 
-Maintainers deliberately dispatch the protected GitHub Actions workflow from `main` for a reviewed release. The workflow publishes the latest DMG and updater artifacts only after Developer ID signing, notarization, Gatekeeper verification, and stapled-ticket checks pass.
+Maintainers deliberately dispatch the protected GitHub Actions workflow from
+`main` for a reviewed, already-tagged release. The workflow creates a draft for
+the exact `vX.Y.Z` tag, attaches and verifies the complete asset set, and only
+then publishes the release. Published releases and their assets are immutable;
+GitHub's `releases/latest` redirect selects the current version without requiring
+an overwriteable release asset. The workflow publishes the DMG and updater
+artifacts only after Developer ID signing, notarization, Gatekeeper verification,
+and stapled-ticket checks pass.
 
 The protected workflow also runs `scripts/verify_desktop_macos_release.sh` before upload. That script verifies the built app bundle with `codesign`, assesses the app and DMG with Gatekeeper, and validates stapled notarization tickets for both artifacts. If any of those checks fail, the workflow must stop before updating the downloadable release.
 
@@ -111,7 +118,7 @@ After downloading release artifacts from GitHub, maintainers can verify the publ
 
 ```bash
 scripts/verify_desktop_release_artifacts.py \
-  --directory /path/to/downloaded/desktop-runner-latest \
+  --directory /path/to/downloaded/vX.Y.Z \
   --require-dmg \
   --required-dmg-name InferGrade.Runner.macOS-arm64.dmg \
   --require-updater \
@@ -125,7 +132,7 @@ The updater manifest writer can already emit a multi-platform Tauri manifest whe
 ```bash
 python3 ./scripts/write_desktop_update_manifest.py \
   --version "$(cat VERSION)" \
-  --base-url "https://github.com/bfogels/infergrade-runner/releases/download/desktop-runner-latest" \
+  --base-url "https://github.com/bfogels/infergrade-runner/releases/download/vX.Y.Z" \
   --artifact darwin-aarch64=/path/to/InferGrade.Runner.app.tar.gz \
   --artifact windows-x86_64=/path/to/InferGrade.Runner.setup.zip \
   --artifact linux-x86_64=/path/to/infergrade-runner.AppImage.tar.gz \
