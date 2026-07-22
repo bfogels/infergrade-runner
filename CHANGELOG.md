@@ -7,6 +7,8 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.42 (contract 0.3.25)
+
 - Validates a direct-answer protocol on the first MMLU-Pro case, retries
   affected Gemma 4 and Qwen 3.5/3.6 models with a recorded 512-token answer
   budget, and stops early when the recovered protocol still cannot emit a
