@@ -6,7 +6,9 @@
   "runtime": {
     "catalog_target": "infergrade/prism-llama-cpp/prism-b9596-9fcaed7/macos-arm64.tar.gz",
     "catalog_source_version": 8,
-    "catalog_activation_status": "staged_candidate",
+    "catalog_activation_status": "active",
+    "catalog_targets_metadata_version": 8,
+    "catalog_targets_metadata_sha256": "633f26e6602b925bf735d1fd1029bec9d1c802903b860cda16511fbc56090eb7",
     "runtime_build_id": "142a189ab18d0847bdc29134db2ffd34b8352743308c783ea740e57e77c7eeb2",
     "build_manifest_files_sha256": "a4488af41082d14cbccb099c2a3b7ceba2ab981854b3e26ac57e7aadb90cb53b",
     "content_manifest_sha256": "892aeaaa1e4e9893ddaa93fb61aa90c7a6b900ccb7b35cbd59fba0c57c98af6e",
@@ -17,7 +19,7 @@
     "support_tier": "candidate",
     "provenance_strength": "checksum_verified",
     "signing_environment": "production",
-    "signed_catalog_state": "not_yet_active"
+    "signed_catalog_state": "production_active"
   },
   "observed_receipt": {
     "content_scope": "selected_binary_set",
@@ -74,7 +76,7 @@
   "limitations": [
     "This validates only the exact Bonsai Q1_0 artifact on the recorded Apple M1 Pro hardware.",
     "The primary Bonsai model ran without the optional DSpark speculative drafter; this does not validate DSpark acceleration.",
-    "The observed receipt binds the three executed Prism binaries. The full archive identity is a separately verified catalog-source assertion and is not yet active signed metadata.",
+    "The observed receipt binds the three executed Prism binaries. Production catalog signing separately authenticates the exact full-archive assertion without broadening compatibility.",
     "It does not establish generic Prism-fork, GGUF, architecture-family, or cross-platform equivalence."
   ]
 }
