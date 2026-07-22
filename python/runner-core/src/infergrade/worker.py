@@ -564,7 +564,33 @@ def _classify_worker_failure(exc: Exception, doctor_report: Optional[Dict[str, A
         return _classify_doctor_failure(doctor_report)
     message = str(exc)
     lowered = message.lower()
-    if "curl failed while downloading" in lowered or "quant artifact does not exist" in lowered or "sha256 mismatch" in lowered:
+    if "requires exact runtime target" in lowered:
+        return {
+            "error_code": "specialized_runtime_required",
+            "message": "This exact model needs a reviewed specialized runtime. Install it from the Runner prompt, then retry the run.",
+            "recovery": [
+                {"label": "Install the reviewed runtime", "detail": "Use the install action shown by Desktop Runner; the signed catalog pins the exact build."},
+                {"label": "Retry from Hub", "detail": "After installation, retry the failed run from the Runs page."},
+            ],
+            "details": {"raw_error": message},
+        }
+    if "no valid exact-artifact compatibility assertion" in lowered:
+        return {
+            "error_code": "specialized_artifact_unsupported",
+            "message": "InferGrade has no reviewed runtime for this exact specialized GGUF. Choose the reviewed alternative in Hub instead of guessing a runtime.",
+            "recovery": [
+                {"label": "Choose the reviewed artifact", "detail": "Return to Build in Hub and use the reviewed alternative offered for this model family."},
+            ],
+            "details": {"raw_error": message},
+        }
+    if (
+        "curl failed while downloading" in lowered
+        or "quant artifact does not exist" in lowered
+        or "sha256 mismatch" in lowered
+        or "http get" in lowered
+        or "http error" in lowered
+        or any("http %s" % status in lowered for status in (403, 404, 429, 500, 502, 503, 504))
+    ):
         return {
             "error_code": "artifact_download_failed",
             "message": "Artifact download failed: verify the artifact reference and reconnect Hugging Face if access is required.",

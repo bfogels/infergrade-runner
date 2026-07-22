@@ -705,6 +705,28 @@ class WorkerTests(unittest.TestCase):
         self.assertTrue(failure["recovery"])
         self.assertIn("raw_error", failure["details"])
 
+    def test_classify_worker_failure_distinguishes_recoverable_and_unqualified_specialized_runtimes(self):
+        recoverable = _classify_worker_failure(
+            RuntimeError(
+                "requires exact runtime target 'infergrade/prism/runtime.tar.gz' "
+                "(runtime build %s)" % ("a" * 64)
+            )
+        )
+        unsupported = _classify_worker_failure(
+            RuntimeError("signed catalog has no valid exact-artifact compatibility assertion for abc")
+        )
+
+        self.assertEqual(recoverable["error_code"], "specialized_runtime_required")
+        self.assertIn("Install", recoverable["message"])
+        self.assertEqual(unsupported["error_code"], "specialized_artifact_unsupported")
+        self.assertIn("reviewed alternative", unsupported["message"])
+
+    def test_classify_worker_failure_treats_http_get_as_download_recovery(self):
+        failure = _classify_worker_failure(RuntimeError("HTTP GET failed with HTTP 503"))
+
+        self.assertEqual(failure["error_code"], "artifact_download_failed")
+        self.assertIn("download", failure["message"].lower())
+
     def test_classify_worker_failure_maps_low_disk_errors_to_actionable_code(self):
         failure = _classify_worker_failure(
             RuntimeError("insufficient free disk space for artifact cache: 1.00 GB free, 5.00 GB required")

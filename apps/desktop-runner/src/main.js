@@ -2,6 +2,7 @@ import "./styles.css";
 import packageInfo from "../package.json";
 import {
   assignmentClockTransition,
+  assignmentFailureRecovery,
   assignmentTitleFromRunId,
   desktopReadinessPresentation,
   displayCacheArtifactName,
@@ -1538,18 +1539,14 @@ function renderAssignmentFromListenerLine(line = "") {
   const failed = trimmed.match(/^Run ([^\.\s]+) failed: (.+)$/);
   if (failed) {
     const runId = failed[1];
-    const runtimeMatch = failed[2].match(/requires exact runtime target '([^']+)' \(runtime build ([0-9a-f]{64})\)/i);
-    pendingRequiredRuntime = runtimeMatch
-      ? { targetName: runtimeMatch[1], runtimeBuildId: runtimeMatch[2].toLowerCase() }
-      : null;
+    const recovery = assignmentFailureRecovery(failed[2]);
+    pendingRequiredRuntime = recovery.requiredRuntime;
     renderAssignmentActive({
       title: assignmentTitleFromRunId(runId),
       phase: "Needs attention",
-      description: pendingRequiredRuntime
-        ? `This model needs a reviewed specialized runtime (${pendingRequiredRuntime.runtimeBuildId.slice(0, 12)}…). Install it here, then retry the benchmark from Hub.`
-        : failed[2],
+      description: recovery.description,
       progress: 100,
-      checkName: pendingRequiredRuntime ? "Specialized runtime required" : "See logs for recovery detail",
+      checkName: recovery.checkName,
       runId,
     });
     setStatus("Needs attention", "error");
