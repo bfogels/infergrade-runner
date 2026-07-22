@@ -8,9 +8,34 @@ from unittest import mock
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.cli import main
+from infergrade.models import RunRequest
 
 
 class CliTests(unittest.TestCase):
+    def test_run_request_file_preserves_resume_and_output_overrides(self):
+        request = RunRequest(model="example/model", backend="llama.cpp", tier="standard", simulate=False)
+        output = io.StringIO()
+        with mock.patch("infergrade.cli.request_from_file", return_value=request), mock.patch(
+            "infergrade.cli.run_infergrade", return_value={"bundle_id": "bundle-1"}
+        ) as run_mock, redirect_stdout(output):
+            self.assertEqual(
+                main([
+                    "--all",
+                    "run",
+                    "--request-file",
+                    "/tmp/request.json",
+                    "--resume",
+                    "--output",
+                    "/tmp/resumed-run",
+                    "--real-run",
+                ]),
+                0,
+            )
+
+        resolved = run_mock.call_args.args[0]
+        self.assertTrue(resolved.resume)
+        self.assertEqual(resolved.output_dir, "/tmp/resumed-run")
+
     def test_default_help_shows_canonical_runner_commands_only(self):
         output = io.StringIO()
         with redirect_stdout(output):
