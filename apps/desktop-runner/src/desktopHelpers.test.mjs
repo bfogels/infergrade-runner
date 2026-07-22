@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   assignmentClockTransition,
+  assignmentFailureRecovery,
   assignmentTitleFromRunId,
   desktopReadinessPresentation,
   hubAuthenticationFailure,
@@ -17,6 +18,24 @@ import {
   userSafeUpdateFailure,
   userSafeTokenFailure,
 } from "./desktopHelpers.js";
+
+test("turns runtime failures into actionable assignment recovery", () => {
+  const required = assignmentFailureRecovery(
+    "Cannot use runtime: requires exact runtime target 'infergrade/prism/runtime.tar.gz' (runtime build aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)"
+  );
+  assert.equal(required.kind, "install_reviewed_runtime");
+  assert.equal(required.requiredRuntime.targetName, "infergrade/prism/runtime.tar.gz");
+
+  const unsupported = assignmentFailureRecovery(
+    "the signed catalog has no valid exact-artifact compatibility assertion for abc"
+  );
+  assert.equal(unsupported.kind, "choose_reviewed_artifact");
+  assert.match(unsupported.description, /choose the reviewed model alternative/i);
+
+  const download = assignmentFailureRecovery("curl failed while downloading model: HTTP 404");
+  assert.equal(download.kind, "retry_artifact_download");
+  assert.match(download.description, /reconnect Hugging Face/i);
+});
 
 test("turns internal assignment ids into compact model-aware titles", () => {
   assert.equal(

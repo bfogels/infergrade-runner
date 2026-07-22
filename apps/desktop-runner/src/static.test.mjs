@@ -22,8 +22,8 @@ test("desktop shell permission shapes keep version separate from URL-scoped comm
 test("desktop onboarding exposes paste-code pairing, reset, and bundled runner self-test", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
-  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
   const helpers = readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 
   assert.ok(html.includes('value="https://api.infergrade.com"'));
   assert.ok(html.includes("Paste the one-time code from Hub"));
@@ -409,6 +409,7 @@ test("desktop legacy handoff path stays token-free and hidden from normal UI", (
 test("desktop assignment panel renders real listener progress updates", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const helpers = readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8");
   const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 
   assert.equal(html.includes("Run assigned local smoke"), false);
@@ -431,7 +432,8 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("Handoff received"));
   assert.ok(js.includes("Start listening to claim this run"));
   assert.ok(js.includes("install_required_runtime_catalog_target"));
-  assert.ok(js.includes("Specialized runtime required"));
+  assert.ok(helpers.includes("Specialized runtime required"));
+  assert.ok(helpers.includes("Choose reviewed artifact in Hub"));
   assert.ok(rust.includes("engine_install_active_runtime_catalog_target"));
   assert.ok(js.includes("currentHandoffRunId"));
   assert.equal(js.includes("Waiting for local runtime and model readiness"), false);
