@@ -173,6 +173,27 @@ export function userSafeUpdateFailure(_message = "") {
   return "Update status is unavailable. You can still pair and start the Runner.";
 }
 
+export function hubAuthenticationFailure(message = "") {
+  const text = String(message || "");
+  if (/runner_token_expired|runner token (?:has )?expired/i.test(text)) {
+    return {
+      invalid: true,
+      title: "Pairing expired",
+      message: "This machine's Hub pairing expired. Pair it again to resume benchmark work.",
+      status: "Pair again",
+    };
+  }
+  if (/runner_token_revoked|runner token (?:was |has been )?revoked/i.test(text)) {
+    return {
+      invalid: true,
+      title: "Pairing revoked",
+      message: "This machine's Hub pairing was revoked. Pair it again before accepting benchmark work.",
+      status: "Pair again",
+    };
+  }
+  return { invalid: false, title: "", message: "", status: "" };
+}
+
 export function assignmentTitleFromRunId(value = "") {
   const runId = String(value || "").trim();
   if (!runId) {
@@ -234,7 +255,17 @@ export function desktopReadinessPresentation({
   listening = false,
   runtimeAvailable = false,
   hubVerified = false,
+  authFailure = null,
 } = {}) {
+  if (authFailure?.invalid) {
+    return {
+      ready: false,
+      title: authFailure.title,
+      message: authFailure.message,
+      hubFact: authFailure.status,
+      hubFactState: "blocked",
+    };
+  }
   if (!paired) {
     return {
       ready: false,

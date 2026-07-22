@@ -5,6 +5,7 @@ import {
   assignmentClockTransition,
   assignmentTitleFromRunId,
   desktopReadinessPresentation,
+  hubAuthenticationFailure,
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
@@ -29,6 +30,30 @@ test("turns internal assignment ids into compact model-aware titles", () => {
 test("hides cache-address prefixes from model filenames", () => {
   assert.equal(displayCacheArtifactName("03b74727a860a563-Qwen3.5-9B-Q4_K_M.gguf"), "Qwen3.5-9B-Q4_K_M.gguf");
   assert.equal(displayCacheArtifactName("Qwen3.5-9B-Q4_K_M.gguf"), "Qwen3.5-9B-Q4_K_M.gguf");
+});
+
+test("maps expired and revoked Hub pairings to direct recovery copy", () => {
+  assert.deepEqual(hubAuthenticationFailure('HTTP 401: {"error":"runner_token_expired"}'), {
+    invalid: true,
+    title: "Pairing expired",
+    message: "This machine's Hub pairing expired. Pair it again to resume benchmark work.",
+    status: "Pair again",
+  });
+  assert.equal(hubAuthenticationFailure("runner_token_revoked").title, "Pairing revoked");
+  assert.equal(hubAuthenticationFailure("network unavailable").invalid, false);
+});
+
+test("expired pairing takes precedence over otherwise saved readiness state", () => {
+  const presentation = desktopReadinessPresentation({
+    paired: true,
+    listening: false,
+    runtimeAvailable: true,
+    hubVerified: false,
+    authFailure: hubAuthenticationFailure("runner_token_expired"),
+  });
+  assert.equal(presentation.title, "Pairing expired");
+  assert.equal(presentation.hubFactState, "blocked");
+  assert.equal(presentation.ready, false);
 });
 
 test("assignment clocks begin on claim, reset for a new run, and freeze on terminal phases", () => {
