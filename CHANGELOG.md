@@ -7,6 +7,13 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.44 (contract 0.3.25)
+
+- Records the declared capability surface, evidence lane, and depth-derived
+  confidence label in every successfully scored component report so Hub corpus
+  coverage can distinguish smoke, decision, reference, and gold evidence
+  without inferring confidence from historical names or scores.
+
 ## 0.3.43 (contract 0.3.25)
 
 - Activates production runtime catalog generation 8 with separate exact target
