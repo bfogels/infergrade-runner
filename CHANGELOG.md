@@ -7,6 +7,11 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.45 (contract 0.3.25)
+
+- Updates the Desktop build's transitive PostCSS dependency to 8.5.23,
+  clearing GHSA-r28c-9q8g-f849 before producing signed installers.
+
 ## 0.3.44 (contract 0.3.25)
 
 - Records the declared capability surface, evidence lane, and depth-derived
