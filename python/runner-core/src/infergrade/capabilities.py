@@ -530,10 +530,16 @@ def _component_report_for_benchmark(
         benchmark_result.get("status")
         or ("simulated" if benchmark_result == {} and component_score is not None else ("completed" if primary_metric_value is not None else "not_run"))
     )
+    check_metadata = _selected_check_metadata(request, benchmark_id)
+    evidence_lane = str(check_metadata.get("evidence_lane_id") or "decision")
+    scored = _benchmark_counts_as_scored(benchmark_result) or component_score is not None
     report = {
         "benchmark_id": benchmark_id,
         "display_name": spec.display_name,
         "benchmark_kind": spec.benchmark_kind,
+        "surface": check_metadata.get("surface_id"),
+        "evidence_lane_id": evidence_lane,
+        "confidence_label": _confidence_label_for_lane(evidence_lane) if scored else None,
         "primary_metric_name": spec.primary_metric_name,
         "primary_metric_value": primary_metric_value,
         "component_score": component_score,
@@ -550,6 +556,15 @@ def _component_report_for_benchmark(
         if isinstance(malformed_output_count, int) and not isinstance(malformed_output_count, bool):
             report["malformed_output_count"] = malformed_output_count
     return report
+
+
+def _confidence_label_for_lane(evidence_lane: str) -> str:
+    return {
+        "smoke": "single_smoke",
+        "decision": "thin_local_sample",
+        "reference": "sampled_reference",
+        "gold": "gold",
+    }.get(str(evidence_lane or ""), "thin_local_sample")
 
 
 def _capability_state_for_request(
