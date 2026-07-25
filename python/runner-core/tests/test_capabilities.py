@@ -2000,6 +2000,16 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(summary["benchmark_coverage"]["planned_count"], 2)
         self.assertEqual(summary["benchmark_coverage"]["scored_count"], 1)
         self.assertEqual(len(summary["capability_component_reports"]), 2)
+        completed_component = next(
+            item for item in summary["capability_component_reports"] if item["benchmark_id"] == "evalplus_humaneval"
+        )
+        self.assertEqual(completed_component["surface"], "local_coding_capability")
+        self.assertEqual(completed_component["evidence_lane_id"], "reference")
+        self.assertEqual(completed_component["confidence_label"], "sampled_reference")
+        missing_component = next(
+            item for item in summary["capability_component_reports"] if item["benchmark_id"] == "evalplus_mbpp"
+        )
+        self.assertIsNone(missing_component["confidence_label"])
         self.assertEqual(summary["capability_suite_ids"], ["coding_code_editing", "quant_fidelity"])
         self.assertIn("evalplus_humaneval", summary["selected_benchmark_check_ids"])
         self.assertEqual(summary["benchmark_protocol_identity"]["status"], "incomplete")
@@ -2131,6 +2141,7 @@ class CapabilityTests(unittest.TestCase):
             item for item in summary["capability_component_reports"] if item["benchmark_id"] == "evalplus_humaneval"
         )
         self.assertEqual(failed_component["status"], "failed")
+        self.assertIsNone(failed_component["confidence_label"])
         self.assertEqual(summary["capability_run_count"], 0)
 
     def test_host_mount_path_maps_listener_runs_dir_to_host_runs_dir(self):
