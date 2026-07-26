@@ -1358,6 +1358,8 @@ def _write_native_capability_run_artifact(
                     {
                         "context_bucket_tokens": case.get("context_bucket_tokens"),
                         "key_position": case.get("key_position"),
+                        "format_valid": case_score.get("format_valid"),
+                        "format_violation": case_score.get("error_class"),
                     }
                     if spec.benchmark_id == "context_retrieval_reference_v1"
                     else {}
@@ -2864,18 +2866,30 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
         if expected_answers:
             total_constraints += 1
             expected = [_normalize_exact_answer(item) for item in expected_answers]
-            extracted_answer = _extract_exact_answer(response, expected_answers)
+            if spec.benchmark_id == "context_retrieval_reference_v1":
+                extracted_answer = _extract_context_retrieval_key(response, expected_answers)
+            else:
+                extracted_answer = _extract_exact_answer(response, expected_answers)
             passed = extracted_answer in expected
+            format_violation = bool(
+                spec.benchmark_id == "context_retrieval_reference_v1"
+                and passed
+                and _normalize_exact_answer(response) != extracted_answer
+            )
             if passed:
                 passed_constraints += 1
+                semantic_correct_count += 1
+            if format_violation:
+                format_violation_count += 1
             case_results.append(
                 {
                     "case_id": case_id,
                     "state": "scored",
-                    "error_class": None,
+                    "error_class": "format_violation" if format_violation else None,
                     "passed_constraints": 1 if passed else 0,
                     "total_constraints": 1,
                     "score": 1.0 if passed else 0.0,
+                    "format_valid": not format_violation,
                     **(
                         {
                             "context_bucket_tokens": case.get("context_bucket_tokens"),
@@ -2959,6 +2973,7 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
             }
         )
     if spec.benchmark_id == "context_retrieval_reference_v1":
+        metrics["format_violation_count"] = format_violation_count
         bucket_metrics = {}
         for item in case_results:
             bucket = item.get("context_bucket_tokens")
@@ -3032,6 +3047,17 @@ def _extract_exact_answer(value: Any, expected_answers: List[Any]) -> Optional[s
         return unique_hits[0] if len(unique_hits) == 1 else None
 
     return None
+
+
+def _extract_context_retrieval_key(value: Any, expected_answers: List[Any]) -> Optional[str]:
+    """Return one uniquely present pinned key while preserving format diagnostics."""
+    text = str(value or "")
+    hits = []
+    for expected in expected_answers:
+        normalized = _normalize_exact_answer(expected)
+        if normalized and re.search(r"(?<![A-Za-z0-9_-])%s(?![A-Za-z0-9_-])" % re.escape(str(expected)), text):
+            hits.append(normalized)
+    return hits[0] if len(set(hits)) == 1 else None
 
 
 def _extract_single_code_fence(value: str, language: Any = None) -> Optional[str]:

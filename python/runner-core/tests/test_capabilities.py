@@ -149,7 +149,7 @@ class _ContextRetrievalPassingAdapter(object):
 
         key = re.search(r"IGCTX-[0-9]+-[A-Z]+-[0-9]+", prompt).group(0)
         return {
-            "text": key,
+            "text": "Retrieved key: %s" % key,
             "status": "completed",
             "error": None,
             "input_tokens": len(prompt) // 4,
@@ -359,6 +359,7 @@ class CapabilityTests(unittest.TestCase):
         result = execution.benchmark_results["context_retrieval_reference_v1"]
 
         self.assertEqual(result["primary_metric"]["value"], 1.0)
+        self.assertEqual(result["metrics"]["format_violation_count"], 3)
         self.assertEqual(set(result["metrics"]["context_bucket_metrics"]), {"4096", "8192", "16384"})
         for bucket in result["metrics"]["context_bucket_metrics"].values():
             self.assertEqual(bucket["accuracy"], 1.0)
