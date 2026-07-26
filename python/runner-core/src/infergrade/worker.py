@@ -177,6 +177,26 @@ def execute_run_job(
         doctor_report = run_doctor(request=request, api_url=api_url)
         if not doctor_report.get("ok"):
             raise RuntimeError(_doctor_failure_message(doctor_report))
+        heartbeat_run_job(
+            api_url,
+            run_id,
+            worker_id,
+            stage="preflight_complete",
+            detail="Artifact, runtime, benchmark images, disk, and Hub access are ready.",
+            message="Exact run preflight passed.",
+            progress_percent=8.0,
+            api_token=api_token,
+            run_token=run_token,
+        )
+        _emit_desktop_event(
+            emit_progress,
+            "assignment_update",
+            phase="Preparing",
+            run_id=run_id,
+            description="This exact setup passed local readiness checks.",
+            progress=16,
+            check_name="Ready to run",
+        )
 
         def _emit(message: str) -> None:
             if emit_progress:

@@ -558,10 +558,15 @@ def _fetch_json_with_curl(url: str) -> Dict[str, object]:
 
 
 def _request_for_url(url: str):
-    headers = _auth_headers(url)
+    headers = artifact_request_headers(url)
     if not headers:
         return url
     return urllib_request.Request(url, headers=headers)
+
+
+def artifact_request_headers(url: str) -> Dict[str, str]:
+    """Return scoped download headers without exposing token values in receipts."""
+    return dict(_auth_headers(url))
 
 
 def _curl_header_config(headers: Dict[str, str]) -> str:
