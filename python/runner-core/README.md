@@ -98,6 +98,8 @@ PYTHONPATH=python/runner-core/src python3 -m infergrade run --model Qwen/Qwen2.5
 
 The `llama.cpp` adapter and capability containers will also try to build missing `:local` images automatically when the checked-out Runner repo is available, so the common “image not found” path should degrade into a local build instead of an unhelpful Docker auth error.
 
+If a released capability image has no Linux/arm64 manifest, Apple Silicon retries that scorer as Linux/amd64 under Docker Desktop emulation. This fallback does not move model inference into Docker: the local-native Metal runtime still produces the model outputs, while the container only evaluates the sandboxed capability cases.
+
 If `infergrade-runner-core:local` already exists but is stale, you can force a rebuild with:
 
 ```bash

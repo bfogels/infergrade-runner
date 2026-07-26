@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import subprocess
 from pathlib import Path
 from typing import Dict, Optional
@@ -16,6 +17,11 @@ LOCAL_IMAGE_DOCKERFILES: Dict[str, str] = {
     "infergrade-evalplus": "containers/capability-evalplus/Dockerfile",
     "infergrade-mmlu-pro": "containers/capability-mmlu-pro/Dockerfile",
     "infergrade-runner-core": "containers/runner-core/Dockerfile",
+}
+CAPABILITY_IMAGE_REPOSITORIES = {
+    "infergrade-ifeval",
+    "infergrade-evalplus",
+    "infergrade-mmlu-pro",
 }
 RUNNER_CORE_IMAGE = "infergrade-runner-core:local"
 
@@ -58,14 +64,31 @@ def install_image(
             return build_result
 
     if pull_if_missing:
+        pulled_platform = None
         completed = subprocess.run(
             ["docker", "pull", image],
             capture_output=True,
             text=True,
         )
-        if completed.returncode == 0:
-            return {"image": image, "action": "pulled"}
         message = (completed.stderr or completed.stdout or "").strip()
+        if (
+            completed.returncode != 0
+            and "no matching manifest for linux/arm64" in message.lower()
+            and known_repository in CAPABILITY_IMAGE_REPOSITORIES
+            and _is_apple_silicon_host()
+        ):
+            completed = subprocess.run(
+                ["docker", "pull", "--platform", "linux/amd64", image],
+                capture_output=True,
+                text=True,
+            )
+            pulled_platform = "linux/amd64"
+            message = (completed.stderr or completed.stdout or "").strip()
+        if completed.returncode == 0:
+            result = {"image": image, "action": "pulled"}
+            if pulled_platform:
+                result["platform"] = pulled_platform
+            return result
         if tag == "local":
             raise RuntimeError(
                 "Docker image %s is not available locally. Build it with `infergrade install-images --image %s` "
@@ -151,6 +174,23 @@ def _expand_install_targets(image: Optional[str]) -> list[str]:
 def _known_repository_name(repository: str) -> Optional[str]:
     candidate = str(repository or "").rsplit("/", 1)[-1]
     return candidate if candidate in LOCAL_IMAGE_DOCKERFILES else None
+
+
+def _is_apple_silicon_host() -> bool:
+    """Detect the host architecture even when Python runs under Rosetta."""
+    if platform.system().lower() != "darwin":
+        return False
+    if platform.machine().lower() in {"arm64", "aarch64"}:
+        return True
+    try:
+        completed = subprocess.run(
+            ["sysctl", "-n", "hw.optional.arm64"],
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return False
+    return completed.returncode == 0 and (completed.stdout or "").strip() == "1"
 
 
 def container_image_identity(image: str) -> Dict[str, object]:
