@@ -711,6 +711,18 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual([item["benchmark_id"] for item in images], ["mmlu_pro_reference_v1"])
         self.assertEqual(images[0]["image"], "ghcr.io/bfogels/infergrade-mmlu-pro:%s" % __version__)
 
+    def test_capability_images_include_gpqa_reference_when_selected(self):
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            benchmark_check_ids=["gpqa_diamond_reference_v1"],
+        )
+        images = capability_images_for_request(request)
+
+        self.assertEqual([item["benchmark_id"] for item in images], ["gpqa_diamond_reference_v1"])
+        self.assertEqual(images[0]["image"], "ghcr.io/bfogels/infergrade-gpqa:%s" % __version__)
+
     def test_execute_native_multiturn_benchmark_scores_constraints_without_docker(self):
         request = RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",
