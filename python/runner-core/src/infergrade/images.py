@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import subprocess
 from pathlib import Path
 from typing import Dict, Optional
@@ -58,14 +59,31 @@ def install_image(
             return build_result
 
     if pull_if_missing:
+        pulled_platform = None
         completed = subprocess.run(
             ["docker", "pull", image],
             capture_output=True,
             text=True,
         )
-        if completed.returncode == 0:
-            return {"image": image, "action": "pulled"}
         message = (completed.stderr or completed.stdout or "").strip()
+        if (
+            completed.returncode != 0
+            and "no matching manifest for linux/arm64" in message.lower()
+            and platform.system().lower() == "darwin"
+            and platform.machine().lower() in {"arm64", "aarch64"}
+        ):
+            completed = subprocess.run(
+                ["docker", "pull", "--platform", "linux/amd64", image],
+                capture_output=True,
+                text=True,
+            )
+            pulled_platform = "linux/amd64"
+            message = (completed.stderr or completed.stdout or "").strip()
+        if completed.returncode == 0:
+            result = {"image": image, "action": "pulled"}
+            if pulled_platform:
+                result["platform"] = pulled_platform
+            return result
         if tag == "local":
             raise RuntimeError(
                 "Docker image %s is not available locally. Build it with `infergrade install-images --image %s` "
