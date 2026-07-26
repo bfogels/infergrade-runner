@@ -19,6 +19,11 @@ IMAGE_NAMES = (
     "infergrade-evalplus",
     "infergrade-mmlu-pro",
 )
+MULTIARCH_IMAGE_NAMES = {
+    "infergrade-ifeval",
+    "infergrade-evalplus",
+    "infergrade-mmlu-pro",
+}
 INDEX_ACCEPT = ", ".join(
     (
         "application/vnd.oci.image.index.v1+json",
@@ -41,6 +46,8 @@ class ImageProof:
     manifest_digest: str
     platform_manifest_digest: str
     config_digest: str
+    platform_manifest_digests: dict[str, str]
+    config_digests: dict[str, str]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -89,15 +96,23 @@ def _manifest_request(registry: str, repository: str, reference: str, token: str
     return payload, digest
 
 
-def _linux_amd64_descriptor(payload: dict) -> dict:
+def _linux_platform_descriptor(payload: dict, architecture: str) -> dict:
     manifests = payload.get("manifests")
     if not isinstance(manifests, list):
         raise ValueError("OCI index is missing manifests.")
     for descriptor in manifests:
         platform = descriptor.get("platform") if isinstance(descriptor, dict) else None
-        if isinstance(platform, dict) and platform.get("os") == "linux" and platform.get("architecture") == "amd64":
+        if (
+            isinstance(platform, dict)
+            and platform.get("os") == "linux"
+            and platform.get("architecture") == architecture
+        ):
             return descriptor
-    raise ValueError("OCI index does not contain a linux/amd64 image.")
+    raise ValueError(f"OCI index does not contain a linux/{architecture} image.")
+
+
+def _linux_amd64_descriptor(payload: dict) -> dict:
+    return _linux_platform_descriptor(payload, "amd64")
 
 
 def verify_image(registry: str, namespace: str, image: str, tag: str) -> ImageProof:
@@ -111,27 +126,50 @@ def verify_image(registry: str, namespace: str, image: str, tag: str) -> ImagePr
 
     payload, manifest_digest = _manifest_request(registry, repository, tag, token, INDEX_ACCEPT)
     media_type = str(payload.get("mediaType") or "")
-    platform_manifest_digest = manifest_digest
+    required_architectures = ("amd64", "arm64") if image in MULTIARCH_IMAGE_NAMES else ("amd64",)
+    platform_manifest_digests = {}
+    config_digests = {}
     if media_type.endswith("image.index.v1+json") or media_type.endswith("manifest.list.v2+json"):
-        descriptor = _linux_amd64_descriptor(payload)
-        platform_manifest_digest = str(descriptor.get("digest") or "")
-        if not platform_manifest_digest.startswith("sha256:"):
-            raise ValueError(f"linux/amd64 descriptor is missing a digest for {repository}:{tag}.")
-        payload, fetched_digest = _manifest_request(
-            registry, repository, platform_manifest_digest, token, MANIFEST_ACCEPT
-        )
-        if fetched_digest != platform_manifest_digest:
-            raise ValueError(f"Platform manifest digest drifted for {repository}:{tag}.")
-
-    config = payload.get("config")
-    config_digest = str(config.get("digest") if isinstance(config, dict) else "")
-    if not config_digest.startswith("sha256:"):
-        raise ValueError(f"Image manifest is missing a config digest for {repository}:{tag}.")
+        for architecture in required_architectures:
+            descriptor = _linux_platform_descriptor(payload, architecture)
+            platform_digest = str(descriptor.get("digest") or "")
+            if not platform_digest.startswith("sha256:"):
+                raise ValueError(
+                    f"linux/{architecture} descriptor is missing a digest for {repository}:{tag}."
+                )
+            platform_payload, fetched_digest = _manifest_request(
+                registry, repository, platform_digest, token, MANIFEST_ACCEPT
+            )
+            if fetched_digest != platform_digest:
+                raise ValueError(
+                    f"linux/{architecture} manifest digest drifted for {repository}:{tag}."
+                )
+            config = platform_payload.get("config")
+            config_digest = str(config.get("digest") if isinstance(config, dict) else "")
+            if not config_digest.startswith("sha256:"):
+                raise ValueError(
+                    f"linux/{architecture} image manifest is missing a config digest for {repository}:{tag}."
+                )
+            platform_manifest_digests[architecture] = platform_digest
+            config_digests[architecture] = config_digest
+    else:
+        if len(required_architectures) > 1:
+            raise ValueError(
+                f"{repository}:{tag} must publish an OCI index with linux/amd64 and linux/arm64 images."
+            )
+        config = payload.get("config")
+        config_digest = str(config.get("digest") if isinstance(config, dict) else "")
+        if not config_digest.startswith("sha256:"):
+            raise ValueError(f"Image manifest is missing a config digest for {repository}:{tag}.")
+        platform_manifest_digests["amd64"] = manifest_digest
+        config_digests["amd64"] = config_digest
     return ImageProof(
         reference=f"{registry}/{repository}:{tag}",
         manifest_digest=manifest_digest,
-        platform_manifest_digest=platform_manifest_digest,
-        config_digest=config_digest,
+        platform_manifest_digest=platform_manifest_digests["amd64"],
+        config_digest=config_digests["amd64"],
+        platform_manifest_digests=platform_manifest_digests,
+        config_digests=config_digests,
     )
 
 
@@ -143,9 +181,13 @@ def main() -> int:
     except Exception as error:
         raise SystemExit(f"Anonymous image verification failed: {error}") from error
     for proof in proofs:
+        platforms = ",".join(
+            f"linux/{architecture}:{digest}"
+            for architecture, digest in proof.platform_manifest_digests.items()
+        )
         print(
             f"{proof.reference}\tmanifest:{proof.manifest_digest}"
-            f"\tlinux_amd64:{proof.platform_manifest_digest}\tconfig:{proof.config_digest}"
+            f"\tplatforms:{platforms}\tconfig:{proof.config_digest}"
         )
     print(f"Verified anonymous registry access for {len(proofs)} InferGrade images at {args.tag}.")
     return 0
