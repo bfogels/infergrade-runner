@@ -1,6 +1,6 @@
 # Capability Benchmarks
 
-Capability container defaults use the canonical public `ghcr.io/bfogels/<image>:<runner-version>` release reference. Source checkouts build that exact reference; installed runners pull it. Capability artifacts record the resolved local image ID and any repository digest so the actual scorer can be audited after the run. Source developers may override an image explicitly with `INFERGRADE_IFEVAL_IMAGE`, `INFERGRADE_EVALPLUS_IMAGE`, or `INFERGRADE_MMLU_PRO_IMAGE`; an unversioned `:local` image is never selected implicitly for evidence collection.
+Capability container defaults use the canonical public `ghcr.io/bfogels/<image>:<runner-version>` release reference. Source checkouts build that exact reference; installed runners pull it. Capability artifacts record the resolved local image ID and any repository digest so the actual scorer can be audited after the run. Source developers may override an image explicitly with `INFERGRADE_IFEVAL_IMAGE`, `INFERGRADE_EVALPLUS_IMAGE`, `INFERGRADE_MMLU_PRO_IMAGE`, or `INFERGRADE_GPQA_IMAGE`; an unversioned `:local` image is never selected implicitly for evidence collection.
 
 InferGrade needs capability benchmarks that are:
 
@@ -29,6 +29,14 @@ InferGrade needs capability benchmarks that are:
   - Why: gives local users a compact reasoning decision signal without shipping restricted datasets or making reference-suite claims.
   - InferGrade role: native local-friendly exact-answer reasoning check for thin local sample evidence.
 
+- `GPQA Diamond reference`
+  - Why: harder expert-level multiple-choice evidence can add headroom where smaller reasoning checks cluster.
+  - InferGrade role: deliberately selected diagnostic reference evidence. It has zero Capability protocol v3.1 weight until cross-family distribution, duration, malformed-output, and repeatability audits justify promotion.
+
+- `Context retrieval reference`
+  - Why: local users need to know whether a setup can retrieve a pinned fact at the prompt lengths they intend to use.
+  - InferGrade role: deterministic exact-key retrieval at nominal 4K, 8K, and 16K buckets, with observed task token counts. It does not claim broad long-context reasoning or maximum-context support and has zero headline score weight.
+
 ### Agentic Coding
 
 - `Coding static repair`
@@ -51,10 +59,6 @@ These are selected as high-value next additions, but are not yet wired into the 
   - Why: a deterministic, small repo-edit task can bridge the gap between code-generation benchmarks and SWE-style work.
   - InferGrade role: likely next local-friendly coding decision check before heavier reference suites.
 
-- `GPQA`
-  - Why: high-value hard reasoning/knowledge benchmark with strong anti-memorization properties.
-  - InferGrade role: assistant reference suite for differentiating models that look similar on instruction following.
-
 - `LiveCodeBench`
   - Why: broad contemporary coding benchmark with multiple task modes and temporal freshness.
   - InferGrade role: coding reference suite after local sandboxing, task pinning, and cost metadata are proven.
@@ -74,6 +78,10 @@ InferGrade should move toward benchmark legitimacy comparable to serious model-a
 - and why it is not part of the default quick path yet.
 
 Planned candidates are roadmap metadata only. They must not be rendered or validated as runnable checks until Runner owns a reproducible harness, scoring policy, fixture/version pin, and runtime-cost story.
+
+## Optional Local Judge Boundary
+
+InferGrade does not currently download or host a judge model. If a future benchmark requires one, the judge must be an explicit opt-in dependency with a pinned model, quant, runtime, prompt, and immutable receipt. Judge-derived outcomes must remain a separate experimental evidence dimension until calibrated against deterministic or human reference labels. Runner must never silently substitute a local judge for canonical scoring, and Hub must disclose judge identity rather than presenting the result as benchmark-native ground truth.
 
 The detailed acceptance gates for heavier third-party lanes live in [Stronger Evidence Lane Gates](stronger_evidence_lane_gates.md).
 

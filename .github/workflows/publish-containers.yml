@@ -47,6 +47,9 @@ jobs:
           - image: infergrade-mmlu-pro
             dockerfile: containers/capability-mmlu-pro/Dockerfile
             platforms: linux/amd64,linux/arm64
+          - image: infergrade-gpqa
+            dockerfile: containers/capability-gpqa/Dockerfile
+            platforms: linux/amd64,linux/arm64
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

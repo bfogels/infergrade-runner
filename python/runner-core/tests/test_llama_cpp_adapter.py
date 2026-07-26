@@ -12,6 +12,7 @@ from infergrade import __version__
 from infergrade.adapters.llama_cpp import (
     LlamaCppAdapter,
     _DEFAULT_IMAGE,
+    _capability_context_size,
     _compute_ttft_ms,
     _decode_utf8_lossy,
     _fetch_container_logs,
@@ -97,6 +98,17 @@ class LlamaCppAdapterTests(unittest.TestCase):
     def tearDown(self):
         self.env_patch.stop()
         self.tempdir.cleanup()
+
+    def test_capability_context_size_honors_only_pinned_context_fixture_buckets(self):
+        self.assertEqual(
+            _capability_context_size("InferGrade nominal context bucket: 8192 tokens.\nfixture"),
+            8192,
+        )
+        self.assertEqual(_capability_context_size("short ordinary prompt"), 4096)
+        self.assertEqual(
+            _capability_context_size("InferGrade nominal context bucket: 32768 tokens.\nfixture"),
+            4096,
+        )
 
     @mock.patch(
         "infergrade.adapters.llama_cpp._start_gpu_monitor",

@@ -38,6 +38,18 @@ _PROMPT_EVAL_TOKENS_RE = re.compile(r"prompt eval time\s*=\s*[0-9.]+\s*ms\s*/\s*
 _EVAL_TIME_RE = re.compile(r"eval time\s*=\s*([0-9.]+)\s*ms", re.IGNORECASE)
 _EVAL_TOKENS_RE = re.compile(r"eval time\s*=\s*[0-9.]+\s*ms\s*/\s*([0-9.]+)\s*runs?", re.IGNORECASE)
 _EVAL_TPS_RE = re.compile(r"\(\s*[0-9.]+\s*ms per token,\s*([0-9.]+)\s*tokens per second\)", re.IGNORECASE)
+_INFERGRADE_CONTEXT_BUCKET_RE = re.compile(
+    r"InferGrade nominal context bucket:\s*(4096|8192|16384)\s+tokens\.",
+    re.IGNORECASE,
+)
+
+
+def _capability_context_size(prompt: str) -> int:
+    """Honor an explicit pinned context fixture bucket; estimate all other prompts."""
+    match = _INFERGRADE_CONTEXT_BUCKET_RE.search(str(prompt or ""))
+    if match:
+        return int(match.group(1))
+    return max(4096, min(16384, len(prompt) * 2))
 _TOTAL_TIME_RE = re.compile(r"total time\s*=\s*([0-9.]+)\s*ms", re.IGNORECASE)
 _TOTAL_TIME_TOKENS_RE = re.compile(r"total time\s*=\s*[0-9.]+\s*ms\s*/\s*([0-9.]+)\s*tokens?", re.IGNORECASE)
 _SUMMARY_TPS_RE = re.compile(
@@ -475,7 +487,7 @@ class LlamaCppAdapter(BaseAdapter):
                     model_path=model_path,
                     prompt=effective_prompt,
                     max_tokens=max_tokens,
-                    ctx_size=max(4096, min(16384, len(prompt) * 2)),
+                    ctx_size=_capability_context_size(prompt),
                     request=request,
                 )
             )
@@ -501,7 +513,7 @@ class LlamaCppAdapter(BaseAdapter):
                     model_path=container_model_path,
                     prompt=effective_prompt,
                     max_tokens=max_tokens,
-                    ctx_size=max(4096, min(16384, len(prompt) * 2)),
+                    ctx_size=_capability_context_size(prompt),
                     request=request,
                 )
             )
@@ -553,7 +565,7 @@ class LlamaCppAdapter(BaseAdapter):
         messages, prompt_transform = _prepare_llama_server_chat(request, prompt)
         if messages is None:
             raise RuntimeError("Direct-answer generation requires structured chat messages")
-        ctx_size = max(4096, min(16384, len(prompt) * 2))
+        ctx_size = _capability_context_size(prompt)
         if self._capability_server_reuse_enabled:
             session = self._ensure_capability_server_session(request, model_path, ctx_size)
             try:
@@ -700,7 +712,7 @@ class LlamaCppAdapter(BaseAdapter):
         prompt_transform: Optional[Dict[str, str]],
         max_tokens: int,
     ) -> Dict[str, object]:
-        ctx_size = max(4096, min(16384, len(prompt) * 2))
+        ctx_size = _capability_context_size(prompt)
         session = self._ensure_capability_server_session(request, model_path, ctx_size)
         try:
             completion = _stream_server_completion(

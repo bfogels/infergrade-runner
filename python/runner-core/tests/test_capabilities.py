@@ -143,6 +143,20 @@ class _ReasoningPassingAdapter(object):
         return {"text": "", "status": "completed", "error": None}
 
 
+class _ContextRetrievalPassingAdapter(object):
+    def generate_text(self, request, prompt, max_tokens):
+        import re
+
+        key = re.search(r"IGCTX-[0-9]+-[A-Z]+-[0-9]+", prompt).group(0)
+        return {
+            "text": key,
+            "status": "completed",
+            "error": None,
+            "input_tokens": len(prompt) // 4,
+            "output_tokens": 8,
+        }
+
+
 class _ReasoningFormattedAnswerAdapter(object):
     def generate_text(self, request, prompt, max_tokens):
         if "Can a dax be red" in prompt:
@@ -331,6 +345,29 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(len({item["case_id"] for item in cases}), 24)
         self.assertEqual(cases[-1]["case_id"], "assistant-compose-reconcile-sources")
         self.assertEqual(cases[-1]["expected_json"]["checksum"], 13)
+
+    def test_context_retrieval_standard_covers_three_buckets_without_headline_suite_membership(self):
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["context_retrieval_reference_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        execution = execute_capability_suite(_ContextRetrievalPassingAdapter(), request)
+        result = execution.benchmark_results["context_retrieval_reference_v1"]
+
+        self.assertEqual(result["primary_metric"]["value"], 1.0)
+        self.assertEqual(set(result["metrics"]["context_bucket_metrics"]), {"4096", "8192", "16384"})
+        for bucket in result["metrics"]["context_bucket_metrics"].values():
+            self.assertEqual(bucket["accuracy"], 1.0)
+            self.assertTrue(bucket["observed_input_tokens"])
+        artifact_path = execution.artifacts["context_retrieval_reference_v1"]["capability_run_path"]
+        with open(artifact_path, encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["evidence"]["surface"], "local_context_capability")
+        self.assertIn("context_bucket_metrics", artifact["summary"])
 
     def test_compositional_extra_prose_is_scored_incorrect_not_accepted(self):
         class _ProseAdapter(_CompositionalPassingAdapter):
