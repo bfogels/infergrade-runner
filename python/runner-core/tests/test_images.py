@@ -141,6 +141,73 @@ class ImageInstallTests(unittest.TestCase):
 
         self.assertEqual(len(run_mock.call_args_list), 2)
 
+    @mock.patch("infergrade.images.platform.machine", return_value="arm64")
+    @mock.patch("infergrade.images.platform.system", return_value="Darwin")
+    @mock.patch("infergrade.images._repo_root", return_value=None)
+    @mock.patch("infergrade.images.subprocess.run")
+    def test_install_image_does_not_emulate_inference_runtime(
+        self,
+        run_mock,
+        _repo_root_mock,
+        _system_mock,
+        _machine_mock,
+    ):
+        run_mock.side_effect = [
+            mock.Mock(returncode=1, stdout="", stderr="missing"),
+            mock.Mock(
+                returncode=1,
+                stdout="",
+                stderr="no matching manifest for linux/arm64/v8 in the manifest list entries",
+            ),
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "no matching manifest"):
+            install_image(
+                "ghcr.io/bfogels/infergrade-llama-cpp:0.3.45",
+                prefer_local_build=False,
+            )
+
+        self.assertEqual(len(run_mock.call_args_list), 2)
+
+    @mock.patch("infergrade.images.platform.machine", return_value="x86_64")
+    @mock.patch("infergrade.images.platform.system", return_value="Darwin")
+    @mock.patch("infergrade.images._repo_root", return_value=None)
+    @mock.patch("infergrade.images.subprocess.run")
+    def test_install_image_retries_capability_image_under_rosetta(
+        self,
+        run_mock,
+        _repo_root_mock,
+        _system_mock,
+        _machine_mock,
+    ):
+        run_mock.side_effect = [
+            mock.Mock(returncode=1, stdout="", stderr="missing"),
+            mock.Mock(
+                returncode=1,
+                stdout="",
+                stderr="no matching manifest for linux/arm64/v8 in the manifest list entries",
+            ),
+            mock.Mock(returncode=0, stdout="1\n", stderr=""),
+            mock.Mock(returncode=0, stdout="pulled", stderr=""),
+        ]
+
+        result = install_image(
+            "ghcr.io/bfogels/infergrade-mmlu-pro:0.3.45",
+            prefer_local_build=False,
+        )
+
+        self.assertEqual(result["platform"], "linux/amd64")
+        self.assertEqual(
+            run_mock.call_args_list[-1].args[0],
+            [
+                "docker",
+                "pull",
+                "--platform",
+                "linux/amd64",
+                "ghcr.io/bfogels/infergrade-mmlu-pro:0.3.45",
+            ],
+        )
+
     @mock.patch("infergrade.images._repo_root", return_value="/tmp/infergrade-runner")
     def test_local_build_command_is_available_for_known_images(self, _repo_root_mock):
         command = local_build_command("infergrade-llama-cpp:local")
