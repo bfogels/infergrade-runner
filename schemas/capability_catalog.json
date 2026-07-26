@@ -1139,7 +1139,7 @@
       ],
       "effort_hint": "balanced",
       "suite_scope": "reference",
-      "expected_duration_band": "10-30 min",
+      "expected_duration_band": "5-15 min",
       "token_volume_band": "large",
       "resumability_boundary": "benchmark",
       "execution_pattern": "native_context_retrieval"
@@ -1481,7 +1481,7 @@
       "suite_scope": "reference",
       "evidence_lane_id": "reference",
       "effort_level": "balanced",
-      "expected_duration_band": "10-30 min",
+      "expected_duration_band": "5-15 min",
       "token_volume_band": "large",
       "resumability_boundary": "benchmark",
       "execution_pattern": "native_context_retrieval",
