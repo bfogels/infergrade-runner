@@ -6,12 +6,14 @@ import sys
 import tempfile
 from typing import Any, Dict, List, Optional
 from urllib import error as urllib_error
+from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 from infergrade import __version__
 from infergrade.adapters.llama_cpp import LlamaCppAdapter
 from infergrade.artifacts import (
     artifact_cache_status,
+    artifact_request_headers,
     artifact_to_download_url,
     default_artifact_cache_dir,
     min_artifact_cache_free_bytes,
@@ -618,12 +620,21 @@ def _local_image_check(image_info: Dict[str, Any], warning: bool = False) -> Dic
 def _cache_dir_check(request: RunRequest) -> Dict[str, Any]:
     path = os.path.expanduser(request.quant_artifact_cache_dir or default_artifact_cache_dir())
     status = artifact_cache_status(path)
+    expected_download_bytes = max(0, int(request.quant_artifact_download_size_bytes or 0))
+    already_cached = _artifact_appears_cached(request, path)
+    required_free_bytes = min_artifact_cache_free_bytes()
+    if expected_download_bytes and not already_cached:
+        required_free_bytes += expected_download_bytes
+    status.update({
+        "artifact_expected_download_bytes": expected_download_bytes or None,
+        "artifact_appears_cached": already_cached,
+    })
     return _writable_directory_check(
         "artifact_cache_dir",
         path,
         "Artifact cache directory is writable and has enough free space.",
         status,
-        min_free_bytes=min_artifact_cache_free_bytes(),
+        min_free_bytes=required_free_bytes,
     )
 
 
@@ -637,12 +648,124 @@ def _artifact_reference_check(request: RunRequest) -> Dict[str, Any]:
             "Quant artifact reference is invalid.",
             {"artifact": request.quant_artifact, "error": str(exc)},
         )
+    cache_dir = os.path.expanduser(request.quant_artifact_cache_dir or default_artifact_cache_dir())
+    if _artifact_appears_cached(request, cache_dir):
+        return _check(
+            "quant_artifact",
+            "ok",
+            "The exact-sized quant artifact is already cached; checksum verification will run before execution.",
+            {
+                "artifact": request.quant_artifact,
+                "cache_hit": True,
+                "expected_size_bytes": request.quant_artifact_download_size_bytes,
+            },
+        )
+    probe_url = _public_artifact_probe_url(download_url)
+    probe_headers = artifact_request_headers(download_url)
+    probe_headers.update({
+        "Range": "bytes=0-0",
+        "User-Agent": "infergrade-runner-readiness/%s" % __version__,
+    })
+    probe_request = urllib_request.Request(
+        download_url,
+        headers=probe_headers,
+    )
+    try:
+        with urllib_request.urlopen(
+            probe_request,
+            timeout=15,
+            context=verified_https_context(download_url),
+        ) as response:
+            status = int(getattr(response, "status", 200) or 200)
+            content_range = str(response.headers.get("Content-Range") or "")
+            content_length = str(response.headers.get("Content-Length") or "")
+    except urllib_error.HTTPError as exc:
+        return _check(
+            "quant_artifact",
+            "error",
+            "Remote quant artifact could not be fetched.",
+            {
+                "artifact": request.quant_artifact,
+                "probe_url": probe_url,
+                "http_status": exc.code,
+                "error": str(exc.reason or exc),
+            },
+        )
+    except Exception as exc:
+        return _check(
+            "quant_artifact",
+            "error",
+            "Remote quant artifact could not be reached.",
+            {
+                "artifact": request.quant_artifact,
+                "probe_url": probe_url,
+                "error": str(exc),
+            },
+        )
+    declared_size = _remote_probe_size(content_range, content_length, status)
+    expected_size = max(0, int(request.quant_artifact_download_size_bytes or 0))
+    if expected_size and declared_size and declared_size != expected_size:
+        return _check(
+            "quant_artifact",
+            "error",
+            "Remote quant artifact size does not match the reviewed catalog.",
+            {
+                "artifact": request.quant_artifact,
+                "probe_url": probe_url,
+                "http_status": status,
+                "expected_size_bytes": expected_size,
+                "declared_size_bytes": declared_size,
+            },
+        )
     return _check(
         "quant_artifact",
         "ok",
-        "Remote quant artifact reference looks valid.",
-        {"artifact": request.quant_artifact, "download_url": download_url},
+        "Remote quant artifact is reachable.",
+        {
+            "artifact": request.quant_artifact,
+            "probe_url": probe_url,
+            "http_status": status,
+            "expected_size_bytes": expected_size or None,
+            "declared_size_bytes": declared_size,
+        },
     )
+
+
+def _artifact_appears_cached(request: RunRequest, cache_dir: str) -> bool:
+    """Avoid reserving download space when the exact-sized artifact is already present."""
+    filename = str(request.quant_artifact_filename or "").strip()
+    expected_size = max(0, int(request.quant_artifact_download_size_bytes or 0))
+    if not filename or not os.path.isdir(cache_dir):
+        return False
+    try:
+        candidates = [
+            os.path.join(cache_dir, item)
+            for item in os.listdir(cache_dir)
+            if item == filename or item.endswith("-" + filename)
+        ]
+    except OSError:
+        return False
+    return any(
+        os.path.isfile(candidate)
+        and (not expected_size or os.path.getsize(candidate) == expected_size)
+        for candidate in candidates
+    )
+
+
+def _public_artifact_probe_url(value: str) -> str:
+    """Keep credentials and query parameters out of readiness reports."""
+    parsed = urllib_parse.urlsplit(str(value or ""))
+    return urllib_parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+
+
+def _remote_probe_size(content_range: str, content_length: str, status: int) -> Optional[int]:
+    if "/" in content_range:
+        total = content_range.rsplit("/", 1)[-1].strip()
+        if total.isdigit():
+            return int(total)
+    if status == 200 and str(content_length).isdigit():
+        return int(content_length)
+    return None
 
 
 def _local_artifact_check(request: RunRequest) -> Dict[str, Any]:

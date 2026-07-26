@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
+from urllib import error as urllib_error
 
 sys.path.insert(0, "python/runner-core/src")
 
@@ -77,6 +78,8 @@ class DoctorTests(unittest.TestCase):
         run_mock.side_effect = fake_run
         response = mock.MagicMock()
         response.read.return_value = b'{"ok": true}'
+        response.status = 206
+        response.headers = {"Content-Range": "bytes 0-0/1024"}
         urlopen_mock.return_value.__enter__.return_value = response
 
         request = RunRequest(
@@ -85,6 +88,7 @@ class DoctorTests(unittest.TestCase):
             tier="canary",
             quant_artifact="hf://TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
             quant_artifact_cache_dir=os.path.join(self.tempdir.name, "cache"),
+            quant_artifact_download_size_bytes=1024,
             backend_image="infergrade-llama-cpp:local",
             output_dir=os.path.join(self.tempdir.name, "runs", "tiny"),
             execution_mode="local_container",
@@ -104,6 +108,126 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("free_bytes", checks["artifact_cache_dir"]["details"])
         self.assertIn("total_bytes", checks["artifact_cache_dir"]["details"])
         self.assertIn("min_required_free_bytes", checks["output_dir"]["details"])
+        self.assertEqual(checks["quant_artifact"]["message"], "Remote quant artifact is reachable.")
+        self.assertEqual(checks["quant_artifact"]["details"]["declared_size_bytes"], 1024)
+        self.assertNotIn("download_url", checks["quant_artifact"]["details"])
+
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.urllib_request.urlopen")
+    @mock.patch("infergrade.doctor.shutil.which")
+    def test_doctor_fails_before_download_when_remote_artifact_is_missing(
+        self,
+        which_mock,
+        urlopen_mock,
+        capture_environment_mock,
+    ):
+        capture_environment_mock.return_value = {
+            "hardware_class": "apple_silicon",
+            "accelerator_api": "metal",
+        }
+        which_mock.side_effect = lambda name: "/opt/homebrew/bin/%s" % name if name in ("llama-cli", "llama-server", "curl") else None
+        urlopen_mock.side_effect = urllib_error.HTTPError(
+            "https://huggingface.co/model.gguf",
+            404,
+            "Not Found",
+            {},
+            None,
+        )
+        request = RunRequest(
+            model="google/gemma-4-12b-it",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://publisher/gemma-4-12b-it-GGUF/gemma-4-12b-it-Q4_K_M.gguf",
+            quant_artifact_cache_dir=os.path.join(self.tempdir.name, "cache"),
+            output_dir=os.path.join(self.tempdir.name, "runs", "gemma"),
+            execution_mode="local_native",
+            simulate=False,
+        )
+
+        report = run_doctor(request=request)
+
+        check = {item["id"]: item for item in report["checks"]}["quant_artifact"]
+        self.assertFalse(report["ok"])
+        self.assertEqual(check["status"], "error")
+        self.assertEqual(check["details"]["http_status"], 404)
+        self.assertNotIn("?", check["details"]["probe_url"])
+
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.urllib_request.urlopen")
+    @mock.patch("infergrade.doctor.shutil.which")
+    def test_doctor_rejects_remote_artifact_size_drift(
+        self,
+        which_mock,
+        urlopen_mock,
+        capture_environment_mock,
+    ):
+        capture_environment_mock.return_value = {
+            "hardware_class": "apple_silicon",
+            "accelerator_api": "metal",
+        }
+        which_mock.side_effect = lambda name: "/opt/homebrew/bin/%s" % name if name in ("llama-cli", "llama-server", "curl") else None
+        response = mock.MagicMock()
+        response.status = 206
+        response.headers = {"Content-Range": "bytes 0-0/2048"}
+        urlopen_mock.return_value.__enter__.return_value = response
+        request = RunRequest(
+            model="Qwen/Qwen3.5-4B",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://publisher/Qwen3.5-4B-GGUF/Qwen3.5-4B-Q4_K_M.gguf",
+            quant_artifact_download_size_bytes=1024,
+            quant_artifact_cache_dir=os.path.join(self.tempdir.name, "cache"),
+            output_dir=os.path.join(self.tempdir.name, "runs", "qwen"),
+            execution_mode="local_native",
+            simulate=False,
+        )
+
+        report = run_doctor(request=request)
+
+        check = {item["id"]: item for item in report["checks"]}["quant_artifact"]
+        self.assertFalse(report["ok"])
+        self.assertEqual(check["message"], "Remote quant artifact size does not match the reviewed catalog.")
+        self.assertEqual(check["details"]["expected_size_bytes"], 1024)
+        self.assertEqual(check["details"]["declared_size_bytes"], 2048)
+
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.urllib_request.urlopen")
+    @mock.patch("infergrade.doctor.shutil.which")
+    def test_doctor_uses_exact_sized_cached_artifact_offline(
+        self,
+        which_mock,
+        urlopen_mock,
+        capture_environment_mock,
+    ):
+        capture_environment_mock.return_value = {
+            "hardware_class": "apple_silicon",
+            "accelerator_api": "metal",
+        }
+        which_mock.side_effect = lambda name: "/opt/homebrew/bin/%s" % name if name in ("llama-cli", "llama-server", "curl") else None
+        cache_dir = os.path.join(self.tempdir.name, "cache")
+        os.makedirs(cache_dir)
+        filename = "Qwen3.5-4B-Q4_K_M.gguf"
+        with open(os.path.join(cache_dir, "digest-%s" % filename), "wb") as handle:
+            handle.write(b"cached")
+        request = RunRequest(
+            model="Qwen/Qwen3.5-4B",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://publisher/Qwen3.5-4B-GGUF/%s" % filename,
+            quant_artifact_filename=filename,
+            quant_artifact_download_size_bytes=6,
+            quant_artifact_cache_dir=cache_dir,
+            output_dir=os.path.join(self.tempdir.name, "runs", "qwen"),
+            execution_mode="local_native",
+            simulate=False,
+        )
+
+        report = run_doctor(request=request)
+
+        check = {item["id"]: item for item in report["checks"]}["quant_artifact"]
+        self.assertTrue(report["ok"])
+        self.assertTrue(check["details"]["cache_hit"])
+        urlopen_mock.assert_not_called()
 
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.shutil.which")
@@ -359,6 +483,54 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(checks["artifact_cache_dir"]["status"], "error")
         self.assertEqual(checks["artifact_cache_dir"]["message"], "Insufficient free disk space.")
         self.assertEqual(checks["artifact_cache_dir"]["details"]["min_required_free_bytes"], 1024 ** 3)
+
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.urllib_request.urlopen")
+    @mock.patch("infergrade.doctor.shutil.which")
+    @mock.patch("infergrade.doctor.shutil.disk_usage")
+    def test_doctor_reserves_catalog_download_size_in_disk_preflight(
+        self,
+        disk_usage_mock,
+        which_mock,
+        urlopen_mock,
+        capture_environment_mock,
+    ):
+        capture_environment_mock.return_value = {
+            "hardware_class": "apple_silicon",
+            "accelerator_api": "metal",
+        }
+        which_mock.side_effect = lambda name: "/opt/homebrew/bin/%s" % name if name in ("llama-cli", "llama-server", "curl") else None
+        disk_usage_mock.return_value = mock.Mock(free=6 * 1024 ** 3)
+        response = mock.MagicMock()
+        response.status = 206
+        response.headers = {"Content-Range": "bytes 0-0/%d" % (2 * 1024 ** 3)}
+        urlopen_mock.return_value.__enter__.return_value = response
+        request = RunRequest(
+            model="Qwen/Qwen3.5-4B",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact="hf://publisher/Qwen3.5-4B-GGUF/Qwen3.5-4B-Q4_K_M.gguf",
+            quant_artifact_filename="Qwen3.5-4B-Q4_K_M.gguf",
+            quant_artifact_download_size_bytes=2 * 1024 ** 3,
+            quant_artifact_cache_dir=os.path.join(self.tempdir.name, "cache"),
+            output_dir=os.path.join(self.tempdir.name, "runs", "qwen"),
+            execution_mode="local_native",
+            simulate=False,
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "INFERGRADE_MIN_ARTIFACT_CACHE_FREE_GB": "5",
+                "INFERGRADE_MIN_OUTPUT_FREE_GB": "0",
+            },
+            clear=False,
+        ):
+            report = run_doctor(request=request)
+
+        check = {item["id"]: item for item in report["checks"]}["artifact_cache_dir"]
+        self.assertFalse(report["ok"])
+        self.assertEqual(check["status"], "error")
+        self.assertEqual(check["details"]["min_required_free_bytes"], 7 * 1024 ** 3)
 
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.shutil.which")

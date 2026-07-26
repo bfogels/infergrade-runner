@@ -219,6 +219,13 @@ class WorkerTests(unittest.TestCase):
                 for call in heartbeat_mock.call_args_list
             )
         )
+        self.assertTrue(
+            any(
+                call.kwargs.get("stage") == "preflight_complete"
+                and call.kwargs.get("message") == "Exact run preflight passed."
+                for call in heartbeat_mock.call_args_list
+            )
+        )
         self.assertEqual(fake_request.output_dir, expected_output_dir)
         self.assertEqual(fake_request.quant_artifact_cache_dir, "/host/cache")
         self.assertTrue(fake_request.resume)
@@ -229,7 +236,7 @@ class WorkerTests(unittest.TestCase):
         ]
         self.assertEqual(
             [event["phase"] for event in structured if event["type"] == "assignment_update"],
-            ["Preparing", "Preparing", "Preparing", "Running", "Uploading", "Complete"],
+            ["Preparing", "Preparing", "Preparing", "Preparing", "Running", "Uploading", "Complete"],
         )
         self.assertTrue(all(event["run_id"] == "run_example" for event in structured if event["type"] == "assignment_update"))
         self.assertTrue(
