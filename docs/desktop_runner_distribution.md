@@ -184,6 +184,37 @@ scripts/smoke_desktop_dmg.sh --dmg "target/release/bundle/dmg/InferGrade Runner_
 
 The script prints stable `desktop_dmg_*` evidence lines for the artifact path, size, SHA-256 digest, code-signature verification, clean-`PATH` sidecar version, app launch observation, and the fact that local smoke does not check notarization.
 
+## Same-account clean-profile acceptance
+
+Use the public-installer acceptance harness when a second macOS user account or
+spare machine is unavailable:
+
+```bash
+scripts/accept_desktop_release.sh \
+  --report-dir /path/to/acceptance-report
+```
+
+By default it downloads the latest public DMG, verifies the DMG and app with
+Gatekeeper and stapled notarization checks, runs the packaged self-test and
+readiness command, copies the app into an isolated Applications directory, and
+launches that installed copy briefly. The process receives isolated home,
+config, runtime-cache, temporary-directory, install, and OS credential-store
+namespaces. The normal app and `com.infergrade.runner` keychain item are neither
+replaced, read, nor modified.
+
+For a personal walkthrough, add `--interactive`. The script keeps the isolated
+app open until Enter is pressed:
+
+```bash
+scripts/accept_desktop_release.sh --interactive --report-dir /path/to/report
+```
+
+The generated JSON and Markdown reports deliberately leave pairing,
+recommendation handoff, runtime resolution, a real benchmark, upload, and the
+signed-out Result page marked as manual work. An automated launch is not
+evidence that those user actions succeeded. `--capture-screen` is explicit
+because a full-display screenshot may contain unrelated private UI.
+
 ## Non-Goals
 
 - no signing secrets in the repo

@@ -32,6 +32,7 @@ REQUIRED_FILES = [
     "scripts/verify_desktop_release_artifacts.py",
     "scripts/prepare_desktop_release_dmg.py",
     "scripts/verify_release_images.py",
+    "scripts/accept_desktop_release.sh",
 ]
 
 SECRET_FILE_PATTERNS = [

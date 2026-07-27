@@ -7,6 +7,18 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.47 (contract 0.3.27)
+
+- Routes Ministral 3 deterministic direct-answer benchmarks through native
+  llama.cpp server chat with the recorded GPQA A-D grammar, eliminating the
+  malformed raw-CLI answer path.
+- Binds observed generation presets and prompt transforms into benchmark
+  protocol identity so semantically different execution paths cannot collapse
+  as exact repeats.
+- Adds an isolated clean-profile acceptance harness for validating the signed
+  macOS installer without disturbing the user's installed app, pairing, or
+  runtime state.
+
 ## 0.3.46 (contract 0.3.26)
 
 - Adds diagnostic-only GPQA Diamond and deterministic 4K, 8K, and 16K

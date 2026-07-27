@@ -666,6 +666,7 @@ def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dic
         "saturation_evidence": dict(check.get("saturation_evidence") or {}),
         "higher_is_better": check.get("higher_is_better"),
         "score_policy_id": check.get("score_policy_id"),
+        "generation_constraint_id": legitimacy_status.get("generation_constraint_id"),
         "score_breakdown_fields": list(check.get("score_breakdown_fields") or []),
         "benchmark_maturity": legitimacy_status.get("maturity"),
         "runnable_status": legitimacy_status.get("runnable_status"),

@@ -32,6 +32,7 @@ from infergrade.adapters.llama_cpp import (
     _stop_container_memory_monitor,
     _stream_server_completion,
     _stream_server_chat_completion,
+    _uses_native_direct_answer_server,
     _validate_direct_answer_server_completion,
 )
 from infergrade.models import RunRequest
@@ -716,6 +717,29 @@ class LlamaCppAdapterTests(unittest.TestCase):
 
         self.assertEqual(transform["generation_constraint"], "gpqa_choice_a_d_grammar_v1")
         self.assertEqual(messages[0]["role"], "user")
+
+    def test_mistral3_gpqa_uses_native_chat_and_choice_grammar(self):
+        request = RunRequest(
+            model="mistralai/Ministral-3-8B-Instruct-2512",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+            ontology_hints={"architecture": "mistral3"},
+        )
+        messages, transform = _prepare_llama_server_chat(
+            request,
+            "Answer the following expert multiple-choice question. Think carefully, but final output must be only "
+            "the option letter.\n\nDomain: Physics\nQuestion: Which?\n\n"
+            "A. one\nB. two\nC. three\nD. four\n\nFinal answer letter:",
+        )
+
+        self.assertEqual(messages[0]["role"], "user")
+        self.assertEqual(transform["id"], "mistral3_chat_template_direct_answer_v1")
+        self.assertEqual(transform["generation_constraint"], "gpqa_choice_a_d_grammar_v1")
+        self.assertTrue(_uses_native_direct_answer_server(request))
 
     def test_server_command_requests_runtime_memory_telemetry(self):
         request = RunRequest(

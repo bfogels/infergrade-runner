@@ -2270,13 +2270,15 @@ def _prepare_llama_server_chat(
     if request.generation_preset != DIRECT_ANSWER_GENERATION_PRESET:
         return None, None
     architecture = str(_infer_llama_cpp_architecture(request) or "")
-    if not (architecture.startswith("qwen3") or architecture == "gemma4"):
+    if not (
+        architecture.startswith("qwen3")
+        or architecture in {"gemma4", "mistral3"}
+    ):
         return None, None
-    transform_id = (
-        "gemma4_chat_template_disable_thinking_v2"
-        if architecture == "gemma4"
-        else "qwen_chat_template_disable_thinking_v2"
-    )
+    transform_id = {
+        "gemma4": "gemma4_chat_template_disable_thinking_v2",
+        "mistral3": "mistral3_chat_template_direct_answer_v1",
+    }.get(architecture, "qwen_chat_template_disable_thinking_v2")
     raw = str(prompt or "")
     assistant_marker = "\nAssistant:"
     user_marker = "\nUser:"
@@ -2357,7 +2359,7 @@ def _uses_native_direct_answer_server(request: RunRequest) -> bool:
         and (
             architecture.startswith("qwen35")
             or _is_qwen36_request(request)
-            or architecture == "gemma4"
+            or architecture in {"gemma4", "mistral3"}
         )
     )
 

@@ -34,6 +34,7 @@ use tauri_plugin_shell::{
 };
 
 const KEYRING_SERVICE: &str = "com.infergrade.runner";
+const ACCEPTANCE_KEYRING_SERVICE_PREFIX: &str = "com.infergrade.runner.acceptance.";
 const KEYRING_USER: &str = "hub-runner-token";
 const SIDECAR_BINARY_NAME: &str = "infergrade-sidecar";
 const DESKTOP_EVENT_PREFIX: &str = "INFERGRADE_DESKTOP_EVENT ";
@@ -112,8 +113,25 @@ impl TokenStore for DesktopTokenStore {
 }
 
 fn runner_token_entry() -> Result<Entry, String> {
-    Entry::new(KEYRING_SERVICE, KEYRING_USER)
+    let configured_service = env::var("INFERGRADE_ACCEPTANCE_KEYRING_SERVICE").ok();
+    let service = acceptance_keyring_service(configured_service.as_deref());
+    Entry::new(service, KEYRING_USER)
         .map_err(|error| format!("could not open OS credential store: {error}"))
+}
+
+fn acceptance_keyring_service(configured: Option<&str>) -> &str {
+    configured
+        .map(str::trim)
+        .filter(|value| {
+            let suffix = value
+                .strip_prefix(ACCEPTANCE_KEYRING_SERVICE_PREFIX)
+                .unwrap_or("");
+            !suffix.is_empty()
+                && suffix
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '-')
+        })
+        .unwrap_or(KEYRING_SERVICE)
 }
 
 fn is_user_canceled(error: &KeyringError) -> bool {
@@ -1393,6 +1411,27 @@ mod tests {
             permissions.set_mode(0o755);
             fs::set_permissions(path, permissions).expect("test binary executable");
         }
+    }
+
+    #[test]
+    fn acceptance_keyring_service_only_accepts_isolated_namespace() {
+        assert_eq!(acceptance_keyring_service(None), KEYRING_SERVICE);
+        assert_eq!(
+            acceptance_keyring_service(Some("com.infergrade.runner.acceptance.clean-123")),
+            "com.infergrade.runner.acceptance.clean-123"
+        );
+        assert_eq!(
+            acceptance_keyring_service(Some("com.infergrade.runner")),
+            KEYRING_SERVICE
+        );
+        assert_eq!(
+            acceptance_keyring_service(Some("com.infergrade.runner.acceptance.")),
+            KEYRING_SERVICE
+        );
+        assert_eq!(
+            acceptance_keyring_service(Some("com.infergrade.runner.acceptance.bad/value")),
+            KEYRING_SERVICE
+        );
     }
 
     #[test]
