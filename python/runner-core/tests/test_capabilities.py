@@ -11,6 +11,7 @@ sys.path.insert(0, "python/runner-core/src")
 from infergrade import __version__
 from infergrade.capabilities import (
     CAPABILITY_BENCHMARKS,
+    _case_benchmark_protocol_identity,
     _generate_predictions,
     _generation_prompt_for_case,
     _host_mount_path,
@@ -248,6 +249,46 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(artifact["protocol"]["scorer_type"], "strict_json_equality")
         self.assertEqual(artifact["protocol"]["scoring_policy"], "strict_json_equality_v1")
         self.assertIn("not psychometrically calibrated", artifact["claim_boundary"]["unsupported_claims"][1])
+
+    def test_protocol_identity_changes_with_observed_generation_transform(self):
+        spec = CAPABILITY_BENCHMARKS["assistant_compositional_instruction_v2"]
+        cases = _native_benchmark_cases(spec)[:1]
+        summary = {"scoring_policy": "strict_json_equality_v1"}
+        selection_check = {
+            "score_policy_id": "assistant_compositional_strict_json_v2",
+            "execution_pattern": "interactive_case_generation",
+        }
+        base_prediction = {
+            "generation_preset_id": "deterministic_direct_answer_v1",
+            "generation_prompt_transform": {
+                "id": "mistral3_chat_template_direct_answer_v1",
+                "generation_constraint": "gpqa_choice_a_d_grammar_v1",
+            },
+        }
+
+        constrained = _case_benchmark_protocol_identity(
+            spec,
+            cases,
+            [base_prediction],
+            summary,
+            selection_check,
+        )
+        raw_cli = _case_benchmark_protocol_identity(
+            spec,
+            cases,
+            [{**base_prediction, "generation_prompt_transform": {"id": "raw_cli_v1"}}],
+            summary,
+            selection_check,
+        )
+
+        self.assertNotEqual(
+            constrained["generation_identity_sha256"],
+            raw_cli["generation_identity_sha256"],
+        )
+        self.assertNotEqual(
+            constrained["fingerprint_sha256"],
+            raw_cli["fingerprint_sha256"],
+        )
 
     def test_resume_reuses_exact_completed_capability_cases(self):
         first_request = RunRequest(

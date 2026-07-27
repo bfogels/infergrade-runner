@@ -299,6 +299,7 @@ def _benchmark_protocol_identity(
 def _case_benchmark_protocol_identity(
     spec: CapabilityBenchmarkSpec,
     cases: List[Dict[str, Any]],
+    predictions: List[Dict[str, Any]],
     summary: Dict[str, Any],
     selection_check: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
@@ -327,6 +328,36 @@ def _case_benchmark_protocol_identity(
         "primary_metric_name": spec.primary_metric_name,
         "execution_pattern": execution_pattern,
     }
+    generation_constraint_id = str(selection_check.get("generation_constraint_id") or "").strip()
+    generation_preset_ids = sorted(
+        {
+            str(item.get("generation_preset_id") or "").strip()
+            for item in predictions
+            if str(item.get("generation_preset_id") or "").strip()
+        }
+    )
+    generation_prompt_transforms = sorted(
+        {
+            stable_hash(item["generation_prompt_transform"], length=64)
+            for item in predictions
+            if isinstance(item.get("generation_prompt_transform"), dict)
+        }
+    )
+    benchmark_prompt_transforms = sorted(
+        {
+            str(item.get("benchmark_prompt_transform") or "").strip()
+            for item in predictions
+            if str(item.get("benchmark_prompt_transform") or "").strip()
+        }
+    )
+    if generation_constraint_id:
+        generation_identity["generation_constraint_id"] = generation_constraint_id
+    if generation_preset_ids:
+        generation_identity["generation_preset_ids"] = generation_preset_ids
+    if generation_prompt_transforms:
+        generation_identity["generation_prompt_transforms"] = generation_prompt_transforms
+    if benchmark_prompt_transforms:
+        generation_identity["benchmark_prompt_transforms"] = benchmark_prompt_transforms
     return _benchmark_protocol_identity(
         spec.benchmark_id,
         input_identity={
@@ -765,6 +796,7 @@ def execute_capability_suite(
             protocol_identity = _case_benchmark_protocol_identity(
                 spec,
                 cases,
+                predictions,
                 summary,
                 _benchmark_selection_check(selection_metadata, benchmark_id),
             )

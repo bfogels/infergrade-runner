@@ -638,6 +638,10 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(metadata["benchmark_checks"][0]["score_dimension"], "broad_reasoning_knowledge")
         self.assertEqual(metadata["benchmark_checks"][0]["primary_score_metric"], "accuracy")
         self.assertEqual(
+            metadata["benchmark_checks"][0]["generation_constraint_id"],
+            "mmlu_choice_a_j_grammar_v1",
+        )
+        self.assertEqual(
             metadata["score_policies"][0]["score_policy_id"],
             "exact_multiple_choice_letter_accuracy_v4",
         )
