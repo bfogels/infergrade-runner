@@ -74,13 +74,18 @@ The first reference-runnable lanes are:
 - `mmlu_pro_reference_v1`
 - `evalplus_humaneval`
 - `evalplus_mbpp`
+- `gpqa_diamond_reference_v1`
+- `context_retrieval_reference_v1`
 - `perplexity_reference_v1`
 
 Important candidates that are not yet promoted:
 
-- `gpqa_reference_v1`: planned, access-gated, non-runnable.
 - `livecodebench_reference_v1`: planned, non-runnable until task-window and sandbox controls exist.
 - `swebench_verified_gold_v1`: gold candidate only, non-runnable until maintainer-reviewed gold controls exist.
+
+`gpqa_diamond_reference_v1` and `context_retrieval_reference_v1` are
+diagnostic-only reference lanes. They have zero headline capability weight and
+are not part of the default suites.
 
 `perplexity_reference_v1` is reference-runnable only as same-family quant-fidelity evidence. Its comparability key includes model family, checkpoint, tokenizer id, corpus id/revision, and protocol id/parameters. It does not support cross-family model ranking, broad capability claims, gold evidence, or leaderboard claims.
 

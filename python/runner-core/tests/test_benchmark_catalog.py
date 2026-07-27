@@ -47,6 +47,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
                 "local_assistant_capability",
                 "local_coding_capability",
                 "local_reasoning_capability",
+                "local_context_capability",
                 "quant_fidelity",
                 "deployment_fitness",
             },
@@ -239,7 +240,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
             "evalplus_humaneval",
             "evalplus_mbpp",
             "perplexity_reference_v1",
-            "gpqa_reference_v1",
+            "gpqa_diamond_reference_v1",
+            "context_retrieval_reference_v1",
             "livecodebench_reference_v1",
             "swebench_verified_gold_v1",
             "repository_edit_smoke_v1",
@@ -271,13 +273,13 @@ class BenchmarkCatalogTests(unittest.TestCase):
         next(
             item for item in mutated["checks"] if item["check_id"] == "multiturn_chat_memory_v1"
         )["score_policy_id"] = "other_typo_policy_v1"
-        statuses["gpqa_reference_v1"]["scoring_policy_id"] = "typo_policy_v1"
+        statuses["gpqa_diamond_reference_v1"]["scoring_policy_id"] = "typo_policy_v1"
         failures = validate_benchmark_legitimacy_metadata(mutated)
         self.assertTrue(any("status field claim_boundary must be non-empty" in item for item in failures))
         self.assertTrue(any("status field runnable_status must be non-empty" in item for item in failures))
         self.assertTrue(any("multiturn_chat_memory_v1" in item and "does not match check" in item for item in failures))
         self.assertTrue(any("multiturn_chat_memory_v1" in item and "is not declared" in item for item in failures))
-        self.assertTrue(any("gpqa_reference_v1" in item and "does not match planned" in item for item in failures))
+        self.assertTrue(any("gpqa_diamond_reference_v1" in item and "does not match check" in item for item in failures))
 
     def test_catalog_legitimacy_validation_rejects_unknown_coverage_generation_preset(self):
         mutated = deepcopy(load_capability_catalog())
@@ -345,6 +347,19 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("ifeval", request.benchmark_check_ids)
         self.assertIn("multiturn_chat_memory_v1", request.benchmark_check_ids)
         self.assertIn("interactive_chat_v1", request.deployment_profiles)
+
+    def test_multiple_choice_reference_selection_owns_direct_answer_protocol(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-4B",
+            backend="llama.cpp",
+            tier="canary",
+            benchmark_check_ids=["gpqa_diamond_reference_v1"],
+            generation_preset="deterministic_v1",
+        )
+
+        normalize_request_selection(request)
+
+        self.assertEqual(request.generation_preset, "deterministic_direct_answer_v1")
 
     def test_native_multiturn_check_can_be_selected_explicitly(self):
         request = RunRequest(
@@ -520,12 +535,9 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertTrue(guidance["planned_benchmark_candidates"])
         planned = {item["check_id"]: item for item in guidance["planned_benchmark_candidates"]}
         self.assertNotIn("mmlu_pro_reference_v1", planned)
-        self.assertEqual(planned["gpqa_reference_v1"]["status"], "planned_access_gated")
-        self.assertEqual(planned["gpqa_reference_v1"]["benchmark_maturity"], "planned")
-        self.assertEqual(planned["gpqa_reference_v1"]["runnable_status"], "not_runnable_access_gated")
-        self.assertEqual(planned["gpqa_reference_v1"]["harness_status"], "not_implemented")
-        self.assertEqual(planned["gpqa_reference_v1"]["access_status"], "gated_contact_share_required")
-        self.assertIn("Do not commit", planned["gpqa_reference_v1"]["dataset_handling_policy"])
+        self.assertNotIn("gpqa_reference_v1", planned)
+        self.assertIn("gpqa_diamond_reference_v1", guidance["available_reference_check_ids"])
+        self.assertIn("context_retrieval_reference_v1", guidance["available_reference_check_ids"])
         self.assertEqual(planned["swebench_verified_gold_v1"]["benchmark_tier"], "gold")
         self.assertEqual(planned["swebench_verified_gold_v1"]["evidence_lane_id"], "gold")
         self.assertEqual(planned["swebench_verified_gold_v1"]["claim_strength"], "curated_reference")

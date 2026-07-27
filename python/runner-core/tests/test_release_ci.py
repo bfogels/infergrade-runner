@@ -212,7 +212,14 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertNotIn("docker manifest inspect", script)
         self.assertIn("/token?", verifier)
         self.assertIn("Docker-Content-Digest".lower(), verifier.lower())
-        for image in ("infergrade-runner-core", "infergrade-llama-cpp", "infergrade-ifeval", "infergrade-evalplus", "infergrade-mmlu-pro"):
+        for image in (
+            "infergrade-runner-core",
+            "infergrade-llama-cpp",
+            "infergrade-ifeval",
+            "infergrade-evalplus",
+            "infergrade-mmlu-pro",
+            "infergrade-gpqa",
+        ):
             self.assertIn(image, verifier)
 
     def test_release_image_verifier_selects_linux_amd64_from_oci_index(self):

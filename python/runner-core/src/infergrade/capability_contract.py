@@ -12,6 +12,7 @@ CAPABILITY_SURFACES = (
     "local_assistant_capability",
     "local_coding_capability",
     "local_reasoning_capability",
+    "local_context_capability",
     "quant_fidelity",
     "deployment_fitness",
 )

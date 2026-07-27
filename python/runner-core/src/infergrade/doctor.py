@@ -36,6 +36,7 @@ DEFAULT_LOCAL_CAPABILITY_IMAGES = (
     {"benchmark_id": "ifeval", "display_name": "IFEval", "image": "ghcr.io/bfogels/infergrade-ifeval:%s" % __version__},
     {"benchmark_id": "evalplus", "display_name": "EvalPlus", "image": "ghcr.io/bfogels/infergrade-evalplus:%s" % __version__},
     {"benchmark_id": "mmlu_pro_reference_v1", "display_name": "MMLU-Pro reference", "image": "ghcr.io/bfogels/infergrade-mmlu-pro:%s" % __version__},
+    {"benchmark_id": "gpqa_diamond_reference_v1", "display_name": "GPQA Diamond reference", "image": "ghcr.io/bfogels/infergrade-gpqa:%s" % __version__},
 )
 DEFAULT_MIN_OUTPUT_FREE_GB = 1.0
 

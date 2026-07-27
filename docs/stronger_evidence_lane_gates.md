@@ -149,27 +149,25 @@ Acceptance:
 
 ### Phase B: GPQA Sampled Reference
 
-GPQA is harder and more differentiating, but it should reuse the multiple-choice harness shape from MMLU-Pro.
+GPQA is harder and more differentiating and reuses the multiple-choice artifact and quarantine shape from MMLU-Pro.
 
-Status: planned and explicitly access-gated. The official dataset card requires users to accept access conditions, so Runner must not ship real GPQA examples or silently download the dataset before the user has access and the harness has redaction-safe artifact handling.
+Status: runnable as deliberately selected diagnostic reference evidence. The image fetches the official repository's password-protected dataset archive at build time, verifies its SHA-256, and extracts only the 198-question Diamond split. Dataset content is not committed to this repository.
 
-Source candidates:
+Source:
 
-- Official code: https://github.com/idavidrein/gpqa
-- Official dataset card: https://huggingface.co/datasets/Idavidrein/gpqa
+- Official repository and dataset archive: https://github.com/idavidrein/gpqa
 
 Runner scope:
 
-- Keep `gpqa_reference_v1` non-runnable until dataset access, leakage controls, and local snapshot pinning are implemented.
-- Generalize shared multiple-choice scoring helpers after MMLU-Pro lands.
-- Add `capability-gpqa` container or a shared `capability-mcq` container if the abstraction is clean.
-- Pin the dataset revision only after the access flow is defined.
-- Start with synthetic shape-only fixtures for tests; do not commit or log real GPQA questions.
-- Start with a local sampled reference lane only after explicit user consent and local dataset availability are proven.
+- Keep `gpqa_diamond_reference_v1` out of default suites and Capability protocol v3.1 weighting.
+- Pin repository revision, dataset archive SHA-256, CC BY 4.0 attribution, deterministic option ordering, and strict A-D scoring.
+- Preserve generation failures separately from completed malformed answers.
+- Apply the systemic output-shape quarantine before capability publication.
+- Require a cross-family distribution audit before considering any score-weight promotion.
 
 Acceptance:
 
-- Catalog metadata marks GPQA as access-gated and non-runnable.
+- Catalog metadata marks GPQA Diamond runnable, intentional, diagnostic-only, and reference-scoped.
 - Exact answer accuracy is reported with question count and category metadata where available.
 - The Hub explains that GPQA is a hard reasoning reference signal, not a first-run confidence shortcut.
 - Generation failures remain separate from wrong answers.

@@ -28,6 +28,7 @@ MULTITURN_MEMORY_FIXTURE_REVISION = "2026-04-multiturn-preview"
 ASSISTANT_COMPOSITIONAL_FIXTURE_REVISION = "2026-07-assistant-compositional-v2"
 CODING_STATIC_REPAIR_FIXTURE_REVISION = "2026-05-coding-static-preview"
 REASONING_EXACT_ANSWER_FIXTURE_REVISION = "2026-05-reasoning-exact-preview"
+CONTEXT_RETRIEVAL_FIXTURE_REVISION = "2026-07-context-retrieval-v1"
 _DOMINANT_GENERATION_FAILURE_RATE = 0.5
 _DOMINANT_MALFORMED_OUTPUT_RATE = 0.5
 _DIRECT_ANSWER_RECOVERY_MAX_TOKENS = 512
@@ -61,6 +62,9 @@ DEFAULT_CAPABILITY_IMAGES = {
     "evalplus_humaneval": env_value("INFERGRADE_EVALPLUS_IMAGE", _released_capability_image("infergrade-evalplus")),
     "evalplus_mbpp": env_value("INFERGRADE_EVALPLUS_IMAGE", _released_capability_image("infergrade-evalplus")),
     "mmlu_pro_reference_v1": env_value("INFERGRADE_MMLU_PRO_IMAGE", _released_capability_image("infergrade-mmlu-pro")),
+    "gpqa_diamond_reference_v1": env_value(
+        "INFERGRADE_GPQA_IMAGE", _released_capability_image("infergrade-gpqa")
+    ),
 }
 
 _LISTENER_RUNS_DIR = "/app/runs"
@@ -154,6 +158,24 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=64,
         container_image=DEFAULT_CAPABILITY_IMAGES["mmlu_pro_reference_v1"],
         case_limits={"canary": 25, "standard": 100, "gold": 300},
+    ),
+    "gpqa_diamond_reference_v1": CapabilityBenchmarkSpec(
+        benchmark_id="gpqa_diamond_reference_v1",
+        display_name="GPQA Diamond reference",
+        benchmark_kind="expert_multiple_choice",
+        primary_metric_name="accuracy",
+        generation_max_tokens=64,
+        container_image=DEFAULT_CAPABILITY_IMAGES["gpqa_diamond_reference_v1"],
+        case_limits={"canary": 25, "standard": 100, "gold": 198},
+    ),
+    "context_retrieval_reference_v1": CapabilityBenchmarkSpec(
+        benchmark_id="context_retrieval_reference_v1",
+        display_name="Context retrieval reference",
+        benchmark_kind="long_context_retrieval",
+        primary_metric_name="retrieval_accuracy",
+        generation_max_tokens=32,
+        execution_mode="native",
+        case_limits={"canary": 1, "standard": 3, "gold": 6},
     ),
     "perplexity_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="perplexity_reference_v1",
@@ -450,20 +472,21 @@ def _benchmark_counts_as_scored(summary: Dict[str, Any]) -> bool:
     return _benchmark_primary_metric_value(summary) is not None and str((summary or {}).get("status") or "") == "completed"
 
 
-def _mmlu_output_shape_gate(
+def _multiple_choice_output_shape_gate(
     spec: CapabilityBenchmarkSpec,
     predictions: List[Dict[str, Any]],
     summary: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Quarantine systemic protocol mismatch without forgiving isolated misses.
 
-    MMLU-Pro intentionally scores occasional malformed completed answers as
+    Multiple-choice references intentionally score occasional malformed completed answers as
     wrong.  When malformed output dominates the sample, however, the result is
     evidence that the model/runtime/prompt protocol did not produce answerable
     rows—not evidence that the model has near-zero reasoning capability.
     """
-    if spec.benchmark_id != "mmlu_pro_reference_v1":
-        return {"status": "not_applicable", "policy_id": "mmlu_output_shape_gate_v1"}
+    supported = {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
+    if spec.benchmark_id not in supported:
+        return {"status": "not_applicable", "policy_id": "multiple_choice_output_shape_gate_v1"}
     metrics = dict(summary.get("metrics") or {})
     case_results = list(summary.get("case_results") or [])
     malformed_count = metrics.get("malformed_output_count", metrics.get("invalid_count"))
@@ -499,7 +522,7 @@ def _mmlu_output_shape_gate(
             reason_codes.append("answer_budget_exhaustion_observed")
     return {
         "status": "blocked" if blocked else "passed",
-        "policy_id": "mmlu_output_shape_gate_v1",
+        "policy_id": "multiple_choice_output_shape_gate_v1",
         "threshold": {"metric": "malformed_output_rate", "operator": ">", "value": _DOMINANT_MALFORMED_OUTPUT_RATE},
         "evaluated_count": evaluated_count,
         "malformed_output_count": malformed_count,
@@ -509,6 +532,11 @@ def _mmlu_output_shape_gate(
         "reason_codes": reason_codes,
         "strict_primary_metric": dict(summary.get("primary_metric") or {}),
     }
+
+
+# Compatibility alias for downstream tests and integrations that referenced the
+# original MMLU-specific helper before the policy became benchmark-agnostic.
+_mmlu_output_shape_gate = _multiple_choice_output_shape_gate
 
 
 def _component_report_for_benchmark(
@@ -551,7 +579,7 @@ def _component_report_for_benchmark(
         "generation_failure_severity": benchmark_result.get("generation_failure_severity"),
     }
     metrics = benchmark_result.get("metrics") or {}
-    if benchmark_id == "mmlu_pro_reference_v1" and isinstance(metrics, dict):
+    if benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"} and isinstance(metrics, dict):
         malformed_output_count = metrics.get("malformed_output_count", metrics.get("invalid_count"))
         if isinstance(malformed_output_count, int) and not isinstance(malformed_output_count, bool):
             report["malformed_output_count"] = malformed_output_count
@@ -731,7 +759,7 @@ def execute_capability_suite(
             summary["unscored_generation_failure_severity"] = unscored_failure_severity
             summary["completed_cases"] = len(cases) - failure_count
             summary["total_cases"] = len(cases)
-            output_shape_gate = _mmlu_output_shape_gate(spec, predictions, summary)
+            output_shape_gate = _multiple_choice_output_shape_gate(spec, predictions, summary)
             if output_shape_gate["status"] != "not_applicable":
                 summary["output_shape_gate"] = output_shape_gate
             protocol_identity = _case_benchmark_protocol_identity(
@@ -799,8 +827,8 @@ def execute_capability_suite(
                     predictions=predictions,
                     summary=summary,
                 )
-            elif spec.benchmark_id == "mmlu_pro_reference_v1":
-                capability_run_path = _write_mmlu_pro_capability_run_artifact(
+            elif spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}:
+                capability_run_path = _write_multiple_choice_capability_run_artifact(
                     request=request,
                     spec=spec,
                     benchmark_dir=benchmark_dir,
@@ -1326,6 +1354,16 @@ def _write_native_capability_run_artifact(
                 "output_artifact": "predictions.jsonl#%s" % case_id,
                 "error_class": None if task_state == "scored" else (task_error_class or "scoring_failed"),
                 **_task_performance_fields(prediction),
+                **(
+                    {
+                        "context_bucket_tokens": case.get("context_bucket_tokens"),
+                        "key_position": case.get("key_position"),
+                        "format_valid": case_score.get("format_valid"),
+                        "format_violation": case_score.get("error_class"),
+                    }
+                    if spec.benchmark_id == "context_retrieval_reference_v1"
+                    else {}
+                ),
             }
         )
     artifact = {
@@ -1396,6 +1434,11 @@ def _write_native_capability_run_artifact(
             "skipped_count": 0,
             "not_comparable_count": 0,
             **_artifact_summary_performance(summary.get("task_performance")),
+            **(
+                {"context_bucket_metrics": dict(summary.get("metrics", {}).get("context_bucket_metrics") or {})}
+                if spec.benchmark_id == "context_retrieval_reference_v1"
+                else {}
+            ),
         },
         "tasks": tasks,
         "artifacts": {
@@ -1422,7 +1465,7 @@ def _native_task_error_class(generation_status: str, case_score: Dict[str, Any])
     return None
 
 
-def _write_mmlu_pro_capability_run_artifact(
+def _write_multiple_choice_capability_run_artifact(
     request: RunRequest,
     spec: CapabilityBenchmarkSpec,
     benchmark_dir: str,
@@ -1535,9 +1578,9 @@ def _write_mmlu_pro_capability_run_artifact(
         },
         "protocol": {
             "task_family": spec.benchmark_kind,
-            "prompt_version": "mmlu_pro_reference_v1_prompt_v1",
+            "prompt_version": "%s_prompt_v1" % spec.benchmark_id,
             "task_version": spec.benchmark_id,
-            "fixture_revision": str(metadata.get("sample_policy") or "mmlu_pro_snapshot"),
+            "fixture_revision": str(metadata.get("sample_policy") or "%s_snapshot" % spec.benchmark_id),
             "dataset_revision": metadata.get("dataset_revision"),
             "scorer_type": "multiple_choice",
             "scoring_policy": summary.get("scoring_policy") or "exact_multiple_choice_letter_accuracy_v4",
@@ -1570,7 +1613,7 @@ def _write_mmlu_pro_capability_run_artifact(
             "scoring_outputs": ["summary.json"],
             "supporting_files": ["cases.jsonl", "benchmark_metadata.json"],
         },
-        "claim_boundary": _mmlu_pro_artifact_claim_boundary(summary_state),
+        "claim_boundary": _multiple_choice_artifact_claim_boundary(spec.benchmark_id, summary_state),
     }
     errors = validate_capability_run_artifact(artifact)
     if errors:
@@ -1757,6 +1800,8 @@ def _native_scorer_type(spec: CapabilityBenchmarkSpec) -> str:
         return "static_check"
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return "exact_match"
+    if spec.benchmark_id == "context_retrieval_reference_v1":
+        return "exact_match"
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -1769,6 +1814,8 @@ def _native_scoring_policy(spec: CapabilityBenchmarkSpec) -> str:
         return "deterministic_static_code_constraints_v1"
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return "deterministic_exact_answer_v1"
+    if spec.benchmark_id == "context_retrieval_reference_v1":
+        return "deterministic_context_key_retrieval_v1"
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -1781,6 +1828,8 @@ def _native_fixture_revision(spec: CapabilityBenchmarkSpec) -> str:
         return CODING_STATIC_REPAIR_FIXTURE_REVISION
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return REASONING_EXACT_ANSWER_FIXTURE_REVISION
+    if spec.benchmark_id == "context_retrieval_reference_v1":
+        return CONTEXT_RETRIEVAL_FIXTURE_REVISION
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -1881,6 +1930,8 @@ def _native_artifact_claim_boundary(spec: CapabilityBenchmarkSpec, state: str) -
         return _coding_artifact_claim_boundary(state)
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return _reasoning_artifact_claim_boundary(state)
+    if spec.benchmark_id == "context_retrieval_reference_v1":
+        return _context_retrieval_artifact_claim_boundary(state)
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -1927,38 +1978,56 @@ def _reasoning_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
     return {"supported_claims": supported, "unsupported_claims": unsupported}
 
 
-def _mmlu_pro_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+def _multiple_choice_artifact_claim_boundary(benchmark_id: str, state: str) -> Dict[str, List[str]]:
+    label = "GPQA Diamond" if benchmark_id == "gpqa_diamond_reference_v1" else "MMLU-Pro"
     unsupported = [
         "This is not a global intelligence score.",
         "This is not public leaderboard evidence.",
         "This is not gold evidence.",
-        "Sampled MMLU-Pro reference evidence does not prove broad real-world assistant quality by itself.",
+        "Sampled %s reference evidence does not prove broad real-world assistant quality by itself." % label,
     ]
     if state == "scored":
         supported = [
-            "This setup completed the pinned MMLU-Pro sampled reference protocol recorded in this artifact.",
+            "This setup completed the pinned %s sampled reference protocol recorded in this artifact." % label,
             "The score reports strict multiple-choice answer-letter accuracy with category breakdowns; completed malformed answers count as incorrect.",
         ]
     elif state == "partial":
         supported = [
-            "This setup attempted the pinned MMLU-Pro sampled reference protocol with partial generation or malformed-output failures.",
+            "This setup attempted the pinned %s sampled reference protocol with partial generation or malformed-output failures." % label,
             "The artifact preserves scored, malformed, and failed task rows separately.",
         ]
     elif state == "failed":
         supported = [
-            "This setup attempted the pinned MMLU-Pro sampled reference protocol.",
+            "This setup attempted the pinned %s sampled reference protocol." % label,
             "The artifact preserves generation, malformed-output, or scoring failures without turning them into a broad reasoning score.",
         ]
     elif state == "not_comparable":
         supported = [
-            "This setup attempted the pinned MMLU-Pro sampled reference protocol, but most outputs did not match its answer format.",
+            "This setup attempted the pinned %s sampled reference protocol, but most outputs did not match its answer format." % label,
             "The strict raw responses and malformed-output diagnostics are preserved without publishing a capability score.",
         ]
     else:
         supported = [
-            "This artifact records that the pinned MMLU-Pro sampled reference protocol was not yet scored.",
+            "This artifact records that the pinned %s sampled reference protocol was not yet scored." % label,
         ]
     return {"supported_claims": supported, "unsupported_claims": unsupported}
+
+
+def _context_retrieval_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    supported = [
+        "This setup attempted deterministic key retrieval at the recorded nominal context buckets.",
+        "The artifact records exact-match retrieval and observed input-token counts for each completed task.",
+    ]
+    if state not in {"scored", "partial"}:
+        supported = ["This artifact records that the pinned context-retrieval fixture was not fully scored."]
+    return {
+        "supported_claims": supported,
+        "unsupported_claims": [
+            "This is not a broad long-context reasoning score.",
+            "This does not prove the model's advertised maximum context window or production reliability.",
+            "Nominal 4K, 8K, and 16K buckets are directly comparable only with the recorded prompt and runtime protocol.",
+        ],
+    }
 
 
 def _evalplus_artifact_claim_boundary(benchmark_id: str, state: str) -> Dict[str, List[str]]:
@@ -2100,8 +2169,8 @@ def _case_checkpoint_fingerprint(
                 "container_image": spec.container_image,
                 "container_args": list(spec.container_args),
                 "generation_protocol": (
-                    "mmlu_choice_a_j_grammar_v1"
-                    if spec.benchmark_id == "mmlu_pro_reference_v1"
+                    "multiple_choice_letter_grammar_v1"
+                    if spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
                     else "default_generation_v1"
                 ),
             },
@@ -2213,7 +2282,7 @@ def _mmlu_completion_has_answer_shape(value: Any) -> bool:
 
 
 def _direct_answer_recovery_reason(spec: CapabilityBenchmarkSpec, generated: Dict[str, Any]) -> Optional[str]:
-    if spec.benchmark_id != "mmlu_pro_reference_v1" or generated.get("status", "completed") != "completed":
+    if spec.benchmark_id not in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"} or generated.get("status", "completed") != "completed":
         return None
     text = str(generated.get("text") or "")
     if _mmlu_completion_has_answer_shape(text):
@@ -2252,7 +2321,7 @@ def _generate_predictions(
         _initialize_case_checkpoint(checkpoint_path, checkpoint_fingerprint, spec, total_cases)
         completed_checkpoint = {}
     adaptive_max_tokens = spec.generation_max_tokens
-    protocol_canary_complete = spec.benchmark_id != "mmlu_pro_reference_v1"
+    protocol_canary_complete = spec.benchmark_id not in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
     for index, case in enumerate(cases, start=1):
         case_id = case.get("case_id") or case.get("task_id") or stable_hash(case, length=12)
         checkpoint_prediction = completed_checkpoint.get(str(case_id))
@@ -2797,18 +2866,39 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
         if expected_answers:
             total_constraints += 1
             expected = [_normalize_exact_answer(item) for item in expected_answers]
-            extracted_answer = _extract_exact_answer(response, expected_answers)
+            if spec.benchmark_id == "context_retrieval_reference_v1":
+                extracted_answer = _extract_context_retrieval_key(response, expected_answers)
+            else:
+                extracted_answer = _extract_exact_answer(response, expected_answers)
             passed = extracted_answer in expected
+            format_violation = bool(
+                spec.benchmark_id == "context_retrieval_reference_v1"
+                and passed
+                and _normalize_exact_answer(response) != extracted_answer
+            )
             if passed:
                 passed_constraints += 1
+                semantic_correct_count += 1
+            if format_violation:
+                format_violation_count += 1
             case_results.append(
                 {
                     "case_id": case_id,
                     "state": "scored",
-                    "error_class": None,
+                    "error_class": "format_violation" if format_violation else None,
                     "passed_constraints": 1 if passed else 0,
                     "total_constraints": 1,
                     "score": 1.0 if passed else 0.0,
+                    "format_valid": not format_violation,
+                    **(
+                        {
+                            "context_bucket_tokens": case.get("context_bucket_tokens"),
+                            "key_position": case.get("key_position"),
+                            "observed_input_tokens": prediction.get("input_tokens"),
+                        }
+                        if spec.benchmark_id == "context_retrieval_reference_v1"
+                        else {}
+                    ),
                 }
             )
             continue
@@ -2882,6 +2972,35 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                 "semantic_task_accuracy": round(semantic_correct_count / float(len(case_results)), 6) if case_results else None,
             }
         )
+    if spec.benchmark_id == "context_retrieval_reference_v1":
+        metrics["format_violation_count"] = format_violation_count
+        bucket_metrics = {}
+        for item in case_results:
+            bucket = item.get("context_bucket_tokens")
+            if not isinstance(bucket, int):
+                continue
+            bucket_rows = [row for row in case_results if row.get("context_bucket_tokens") == bucket]
+            scored_rows = [row for row in bucket_rows if row.get("score") is not None]
+            observed_tokens = [
+                row.get("observed_input_tokens")
+                for row in bucket_rows
+                if isinstance(row.get("observed_input_tokens"), int)
+            ]
+            bucket_metrics[str(bucket)] = {
+                "correct_count": len([row for row in scored_rows if row.get("score") == 1.0]),
+                "total_count": len(scored_rows),
+                "accuracy": (
+                    round(
+                        len([row for row in scored_rows if row.get("score") == 1.0])
+                        / float(len(scored_rows)),
+                        6,
+                    )
+                    if scored_rows
+                    else None
+                ),
+                "observed_input_tokens": observed_tokens,
+            }
+        metrics["context_bucket_metrics"] = bucket_metrics
     return {
         "benchmark_id": spec.benchmark_id,
         "display_name": spec.display_name,
@@ -2930,6 +3049,17 @@ def _extract_exact_answer(value: Any, expected_answers: List[Any]) -> Optional[s
     return None
 
 
+def _extract_context_retrieval_key(value: Any, expected_answers: List[Any]) -> Optional[str]:
+    """Return one uniquely present pinned key while preserving format diagnostics."""
+    text = str(value or "")
+    hits = []
+    for expected in expected_answers:
+        normalized = _normalize_exact_answer(expected)
+        if normalized and re.search(r"(?<![A-Za-z0-9_-])%s(?![A-Za-z0-9_-])" % re.escape(str(expected)), text):
+            hits.append(normalized)
+    return hits[0] if len(set(hits)) == 1 else None
+
+
 def _extract_single_code_fence(value: str, language: Any = None) -> Optional[str]:
     text = str(value or "")
     fence_pattern = re.compile(
@@ -2959,7 +3089,54 @@ def _native_benchmark_cases(spec: CapabilityBenchmarkSpec) -> List[Dict[str, Any
         return _coding_static_repair_cases()
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return _reasoning_exact_answer_cases()
+    if spec.benchmark_id == "context_retrieval_reference_v1":
+        return _context_retrieval_cases()
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
+
+
+def _context_retrieval_cases() -> List[Dict[str, Any]]:
+    """Pinned synthetic retrieval tasks at the Runner's supported context buckets."""
+    cases = []
+    definitions = (
+        (4096, "early", 6000),
+        (8192, "middle", 12000),
+        (16384, "late", 24000),
+        (4096, "late", 6000),
+        (8192, "early", 12000),
+        (16384, "middle", 24000),
+    )
+    for index, (bucket, position, target_chars) in enumerate(definitions, start=1):
+        key = "IGCTX-%s-%s-%02d" % (bucket, position.upper(), index)
+        filler_parts = []
+        filler_chars = 0
+        record = 0
+        while filler_chars < target_chars:
+            part = (
+                "record-%06d payload-%08x observation-%06d; "
+                % (record, (record * 2654435761) & 0xFFFFFFFF, (record * 7919) % 1000000)
+            )
+            filler_parts.append(part)
+            filler_chars += len(part)
+            record += 1
+        filler = "".join(filler_parts)[:target_chars]
+        insert_at = {"early": len(filler) // 6, "middle": len(filler) // 2, "late": (len(filler) * 5) // 6}[position]
+        document = filler[:insert_at] + "\nRetrieval key: %s\n" % key + filler[insert_at:]
+        cases.append(
+            {
+                "case_id": "context-retrieval-%s-%s" % (bucket, position),
+                "task_id": "context_retrieval_reference_v1/%s-%s" % (bucket, position),
+                "context_bucket_tokens": bucket,
+                "key_position": position,
+                "prompt": (
+                    "InferGrade nominal context bucket: %s tokens.\n"
+                    "Read the archive below. Return only the exact retrieval key beginning IGCTX-, "
+                    "with no explanation.\n\n%s\n\nRetrieval key:"
+                )
+                % (bucket, document),
+                "expected_answers": [key],
+            }
+        )
+    return cases
 
 
 def _assistant_compositional_instruction_cases() -> List[Dict[str, Any]]:
