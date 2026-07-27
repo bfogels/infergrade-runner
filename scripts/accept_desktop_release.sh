@@ -163,6 +163,87 @@ clean_env=(
 python3 -m json.tool "$report_dir_absolute/desktop-self-test.json" >/dev/null
 python3 -m json.tool "$report_dir_absolute/desktop-readiness.json" >/dev/null
 
+deterministic_request="$workspace/packaged-deterministic-run.json"
+deterministic_bundle="$workspace/packaged-deterministic-bundle"
+IG_ACCEPT_DETERMINISTIC_BUNDLE="$deterministic_bundle" python3 - "$deterministic_request" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+request_path = Path(sys.argv[1])
+request_path.write_text(
+    json.dumps(
+        {
+            "spec_version": "0.1-draft",
+            "run": {
+                "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+                "backend": "llama.cpp",
+                "tier": "canary",
+                "use_case": "general_assistant",
+                "execution_mode": "local_native",
+                "capability_suite_ids": ["chat_instruction_following"],
+                "benchmark_group_ids": ["deployment_chat"],
+                "benchmark_check_ids": ["interactive_chat_v1"],
+                "simulate": True,
+                "output_dir": os.environ["IG_ACCEPT_DETERMINISTIC_BUNDLE"],
+            },
+            "artifacts": {
+                "quantized_weights": {
+                    "uri": (
+                        "hf://TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/"
+                        "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+                    ),
+                    "filename": "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+                }
+            },
+            "metadata": {
+                "notes": "Synthetic packaged-engine acceptance only; not benchmark evidence.",
+            },
+        },
+        indent=2,
+        sort_keys=True,
+    )
+    + "\n",
+    encoding="utf-8",
+)
+PY
+"${clean_env[@]}" "$sidecar_path" --all run --request-file "$deterministic_request" \
+  >"$report_dir_absolute/packaged-deterministic-run.log"
+"${clean_env[@]}" "$sidecar_path" --all validate-bundle "$deterministic_bundle" \
+  >"$report_dir_absolute/packaged-deterministic-validation.json"
+python3 - "$deterministic_bundle" "$report_dir_absolute/packaged-deterministic-receipt.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+bundle_path, receipt_path = map(Path, sys.argv[1:])
+manifest = json.loads((bundle_path / "manifest.json").read_text(encoding="utf-8"))
+summary = json.loads((bundle_path / "summary.json").read_text(encoding="utf-8"))
+validation = json.loads((bundle_path / "validation.json").read_text(encoding="utf-8"))
+result_path = bundle_path / "results" / "interactive_chat_v1.json"
+if not result_path.is_file():
+    raise SystemExit("Packaged deterministic run did not write interactive_chat_v1.json")
+if validation.get("valid") is not True:
+    raise SystemExit("Packaged deterministic run did not produce a valid bundle")
+receipt = {
+    "schema_version": "infergrade.packaged_deterministic_acceptance.v1",
+    "synthetic": True,
+    "claim_boundary": "Packaged-engine smoke only; not model, runtime, upload, or capability evidence.",
+    "bundle_spec_version": manifest.get("bundle_spec_version"),
+    "result_spec_version": manifest.get("result_spec_version"),
+    "runner_version": (manifest.get("runner") or {}).get("version"),
+    "model_family": summary.get("model_family"),
+    "benchmark_check_ids": summary.get("benchmark_check_ids"),
+    "result_count": summary.get("result_count"),
+    "validation": {
+        "valid": validation.get("valid"),
+        "verification_level": validation.get("verification_level"),
+    },
+}
+receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+
 "${clean_env[@]}" "$runner_path" >"$report_dir_absolute/app.log" 2>&1 &
 app_pid="$!"
 if [ "$INTERACTIVE" -eq 1 ]; then
@@ -216,6 +297,7 @@ payload = {
         "isolated_profile": "passed",
         "packaged_self_test": "passed",
         "packaged_readiness": "passed",
+        "packaged_deterministic_bundle": "passed",
         "launch_survival": "passed",
     },
     "screenshot_captured": os.environ["IG_ACCEPT_SCREENSHOT"] == "1",

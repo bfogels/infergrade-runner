@@ -1374,6 +1374,14 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn('xcrun stapler validate "$app_path"', script)
         self.assertIn('ditto "$source_app_path" "$app_path"', script)
         self.assertIn('"isolated_install_copy": "passed"', script)
+        self.assertIn('"packaged_deterministic_bundle": "passed"', script)
+        self.assertIn('"synthetic": True', script)
+        self.assertIn(
+            '"claim_boundary": "Packaged-engine smoke only; not model, runtime, upload, or capability evidence."',
+            script,
+        )
+        self.assertIn('"benchmark_check_ids": ["interactive_chat_v1"]', script)
+        self.assertIn('validate-bundle "$deterministic_bundle"', script)
         self.assertIn('"manual_acceptance_remaining"', script)
         self.assertIn('urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))', script)
         self.assertNotIn('export IG_ACCEPT_DMG_SOURCE="$DMG_SOURCE"', script)
