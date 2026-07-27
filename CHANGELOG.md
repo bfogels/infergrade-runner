@@ -7,6 +7,16 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.46 (contract 0.3.26)
+
+- Adds diagnostic-only GPQA Diamond and deterministic 4K, 8K, and 16K
+  context-retrieval references without changing Capability protocol v3.1
+  headline weights or default suites.
+- Makes Runner own the strict multiple-choice direct-answer protocol, including
+  GPQA A-D grammar and honest completion-shape quarantine.
+- Publishes native amd64 and arm64 capability-scorer images and preflights
+  exact artifact identity, availability, and disk requirements before a run.
+
 ## 0.3.45 (contract 0.3.25)
 
 - Updates the Desktop build's transitive PostCSS dependency to 8.5.23,
