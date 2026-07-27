@@ -699,6 +699,24 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(transform["generation_constraint"], "mmlu_choice_a_j_grammar_v1")
         self.assertEqual(messages[0]["role"], "user")
 
+    def test_qwen3_gpqa_chat_records_choice_grammar_constraint(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-4B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        messages, transform = _prepare_llama_server_chat(
+            request,
+            "Answer the following expert multiple-choice question. Think carefully, but final output must be only "
+            "the option letter.\n\nDomain: Physics\nQuestion: Which?\n\n"
+            "A. one\nB. two\nC. three\nD. four\n\nFinal answer letter:",
+        )
+
+        self.assertEqual(transform["generation_constraint"], "gpqa_choice_a_d_grammar_v1")
+        self.assertEqual(messages[0]["role"], "user")
+
     def test_server_command_requests_runtime_memory_telemetry(self):
         request = RunRequest(
             model="google/gemma-4-E4B-it",
@@ -862,6 +880,30 @@ class LlamaCppAdapterTests(unittest.TestCase):
 
         sent = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
         self.assertEqual(sent["grammar"], "root ::= [A-J]")
+
+    @mock.patch("infergrade.adapters.llama_cpp.urllib_request.urlopen")
+    def test_stream_chat_completion_constrains_gpqa_to_one_answer_letter(self, urlopen_mock):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.readline.side_effect = [
+            b'data: {"choices":[{"delta":{"content":"D"},"finish_reason":"stop"}]}\n',
+            b'data: [DONE]\n',
+        ]
+        urlopen_mock.return_value = response
+
+        _stream_server_chat_completion(
+            "http://127.0.0.1:8080",
+            [{
+                "role": "user",
+                "content": "Answer the following expert multiple-choice question. Think carefully, but final output must be only "
+                "the option letter.\n\nDomain: Physics\nQuestion: Which?\n\n"
+                "A. one\nB. two\nC. three\nD. four\n\nFinal answer letter:",
+            }],
+            64,
+        )
+
+        sent = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(sent["grammar"], "root ::= [A-D]")
 
     def test_direct_answer_deployment_rejects_empty_but_keeps_visible_fixed_budget_output(self):
         transform = {"id": "qwen_chat_template_disable_thinking_v2"}

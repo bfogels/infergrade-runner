@@ -1984,7 +1984,7 @@ def _multiple_choice_artifact_claim_boundary(benchmark_id: str, state: str) -> D
         "This is not a global intelligence score.",
         "This is not public leaderboard evidence.",
         "This is not gold evidence.",
-        "Sampled MMLU-Pro reference evidence does not prove broad real-world assistant quality by itself.",
+        "Sampled %s reference evidence does not prove broad real-world assistant quality by itself." % label,
     ]
     if state == "scored":
         supported = [

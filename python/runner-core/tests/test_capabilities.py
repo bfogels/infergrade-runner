@@ -14,6 +14,7 @@ from infergrade.capabilities import (
     _generate_predictions,
     _generation_prompt_for_case,
     _host_mount_path,
+    _multiple_choice_artifact_claim_boundary,
     _normalize_evalplus_completion,
     _native_benchmark_cases,
     _run_capability_container,
@@ -722,6 +723,16 @@ class CapabilityTests(unittest.TestCase):
 
         self.assertEqual([item["benchmark_id"] for item in images], ["gpqa_diamond_reference_v1"])
         self.assertEqual(images[0]["image"], "ghcr.io/bfogels/infergrade-gpqa:%s" % __version__)
+
+    def test_gpqa_claim_boundary_names_gpqa_instead_of_mmlu_pro(self):
+        boundary = _multiple_choice_artifact_claim_boundary(
+            "gpqa_diamond_reference_v1",
+            "scored",
+        )
+
+        unsupported = " ".join(boundary["unsupported_claims"])
+        self.assertIn("Sampled GPQA Diamond reference evidence", unsupported)
+        self.assertNotIn("Sampled MMLU-Pro reference evidence", unsupported)
 
     def test_execute_native_multiturn_benchmark_scores_constraints_without_docker(self):
         request = RunRequest(
