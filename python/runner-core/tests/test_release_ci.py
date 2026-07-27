@@ -1365,6 +1365,19 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("manual\tsigning_credentials\t", output)
         self.assertNotIn("release_signing_notarization=pass", output)
 
+    def test_desktop_release_acceptance_isolated_and_honest(self):
+        script = (ROOT / "scripts" / "accept_desktop_release.sh").read_text(encoding="utf-8")
+
+        self.assertIn("INFERGRADE_ACCEPTANCE_KEYRING_SERVICE=", script)
+        self.assertIn('env -i', script)
+        self.assertIn('xcrun stapler validate "$dmg_path"', script)
+        self.assertIn('xcrun stapler validate "$app_path"', script)
+        self.assertIn('ditto "$source_app_path" "$app_path"', script)
+        self.assertIn('"isolated_install_copy": "passed"', script)
+        self.assertIn('"manual_acceptance_remaining"', script)
+        self.assertIn('urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))', script)
+        self.assertNotIn('export IG_ACCEPT_DMG_SOURCE="$DMG_SOURCE"', script)
+
     def test_public_release_readiness_json_preserves_manual_state(self):
         old_argv = sys.argv
         try:
