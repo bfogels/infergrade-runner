@@ -504,6 +504,67 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertIn("54611cde22c74cca43dd78732198de6abe971398", dockerfile)
         self.assertIn("build_snapshot.py", dockerfile)
 
+    def test_gpqa_diamond_prepare_and_strict_scoring(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-gpqa", "runner.py")
+        module = _load_module("gpqa_runner_test_module", module_path)
+        fieldnames = [
+            "Question",
+            "Correct Answer",
+            "Incorrect Answer 1",
+            "Incorrect Answer 2",
+            "Incorrect Answer 3",
+            "Record ID",
+            "High-level domain",
+        ]
+        with tempfile.TemporaryDirectory() as tempdir:
+            data_path = os.path.join(tempdir, "gpqa_diamond.csv")
+            with open(data_path, "w", newline="", encoding="utf-8") as handle:
+                writer = __import__("csv").DictWriter(handle, fieldnames=fieldnames)
+                writer.writeheader()
+                for index in range(198):
+                    writer.writerow(
+                        {
+                            "Question": "Synthetic question %d?" % index,
+                            "Correct Answer": "correct-%d" % index,
+                            "Incorrect Answer 1": "wrong-a-%d" % index,
+                            "Incorrect Answer 2": "wrong-b-%d" % index,
+                            "Incorrect Answer 3": "wrong-c-%d" % index,
+                            "Record ID": "fixture-%03d" % index,
+                            "High-level domain": ("physics", "chemistry", "biology")[index % 3],
+                        }
+                    )
+            module.prepare(tempdir, limit=3, data_path=data_path)
+            with open(os.path.join(tempdir, "cases.jsonl"), encoding="utf-8") as handle:
+                cases = [json.loads(line) for line in handle]
+            predictions = [
+                {"task_id": cases[0]["task_id"], "completion": cases[0]["answer"]},
+                {"task_id": cases[1]["task_id"], "completion": "not an answer"},
+                {"task_id": cases[2]["task_id"], "completion": "", "generation_status": "failed"},
+            ]
+            with open(os.path.join(tempdir, "predictions.jsonl"), "w", encoding="utf-8") as handle:
+                for prediction in predictions:
+                    handle.write(json.dumps(prediction) + "\n")
+            module.evaluate(tempdir)
+            with open(os.path.join(tempdir, "summary.json"), encoding="utf-8") as handle:
+                summary = json.load(handle)
+        self.assertEqual(len(cases), 3)
+        self.assertEqual(summary["primary_metric"]["value"], 0.5)
+        self.assertEqual(summary["metrics"]["malformed_output_count"], 1)
+        self.assertEqual(summary["metrics"]["total_count"], 2)
+
+    def test_gpqa_dockerfile_pins_archive_identity_and_dataset_license(self):
+        container_dir = os.path.join(ROOT_DIR, "containers", "capability-gpqa")
+        with open(os.path.join(container_dir, "Dockerfile"), encoding="utf-8") as handle:
+            dockerfile = handle.read()
+        with open(os.path.join(container_dir, "build_snapshot.py"), encoding="utf-8") as handle:
+            build_script = handle.read()
+        with open(os.path.join(container_dir, "LICENSE.dataset"), encoding="utf-8") as handle:
+            license_text = handle.read()
+        self.assertIn("56686c06f5e19865c153de0fdb11be3890014df7", dockerfile)
+        self.assertIn("461ae7329f15a3e35f8184d2dac24b990f34fdf12f366ca4062d8e6638cd08dc", dockerfile)
+        self.assertIn("dataset/gpqa_diamond.csv", build_script)
+        self.assertIn("Creative Commons Attribution 4.0", license_text)
+
 
 if __name__ == "__main__":
     unittest.main()

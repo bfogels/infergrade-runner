@@ -139,7 +139,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.25")
+        self.assertEqual(manifest["contract_version"], "0.3.26")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_run_request_contract_accepts_authorized_artifact_download_size(self):
@@ -346,6 +346,7 @@ class ContractExportTests(unittest.TestCase):
             (image_dir / "infergrade-runner-core_1.2.3-preview.tar").write_text("runner-image", encoding="utf-8")
             (image_dir / "infergrade-llama-cpp_1.2.3-preview.tar").write_text("runtime-image", encoding="utf-8")
             (image_dir / "infergrade-mmlu-pro_1.2.3-preview.tar").write_text("mmlu-image", encoding="utf-8")
+            (image_dir / "infergrade-gpqa_1.2.3-preview.tar").write_text("gpqa-image", encoding="utf-8")
 
             bundle_dir = export_release_bundle(
                 output_dir=output_root,
@@ -376,6 +377,10 @@ class ContractExportTests(unittest.TestCase):
             self.assertEqual(
                 "images/infergrade-mmlu-pro_1.2.3-preview.tar",
                 capability_refs["infergrade-mmlu-pro"]["archive_path"],
+            )
+            self.assertEqual(
+                "images/infergrade-gpqa_1.2.3-preview.tar",
+                capability_refs["infergrade-gpqa"]["archive_path"],
             )
 
 

@@ -38,6 +38,18 @@ _PROMPT_EVAL_TOKENS_RE = re.compile(r"prompt eval time\s*=\s*[0-9.]+\s*ms\s*/\s*
 _EVAL_TIME_RE = re.compile(r"eval time\s*=\s*([0-9.]+)\s*ms", re.IGNORECASE)
 _EVAL_TOKENS_RE = re.compile(r"eval time\s*=\s*[0-9.]+\s*ms\s*/\s*([0-9.]+)\s*runs?", re.IGNORECASE)
 _EVAL_TPS_RE = re.compile(r"\(\s*[0-9.]+\s*ms per token,\s*([0-9.]+)\s*tokens per second\)", re.IGNORECASE)
+_INFERGRADE_CONTEXT_BUCKET_RE = re.compile(
+    r"InferGrade nominal context bucket:\s*(4096|8192|16384)\s+tokens\.",
+    re.IGNORECASE,
+)
+
+
+def _capability_context_size(prompt: str) -> int:
+    """Honor an explicit pinned context fixture bucket; estimate all other prompts."""
+    match = _INFERGRADE_CONTEXT_BUCKET_RE.search(str(prompt or ""))
+    if match:
+        return int(match.group(1))
+    return max(4096, min(16384, len(prompt) * 2))
 _TOTAL_TIME_RE = re.compile(r"total time\s*=\s*([0-9.]+)\s*ms", re.IGNORECASE)
 _TOTAL_TIME_TOKENS_RE = re.compile(r"total time\s*=\s*[0-9.]+\s*ms\s*/\s*([0-9.]+)\s*tokens?", re.IGNORECASE)
 _SUMMARY_TPS_RE = re.compile(
@@ -475,7 +487,7 @@ class LlamaCppAdapter(BaseAdapter):
                     model_path=model_path,
                     prompt=effective_prompt,
                     max_tokens=max_tokens,
-                    ctx_size=max(4096, min(16384, len(prompt) * 2)),
+                    ctx_size=_capability_context_size(prompt),
                     request=request,
                 )
             )
@@ -501,7 +513,7 @@ class LlamaCppAdapter(BaseAdapter):
                     model_path=container_model_path,
                     prompt=effective_prompt,
                     max_tokens=max_tokens,
-                    ctx_size=max(4096, min(16384, len(prompt) * 2)),
+                    ctx_size=_capability_context_size(prompt),
                     request=request,
                 )
             )
@@ -553,7 +565,7 @@ class LlamaCppAdapter(BaseAdapter):
         messages, prompt_transform = _prepare_llama_server_chat(request, prompt)
         if messages is None:
             raise RuntimeError("Direct-answer generation requires structured chat messages")
-        ctx_size = max(4096, min(16384, len(prompt) * 2))
+        ctx_size = _capability_context_size(prompt)
         if self._capability_server_reuse_enabled:
             session = self._ensure_capability_server_session(request, model_path, ctx_size)
             try:
@@ -700,7 +712,7 @@ class LlamaCppAdapter(BaseAdapter):
         prompt_transform: Optional[Dict[str, str]],
         max_tokens: int,
     ) -> Dict[str, object]:
-        ctx_size = max(4096, min(16384, len(prompt) * 2))
+        ctx_size = _capability_context_size(prompt)
         session = self._ensure_capability_server_session(request, model_path, ctx_size)
         try:
             completion = _stream_server_completion(
@@ -2042,8 +2054,9 @@ def _stream_server_chat_completion(base_url: str, messages: List[Dict[str, str]]
         "chat_template_kwargs": {"enable_thinking": False},
         "thinking_budget_tokens": 0,
     }
-    if _uses_mmlu_choice_grammar(messages):
-        payload["grammar"] = "root ::= [A-J]"
+    choice_grammar = _multiple_choice_grammar(messages)
+    if choice_grammar:
+        payload["grammar"] = choice_grammar
     request = urllib_request.Request(
         "%s/v1/chat/completions" % base_url,
         data=json.dumps(payload).encode("utf-8"),
@@ -2280,6 +2293,8 @@ def _prepare_llama_server_chat(
         }
         if _is_mmlu_choice_prompt(raw):
             transform["generation_constraint"] = "mmlu_choice_a_j_grammar_v1"
+        elif _is_gpqa_choice_prompt(raw):
+            transform["generation_constraint"] = "gpqa_choice_a_d_grammar_v1"
         return [{"role": "user", "content": raw.strip()}], transform
     system_content = raw[:user_index].strip()
     user_content = raw[user_index + len(user_marker) : assistant_index].strip()
@@ -2306,11 +2321,26 @@ def _is_mmlu_choice_prompt(prompt: str) -> bool:
     )
 
 
-def _uses_mmlu_choice_grammar(messages: List[Dict[str, str]]) -> bool:
-    return any(
-        message.get("role") == "user" and _is_mmlu_choice_prompt(str(message.get("content") or ""))
-        for message in messages
+def _is_gpqa_choice_prompt(prompt: str) -> bool:
+    text = str(prompt or "")
+    return (
+        "Answer the following expert multiple-choice question." in text
+        and "Final answer letter:" in text
+        and all("\n%s. " % letter in text for letter in "ABCD")
+        and "\nE. " not in text
     )
+
+
+def _multiple_choice_grammar(messages: List[Dict[str, str]]) -> Optional[str]:
+    for message in messages:
+        if message.get("role") != "user":
+            continue
+        content = str(message.get("content") or "")
+        if _is_mmlu_choice_prompt(content):
+            return "root ::= [A-J]"
+        if _is_gpqa_choice_prompt(content):
+            return "root ::= [A-D]"
+    return None
 
 
 def _infer_llama_cpp_architecture(request: RunRequest) -> Optional[str]:

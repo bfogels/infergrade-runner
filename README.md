@@ -193,6 +193,8 @@ That setup command also prepares `infergrade-runner-core:local`, because the rec
 
 If a local runtime image like `infergrade-llama-cpp:local` is missing, the Runner tries to build it automatically from the checked-out repo before falling back to a Docker pull, so local development does not depend on a manual `docker login` or hand-built image step in the common case.
 
+On Apple Silicon, a released capability scorer that currently publishes only a Linux/amd64 manifest is pulled explicitly for Docker Desktop emulation after the normal arm64 pull reports that no matching manifest exists. Model inference remains on the native Metal runtime; the emulated container is limited to the sandboxed scorer, and its exact image identity remains part of the benchmark evidence.
+
 If you change the runner container dependencies and want to refresh an existing local image, use:
 
 ```bash

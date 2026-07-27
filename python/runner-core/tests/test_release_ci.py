@@ -15,7 +15,11 @@ from scripts.check_version_bump import parse_release_version, validate_forward_v
 from scripts.prepare_desktop_release_dmg import DEFAULT_PUBLIC_DMG_NAME, prepare_public_dmg
 from scripts.verify_desktop_release_artifacts import main as verify_desktop_release_artifacts
 from scripts.verify_desktop_update_endpoint import verify_manifest as verify_desktop_update_manifest_endpoint
-from scripts.verify_release_images import _linux_amd64_descriptor, parse_registry_prefix, verify_image
+from scripts.verify_release_images import (
+    _linux_amd64_descriptor,
+    parse_registry_prefix,
+    verify_image,
+)
 from scripts.write_desktop_release_checksums import main as write_desktop_release_checksums
 from scripts.write_desktop_update_manifest import main as write_desktop_update_manifest
 
@@ -208,7 +212,14 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertNotIn("docker manifest inspect", script)
         self.assertIn("/token?", verifier)
         self.assertIn("Docker-Content-Digest".lower(), verifier.lower())
-        for image in ("infergrade-runner-core", "infergrade-llama-cpp", "infergrade-ifeval", "infergrade-evalplus", "infergrade-mmlu-pro"):
+        for image in (
+            "infergrade-runner-core",
+            "infergrade-llama-cpp",
+            "infergrade-ifeval",
+            "infergrade-evalplus",
+            "infergrade-mmlu-pro",
+            "infergrade-gpqa",
+        ):
             self.assertIn(image, verifier)
 
     def test_release_image_verifier_selects_linux_amd64_from_oci_index(self):
@@ -246,6 +257,52 @@ class ReleaseCiTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "digest drifted"):
                 verify_image("ghcr.io", "bfogels", "infergrade-runner-core", "0.3.37")
+
+    def test_release_image_verifier_requires_arm64_for_capability_images(self):
+        token_payload = ({"token": "anonymous-token"}, {})
+        index_payload = (
+            {
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "manifests": [
+                    {"digest": "sha256:amd", "platform": {"os": "linux", "architecture": "amd64"}}
+                ],
+            },
+            "sha256:index",
+        )
+        platform_payload = ({"config": {"digest": "sha256:config-amd"}}, "sha256:amd")
+        with patch("scripts.verify_release_images._json_request", return_value=token_payload), patch(
+            "scripts.verify_release_images._manifest_request",
+            side_effect=[index_payload, platform_payload],
+        ):
+            with self.assertRaisesRegex(ValueError, "linux/arm64"):
+                verify_image("ghcr.io", "bfogels", "infergrade-evalplus", "0.3.46")
+
+    def test_release_image_verifier_accepts_both_capability_platforms(self):
+        token_payload = ({"token": "anonymous-token"}, {})
+        index_payload = (
+            {
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "manifests": [
+                    {"digest": "sha256:amd", "platform": {"os": "linux", "architecture": "amd64"}},
+                    {"digest": "sha256:arm", "platform": {"os": "linux", "architecture": "arm64"}},
+                ],
+            },
+            "sha256:index",
+        )
+        with patch("scripts.verify_release_images._json_request", return_value=token_payload), patch(
+            "scripts.verify_release_images._manifest_request",
+            side_effect=[
+                index_payload,
+                ({"config": {"digest": "sha256:config-amd"}}, "sha256:amd"),
+                ({"config": {"digest": "sha256:config-arm"}}, "sha256:arm"),
+            ],
+        ):
+            proof = verify_image("ghcr.io", "bfogels", "infergrade-evalplus", "0.3.46")
+
+        self.assertEqual(
+            proof.platform_manifest_digests,
+            {"amd64": "sha256:amd", "arm64": "sha256:arm"},
+        )
 
     def test_ci_checks_version_sync_before_running_tests(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
@@ -374,6 +431,8 @@ class ReleaseCiTests(unittest.TestCase):
 
         self.assertIn('default: ""', workflow)
         self.assertIn('image_tag="$(cat VERSION)"', workflow)
+        self.assertIn("platforms: linux/amd64,linux/arm64", workflow)
+        self.assertIn("platforms: ${{ matrix.platforms }}", workflow)
         self.assertNotIn("0.1.31-preview", workflow)
 
     def test_desktop_app_uses_package_metadata_for_browser_version_fallback(self):

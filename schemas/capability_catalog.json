@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-07-15-capability-protocol-3.1-current-task-campaign",
+  "catalog_version": "2026-07-26-diagnostic-context-gpqa-reference",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -586,6 +586,46 @@
       ]
     },
     {
+      "check_id": "gpqa_diamond_reference_v1",
+      "surface_id": "local_reasoning_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "reference_runnable",
+      "runnable_status": "runnable_intentional_reference",
+      "default_inclusion_status": "not_default_diagnostic",
+      "fixture_or_dataset_revision_status": "pinned_dataset_revision_and_archive_sha256",
+      "harness_status": "container_harness_implemented",
+      "scoring_policy_id": "exact_multiple_choice_letter_accuracy_v4",
+      "sample_policy": "Official 198-question GPQA Diamond split with domain-round-robin canary and standard samples.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "container_for_prepare_and_scoring",
+      "claim_boundary": "Sampled GPQA Diamond expert multiple-choice evidence only; diagnostic, not part of Capability protocol v3.1, a leaderboard, or a global intelligence claim.",
+      "promotion_blockers": [
+        "Run a cross-family distribution audit before assigning headline score weight.",
+        "Observe duration, malformed-output, and repeatability behavior on supported local runtimes.",
+        "Keep the official dataset revision, archive hash, license, and strict answer protocol pinned."
+      ]
+    },
+    {
+      "check_id": "context_retrieval_reference_v1",
+      "surface_id": "local_context_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "thin_local_sample",
+      "runnable_status": "runnable_intentional_reference",
+      "default_inclusion_status": "not_default_diagnostic",
+      "fixture_or_dataset_revision_status": "pinned_runner_fixture",
+      "harness_status": "native_harness_implemented",
+      "scoring_policy_id": "deterministic_context_key_retrieval_v1",
+      "sample_policy": "Six deterministic exact-key retrieval tasks across nominal 4K, 8K, and 16K context buckets; standard runs one task per bucket.",
+      "expected_duration_token_volume_status": "estimated_static_catalog_with_observed_task_tokens",
+      "sandbox_requirement": "none_native_generation_only",
+      "claim_boundary": "Exact retrieval at the recorded prompt lengths only; not broad long-context reasoning, advertised maximum context, or production reliability.",
+      "promotion_blockers": [
+        "Audit cross-model and cross-runtime score distributions and actual prompt-token counts.",
+        "Measure repeatability and failure behavior at every context bucket.",
+        "Do not fold retrieval accuracy into Capability protocol v3.1."
+      ]
+    },
+    {
       "check_id": "evalplus_humaneval",
       "surface_id": "local_coding_capability",
       "evidence_lane_id": "reference",
@@ -738,26 +778,6 @@
       ]
     },
     {
-      "check_id": "gpqa_reference_v1",
-      "surface_id": "local_reasoning_capability",
-      "evidence_lane_id": "reference",
-      "maturity": "planned",
-      "runnable_status": "not_runnable_access_gated",
-      "default_inclusion_status": "not_default",
-      "fixture_or_dataset_revision_status": "access_gated_dataset_policy_needed",
-      "harness_status": "not_implemented",
-      "scoring_policy_id": "multiple_choice_accuracy_v1",
-      "sample_policy": "Synthetic shape-only fixtures until local accepted dataset snapshots and leakage controls are implemented.",
-      "expected_duration_token_volume_status": "unknown",
-      "sandbox_requirement": "local_dataset_access_and_redaction_controls_required",
-      "claim_boundary": "Future hard reasoning reference candidate; not runnable and not gold evidence.",
-      "promotion_blockers": [
-        "No committed restricted data.",
-        "Define access-gated local dataset flow and leakage-safe artifacts.",
-        "Pin dataset revision after access controls exist."
-      ]
-    },
-    {
       "check_id": "livecodebench_reference_v1",
       "surface_id": "local_coding_capability",
       "evidence_lane_id": "reference",
@@ -832,6 +852,12 @@
       "score_policy_id": "reasoning_exact_answer_v1",
       "display_name": "Reasoning exact answer",
       "description": "Score compact local reasoning prompts with deterministic exact-answer matching.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "deterministic_context_key_retrieval_v1",
+      "display_name": "Deterministic context key retrieval",
+      "description": "Score only exact retrieval of the pinned key at the recorded nominal context bucket and observed prompt length.",
       "score_method": "primary_metric_value_v1"
     },
     {
@@ -937,6 +963,12 @@
       "display_name": "Local reasoning capability",
       "description": "Exact-answer, multiple-choice, or structured reasoning checks that can run locally under pinned fixture rules.",
       "claim_boundary": "Useful as a narrow reasoning signal. Not an expert reasoning or restricted-dataset claim without reference or gold controls."
+    },
+    {
+      "surface_id": "local_context_capability",
+      "display_name": "Local context capability",
+      "description": "Deterministic retrieval evidence at recorded prompt lengths and runtime context settings.",
+      "claim_boundary": "Useful for checking whether a local setup retrieves a pinned key at a measured prompt length. Not broad long-context reasoning or maximum-context proof."
     },
     {
       "surface_id": "quant_fidelity",
@@ -1079,6 +1111,38 @@
       "token_volume_band": "medium",
       "resumability_boundary": "benchmark",
       "execution_pattern": "throughput_oriented_offline_suite"
+    },
+    {
+      "group_id": "expert_reasoning_reference",
+      "display_name": "Expert reasoning reference",
+      "description": "Run GPQA Diamond as a diagnostic expert multiple-choice reference.",
+      "evidence_kind": "capability",
+      "surface_id": "local_reasoning_capability",
+      "default_check_ids": [
+        "gpqa_diamond_reference_v1"
+      ],
+      "effort_hint": "deep",
+      "suite_scope": "reference",
+      "expected_duration_band": "25-60 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "throughput_oriented_offline_suite"
+    },
+    {
+      "group_id": "context_retrieval",
+      "display_name": "Context retrieval",
+      "description": "Measure deterministic key retrieval at nominal 4K, 8K, and 16K prompt buckets.",
+      "evidence_kind": "capability",
+      "surface_id": "local_context_capability",
+      "default_check_ids": [
+        "context_retrieval_reference_v1"
+      ],
+      "effort_hint": "balanced",
+      "suite_scope": "reference",
+      "expected_duration_band": "5-15 min",
+      "token_volume_band": "large",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "native_context_retrieval"
     },
     {
       "group_id": "reasoning_exact_answer",
@@ -1361,6 +1425,82 @@
       "source": "https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro",
       "source_code": "https://github.com/TIGER-AI-Lab/MMLU-Pro",
       "dataset_revision": "54611cde22c74cca43dd78732198de6abe971398"
+    },
+    {
+      "check_id": "gpqa_diamond_reference_v1",
+      "display_name": "GPQA Diamond reference",
+      "description": "Official expert-level multiple-choice reference split with strict answer-letter scoring.",
+      "evidence_kind": "capability",
+      "group_id": "expert_reasoning_reference",
+      "surface_id": "local_reasoning_capability",
+      "runner_target": "gpqa_diamond_reference_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "reference",
+      "evidence_lane_id": "reference",
+      "effort_level": "deep",
+      "expected_duration_band": "25-60 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "throughput_oriented_offline_suite",
+      "selection_guidance": "Adds a harder diagnostic expert-reasoning reference without changing the Capability protocol v3.1 score.",
+      "score_dimension": "expert_reasoning_reference",
+      "primary_score_metric": "accuracy",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "score_role": "diagnostic_only",
+      "discrimination_status": "pending_distribution_audit",
+      "higher_is_better": true,
+      "score_policy_id": "exact_multiple_choice_letter_accuracy_v4",
+      "score_breakdown_fields": [
+        "correct_count",
+        "total_count",
+        "invalid_count",
+        "malformed_output_count",
+        "category_metrics"
+      ],
+      "source": "https://github.com/idavidrein/gpqa",
+      "dataset_revision": "56686c06f5e19865c153de0fdb11be3890014df7",
+      "dataset_sha256": "461ae7329f15a3e35f8184d2dac24b990f34fdf12f366ca4062d8e6638cd08dc",
+      "dataset_license": "CC-BY-4.0"
+    },
+    {
+      "check_id": "context_retrieval_reference_v1",
+      "display_name": "Context retrieval reference",
+      "description": "Deterministic exact-key retrieval at nominal 4K, 8K, and 16K prompt buckets.",
+      "evidence_kind": "capability",
+      "group_id": "context_retrieval",
+      "surface_id": "local_context_capability",
+      "runner_target": "context_retrieval_reference_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "reference",
+      "evidence_lane_id": "reference",
+      "effort_level": "balanced",
+      "expected_duration_band": "5-15 min",
+      "token_volume_band": "large",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "native_context_retrieval",
+      "selection_guidance": "Measures retrieval at three local context buckets without claiming broad long-context reasoning or maximum-context support.",
+      "score_dimension": "context_retrieval",
+      "primary_score_metric": "retrieval_accuracy",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "score_role": "diagnostic_only",
+      "discrimination_status": "pending_distribution_audit",
+      "higher_is_better": true,
+      "score_policy_id": "deterministic_context_key_retrieval_v1",
+      "score_breakdown_fields": [
+        "correct_count",
+        "total_count",
+        "case_accuracy",
+        "context_bucket_metrics"
+      ],
+      "fixture_revision": "2026-07-context-retrieval-v1"
     },
     {
       "check_id": "reasoning_exact_answer_v1",
@@ -1729,30 +1869,6 @@
       "local_feasibility": "good",
       "why_not_default": "Needs deterministic fixture repositories and rollback-safe execution before default inclusion.",
       "status": "planned"
-    },
-    {
-      "check_id": "gpqa_reference_v1",
-      "display_name": "GPQA reference",
-      "value": "Adds hard expert-level reasoning coverage that helps distinguish models with similar instruction-following scores.",
-      "cost": "medium-to-large token volume; likely reference-only for local users",
-      "implementation_risk": "medium",
-      "suite_placement": "chat_instruction_following/reference",
-      "primary_use_case": "general_assistant",
-      "benchmark_tier": "reference",
-      "evidence_lane_id": "reference",
-      "score_dimension": "expert_reasoning",
-      "planned_score_policy_id": "multiple_choice_accuracy_v1",
-      "local_feasibility": "reference_only",
-      "why_not_default": "Access is gated and the benchmark is intentionally difficult and reference-only; it should not run without explicit user consent and leakage-safe handling.",
-      "status": "planned_access_gated",
-      "source": "https://huggingface.co/datasets/Idavidrein/gpqa",
-      "source_code": "https://github.com/idavidrein/gpqa",
-      "license": "cc-by-4.0",
-      "access_status": "gated_contact_share_required",
-      "access_requirements": "Users must accept the Hugging Face dataset conditions before files can be accessed.",
-      "dataset_handling_policy": "Do not commit, log, screenshot, or publish GPQA examples in plain text; fixtures must use synthetic non-GPQA examples until access and leakage controls are implemented.",
-      "fixture_policy": "Synthetic shape-only fixtures only until the harness can load an accepted local dataset snapshot without exposing real examples.",
-      "harness_prerequisite": "Add a local dataset path/token flow, pinned revision metadata, and redaction-safe artifacts before making this runnable."
     },
     {
       "check_id": "livecodebench_reference_v1",
