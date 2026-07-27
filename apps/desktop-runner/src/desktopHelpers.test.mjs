@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   assignmentClockTransition,
+  assignmentEventRecovery,
   assignmentFailureRecovery,
   assignmentTitleFromRunId,
   desktopReadinessPresentation,
@@ -35,6 +36,30 @@ test("turns runtime failures into actionable assignment recovery", () => {
   const download = assignmentFailureRecovery("curl failed while downloading model: HTTP 404");
   assert.equal(download.kind, "retry_artifact_download");
   assert.match(download.description, /reconnect Hugging Face/i);
+});
+
+test("uses structured runtime requirements without depending on log-text parsing", () => {
+  const recovery = assignmentEventRecovery({
+    recovery_kind: "specialized_runtime_required",
+    description: "This exact model needs a reviewed specialized runtime.",
+    required_runtime: {
+      target_name: "infergrade/prism/runtime.tar.gz",
+      runtime_build_id: "A".repeat(64),
+    },
+  });
+  assert.equal(recovery.kind, "install_reviewed_runtime");
+  assert.equal(recovery.requiredRuntime.targetName, "infergrade/prism/runtime.tar.gz");
+  assert.equal(recovery.requiredRuntime.runtimeBuildId, "a".repeat(64));
+
+  const unsafe = assignmentEventRecovery({
+    recovery_kind: "specialized_runtime_required",
+    required_runtime: {
+      target_name: "../runtime.tar.gz",
+      runtime_build_id: "a".repeat(64),
+    },
+  });
+  assert.equal(unsafe.kind, "unknown");
+  assert.equal(unsafe.requiredRuntime, null);
 });
 
 test("turns internal assignment ids into compact model-aware titles", () => {

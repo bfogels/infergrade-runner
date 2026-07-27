@@ -725,6 +725,13 @@ class WorkerTests(unittest.TestCase):
 
         self.assertEqual(recoverable["error_code"], "specialized_runtime_required")
         self.assertIn("Install", recoverable["message"])
+        self.assertEqual(
+            recoverable["details"]["required_runtime"],
+            {
+                "target_name": "infergrade/prism/runtime.tar.gz",
+                "runtime_build_id": "a" * 64,
+            },
+        )
         self.assertEqual(unsupported["error_code"], "specialized_artifact_unsupported")
         self.assertIn("reviewed alternative", unsupported["message"])
 
