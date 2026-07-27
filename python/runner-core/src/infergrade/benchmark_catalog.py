@@ -19,6 +19,10 @@ SUPPORTED_COVERAGE_GENERATION_PRESETS = {
     DEFAULT_GENERATION_PRESET,
     DIRECT_ANSWER_GENERATION_PRESET,
 }
+DIRECT_ANSWER_PROTOCOL_CHECK_IDS = {
+    "mmlu_pro_reference_v1",
+    "gpqa_diamond_reference_v1",
+}
 
 
 def repo_root() -> Path:
@@ -369,6 +373,8 @@ def normalize_request_selection(request: RunRequest, catalog: Optional[Dict[str,
     request.capability_suite_ids = suite_ids
     request.benchmark_group_ids = group_ids
     request.benchmark_check_ids = check_ids
+    if DIRECT_ANSWER_PROTOCOL_CHECK_IDS.intersection(check_ids):
+        request.generation_preset = DIRECT_ANSWER_GENERATION_PRESET
 
     if check_ids and not request.tier_was_explicit:
         request.tier = derive_tier_from_selection(check_ids, group_ids=group_ids, suite_ids=suite_ids, catalog=payload)

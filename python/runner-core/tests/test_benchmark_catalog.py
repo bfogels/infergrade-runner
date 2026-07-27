@@ -348,6 +348,19 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("multiturn_chat_memory_v1", request.benchmark_check_ids)
         self.assertIn("interactive_chat_v1", request.deployment_profiles)
 
+    def test_multiple_choice_reference_selection_owns_direct_answer_protocol(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-4B",
+            backend="llama.cpp",
+            tier="canary",
+            benchmark_check_ids=["gpqa_diamond_reference_v1"],
+            generation_preset="deterministic_v1",
+        )
+
+        normalize_request_selection(request)
+
+        self.assertEqual(request.generation_preset, "deterministic_direct_answer_v1")
+
     def test_native_multiturn_check_can_be_selected_explicitly(self):
         request = RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",
