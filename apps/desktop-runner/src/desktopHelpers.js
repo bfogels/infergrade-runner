@@ -208,6 +208,35 @@ export function assignmentFailureRecovery(message = "") {
   };
 }
 
+export function assignmentEventRecovery(payload = {}) {
+  const description = String(payload.description || "").trim();
+  if (payload.recovery_kind !== "specialized_runtime_required") {
+    return assignmentFailureRecovery(description);
+  }
+  const required = payload.required_runtime || {};
+  const targetName = String(required.target_name || "").trim();
+  const runtimeBuildId = String(required.runtime_build_id || "").trim().toLowerCase();
+  const safeTarget =
+    /^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$/.test(targetName) &&
+    !targetName.startsWith("/") &&
+    !targetName.includes("..") &&
+    !targetName.includes("\\");
+  if (!safeTarget || !/^[0-9a-f]{64}$/.test(runtimeBuildId)) {
+    return {
+      kind: "unknown",
+      description: description || "Runner needs attention before this assignment can continue.",
+      checkName: "See logs for recovery detail",
+      requiredRuntime: null,
+    };
+  }
+  return {
+    kind: "install_reviewed_runtime",
+    description: `This model needs a reviewed specialized runtime (${runtimeBuildId.slice(0, 12)}…). Install it here, then retry the benchmark from Hub.`,
+    checkName: "Specialized runtime required",
+    requiredRuntime: { targetName, runtimeBuildId },
+  };
+}
+
 export function hubAuthenticationFailure(message = "") {
   const text = String(message || "");
   if (/runner_token_expired|runner token (?:has )?expired/i.test(text)) {
