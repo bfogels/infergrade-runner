@@ -328,6 +328,8 @@ def execute_run_job(
             description=failure["message"],
             progress=100,
             check_name=failure["error_code"],
+            recovery_kind=failure["error_code"],
+            required_runtime=(failure.get("details") or {}).get("required_runtime"),
         )
         if emit_progress:
             emit_progress("Run %s failed: %s" % (run_id, exc))
@@ -578,13 +580,28 @@ def _doctor_failure_message(report: Dict[str, Any]) -> str:
     return "Preflight failed: %s." % "; ".join(labels)
 
 
+def _specialized_runtime_requirement(message: str) -> Optional[Dict[str, str]]:
+    match = re.search(
+        r"requires exact runtime target '([^']+)' \(runtime build ([0-9a-f]{64})\)",
+        str(message or ""),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return {
+        "target_name": match.group(1),
+        "runtime_build_id": match.group(2).lower(),
+    }
+
+
 def _classify_worker_failure(exc: Exception, doctor_report: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Normalize common first-user-path failures into actionable error codes."""
     if doctor_report and not doctor_report.get("ok"):
         return _classify_doctor_failure(doctor_report)
     message = str(exc)
     lowered = message.lower()
-    if "requires exact runtime target" in lowered:
+    required_runtime = _specialized_runtime_requirement(message)
+    if required_runtime is not None:
         return {
             "error_code": "specialized_runtime_required",
             "message": "This exact model needs a reviewed specialized runtime. Install it from the Runner prompt, then retry the run.",
@@ -592,7 +609,10 @@ def _classify_worker_failure(exc: Exception, doctor_report: Optional[Dict[str, A
                 {"label": "Install the reviewed runtime", "detail": "Use the install action shown by Desktop Runner; the signed catalog pins the exact build."},
                 {"label": "Retry from Hub", "detail": "After installation, retry the failed run from the Runs page."},
             ],
-            "details": {"raw_error": message},
+            "details": {
+                "raw_error": message,
+                "required_runtime": required_runtime,
+            },
         }
     if "no valid exact-artifact compatibility assertion" in lowered:
         return {

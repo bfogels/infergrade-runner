@@ -2,6 +2,7 @@ import "./styles.css";
 import packageInfo from "../package.json";
 import {
   assignmentClockTransition,
+  assignmentEventRecovery,
   assignmentFailureRecovery,
   assignmentTitleFromRunId,
   desktopReadinessPresentation,
@@ -1491,12 +1492,16 @@ function renderAssignmentFromListenerEvent(payload = {}) {
   }
   const phase = payload.phase || "Running";
   const runId = payload.run_id || payload.runId || "";
+  const recovery = phase === "Needs attention" ? assignmentEventRecovery(payload) : null;
+  if (recovery) {
+    pendingRequiredRuntime = recovery.requiredRuntime;
+  }
   renderAssignmentActive({
     title: redactSecrets(payload.title || assignmentTitleFromRunId(runId)),
     phase,
-    description: redactSecrets(payload.description || "Runner is processing Hub-assigned work."),
+    description: redactSecrets(recovery?.description || payload.description || "Runner is processing Hub-assigned work."),
     progress: Number.isFinite(payload.progress) ? payload.progress : phase === "Complete" ? 100 : 32,
-    checkName: redactSecrets(payload.check_name || payload.checkName || payload.stage || ""),
+    checkName: redactSecrets(recovery?.checkName || payload.check_name || payload.checkName || payload.stage || ""),
     remaining: redactSecrets(payload.remaining || ""),
     runId,
   });
