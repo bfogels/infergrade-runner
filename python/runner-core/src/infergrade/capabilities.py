@@ -2301,7 +2301,10 @@ def _supports_direct_answer_recovery(request: RunRequest) -> bool:
     from infergrade.gguf import infer_llama_cpp_architecture
 
     architecture = str(infer_llama_cpp_architecture(request) or "")
-    return architecture.startswith(("qwen35", "qwen36")) or architecture == "gemma4"
+    return (
+        architecture.startswith(("qwen35", "qwen36"))
+        or architecture in {"gemma4", "mistral3"}
+    )
 
 
 def _generate_predictions(
