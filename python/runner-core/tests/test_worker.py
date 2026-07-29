@@ -8,7 +8,7 @@ from urllib import error as urllib_error
 
 sys.path.insert(0, "python/runner-core/src")
 
-from infergrade.worker import _claim_error_message, _classify_worker_failure, _emit_desktop_event, _progress_detail, _progress_percent, _runtime_progress_update, run_worker_loop, run_worker_once
+from infergrade.worker import _claim_error_message, _classify_worker_failure, _emit_desktop_event, _listener_error_summary, _progress_detail, _progress_percent, _runtime_progress_update, run_worker_loop, run_worker_once
 
 DESKTOP_EVENT_PREFIX = "INFERGRADE_DESKTOP_EVENT "
 
@@ -656,11 +656,12 @@ class WorkerTests(unittest.TestCase):
 
         self.assertEqual(result["processed_jobs"], 1)
         self.assertEqual(result["completed_jobs"], 1)
-        self.assertTrue(any("temporary claim failure" in message for message in messages))
+        self.assertIn("Hub connection interrupted: temporary claim failure. Retrying quietly.", messages)
+        self.assertIn("✓ Hub connection restored.", messages)
         sleep_mock.assert_called_once()
         self.assertTrue(
             any(
-                "Last claim failed: temporary claim failure" == call.kwargs.get("metadata", {}).get("message")
+                "Last claim failed: temporary claim failure." == call.kwargs.get("metadata", {}).get("message")
                 for call in heartbeat_mock.call_args_list
             )
         )
@@ -698,9 +699,46 @@ class WorkerTests(unittest.TestCase):
 
         self.assertEqual(result["processed_jobs"], 1)
         self.assertEqual(result["completed_jobs"], 1)
-        self.assertTrue(any("Claim failed:" in message and "connection refused" in message for message in messages))
-        self.assertTrue(any("Runner heartbeat failed:" in message and "still down" in message for message in messages))
+        self.assertTrue(any("Hub connection interrupted:" in message and "connection refused" in message for message in messages))
+        self.assertIn("✓ Hub connection restored.", messages)
+        self.assertFalse(any("Runner heartbeat failed:" in message for message in messages))
         sleep_mock.assert_called_once()
+
+    def test_worker_loop_summarizes_and_deduplicates_html_outages(self):
+        snapshot = {"environment": {}, "contract": {}, "diagnostics": {}}
+        messages = []
+        html_502 = RuntimeError("<!DOCTYPE html><html><head><title>502</title></head><body>private proxy page</body></html>")
+        attempts = [
+            html_502,
+            RuntimeError(str(html_502)),
+            {"claimed": True, "completed": True, "worker_id": "runner-1"},
+        ]
+
+        with mock.patch("infergrade.worker.collect_runner_diagnostics", return_value=snapshot), mock.patch(
+            "infergrade.worker.register_runner"
+        ), mock.patch("infergrade.worker.heartbeat_runner"), mock.patch(
+            "infergrade.worker.time.sleep"
+        ) as sleep_mock, mock.patch("infergrade.worker.run_worker_once", side_effect=attempts):
+            result = run_worker_loop(
+                api_url="http://localhost:8000",
+                execution_mode="local_native",
+                worker_id="runner-1",
+                max_jobs=1,
+                emit_progress=messages.append,
+            )
+
+        self.assertEqual(result["completed_jobs"], 1)
+        self.assertEqual(messages.count("Hub connection interrupted: Hub returned HTTP 502. Retrying quietly."), 1)
+        self.assertEqual(messages.count("✓ Hub connection restored."), 1)
+        self.assertFalse(any("<!DOCTYPE" in message or "private proxy page" in message for message in messages))
+        self.assertEqual(sleep_mock.call_count, 2)
+
+    def test_listener_error_summary_redacts_and_bounds_unstructured_errors(self):
+        summary = _listener_error_summary(RuntimeError("Bearer qbhr_secret " + ("failure " * 100)))
+
+        self.assertNotIn("qbhr_secret", summary)
+        self.assertIn("Bearer [redacted]", summary)
+        self.assertLessEqual(len(summary), 180)
 
     def test_classify_worker_failure_maps_download_errors_to_actionable_code(self):
         failure = _classify_worker_failure(

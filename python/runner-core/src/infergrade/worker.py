@@ -461,6 +461,7 @@ def run_worker_loop(
     processed = 0
     completed = 0
     failed = 0
+    last_claim_error_summary: Optional[str] = None
     if emit_progress:
         emit_progress("✓ Runner connected · waiting for benchmarks from InferGrade Hub.")
     while True:
@@ -486,8 +487,10 @@ def run_worker_loop(
         except RunnerTokenInvalidError:
             raise
         except Exception as exc:
-            if emit_progress:
-                emit_progress("Claim failed: %s Retrying." % exc)
+            error_summary = _listener_error_summary(exc)
+            if emit_progress and error_summary != last_claim_error_summary:
+                emit_progress("Hub connection interrupted: %s Retrying quietly." % error_summary)
+            last_claim_error_summary = error_summary
             _safe_runner_heartbeat(
                 api_url,
                 runner_id=resolved_worker_id,
@@ -496,14 +499,18 @@ def run_worker_loop(
                 hostname=hostname or socket.gethostname(),
                 provider_id=provider_id,
                 instance_type_id=instance_type_id,
-                metadata={"message": "Last claim failed: %s" % exc},
+                metadata={"message": "Last claim failed: %s" % error_summary},
                 environment=runner_snapshot.get("environment"),
                 contract=runner_snapshot.get("contract"),
                 diagnostics=runner_snapshot.get("diagnostics"),
-                emit_progress=emit_progress,
+                emit_progress=None,
             )
             time.sleep(max(poll_interval_seconds, 0.1))
             continue
+        if last_claim_error_summary is not None:
+            if emit_progress:
+                emit_progress("✓ Hub connection restored.")
+            last_claim_error_summary = None
         if not result.get("claimed"):
             _safe_runner_heartbeat(
                 api_url,
@@ -532,6 +539,25 @@ def run_worker_loop(
         "completed_jobs": completed,
         "failed_jobs": failed,
     }
+
+
+def _listener_error_summary(exc: Exception) -> str:
+    """Turn transport failures into one bounded, human-readable listener status."""
+    raw = str(exc or "").strip()
+    html_status = re.search(r"<title>\s*(\d{3})\s*</title>", raw, flags=re.IGNORECASE)
+    if html_status:
+        return "Hub returned HTTP %s." % html_status.group(1)
+    http_status = re.search(r"\bHTTP(?:\s+Error)?\s*:?\s*(\d{3})\b", raw, flags=re.IGNORECASE)
+    if http_status:
+        return "Hub returned HTTP %s." % http_status.group(1)
+    summary = re.sub(r"\s+", " ", _redact_desktop_event_text(raw)).strip()
+    if not summary:
+        return "Hub is temporarily unavailable."
+    if len(summary) > 180:
+        summary = summary[:177].rstrip() + "..."
+    if summary[-1] not in ".!?":
+        summary += "."
+    return summary
 
 
 def _safe_runner_heartbeat(api_url: str, emit_progress: Optional[Callable[[str], None]] = None, **kwargs: Any) -> bool:
