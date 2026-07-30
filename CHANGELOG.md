@@ -7,6 +7,10 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+- Makes the Runner-owned coding default include every score-weighted coding
+  check, preventing a completed default run from silently covering only part of
+  the local coding score profile.
+
 ## 0.3.47 (contract 0.3.27)
 
 - Routes Ministral 3 deterministic direct-answer benchmarks through native

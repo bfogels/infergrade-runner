@@ -438,6 +438,24 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("mmlu_pro_reference_v1", selection["check_ids"])
         self.assertNotIn("mmlu_pro_reference_v1", shortcut_selection("quick_default")["check_ids"])
 
+    def test_coding_default_shortcut_covers_every_weighted_coding_check(self):
+        catalog = load_capability_catalog()
+        weighted_coding_check_ids = {
+            str(item["check_id"])
+            for item in catalog["checks"]
+            if item.get("surface_id") == "local_coding_capability"
+            and float(item.get("primary_score_weight") or 0) > 0
+        }
+
+        selection = shortcut_selection("coding_default")
+
+        self.assertEqual(
+            weighted_coding_check_ids,
+            {"coding_static_repair_v1", "evalplus_humaneval", "evalplus_mbpp"},
+        )
+        self.assertTrue(weighted_coding_check_ids.issubset(set(selection["check_ids"])))
+        self.assertIn("interactive_chat_v1", selection["check_ids"])
+
     def test_normalize_request_selection_uses_shortcut_before_legacy_lane(self):
         request = RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",

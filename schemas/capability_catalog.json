@@ -1765,20 +1765,24 @@
     {
       "shortcut_id": "coding_default",
       "display_name": "Coding default",
-      "description": "Coding-focused evidence with HumanEval+ and the most useful deployment checks.",
+      "description": "Coding-focused evidence with every score-weighted coding check and the most useful deployment checks.",
       "suite_scope": "decision",
-      "effort_level": "balanced",
-      "expected_duration_band": "10-25 min",
+      "effort_level": "deep",
+      "expected_duration_band": "25-60 min",
       "suite_ids": [
         "coding_code_editing"
       ],
       "group_ids": [
+        "coding_static_repair",
         "coding_core",
+        "coding_breadth",
         "deployment_chat",
         "deployment_long_context"
       ],
       "check_ids": [
+        "coding_static_repair_v1",
         "evalplus_humaneval",
+        "evalplus_mbpp",
         "interactive_chat_v1",
         "long_context_v1"
       ]
