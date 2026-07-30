@@ -343,6 +343,24 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(remove_capability_case_checkpoints(self.tempdir), 1)
         self.assertFalse(os.path.exists(checkpoint_path))
 
+    def test_failed_capability_checkpoint_is_retained_for_resume(self):
+        benchmark_dir = os.path.join(
+            self.tempdir,
+            "artifacts",
+            "capability",
+            "ifeval",
+        )
+        os.makedirs(benchmark_dir)
+        checkpoint_path = os.path.join(benchmark_dir, "case-checkpoint.jsonl")
+        with open(checkpoint_path, "w", encoding="utf-8") as handle:
+            handle.write('{"record_type":"header"}\n')
+            handle.write('{"record_type":"prediction"}\n')
+        with open(os.path.join(benchmark_dir, "summary.json"), "w", encoding="utf-8") as handle:
+            json.dump({"benchmark_id": "ifeval", "status": "failed"}, handle)
+
+        self.assertEqual(remove_capability_case_checkpoints(self.tempdir), 0)
+        self.assertTrue(os.path.exists(checkpoint_path))
+
     def test_resume_rejects_mismatched_capability_checkpoint(self):
         request = RunRequest(
             model="Qwen/Qwen3-8B",
