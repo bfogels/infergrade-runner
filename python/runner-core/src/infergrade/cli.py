@@ -374,6 +374,19 @@ def _request_from_args(args: argparse.Namespace):
     return request_from_cli(args)
 
 
+def _reject_unavailable_standalone_upload(request) -> None:
+    """Fail before compute when a standalone command promises an upload it cannot perform."""
+    if not request.upload:
+        return
+    raise SystemExit(
+        "Standalone `infergrade run --upload` cannot perform a run-scoped Hub upload, "
+        "so no benchmark was started. For normal publication, queue the setup from Hub Build "
+        "and keep `infergrade start` listening. To keep a local staged bundle, remove `--upload` "
+        "(or set `run.upload` to false). Authorized catalog operators can validate the bundle "
+        "and use `infergrade upload-bundle` separately."
+    )
+
+
 def _request_for_doctor(args: argparse.Namespace):
     """Resolve the optional request context used by the doctor command."""
     if args.run_config_id:
@@ -884,6 +897,7 @@ def main(argv: Optional[list] = None) -> int:
         if args.output:
             request.output_dir = args.output
         request.resume = bool(args.resume)
+        _reject_unavailable_standalone_upload(request)
         result = run_infergrade(request, emit_progress=lambda message: print(message, file=sys.stderr, flush=True))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
@@ -1022,6 +1036,7 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     request = _request_from_args(args)
+    _reject_unavailable_standalone_upload(request)
     result = run_infergrade(request, emit_progress=lambda message: print(message, file=sys.stderr, flush=True))
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

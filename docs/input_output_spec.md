@@ -251,7 +251,12 @@ Optional boolean.
 
 Meaning:
 
-- request upload after local validation succeeds.
+- request upload after local validation succeeds when execution is owned by a
+  Hub run job.
+- standalone `infergrade run` refuses this option before compute because a
+  paired Runner credential may upload only to a claimed Hub job. Queue normal
+  contributions from Hub Build, or omit this option to keep a staged local
+  bundle for a separately authorized catalog import.
 
 Default:
 
