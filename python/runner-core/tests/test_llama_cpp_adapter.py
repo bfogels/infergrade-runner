@@ -684,6 +684,38 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(transform["id"], "qwen_chat_template_disable_thinking_v2")
         self.assertEqual(transform["placement"], "structured_messages")
 
+    @mock.patch.object(LlamaCppAdapter, "_generate_native_server_text")
+    @mock.patch.object(LlamaCppAdapter, "_require_local_gguf_artifact", return_value="/models/qwen3.gguf")
+    @mock.patch.object(LlamaCppAdapter, "_ensure_backend_model_compatibility")
+    def test_qwen3_local_native_direct_answer_uses_chat_server(
+        self,
+        _compatibility_mock,
+        _artifact_mock,
+        chat_server_mock,
+    ):
+        chat_server_mock.return_value = {"status": "completed", "text": "READY"}
+        request = RunRequest(
+            model="Qwen/Qwen3-4B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+            ontology_hints={"architecture": "qwen3"},
+        )
+
+        generated = LlamaCppAdapter().generate_text(request, "Reply READY.", 32)
+
+        self.assertEqual(generated["text"], "READY")
+        self.assertTrue(_uses_native_direct_answer_server(request))
+        chat_server_mock.assert_called_once_with(
+            request=request,
+            model_path="/models/qwen3.gguf",
+            prompt="Reply READY.",
+            max_tokens=32,
+        )
+
     def test_qwen3_mmlu_chat_records_choice_grammar_constraint(self):
         request = RunRequest(
             model="Qwen/Qwen3-4B",
@@ -1022,8 +1054,8 @@ class LlamaCppAdapterTests(unittest.TestCase):
             max_tokens=96,
         )
 
-    @mock.patch.object(LlamaCppAdapter, "_generate_native_completion_server_text")
-    def test_capability_suite_routes_raw_prompt_generation_through_reused_server(self, server_generate_mock):
+    @mock.patch.object(LlamaCppAdapter, "_generate_native_server_text")
+    def test_qwen3_capability_suite_routes_direct_answer_through_chat_server(self, server_generate_mock):
         server_generate_mock.return_value = {"text": "A", "status": "completed"}
         request = RunRequest(
             model="Qwen/Qwen3-8B",
@@ -1043,13 +1075,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
         server_generate_mock.assert_called_once_with(
             request=request,
             model_path=self.model_path,
-            prompt="Answer only A.\n/no_think",
-            prompt_transform={
-                "id": "qwen_no_think_directive_v1",
-                "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
-                "state": "appended",
-                "placement": "append",
-            },
+            prompt="Answer only A.",
             max_tokens=32,
         )
 

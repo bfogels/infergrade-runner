@@ -7,6 +7,9 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+- Routes Qwen3 deterministic direct-answer benchmarks through the native
+  llama.cpp chat template, preventing raw-completion control tokens from
+  corrupting capability answers.
 - Makes the Runner-owned coding default include every score-weighted coding
   check, preventing a completed default run from silently covering only part of
   the local coding score profile.

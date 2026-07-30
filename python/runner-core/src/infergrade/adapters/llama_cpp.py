@@ -2357,7 +2357,7 @@ def _uses_native_direct_answer_server(request: RunRequest) -> bool:
         request.execution_mode == "local_native"
         and request.generation_preset == DIRECT_ANSWER_GENERATION_PRESET
         and (
-            architecture.startswith("qwen35")
+            architecture.startswith("qwen3")
             or _is_qwen36_request(request)
             or architecture in {"gemma4", "mistral3"}
         )
