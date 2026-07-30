@@ -1374,6 +1374,11 @@ def _write_native_capability_run_artifact(
         generation_status = str(prediction.get("generation_status") or "")
         task_error_class = _native_task_error_class(generation_status, case_score)
         task_state = "failed" if task_error_class else ("scored" if case_score.get("score") is not None else "failed")
+        scored_output_diagnostic = (
+            str(case_score.get("error_class") or "")
+            if task_state == "scored" and case_score.get("error_class")
+            else None
+        )
         tasks.append(
             {
                 "task_id": str(case.get("task_id") or case_id),
@@ -1384,7 +1389,7 @@ def _write_native_capability_run_artifact(
                 "scorer_type": _native_scorer_type(spec) if task_state == "scored" else None,
                 "scoring_policy": summary.get("scoring_policy") if task_state == "scored" else None,
                 "output_artifact": "predictions.jsonl#%s" % case_id,
-                "error_class": None if task_state == "scored" else (task_error_class or "scoring_failed"),
+                "error_class": scored_output_diagnostic if task_state == "scored" else (task_error_class or "scoring_failed"),
                 **_task_performance_fields(prediction),
                 **(
                     {
@@ -2945,11 +2950,11 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                 case_results.append(
                     {
                         "case_id": case_id,
-                        "state": "failed",
+                        "state": "scored",
                         "error_class": "malformed_output",
                         "passed_constraints": 0,
                         "total_constraints": len(checks),
-                        "score": None,
+                        "score": 0.0,
                     }
                 )
                 continue
@@ -2984,7 +2989,15 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
     score = round(passed_constraints / float(total_constraints), 6) if total_constraints else None
     malformed_output_count = len([item for item in case_results if item.get("error_class") == "malformed_output"])
     correct_count = len([item for item in case_results if item.get("score") == 1.0])
-    status = "partial" if malformed_output_count and spec.benchmark_id != "assistant_compositional_instruction_v2" else "completed"
+    # A completed response that violates a deterministic output contract is a
+    # model-output miss, not absent evidence. Its constraints are already in the
+    # denominator and score zero above. Transport/generation failures remain
+    # unscored and can still make the enclosing execution partial.
+    scored_malformed_output = spec.benchmark_id in {
+        "assistant_compositional_instruction_v2",
+        "coding_static_repair_v1",
+    }
+    status = "partial" if malformed_output_count and not scored_malformed_output else "completed"
     metrics = {
         spec.primary_metric_name: score,
         "passed_constraints": passed_constraints,
