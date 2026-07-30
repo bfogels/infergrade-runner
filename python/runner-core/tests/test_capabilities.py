@@ -1004,15 +1004,21 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["generation_failure_severity"], "partial")
         self.assertEqual(result["metrics"]["malformed_output_count"], 1)
+        self.assertEqual(result["primary_metric"]["value"], 0.333333)
         capability_run_path = execution.artifacts["coding_static_repair_v1"]["capability_run_path"]
         with open(capability_run_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)
         self.assertEqual(artifact["summary"]["state"], "partial")
         self.assertEqual(
             {task["error_class"] for task in artifact["tasks"] if task["state"] == "failed"},
-            {"malformed_output", "generation_failed"},
+            {"generation_failed"},
         )
         self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored", "failed"})
+        malformed_task = next(
+            task for task in artifact["tasks"] if task.get("error_class") == "malformed_output"
+        )
+        self.assertEqual(malformed_task["state"], "scored")
+        self.assertEqual(malformed_task["score"], 0.0)
         self.assertIn("partial generation or malformed-output failures", artifact["claim_boundary"]["supported_claims"][0])
         self.assertNotIn("completed the pinned coding", " ".join(artifact["claim_boundary"]["supported_claims"]))
 
@@ -1043,11 +1049,24 @@ class CapabilityTests(unittest.TestCase):
 
         execution = execute_capability_suite(_ProseOnlyCodingAdapter(), request)
 
-        self.assertEqual(execution.status, "partial")
-        case_results = execution.benchmark_results["coding_static_repair_v1"]["case_results"]
+        self.assertEqual(execution.status, "completed")
+        result = execution.benchmark_results["coding_static_repair_v1"]
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(execution.component_scores["coding_static_repair_v1"], 0.666667)
+        self.assertEqual(result["metrics"]["malformed_output_count"], 1)
+        case_results = result["case_results"]
         clamp_result = next(item for item in case_results if item["case_id"] == "coding-static-clamp-score")
-        self.assertEqual(clamp_result["state"], "failed")
+        self.assertEqual(clamp_result["state"], "scored")
         self.assertEqual(clamp_result["error_class"], "malformed_output")
+        self.assertEqual(clamp_result["score"], 0.0)
+        capability_run_path = execution.artifacts["coding_static_repair_v1"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        malformed_task = next(
+            task for task in artifact["tasks"] if task.get("error_class") == "malformed_output"
+        )
+        self.assertEqual(malformed_task["state"], "scored")
+        self.assertEqual(malformed_task["score"], 0.0)
 
     def test_native_coding_static_rejects_unclosed_python_fence(self):
         class _UnclosedFenceCodingAdapter(object):
@@ -1079,11 +1098,12 @@ class CapabilityTests(unittest.TestCase):
 
         execution = execute_capability_suite(_UnclosedFenceCodingAdapter(), request)
 
-        self.assertEqual(execution.status, "partial")
+        self.assertEqual(execution.status, "completed")
         case_results = execution.benchmark_results["coding_static_repair_v1"]["case_results"]
         clamp_result = next(item for item in case_results if item["case_id"] == "coding-static-clamp-score")
-        self.assertEqual(clamp_result["state"], "failed")
+        self.assertEqual(clamp_result["state"], "scored")
         self.assertEqual(clamp_result["error_class"], "malformed_output")
+        self.assertEqual(clamp_result["score"], 0.0)
 
     def test_native_coding_static_rejects_multiple_python_fences(self):
         class _MultipleFenceCodingAdapter(object):
@@ -1119,11 +1139,12 @@ class CapabilityTests(unittest.TestCase):
 
         execution = execute_capability_suite(_MultipleFenceCodingAdapter(), request)
 
-        self.assertEqual(execution.status, "partial")
+        self.assertEqual(execution.status, "completed")
         case_results = execution.benchmark_results["coding_static_repair_v1"]["case_results"]
         clamp_result = next(item for item in case_results if item["case_id"] == "coding-static-clamp-score")
-        self.assertEqual(clamp_result["state"], "failed")
+        self.assertEqual(clamp_result["state"], "scored")
         self.assertEqual(clamp_result["error_class"], "malformed_output")
+        self.assertEqual(clamp_result["score"], 0.0)
 
     def test_execute_native_reasoning_exact_answer_scores_without_docker(self):
         request = RunRequest(
