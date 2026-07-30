@@ -28,6 +28,7 @@ from infergrade.transport import (
 
 DESKTOP_EVENT_ENV = "INFERGRADE_DESKTOP_EVENTS"
 DESKTOP_EVENT_PREFIX = "INFERGRADE_DESKTOP_EVENT "
+_PROGRESS_HEARTBEAT_INTERVAL_SECONDS = 10.0
 _DESKTOP_EVENT_SENSITIVE_KEY_MARKERS = (
     "access_token",
     "api_token",
@@ -128,6 +129,9 @@ def execute_run_job(
         )
 
     doctor_report = None
+    progress_reporting_warning_emitted = False
+    last_hub_progress_at = 0.0
+    last_hub_progress_key = None
     try:
         _emit_desktop_event(
             emit_progress,
@@ -199,30 +203,73 @@ def execute_run_job(
         )
 
         def _emit(message: str) -> None:
+            nonlocal last_hub_progress_at, last_hub_progress_key, progress_reporting_warning_emitted
+            reporting_failed = False
+
             if emit_progress:
-                emit_progress(message)
-            _runner_heartbeat("busy", current_run_id=run_id, message=message)
-            stage, detail, desktop_detail, progress_percent = _runtime_progress_update(request.output_dir)
-            _emit_desktop_event(
-                emit_progress,
-                "assignment_update",
-                phase="Running",
-                run_id=run_id,
-                description="Runner is executing Hub-assigned work.",
-                progress=progress_percent,
-                check_name=desktop_detail or detail or stage or message,
+                try:
+                    emit_progress(message)
+                except Exception:
+                    reporting_failed = True
+            try:
+                stage, detail, desktop_detail, progress_percent = _runtime_progress_update(request.output_dir)
+            except Exception:
+                reporting_failed = True
+                stage, detail, desktop_detail, progress_percent = None, None, None, None
+            try:
+                _emit_desktop_event(
+                    emit_progress,
+                    "assignment_update",
+                    phase="Running",
+                    run_id=run_id,
+                    description="Runner is executing Hub-assigned work.",
+                    progress=progress_percent,
+                    check_name=desktop_detail or detail or stage or message,
+                )
+            except Exception:
+                reporting_failed = True
+
+            now = time.monotonic()
+            progress_key = (stage, detail)
+            lifecycle_message = any(
+                token in str(message or "").lower()
+                for token in (" started", " completed", " failed", "writing bundle")
             )
-            heartbeat_run_job(
-                api_url,
-                run_id,
-                worker_id,
-                stage=stage,
-                detail=detail,
-                message=message,
-                progress_percent=progress_percent,
-                api_token=api_token,
-                run_token=run_token,
+            should_report_to_hub = (
+                progress_key != last_hub_progress_key
+                or now - last_hub_progress_at >= _PROGRESS_HEARTBEAT_INTERVAL_SECONDS
+                or lifecycle_message
             )
+            if should_report_to_hub:
+                try:
+                    _runner_heartbeat("busy", current_run_id=run_id, message=message)
+                except Exception:
+                    reporting_failed = True
+                try:
+                    heartbeat_run_job(
+                        api_url,
+                        run_id,
+                        worker_id,
+                        stage=stage,
+                        detail=detail,
+                        message=message,
+                        progress_percent=progress_percent,
+                        api_token=api_token,
+                        run_token=run_token,
+                    )
+                except Exception:
+                    reporting_failed = True
+                last_hub_progress_at = now
+                last_hub_progress_key = progress_key
+
+            # Hub heartbeats and Desktop event delivery are observability side
+            # channels. A transient failure must never invalidate benchmark work.
+            if reporting_failed and emit_progress and not progress_reporting_warning_emitted:
+                progress_reporting_warning_emitted = True
+                try:
+                    emit_progress("Progress reporting is temporarily unavailable; benchmark execution continues.")
+                except Exception:
+                    pass
 
         result = run_infergrade(request, emit_progress=_emit)
         _emit_desktop_event(
@@ -854,22 +901,19 @@ def _progress_percent(payload: Dict[str, Any]) -> Optional[float]:
         capability_benchmarks = payload.get("capability_benchmarks") or {}
         if not capability_benchmarks:
             return 52.0
-        total_benchmarks = max(len(capability_benchmarks), 1)
         span = 12.0
-        progress = 48.0
-        completed_benchmarks = len(
-            [item for item in capability_benchmarks.values() if item.get("status") == "completed"]
-        )
-        progress += (span * completed_benchmarks) / float(total_benchmarks)
-        running_benchmarks = [item for item in capability_benchmarks.values() if item.get("status") == "running"]
-        if running_benchmarks:
-            running = running_benchmarks[0]
-            total_cases = running.get("total_cases") or 0
-            completed_cases = running.get("completed_cases") or 0
-            if total_cases:
-                progress += (span / float(total_benchmarks)) * min(completed_cases / float(total_cases), 0.98)
-            else:
-                progress += min(span / float(total_benchmarks) * 0.15, 2.0)
+        terminal_statuses = {"completed", "partial", "degraded", "failed", "not_comparable", "skipped"}
+        total_work = 0.0
+        completed_work = 0.0
+        for benchmark in capability_benchmarks.values():
+            benchmark_work = float(benchmark.get("total_cases") or 1)
+            total_work += benchmark_work
+            if benchmark.get("status") in terminal_statuses:
+                completed_work += benchmark_work
+            elif benchmark.get("status") == "running":
+                completed_cases = float(benchmark.get("completed_cases") or 0)
+                completed_work += min(max(completed_cases, 0.0), benchmark_work)
+        progress = 48.0 + (span * completed_work / max(total_work, 1.0))
         return round(min(progress, 60.0), 1)
     if stage in stage_defaults:
         return stage_defaults[stage]

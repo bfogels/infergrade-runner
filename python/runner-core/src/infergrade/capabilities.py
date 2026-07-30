@@ -2293,13 +2293,23 @@ def _append_case_checkpoint(path: str, prediction: Dict[str, Any]) -> None:
 
 
 def remove_capability_case_checkpoints(output_dir: str) -> int:
-    """Remove temporary per-case duplicates only after the whole bundle completes."""
+    """Remove per-case duplicates only after their benchmark has durable output."""
     capability_root = os.path.join(output_dir, "artifacts", "capability")
     removed = 0
     if not os.path.isdir(capability_root):
         return removed
     for root, _dirs, files in os.walk(capability_root):
         if "case-checkpoint.jsonl" not in files:
+            continue
+        summary_path = os.path.join(root, "summary.json")
+        predictions_path = os.path.join(root, "predictions.jsonl")
+        try:
+            summary = read_json(summary_path)
+        except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+            continue
+        if summary.get("status") == "failed" or not os.path.exists(predictions_path):
+            # Preserve resumable work when a benchmark failed before it could
+            # persist its canonical predictions artifact.
             continue
         try:
             os.remove(os.path.join(root, "case-checkpoint.jsonl"))

@@ -247,6 +247,158 @@ class WorkerTests(unittest.TestCase):
             )
         )
 
+    def test_transient_progress_heartbeat_failure_does_not_abort_benchmark(self):
+        claimed_run = {
+            "run_id": "run_example",
+            "run_config_id": "rcfg_example",
+            "execution_mode": "local_native",
+            "output_dir": "runs/run_example",
+            "cloud": None,
+        }
+        fake_request = mock.Mock(
+            execution_mode="local_native",
+            resume=False,
+            output_dir=None,
+            cloud_provider=None,
+            cloud_instance_type=None,
+        )
+        messages = []
+
+        def heartbeat_side_effect(*_args, **kwargs):
+            if kwargs.get("stage") == "capability":
+                raise ConnectionResetError(54, "Connection reset by peer")
+            return {"run": {"run_id": "run_example"}}
+
+        with tempfile.TemporaryDirectory() as output_root:
+            with mock.patch.dict(
+                "os.environ",
+                {"INFERGRADE_RUNNER_OUTPUT_ROOT": output_root},
+                clear=False,
+            ):
+                with mock.patch("infergrade.worker.claim_run_job", return_value={"run": claimed_run}):
+                    with mock.patch("infergrade.worker.fetch_run_config", return_value={"run_config_id": "rcfg_example"}):
+                        with mock.patch("infergrade.worker.request_from_run_config_document", return_value=fake_request):
+                            with mock.patch("infergrade.worker.run_doctor", return_value={"ok": True, "checks": []}):
+                                with mock.patch(
+                                    "infergrade.worker.load_progress",
+                                    return_value={
+                                        "current_stage": "capability",
+                                        "current_detail": "ifeval",
+                                        "capability_benchmarks": {
+                                            "ifeval": {
+                                                "status": "running",
+                                                "completed_cases": 179,
+                                                "total_cases": 541,
+                                            }
+                                        },
+                                    },
+                                ):
+                                    with mock.patch(
+                                        "infergrade.worker.run_infergrade",
+                                        side_effect=lambda request, emit_progress=None: (
+                                            emit_progress("Capability benchmark IFEval 179/541 cases."),
+                                            {"bundle_id": "qb_bundle", "output_dir": request.output_dir},
+                                        )[1],
+                                    ):
+                                        with mock.patch(
+                                            "infergrade.worker.upload_run_bundle",
+                                            return_value={"stored": True},
+                                        ):
+                                            with mock.patch(
+                                                "infergrade.worker.complete_run_job",
+                                                return_value={"run": {"run_id": "run_example", "status": "completed"}},
+                                            ):
+                                                with mock.patch(
+                                                    "infergrade.worker.heartbeat_run_job",
+                                                    side_effect=heartbeat_side_effect,
+                                                ):
+                                                    result = run_worker_once(
+                                                        api_url="http://localhost:8000",
+                                                        execution_mode="local_native",
+                                                        worker_id="worker-1",
+                                                        emit_progress=messages.append,
+                                                    )
+
+        self.assertTrue(result["completed"])
+        self.assertEqual(
+            messages.count("Progress reporting is temporarily unavailable; benchmark execution continues."),
+            1,
+        )
+
+    def test_repeated_case_progress_throttles_hub_heartbeats(self):
+        claimed_run = {
+            "run_id": "run_example",
+            "run_config_id": "rcfg_example",
+            "execution_mode": "local_native",
+            "output_dir": "runs/run_example",
+            "cloud": None,
+        }
+        fake_request = mock.Mock(
+            execution_mode="local_native",
+            resume=False,
+            output_dir=None,
+            cloud_provider=None,
+            cloud_instance_type=None,
+        )
+
+        def emit_three_cases(request, emit_progress=None):
+            emit_progress("Capability benchmark IFEval 1/541 cases.")
+            emit_progress("Capability benchmark IFEval 2/541 cases.")
+            emit_progress("Capability benchmark IFEval 3/541 cases.")
+            return {"bundle_id": "qb_bundle", "output_dir": request.output_dir}
+
+        with tempfile.TemporaryDirectory() as output_root:
+            with mock.patch.dict(
+                "os.environ",
+                {"INFERGRADE_RUNNER_OUTPUT_ROOT": output_root},
+                clear=False,
+            ):
+                with mock.patch("infergrade.worker.claim_run_job", return_value={"run": claimed_run}):
+                    with mock.patch("infergrade.worker.fetch_run_config", return_value={"run_config_id": "rcfg_example"}):
+                        with mock.patch("infergrade.worker.request_from_run_config_document", return_value=fake_request):
+                            with mock.patch("infergrade.worker.run_doctor", return_value={"ok": True, "checks": []}):
+                                with mock.patch(
+                                    "infergrade.worker.load_progress",
+                                    return_value={
+                                        "current_stage": "capability",
+                                        "current_detail": "ifeval",
+                                        "capability_benchmarks": {
+                                            "ifeval": {
+                                                "status": "running",
+                                                "completed_cases": 3,
+                                                "total_cases": 541,
+                                            }
+                                        },
+                                    },
+                                ):
+                                    with mock.patch("infergrade.worker.run_infergrade", side_effect=emit_three_cases):
+                                        with mock.patch(
+                                            "infergrade.worker.upload_run_bundle",
+                                            return_value={"stored": True},
+                                        ):
+                                            with mock.patch(
+                                                "infergrade.worker.complete_run_job",
+                                                return_value={"run": {"run_id": "run_example", "status": "completed"}},
+                                            ):
+                                                with mock.patch("infergrade.worker.heartbeat_run_job") as heartbeat_mock:
+                                                    with mock.patch(
+                                                        "infergrade.worker.time.monotonic",
+                                                        side_effect=[100.0, 101.0, 102.0],
+                                                    ):
+                                                        result = run_worker_once(
+                                                            api_url="http://localhost:8000",
+                                                            execution_mode="local_native",
+                                                            worker_id="worker-1",
+                                                        )
+
+        capability_heartbeats = [
+            call
+            for call in heartbeat_mock.call_args_list
+            if call.kwargs.get("stage") == "capability"
+        ]
+        self.assertTrue(result["completed"])
+        self.assertEqual(len(capability_heartbeats), 1)
+
     def test_worker_rehomes_absolute_claim_output_dir_by_default(self):
         with tempfile.TemporaryDirectory() as output_root:
             absolute_output_dir = os.path.join(tempfile.gettempdir(), "hub-requested-explicit")
@@ -559,6 +711,57 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(hub_detail, "multi_turn_chat_memory_v1")
         self.assertEqual(desktop_detail, "Multi-turn chat memory 5/5")
         self.assertGreater(progress_percent, 52.0)
+
+    def test_progress_percent_weights_planned_capability_cases_without_regressing(self):
+        capability_benchmarks = {
+            "ifeval": {
+                "status": "running",
+                "display_name": "IFEval",
+                "completed_cases": 141,
+                "total_cases": 541,
+            },
+            "multiturn_chat_memory_v1": {
+                "status": "pending",
+                "display_name": "Multi-turn chat memory",
+                "completed_cases": 0,
+                "total_cases": 5,
+            },
+            "assistant_compositional_instruction_v2": {
+                "status": "pending",
+                "display_name": "Compositional instruction following",
+                "completed_cases": 0,
+                "total_cases": 24,
+            },
+        }
+        during_ifeval = _progress_percent(
+            {
+                "current_stage": "capability",
+                "current_detail": "ifeval",
+                "capability_benchmarks": capability_benchmarks,
+            }
+        )
+        self.assertEqual(during_ifeval, 51.0)
+
+        capability_benchmarks["ifeval"]["status"] = "completed"
+        capability_benchmarks["multiturn_chat_memory_v1"]["status"] = "running"
+        after_transition = _progress_percent(
+            {
+                "current_stage": "capability",
+                "current_detail": "multiturn_chat_memory_v1",
+                "capability_benchmarks": capability_benchmarks,
+            }
+        )
+        self.assertGreaterEqual(after_transition, during_ifeval)
+
+        capability_benchmarks["multiturn_chat_memory_v1"]["completed_cases"] = 3
+        during_memory = _progress_percent(
+            {
+                "current_stage": "capability",
+                "current_detail": "multiturn_chat_memory_v1",
+                "capability_benchmarks": capability_benchmarks,
+            }
+        )
+        self.assertGreater(during_memory, after_transition)
 
     def test_progress_percent_uses_deployment_iteration_progress(self):
         payload = {

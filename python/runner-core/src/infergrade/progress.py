@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from infergrade.request import request_to_dict
 from infergrade.utils import read_json, stable_hash, utcnow_iso, write_json
@@ -16,7 +16,26 @@ def request_fingerprint(request) -> str:
     return stable_hash(payload, length=16)
 
 
-def initialize_progress(bundle_id: str, request, started_at: str) -> Dict[str, Any]:
+def initialize_progress(
+    bundle_id: str,
+    request,
+    started_at: str,
+    planned_capability_benchmarks: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    capability_benchmarks = {
+        str(item["benchmark_id"]): {
+            "status": "pending",
+            "display_name": str(item.get("display_name") or item["benchmark_id"]),
+            "started_at": None,
+            "completed_at": None,
+            "total_cases": item.get("total_cases"),
+            "completed_cases": 0,
+            "current_case": None,
+            "progress_detail": None,
+        }
+        for item in (planned_capability_benchmarks or [])
+        if item.get("benchmark_id")
+    }
     return {
         "spec_version": "0.1-draft",
         "bundle_id": bundle_id,
@@ -44,7 +63,7 @@ def initialize_progress(bundle_id: str, request, started_at: str) -> Dict[str, A
             }
         },
         "deployment_profiles": {},
-        "capability_benchmarks": {},
+        "capability_benchmarks": capability_benchmarks,
         "errors": [],
     }
 
