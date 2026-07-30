@@ -7,6 +7,9 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+- Quarantines large multiple-choice runs when valid answers collapse onto one
+  label despite a diverse reference distribution, preventing protocol failures
+  from becoming misleadingly low reasoning scores.
 - Routes Qwen3 deterministic direct-answer benchmarks through the native
   llama.cpp chat template, preventing raw-completion control tokens from
   corrupting capability answers.
