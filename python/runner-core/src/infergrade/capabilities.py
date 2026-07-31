@@ -31,6 +31,10 @@ REASONING_EXACT_ANSWER_FIXTURE_REVISION = "2026-05-reasoning-exact-preview"
 CONTEXT_RETRIEVAL_FIXTURE_REVISION = "2026-07-context-retrieval-v1"
 _DOMINANT_GENERATION_FAILURE_RATE = 0.5
 _DOMINANT_MALFORMED_OUTPUT_RATE = 0.5
+_DISTRIBUTION_COLLAPSE_MIN_VALID_ANSWERS = 50
+_DISTRIBUTION_COLLAPSE_PREDICTED_LABEL_RATE = 0.75
+_DISTRIBUTION_COLLAPSE_MAX_EXPECTED_LABEL_RATE = 0.3
+_DISTRIBUTION_COLLAPSE_MIN_EXPECTED_LABELS = 4
 _DIRECT_ANSWER_RECOVERY_MAX_TOKENS = 512
 _RUNTIME_CONTROL_TOKEN = re.compile(
     r"(?:<\|(?:channel|turn|think|start|end)[^>]*\|?>|<channel\|>|<\|channel>)",
@@ -514,10 +518,14 @@ def _multiple_choice_output_shape_gate(
     wrong.  When malformed output dominates the sample, however, the result is
     evidence that the model/runtime/prompt protocol did not produce answerable
     rows—not evidence that the model has near-zero reasoning capability.
+
+    A sufficiently large run can also be formally valid while collapsing onto
+    one answer label despite a diverse reference distribution. That is evidence
+    of a broken response protocol, not a trustworthy capability measurement.
     """
     supported = {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
     if spec.benchmark_id not in supported:
-        return {"status": "not_applicable", "policy_id": "multiple_choice_output_shape_gate_v1"}
+        return {"status": "not_applicable", "policy_id": "multiple_choice_output_shape_gate_v2"}
     metrics = dict(summary.get("metrics") or {})
     case_results = list(summary.get("case_results") or [])
     malformed_count = metrics.get("malformed_output_count", metrics.get("invalid_count"))
@@ -543,21 +551,68 @@ def _multiple_choice_output_shape_gate(
             and item.get("output_tokens") >= spec.generation_max_tokens
         ]
     )
-    blocked = bool(evaluated_count and malformed_rate > _DOMINANT_MALFORMED_OUTPUT_RATE)
+    valid_case_results = [
+        item
+        for item in case_results
+        if isinstance(item.get("predicted"), str)
+        and re.fullmatch(r"[A-J]", item["predicted"].strip().upper())
+        and isinstance(item.get("expected"), str)
+        and re.fullmatch(r"[A-J]", item["expected"].strip().upper())
+    ]
+
+    def _label_distribution(items: List[Dict[str, Any]], field_name: str) -> Tuple[Dict[str, int], float]:
+        counts: Dict[str, int] = {}
+        for item in items:
+            label = str(item[field_name]).strip().upper()
+            counts[label] = counts.get(label, 0) + 1
+        top_rate = max(counts.values()) / float(len(items)) if items else 0.0
+        return dict(sorted(counts.items())), round(top_rate, 6)
+
+    predicted_label_counts, predicted_top_label_rate = _label_distribution(valid_case_results, "predicted")
+    expected_label_counts, expected_top_label_rate = _label_distribution(valid_case_results, "expected")
+    response_distribution_collapsed = bool(
+        len(valid_case_results) >= _DISTRIBUTION_COLLAPSE_MIN_VALID_ANSWERS
+        and predicted_top_label_rate > _DISTRIBUTION_COLLAPSE_PREDICTED_LABEL_RATE
+        and len(expected_label_counts) >= _DISTRIBUTION_COLLAPSE_MIN_EXPECTED_LABELS
+        and expected_top_label_rate <= _DISTRIBUTION_COLLAPSE_MAX_EXPECTED_LABEL_RATE
+    )
+    dominant_malformed_output = bool(
+        evaluated_count and malformed_rate > _DOMINANT_MALFORMED_OUTPUT_RATE
+    )
+    blocked = dominant_malformed_output or response_distribution_collapsed
     reason_codes = []
-    if blocked:
+    if dominant_malformed_output:
         reason_codes.append("dominant_malformed_output")
         if control_token_count:
             reason_codes.append("runtime_control_tokens_observed")
         if token_limit_count:
             reason_codes.append("answer_budget_exhaustion_observed")
+    if response_distribution_collapsed:
+        reason_codes.append("response_distribution_collapse")
     return {
         "status": "blocked" if blocked else "passed",
-        "policy_id": "multiple_choice_output_shape_gate_v1",
+        "policy_id": "multiple_choice_output_shape_gate_v2",
         "threshold": {"metric": "malformed_output_rate", "operator": ">", "value": _DOMINANT_MALFORMED_OUTPUT_RATE},
         "evaluated_count": evaluated_count,
         "malformed_output_count": malformed_count,
         "malformed_output_rate": malformed_rate,
+        "valid_answer_count": len(valid_case_results),
+        "predicted_label_counts": predicted_label_counts,
+        "predicted_top_label_rate": predicted_top_label_rate,
+        "expected_label_counts": expected_label_counts,
+        "expected_top_label_rate": expected_top_label_rate,
+        "response_distribution_threshold": {
+            "minimum_valid_answers": _DISTRIBUTION_COLLAPSE_MIN_VALID_ANSWERS,
+            "predicted_top_label_rate": {
+                "operator": ">",
+                "value": _DISTRIBUTION_COLLAPSE_PREDICTED_LABEL_RATE,
+            },
+            "minimum_expected_labels": _DISTRIBUTION_COLLAPSE_MIN_EXPECTED_LABELS,
+            "expected_top_label_rate": {
+                "operator": "<=",
+                "value": _DISTRIBUTION_COLLAPSE_MAX_EXPECTED_LABEL_RATE,
+            },
+        },
         "runtime_control_token_count": control_token_count,
         "answer_budget_exhaustion_count": token_limit_count,
         "reason_codes": reason_codes,

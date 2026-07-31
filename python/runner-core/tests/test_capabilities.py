@@ -1961,6 +1961,74 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(gate["malformed_output_rate"], 0.5)
         self.assertEqual(gate["strict_primary_metric"]["value"], 0.5)
 
+    def test_mmlu_large_response_distribution_collapse_is_quarantined(self):
+        spec = CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"]
+        case_results = [
+            {
+                "expected": chr(ord("A") + (index % 10)),
+                "predicted": "A" if index < 50 else "B",
+            }
+            for index in range(60)
+        ]
+        summary = {
+            "primary_metric": {"name": "accuracy", "value": 0.1},
+            "metrics": {"total_count": 60, "invalid_count": 0},
+            "case_results": case_results,
+        }
+
+        from infergrade.capabilities import _multiple_choice_output_shape_gate
+
+        gate = _multiple_choice_output_shape_gate(spec, [], summary)
+
+        self.assertEqual(gate["status"], "blocked")
+        self.assertEqual(gate["policy_id"], "multiple_choice_output_shape_gate_v2")
+        self.assertIn("response_distribution_collapse", gate["reason_codes"])
+        self.assertEqual(gate["valid_answer_count"], 60)
+        self.assertEqual(gate["predicted_label_counts"], {"A": 50, "B": 10})
+        self.assertEqual(gate["predicted_top_label_rate"], 0.833333)
+        self.assertEqual(gate["expected_top_label_rate"], 0.1)
+
+    def test_mmlu_small_response_distribution_canary_is_not_quarantined(self):
+        spec = CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"]
+        case_results = [
+            {
+                "expected": chr(ord("A") + (index % 10)),
+                "predicted": "A",
+            }
+            for index in range(40)
+        ]
+        summary = {
+            "primary_metric": {"name": "accuracy", "value": 0.1},
+            "metrics": {"total_count": 40, "invalid_count": 0},
+            "case_results": case_results,
+        }
+
+        from infergrade.capabilities import _multiple_choice_output_shape_gate
+
+        gate = _multiple_choice_output_shape_gate(spec, [], summary)
+
+        self.assertEqual(gate["status"], "passed")
+        self.assertNotIn("response_distribution_collapse", gate["reason_codes"])
+        self.assertEqual(gate["valid_answer_count"], 40)
+
+    def test_mmlu_concentrated_reference_distribution_is_not_quarantined(self):
+        spec = CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"]
+        case_results = [{"expected": "A", "predicted": "A"} for _index in range(60)]
+        summary = {
+            "primary_metric": {"name": "accuracy", "value": 1.0},
+            "metrics": {"total_count": 60, "invalid_count": 0},
+            "case_results": case_results,
+        }
+
+        from infergrade.capabilities import _multiple_choice_output_shape_gate
+
+        gate = _multiple_choice_output_shape_gate(spec, [], summary)
+
+        self.assertEqual(gate["status"], "passed")
+        self.assertNotIn("response_distribution_collapse", gate["reason_codes"])
+        self.assertEqual(gate["expected_label_counts"], {"A": 60})
+        self.assertEqual(gate["expected_top_label_rate"], 1.0)
+
     def test_mmlu_pro_artifact_distinguishes_wrong_malformed_and_generation_failed_tasks(self):
         def fake_prepare(spec, benchmark_dir, tier):
             cases = [
