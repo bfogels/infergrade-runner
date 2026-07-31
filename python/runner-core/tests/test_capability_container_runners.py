@@ -10,6 +10,10 @@ from unittest import mock
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
+RUNNER_CORE_SRC = os.path.join(ROOT_DIR, "python", "runner-core", "src")
+if RUNNER_CORE_SRC not in sys.path:
+    sys.path.insert(0, RUNNER_CORE_SRC)
+
 
 def _load_module(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -415,6 +419,61 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertEqual(summary["metrics"]["correct_count"], 25)
         self.assertEqual(summary["primary_metric"], {"name": "accuracy", "value": 1.0})
         self.assertEqual(summary["scoring_policy"], "exact_multiple_choice_letter_accuracy_v4")
+
+    def test_mmlu_pro_case_results_feed_distribution_gate_from_jsonl(self):
+        from infergrade.capabilities import CAPABILITY_BENCHMARKS, _multiple_choice_output_shape_gate
+
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
+        module = _load_module("mmlu_pro_gate_integration_test_module", module_path)
+        cases = []
+        predictions = []
+        for index in range(60):
+            task_id = "mmlu_pro/%d" % index
+            cases.append(
+                {
+                    "case_id": task_id,
+                    "task_id": task_id,
+                    "category": "fixture",
+                    "answer": module.LETTERS[index % len(module.LETTERS)],
+                }
+            )
+            predictions.append(
+                {
+                    "case_id": task_id,
+                    "task_id": task_id,
+                    "generation_status": "completed",
+                    "completion": "A" if index < 50 else "B",
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            for filename, rows in (("cases.jsonl", cases), ("predictions.jsonl", predictions)):
+                with open(os.path.join(tempdir, filename), "w", encoding="utf-8") as handle:
+                    for row in rows:
+                        handle.write(json.dumps(row) + "\n")
+
+            module.evaluate(tempdir)
+            with open(os.path.join(tempdir, "summary.json"), "r", encoding="utf-8") as handle:
+                summary = json.load(handle)
+            with open(os.path.join(tempdir, "predictions.jsonl"), "r", encoding="utf-8") as handle:
+                persisted_predictions = [json.loads(line) for line in handle if line.strip()]
+
+        self.assertEqual(summary["metrics"]["total_count"], 60)
+        self.assertEqual(summary["case_results"][0]["expected"], "A")
+        self.assertEqual(summary["case_results"][0]["predicted"], "A")
+        self.assertEqual(summary["case_results"][-1]["expected"], "J")
+        self.assertEqual(summary["case_results"][-1]["predicted"], "B")
+
+        gate = _multiple_choice_output_shape_gate(
+            CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"],
+            persisted_predictions,
+            summary,
+        )
+
+        self.assertEqual(gate["status"], "blocked")
+        self.assertIn("response_distribution_collapse", gate["reason_codes"])
+        self.assertEqual(gate["valid_answer_count"], 60)
+        self.assertEqual(gate["predicted_label_counts"], {"A": 50, "B": 10})
 
     def test_mmlu_pro_terminal_normalization_does_not_hide_extra_output(self):
         module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
