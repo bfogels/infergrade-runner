@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import textwrap
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -807,8 +808,18 @@ def execute_capability_suite(
         spec = CAPABILITY_BENCHMARKS[benchmark_id]
         benchmark_dir = os.path.join(benchmark_root, benchmark_id)
         ensure_dir(benchmark_dir)
+        benchmark_started = time.perf_counter()
+        phase_timings = {
+            "timing_version": "benchmark_phase_timing_v1",
+            "fixture_preparation_seconds": None,
+            "generation_seconds": None,
+            "scoring_seconds": None,
+            "total_wall_seconds": None,
+        }
         try:
+            phase_started = time.perf_counter()
             _prepare_benchmark_cases(spec, benchmark_dir, request.tier)
+            phase_timings["fixture_preparation_seconds"] = round(time.perf_counter() - phase_started, 6)
             cases = _read_jsonl(os.path.join(benchmark_dir, "cases.jsonl"))
             if progress_callback:
                 progress_callback(
@@ -820,10 +831,16 @@ def execute_capability_suite(
                         "message": "Capability benchmark %s started (%d cases)." % (spec.display_name, len(cases)),
                     }
                 )
+            phase_started = time.perf_counter()
             predictions = _generate_predictions(adapter, request, spec, cases, progress_callback=progress_callback)
+            phase_timings["generation_seconds"] = round(time.perf_counter() - phase_started, 6)
             task_performance_rows.extend(predictions)
             _write_jsonl(os.path.join(benchmark_dir, "predictions.jsonl"), predictions)
+            phase_started = time.perf_counter()
             summary = _evaluate_benchmark(spec, benchmark_dir)
+            phase_timings["scoring_seconds"] = round(time.perf_counter() - phase_started, 6)
+            phase_timings["total_wall_seconds"] = round(time.perf_counter() - benchmark_started, 6)
+            summary["phase_timings"] = dict(phase_timings)
             if spec.execution_mode == "container":
                 summary["container_runtime"] = container_image_identity(spec.container_image)
             if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:
@@ -970,6 +987,7 @@ def execute_capability_suite(
             elif unscored_failure_severity == "all_failed":
                 hard_failed += 1
         except Exception as exc:
+            phase_timings["total_wall_seconds"] = round(time.perf_counter() - benchmark_started, 6)
             failure_summary = {
                 "benchmark_id": benchmark_id,
                 "display_name": spec.display_name,
@@ -979,6 +997,7 @@ def execute_capability_suite(
                     "name": spec.primary_metric_name,
                     "value": None,
                 },
+                "phase_timings": dict(phase_timings),
             }
             summary_path = os.path.join(benchmark_dir, "summary.json")
             write_json(summary_path, failure_summary)
@@ -1016,6 +1035,31 @@ def execute_capability_suite(
     # hard-coded probability-like confidence number.
     confidence = None
 
+    task_performance = _summarize_task_performance_rows(task_performance_rows)
+    task_performance["phase_timings"] = {
+        "timing_version": "capability_phase_timing_v1",
+        "benchmarks": {
+            benchmark_id: dict((benchmark_results.get(benchmark_id) or {}).get("phase_timings") or {})
+            for benchmark_id in benchmark_ids
+        },
+        "fixture_preparation_seconds": round(sum(
+            float(((benchmark_results.get(item) or {}).get("phase_timings") or {}).get("fixture_preparation_seconds") or 0.0)
+            for item in benchmark_ids
+        ), 6),
+        "generation_seconds": round(sum(
+            float(((benchmark_results.get(item) or {}).get("phase_timings") or {}).get("generation_seconds") or 0.0)
+            for item in benchmark_ids
+        ), 6),
+        "scoring_seconds": round(sum(
+            float(((benchmark_results.get(item) or {}).get("phase_timings") or {}).get("scoring_seconds") or 0.0)
+            for item in benchmark_ids
+        ), 6),
+        "total_wall_seconds": round(sum(
+            float(((benchmark_results.get(item) or {}).get("phase_timings") or {}).get("total_wall_seconds") or 0.0)
+            for item in benchmark_ids
+        ), 6),
+    }
+
     execution = CapabilityExecution(
         use_case=request.use_case,
         suite_id=primary_suite_id,
@@ -1032,7 +1076,7 @@ def execute_capability_suite(
         benchmark_results=benchmark_results,
         artifacts=benchmark_artifacts,
         score_details=score_details,
-        task_performance=_summarize_task_performance_rows(task_performance_rows),
+        task_performance=task_performance,
     )
     summary_path = write_capability_summary_artifact(request, execution, request.output_dir or os.path.dirname(os.path.dirname(benchmark_root)))
     execution.artifacts["_summary"] = {"capability_summary_path": summary_path}
@@ -2531,7 +2575,7 @@ def _generate_predictions(
         _append_case_checkpoint(checkpoint_path, record)
         predictions.append(record)
         if (
-            spec.benchmark_id == "mmlu_pro_reference_v1"
+            spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
             and record.get("direct_answer_protocol_recovery", {}).get("status") == "failed"
         ):
             # One failed, model-specific protocol canary is sufficient to

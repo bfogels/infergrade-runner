@@ -1843,6 +1843,40 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(len(predictions), 1)
         self.assertEqual(predictions[0]["direct_answer_protocol_recovery"]["status"], "failed")
 
+    @mock.patch("infergrade.gguf.infer_llama_cpp_architecture", return_value="gemma4")
+    def test_gpqa_protocol_canary_fails_fast_when_recovery_cannot_emit_answer(self, _architecture_mock):
+        adapter = mock.Mock()
+        adapter.generate_text.return_value = {
+            "text": "<|channel|>analysis only",
+            "status": "completed",
+            "output_tokens": 64,
+            "token_budget_exhausted": True,
+        }
+        request = RunRequest(
+            model="google/gemma-4-12b",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="reasoning",
+            benchmark_check_ids=["gpqa_diamond_reference_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        cases = [
+            {"case_id": "gpqa/1", "task_id": "gpqa/1", "prompt": "Question one"},
+            {"case_id": "gpqa/2", "task_id": "gpqa/2", "prompt": "Question two"},
+        ]
+
+        predictions = _generate_predictions(
+            adapter,
+            request,
+            CAPABILITY_BENCHMARKS["gpqa_diamond_reference_v1"],
+            cases,
+        )
+
+        self.assertEqual(adapter.generate_text.call_count, 2)
+        self.assertEqual(len(predictions), 1)
+        self.assertEqual(predictions[0]["direct_answer_protocol_recovery"]["status"], "failed")
+
     def test_mmlu_dominant_malformed_output_is_quarantined_from_capability_score(self):
         def fake_prepare(spec, benchmark_dir, tier):
             cases = [
@@ -1917,6 +1951,12 @@ class CapabilityTests(unittest.TestCase):
                     execution = execute_capability_suite(adapter, request)
 
         result = execution.benchmark_results["mmlu_pro_reference_v1"]
+        self.assertEqual(result["phase_timings"]["timing_version"], "benchmark_phase_timing_v1")
+        self.assertGreaterEqual(result["phase_timings"]["total_wall_seconds"], 0.0)
+        self.assertEqual(
+            execution.task_performance["phase_timings"]["timing_version"],
+            "capability_phase_timing_v1",
+        )
         self.assertEqual(execution.status, "not_comparable")
         self.assertNotIn("mmlu_pro_reference_v1", execution.component_scores)
         self.assertIsNone(result["primary_metric"]["value"])
