@@ -209,6 +209,11 @@ class WorkerTests(unittest.TestCase):
             api_token=None,
         )
         complete_mock.assert_called_once()
+        completion_timing = complete_mock.call_args.kwargs["lifecycle_timing"]
+        self.assertEqual(completion_timing["timing_version"], "run_lifecycle_timing_v1")
+        self.assertEqual(completion_timing["phases"]["upload"]["status"], "completed")
+        self.assertIsNotNone(completion_timing["phases"]["upload"]["elapsed_seconds"])
+        self.assertNotIn("output_dir", json.dumps(completion_timing))
         heartbeat_mock.assert_called()
         self.assertTrue(
             any(
@@ -216,6 +221,7 @@ class WorkerTests(unittest.TestCase):
                 and call.kwargs.get("detail") == "interactive_chat_v1"
                 and call.kwargs.get("progress_percent") is not None
                 and call.kwargs.get("progress_percent") >= 60.0
+                and (call.kwargs.get("lifecycle_timing") or {}).get("timing_version") == "run_lifecycle_timing_v1"
                 for call in heartbeat_mock.call_args_list
             )
         )

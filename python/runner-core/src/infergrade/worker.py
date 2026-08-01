@@ -11,7 +11,7 @@ from infergrade import __version__
 from infergrade.doctor import collect_runner_diagnostics, run_doctor
 from infergrade.pairing import load_runner_profile
 from infergrade.paths import resolve_worker_output_dir
-from infergrade.progress import load_progress
+from infergrade.progress import lifecycle_timing_snapshot, load_progress
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.runner import run_infergrade
 from infergrade.transport import (
@@ -132,6 +132,27 @@ def execute_run_job(
     progress_reporting_warning_emitted = False
     last_hub_progress_at = 0.0
     last_hub_progress_key = None
+    worker_started_monotonic = time.perf_counter()
+    request = None
+    preflight_seconds = None
+    upload_seconds = None
+    upload_status = None
+
+    def _lifecycle_timing() -> Optional[Dict[str, Any]]:
+        output_dir = getattr(request, "output_dir", None)
+        if not output_dir:
+            return None
+        progress_payload = load_progress(output_dir)
+        if not progress_payload:
+            return None
+        return lifecycle_timing_snapshot(
+            progress_payload,
+            preflight_seconds=preflight_seconds,
+            upload_seconds=upload_seconds,
+            upload_status=upload_status,
+            worker_wall_seconds=time.perf_counter() - worker_started_monotonic,
+        )
+
     try:
         _emit_desktop_event(
             emit_progress,
@@ -178,7 +199,11 @@ def execute_run_job(
             progress=12,
             check_name="Local preflight",
         )
-        doctor_report = run_doctor(request=request, api_url=api_url)
+        preflight_started_monotonic = time.perf_counter()
+        try:
+            doctor_report = run_doctor(request=request, api_url=api_url)
+        finally:
+            preflight_seconds = time.perf_counter() - preflight_started_monotonic
         if not doctor_report.get("ok"):
             raise RuntimeError(_doctor_failure_message(doctor_report))
         heartbeat_run_job(
@@ -225,6 +250,7 @@ def execute_run_job(
                     description="Runner is executing Hub-assigned work.",
                     progress=progress_percent,
                     check_name=desktop_detail or detail or stage or message,
+                    lifecycle_timing=_lifecycle_timing(),
                 )
             except Exception:
                 reporting_failed = True
@@ -254,6 +280,7 @@ def execute_run_job(
                         detail=detail,
                         message=message,
                         progress_percent=progress_percent,
+                        lifecycle_timing=_lifecycle_timing(),
                         api_token=api_token,
                         run_token=run_token,
                     )
@@ -272,6 +299,7 @@ def execute_run_job(
                     pass
 
         result = run_infergrade(request, emit_progress=_emit)
+        upload_status = "running"
         _emit_desktop_event(
             emit_progress,
             "assignment_update",
@@ -280,15 +308,30 @@ def execute_run_job(
             description="Execution finished. Uploading the result bundle to Hub.",
             progress=95,
             check_name="Upload result bundle",
+            lifecycle_timing=_lifecycle_timing(),
         )
-        heartbeat_run_job(api_url, run_id, worker_id, stage="upload", message="Uploading completed bundle.", progress_percent=95.0, api_token=api_token, run_token=run_token)
+        heartbeat_run_job(
+            api_url,
+            run_id,
+            worker_id,
+            stage="upload",
+            message="Uploading completed bundle.",
+            progress_percent=95.0,
+            lifecycle_timing=_lifecycle_timing(),
+            api_token=api_token,
+            run_token=run_token,
+        )
+        upload_started_monotonic = time.perf_counter()
         upload = upload_run_bundle(result["output_dir"], api_url, run_id=run_id, run_token=run_token, api_token=api_token)
+        upload_seconds = time.perf_counter() - upload_started_monotonic
+        upload_status = "completed"
         completed = complete_run_job(
             api_url,
             run_id,
             worker_id,
             bundle_id=result["bundle_id"],
             upload=upload,
+            lifecycle_timing=_lifecycle_timing(),
             api_token=api_token,
             run_token=run_token,
         )
@@ -299,6 +342,7 @@ def execute_run_job(
             run_id=run_id,
             description="Hub-assigned work completed and uploaded.",
             progress=100,
+            lifecycle_timing=_lifecycle_timing(),
             check_name=result.get("bundle_id"),
         )
         _runner_heartbeat("listening", current_run_id=None, message="Runner is listening for the next run.")
@@ -321,6 +365,9 @@ def execute_run_job(
             ],
             "details": {"interruption": "keyboard_interrupt"},
         }
+        lifecycle_timing = _lifecycle_timing()
+        if lifecycle_timing:
+            failure["details"]["lifecycle_timing"] = lifecycle_timing
         try:
             fail_run_job(
                 api_url,
@@ -349,6 +396,9 @@ def execute_run_job(
         raise
     except Exception as exc:
         failure = _classify_worker_failure(exc, doctor_report=doctor_report)
+        lifecycle_timing = _lifecycle_timing()
+        if lifecycle_timing:
+            failure.setdefault("details", {})["lifecycle_timing"] = lifecycle_timing
         try:
             fail_run_job(
                 api_url,
