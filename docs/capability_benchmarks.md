@@ -140,6 +140,8 @@ The currently implemented first-user catalog is:
 
 Compatibility breadth labels like `canary`, `standard`, and `gold` are still derived from the selected checks for older flows and release planning, but they are no longer the main user-facing benchmark abstraction.
 
+Runner records fixture preparation, model generation, scorer execution, and total wall time separately for every selected capability benchmark under `task_performance.phase_timings`. These timings are operational evidence, not score inputs. They let Hub calibrate honest run-duration ranges and identify setup or scorer overhead without changing canonical serial generation (`server_slots=1`) or mixing accelerated throughput experiments into comparable capability results.
+
 ## Benchmark Maturity
 
 Benchmark maturity is separate from evidence lane:

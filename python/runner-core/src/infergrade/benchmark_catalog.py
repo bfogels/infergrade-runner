@@ -12,7 +12,7 @@ from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
 
 FALLBACK_METADATA_ORDERING = {
     "effort_level": ["short", "low", "balanced", "medium", "deep", "high"],
-    "expected_duration_band": ["1-5 min", "5-15 min", "10-25 min", "10-30 min", "15-45 min", "25-60 min"],
+    "expected_duration_band": ["1-5 min", "5-15 min", "10-25 min", "10-30 min", "15-45 min", "25-60 min", "15-90 min"],
     "token_volume_band": ["tiny", "small", "medium", "large"],
 }
 SUPPORTED_COVERAGE_GENERATION_PRESETS = {

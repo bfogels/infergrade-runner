@@ -1843,6 +1843,40 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(len(predictions), 1)
         self.assertEqual(predictions[0]["direct_answer_protocol_recovery"]["status"], "failed")
 
+    @mock.patch("infergrade.gguf.infer_llama_cpp_architecture", return_value="gemma4")
+    def test_gpqa_protocol_canary_fails_fast_when_recovery_cannot_emit_answer(self, _architecture_mock):
+        adapter = mock.Mock()
+        adapter.generate_text.return_value = {
+            "text": "<|channel|>analysis only",
+            "status": "completed",
+            "output_tokens": 64,
+            "token_budget_exhausted": True,
+        }
+        request = RunRequest(
+            model="google/gemma-4-12b",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="reasoning",
+            benchmark_check_ids=["gpqa_diamond_reference_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        cases = [
+            {"case_id": "gpqa/1", "task_id": "gpqa/1", "prompt": "Question one"},
+            {"case_id": "gpqa/2", "task_id": "gpqa/2", "prompt": "Question two"},
+        ]
+
+        predictions = _generate_predictions(
+            adapter,
+            request,
+            CAPABILITY_BENCHMARKS["gpqa_diamond_reference_v1"],
+            cases,
+        )
+
+        self.assertEqual(adapter.generate_text.call_count, 2)
+        self.assertEqual(len(predictions), 1)
+        self.assertEqual(predictions[0]["direct_answer_protocol_recovery"]["status"], "failed")
+
     def test_mmlu_dominant_malformed_output_is_quarantined_from_capability_score(self):
         def fake_prepare(spec, benchmark_dir, tier):
             cases = [
@@ -1917,6 +1951,20 @@ class CapabilityTests(unittest.TestCase):
                     execution = execute_capability_suite(adapter, request)
 
         result = execution.benchmark_results["mmlu_pro_reference_v1"]
+        self.assertEqual(result["phase_timings"]["timing_version"], "benchmark_phase_timing_v1")
+        self.assertGreaterEqual(result["phase_timings"]["total_wall_seconds"], 0.0)
+        self.assertEqual(
+            execution.task_performance["phase_timings"]["timing_version"],
+            "capability_phase_timing_v1",
+        )
+        aggregate_timing = execution.task_performance["phase_timings"]
+        self.assertEqual(aggregate_timing["total_wall_seconds"], result["phase_timings"]["total_wall_seconds"])
+        self.assertLessEqual(
+            sum(result["phase_timings"][key] for key in (
+                "fixture_preparation_seconds", "generation_seconds", "scoring_seconds"
+            )),
+            result["phase_timings"]["total_wall_seconds"] + 0.001,
+        )
         self.assertEqual(execution.status, "not_comparable")
         self.assertNotIn("mmlu_pro_reference_v1", execution.component_scores)
         self.assertIsNone(result["primary_metric"]["value"])
@@ -2171,6 +2219,11 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(execution.score_details["observed_weighted_score"], 0.5)
         self.assertIn("insufficient_scored_components", execution.score_details["failed_gates"])
         self.assertEqual(execution.benchmark_results["evalplus_mbpp"]["status"], "failed")
+        failed_timing = execution.benchmark_results["evalplus_mbpp"]["phase_timings"]
+        self.assertIsNotNone(failed_timing["fixture_preparation_seconds"])
+        self.assertIsNotNone(failed_timing["generation_seconds"])
+        self.assertIsNone(failed_timing["scoring_seconds"])
+        self.assertGreaterEqual(failed_timing["total_wall_seconds"], failed_timing["generation_seconds"])
 
     def test_summarize_capability_execution_reports_state_and_coverage(self):
         request = RunRequest(
@@ -2504,6 +2557,11 @@ class CapabilityTests(unittest.TestCase):
         with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
             execution = execute_capability_suite(_FakeAdapter(), request)
 
+        timing = execution.benchmark_results["ifeval"]["phase_timings"]
+        self.assertIsNone(timing["fixture_preparation_seconds"])
+        self.assertIsNone(timing["generation_seconds"])
+        self.assertIsNone(timing["scoring_seconds"])
+        self.assertGreaterEqual(timing["total_wall_seconds"], 0.0)
         summary_path = execution.artifacts["ifeval"]["summary_path"]
         self.assertTrue(os.path.exists(summary_path))
         capability_summary_path = execution.artifacts["_summary"]["capability_summary_path"]

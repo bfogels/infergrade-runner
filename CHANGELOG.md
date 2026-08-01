@@ -7,6 +7,11 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+- Records fixture preparation, model generation, scorer execution, and total
+  wall time per capability benchmark so Hub can calibrate duration without
+  changing canonical serial generation.
+- Applies the same failed direct-answer recovery stop to GPQA as MMLU-Pro,
+  avoiding wasted follow-on cases after a model cannot emit a valid answer.
 - Quarantines large multiple-choice runs when valid answers collapse onto one
   label despite a diverse reference distribution, preventing protocol failures
   from becoming misleadingly low reasoning scores.

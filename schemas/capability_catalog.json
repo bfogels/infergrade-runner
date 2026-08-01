@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-07-26-diagnostic-context-gpqa-reference",
+  "catalog_version": "2026-08-01-benchmark-duration-truth",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -16,7 +16,8 @@
       "10-25 min",
       "10-30 min",
       "15-45 min",
-      "25-60 min"
+      "25-60 min",
+      "15-90 min"
     ],
     "token_volume_band": [
       "tiny",
@@ -1060,7 +1061,7 @@
       ],
       "effort_hint": "medium",
       "suite_scope": "decision",
-      "expected_duration_band": "5-15 min",
+      "expected_duration_band": "15-90 min",
       "token_volume_band": "small",
       "resumability_boundary": "benchmark",
       "execution_pattern": "fast_capability_microcheck"
@@ -1293,7 +1294,7 @@
       "suite_scope": "decision",
       "evidence_lane_id": "decision",
       "effort_level": "balanced",
-      "expected_duration_band": "5-15 min",
+      "expected_duration_band": "15-90 min",
       "token_volume_band": "small",
       "resumability_boundary": "benchmark",
       "execution_pattern": "fast_capability_microcheck",
@@ -1745,7 +1746,7 @@
       "description": "Fast assistant evidence with one capability benchmark and one deployment profile.",
       "suite_scope": "decision",
       "effort_level": "short",
-      "expected_duration_band": "5-15 min",
+      "expected_duration_band": "15-90 min",
       "suite_ids": [
         "chat_instruction_following"
       ],
