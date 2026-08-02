@@ -83,11 +83,14 @@ jobs:
           Source commit: $env:GITHUB_SHA
           The Windows installers are unsigned and GPU execution was not tested.
           "@ | Set-Content -Encoding utf8 target/release/public-windows/CI-CANDIDATE-NOT-A-RELEASE.txt
+          $checksumInputs = @(
+            (Resolve-Path target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi).Path
+            (Resolve-Path target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe).Path
+            (Resolve-Path target/release/public-windows/CI-CANDIDATE-NOT-A-RELEASE.txt).Path
+          )
           python ./scripts/write_desktop_release_checksums.py `
             --output target/release/public-windows/SHA256SUMS `
-            target/release/public-windows/*.msi `
-            target/release/public-windows/*.exe `
-            target/release/public-windows/CI-CANDIDATE-NOT-A-RELEASE.txt
+            @checksumInputs
           python ./scripts/verify_desktop_release_artifacts.py `
             --directory target/release/public-windows `
             --require-windows-preview `
