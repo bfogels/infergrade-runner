@@ -438,6 +438,11 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("currentHandoffRunId"));
   assert.equal(js.includes("Waiting for local runtime and model readiness"), false);
   assert.ok(js.includes('payload.type === "assignment_update" || payload.type === "assignment_idle"'));
+  assert.ok(js.includes("function assignmentTimingSummary(timing = {})"));
+  assert.ok(js.includes('timing?.timing_version !== "run_lifecycle_timing_v1"'));
+  assert.ok(js.includes('artifact: "Preparing model"'));
+  assert.ok(js.includes('capability: "Running capability tasks"'));
+  assert.ok(js.includes("assignmentTimingSummary(payload.lifecycle_timing)"));
   assert.ok(js.includes("Hub assignment ${payload.phase || \"update\"}"));
   assert.ok(js.includes("renderAssignmentActive({"));
   assert.ok(js.includes("phase === \"Complete\" ? 100 : 32"));
@@ -448,7 +453,7 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("stopAssignmentClock();"));
   assert.ok(js.includes("IGRP-[redacted]"));
   assert.ok(js.includes("Bearer [redacted]"));
-  assert.ok(js.includes("description: redactSecrets(payload.description"));
+  assert.ok(js.includes("description: redactSecrets(recovery?.description || payload.description"));
   assert.ok(js.includes("payload.check_name || payload.checkName || payload.stage"));
   assert.ok(js.includes("Capability benchmark (.+?)"));
   assert.ok(js.includes("Runner is executing Hub-assigned benchmark checks."));

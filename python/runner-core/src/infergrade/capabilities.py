@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import textwrap
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -31,6 +32,10 @@ REASONING_EXACT_ANSWER_FIXTURE_REVISION = "2026-05-reasoning-exact-preview"
 CONTEXT_RETRIEVAL_FIXTURE_REVISION = "2026-07-context-retrieval-v1"
 _DOMINANT_GENERATION_FAILURE_RATE = 0.5
 _DOMINANT_MALFORMED_OUTPUT_RATE = 0.5
+_DISTRIBUTION_COLLAPSE_MIN_VALID_ANSWERS = 50
+_DISTRIBUTION_COLLAPSE_PREDICTED_LABEL_RATE = 0.75
+_DISTRIBUTION_COLLAPSE_MAX_EXPECTED_LABEL_RATE = 0.3
+_DISTRIBUTION_COLLAPSE_MIN_EXPECTED_LABELS = 4
 _DIRECT_ANSWER_RECOVERY_MAX_TOKENS = 512
 _RUNTIME_CONTROL_TOKEN = re.compile(
     r"(?:<\|(?:channel|turn|think|start|end)[^>]*\|?>|<channel\|>|<\|channel>)",
@@ -514,10 +519,14 @@ def _multiple_choice_output_shape_gate(
     wrong.  When malformed output dominates the sample, however, the result is
     evidence that the model/runtime/prompt protocol did not produce answerable
     rows—not evidence that the model has near-zero reasoning capability.
+
+    A sufficiently large run can also be formally valid while collapsing onto
+    one answer label despite a diverse reference distribution. That is evidence
+    of a broken response protocol, not a trustworthy capability measurement.
     """
     supported = {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
     if spec.benchmark_id not in supported:
-        return {"status": "not_applicable", "policy_id": "multiple_choice_output_shape_gate_v1"}
+        return {"status": "not_applicable", "policy_id": "multiple_choice_output_shape_gate_v2"}
     metrics = dict(summary.get("metrics") or {})
     case_results = list(summary.get("case_results") or [])
     malformed_count = metrics.get("malformed_output_count", metrics.get("invalid_count"))
@@ -543,21 +552,68 @@ def _multiple_choice_output_shape_gate(
             and item.get("output_tokens") >= spec.generation_max_tokens
         ]
     )
-    blocked = bool(evaluated_count and malformed_rate > _DOMINANT_MALFORMED_OUTPUT_RATE)
+    valid_case_results = [
+        item
+        for item in case_results
+        if isinstance(item.get("predicted"), str)
+        and re.fullmatch(r"[A-J]", item["predicted"].strip().upper())
+        and isinstance(item.get("expected"), str)
+        and re.fullmatch(r"[A-J]", item["expected"].strip().upper())
+    ]
+
+    def _label_distribution(items: List[Dict[str, Any]], field_name: str) -> Tuple[Dict[str, int], float]:
+        counts: Dict[str, int] = {}
+        for item in items:
+            label = str(item[field_name]).strip().upper()
+            counts[label] = counts.get(label, 0) + 1
+        top_rate = max(counts.values()) / float(len(items)) if items else 0.0
+        return dict(sorted(counts.items())), round(top_rate, 6)
+
+    predicted_label_counts, predicted_top_label_rate = _label_distribution(valid_case_results, "predicted")
+    expected_label_counts, expected_top_label_rate = _label_distribution(valid_case_results, "expected")
+    response_distribution_collapsed = bool(
+        len(valid_case_results) >= _DISTRIBUTION_COLLAPSE_MIN_VALID_ANSWERS
+        and predicted_top_label_rate > _DISTRIBUTION_COLLAPSE_PREDICTED_LABEL_RATE
+        and len(expected_label_counts) >= _DISTRIBUTION_COLLAPSE_MIN_EXPECTED_LABELS
+        and expected_top_label_rate <= _DISTRIBUTION_COLLAPSE_MAX_EXPECTED_LABEL_RATE
+    )
+    dominant_malformed_output = bool(
+        evaluated_count and malformed_rate > _DOMINANT_MALFORMED_OUTPUT_RATE
+    )
+    blocked = dominant_malformed_output or response_distribution_collapsed
     reason_codes = []
-    if blocked:
+    if dominant_malformed_output:
         reason_codes.append("dominant_malformed_output")
         if control_token_count:
             reason_codes.append("runtime_control_tokens_observed")
         if token_limit_count:
             reason_codes.append("answer_budget_exhaustion_observed")
+    if response_distribution_collapsed:
+        reason_codes.append("response_distribution_collapse")
     return {
         "status": "blocked" if blocked else "passed",
-        "policy_id": "multiple_choice_output_shape_gate_v1",
+        "policy_id": "multiple_choice_output_shape_gate_v2",
         "threshold": {"metric": "malformed_output_rate", "operator": ">", "value": _DOMINANT_MALFORMED_OUTPUT_RATE},
         "evaluated_count": evaluated_count,
         "malformed_output_count": malformed_count,
         "malformed_output_rate": malformed_rate,
+        "valid_answer_count": len(valid_case_results),
+        "predicted_label_counts": predicted_label_counts,
+        "predicted_top_label_rate": predicted_top_label_rate,
+        "expected_label_counts": expected_label_counts,
+        "expected_top_label_rate": expected_top_label_rate,
+        "response_distribution_threshold": {
+            "minimum_valid_answers": _DISTRIBUTION_COLLAPSE_MIN_VALID_ANSWERS,
+            "predicted_top_label_rate": {
+                "operator": ">",
+                "value": _DISTRIBUTION_COLLAPSE_PREDICTED_LABEL_RATE,
+            },
+            "minimum_expected_labels": _DISTRIBUTION_COLLAPSE_MIN_EXPECTED_LABELS,
+            "expected_top_label_rate": {
+                "operator": "<=",
+                "value": _DISTRIBUTION_COLLAPSE_MAX_EXPECTED_LABEL_RATE,
+            },
+        },
         "runtime_control_token_count": control_token_count,
         "answer_budget_exhaustion_count": token_limit_count,
         "reason_codes": reason_codes,
@@ -752,8 +808,18 @@ def execute_capability_suite(
         spec = CAPABILITY_BENCHMARKS[benchmark_id]
         benchmark_dir = os.path.join(benchmark_root, benchmark_id)
         ensure_dir(benchmark_dir)
+        benchmark_started = time.perf_counter()
+        phase_timings = {
+            "timing_version": "benchmark_phase_timing_v1",
+            "fixture_preparation_seconds": None,
+            "generation_seconds": None,
+            "scoring_seconds": None,
+            "total_wall_seconds": None,
+        }
         try:
+            phase_started = time.perf_counter()
             _prepare_benchmark_cases(spec, benchmark_dir, request.tier)
+            phase_timings["fixture_preparation_seconds"] = round(time.perf_counter() - phase_started, 6)
             cases = _read_jsonl(os.path.join(benchmark_dir, "cases.jsonl"))
             if progress_callback:
                 progress_callback(
@@ -765,10 +831,16 @@ def execute_capability_suite(
                         "message": "Capability benchmark %s started (%d cases)." % (spec.display_name, len(cases)),
                     }
                 )
+            phase_started = time.perf_counter()
             predictions = _generate_predictions(adapter, request, spec, cases, progress_callback=progress_callback)
+            phase_timings["generation_seconds"] = round(time.perf_counter() - phase_started, 6)
             task_performance_rows.extend(predictions)
             _write_jsonl(os.path.join(benchmark_dir, "predictions.jsonl"), predictions)
+            phase_started = time.perf_counter()
             summary = _evaluate_benchmark(spec, benchmark_dir)
+            phase_timings["scoring_seconds"] = round(time.perf_counter() - phase_started, 6)
+            phase_timings["total_wall_seconds"] = round(time.perf_counter() - benchmark_started, 6)
+            summary["phase_timings"] = dict(phase_timings)
             if spec.execution_mode == "container":
                 summary["container_runtime"] = container_image_identity(spec.container_image)
             if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:
@@ -915,6 +987,7 @@ def execute_capability_suite(
             elif unscored_failure_severity == "all_failed":
                 hard_failed += 1
         except Exception as exc:
+            phase_timings["total_wall_seconds"] = round(time.perf_counter() - benchmark_started, 6)
             failure_summary = {
                 "benchmark_id": benchmark_id,
                 "display_name": spec.display_name,
@@ -924,6 +997,7 @@ def execute_capability_suite(
                     "name": spec.primary_metric_name,
                     "value": None,
                 },
+                "phase_timings": dict(phase_timings),
             }
             summary_path = os.path.join(benchmark_dir, "summary.json")
             write_json(summary_path, failure_summary)
@@ -961,6 +1035,31 @@ def execute_capability_suite(
     # hard-coded probability-like confidence number.
     confidence = None
 
+    task_performance = _summarize_task_performance_rows(task_performance_rows)
+    task_performance["phase_timings"] = {
+        "timing_version": "capability_phase_timing_v1",
+        "benchmarks": {
+            benchmark_id: dict((benchmark_results.get(benchmark_id) or {}).get("phase_timings") or {})
+            for benchmark_id in benchmark_ids
+        },
+        "fixture_preparation_seconds": round(sum(
+            float(((benchmark_results.get(item) or {}).get("phase_timings") or {}).get("fixture_preparation_seconds") or 0.0)
+            for item in benchmark_ids
+        ), 6),
+        "generation_seconds": round(sum(
+            float(((benchmark_results.get(item) or {}).get("phase_timings") or {}).get("generation_seconds") or 0.0)
+            for item in benchmark_ids
+        ), 6),
+        "scoring_seconds": round(sum(
+            float(((benchmark_results.get(item) or {}).get("phase_timings") or {}).get("scoring_seconds") or 0.0)
+            for item in benchmark_ids
+        ), 6),
+        "total_wall_seconds": round(sum(
+            float(((benchmark_results.get(item) or {}).get("phase_timings") or {}).get("total_wall_seconds") or 0.0)
+            for item in benchmark_ids
+        ), 6),
+    }
+
     execution = CapabilityExecution(
         use_case=request.use_case,
         suite_id=primary_suite_id,
@@ -977,7 +1076,7 @@ def execute_capability_suite(
         benchmark_results=benchmark_results,
         artifacts=benchmark_artifacts,
         score_details=score_details,
-        task_performance=_summarize_task_performance_rows(task_performance_rows),
+        task_performance=task_performance,
     )
     summary_path = write_capability_summary_artifact(request, execution, request.output_dir or os.path.dirname(os.path.dirname(benchmark_root)))
     execution.artifacts["_summary"] = {"capability_summary_path": summary_path}
@@ -1374,6 +1473,11 @@ def _write_native_capability_run_artifact(
         generation_status = str(prediction.get("generation_status") or "")
         task_error_class = _native_task_error_class(generation_status, case_score)
         task_state = "failed" if task_error_class else ("scored" if case_score.get("score") is not None else "failed")
+        scored_output_diagnostic = (
+            str(case_score.get("error_class") or "")
+            if task_state == "scored" and case_score.get("error_class")
+            else None
+        )
         tasks.append(
             {
                 "task_id": str(case.get("task_id") or case_id),
@@ -1384,7 +1488,7 @@ def _write_native_capability_run_artifact(
                 "scorer_type": _native_scorer_type(spec) if task_state == "scored" else None,
                 "scoring_policy": summary.get("scoring_policy") if task_state == "scored" else None,
                 "output_artifact": "predictions.jsonl#%s" % case_id,
-                "error_class": None if task_state == "scored" else (task_error_class or "scoring_failed"),
+                "error_class": scored_output_diagnostic if task_state == "scored" else (task_error_class or "scoring_failed"),
                 **_task_performance_fields(prediction),
                 **(
                     {
@@ -2288,13 +2392,23 @@ def _append_case_checkpoint(path: str, prediction: Dict[str, Any]) -> None:
 
 
 def remove_capability_case_checkpoints(output_dir: str) -> int:
-    """Remove temporary per-case duplicates only after the whole bundle completes."""
+    """Remove per-case duplicates only after their benchmark has durable output."""
     capability_root = os.path.join(output_dir, "artifacts", "capability")
     removed = 0
     if not os.path.isdir(capability_root):
         return removed
     for root, _dirs, files in os.walk(capability_root):
         if "case-checkpoint.jsonl" not in files:
+            continue
+        summary_path = os.path.join(root, "summary.json")
+        predictions_path = os.path.join(root, "predictions.jsonl")
+        try:
+            summary = read_json(summary_path)
+        except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+            continue
+        if summary.get("status") == "failed" or not os.path.exists(predictions_path):
+            # Preserve resumable work when a benchmark failed before it could
+            # persist its canonical predictions artifact.
             continue
         try:
             os.remove(os.path.join(root, "case-checkpoint.jsonl"))
@@ -2461,7 +2575,7 @@ def _generate_predictions(
         _append_case_checkpoint(checkpoint_path, record)
         predictions.append(record)
         if (
-            spec.benchmark_id == "mmlu_pro_reference_v1"
+            spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
             and record.get("direct_answer_protocol_recovery", {}).get("status") == "failed"
         ):
             # One failed, model-specific protocol canary is sufficient to
@@ -2945,11 +3059,11 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                 case_results.append(
                     {
                         "case_id": case_id,
-                        "state": "failed",
+                        "state": "scored",
                         "error_class": "malformed_output",
                         "passed_constraints": 0,
                         "total_constraints": len(checks),
-                        "score": None,
+                        "score": 0.0,
                     }
                 )
                 continue
@@ -2984,7 +3098,15 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
     score = round(passed_constraints / float(total_constraints), 6) if total_constraints else None
     malformed_output_count = len([item for item in case_results if item.get("error_class") == "malformed_output"])
     correct_count = len([item for item in case_results if item.get("score") == 1.0])
-    status = "partial" if malformed_output_count and spec.benchmark_id != "assistant_compositional_instruction_v2" else "completed"
+    # A completed response that violates a deterministic output contract is a
+    # model-output miss, not absent evidence. Its constraints are already in the
+    # denominator and score zero above. Transport/generation failures remain
+    # unscored and can still make the enclosing execution partial.
+    scored_malformed_output = spec.benchmark_id in {
+        "assistant_compositional_instruction_v2",
+        "coding_static_repair_v1",
+    }
+    status = "partial" if malformed_output_count and not scored_malformed_output else "completed"
     metrics = {
         spec.primary_metric_name: score,
         "passed_constraints": passed_constraints,

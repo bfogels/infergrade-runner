@@ -220,6 +220,22 @@
             "decode_tokens_per_second_p95": { "type": ["number", "null"], "minimum": 0 },
             "total_elapsed_seconds": { "type": ["number", "null"], "minimum": 0 },
             "total_output_tokens": { "type": ["integer", "null"], "minimum": 0 },
+            "phase_timings": {
+              "type": "object",
+              "required": ["timing_version", "benchmarks", "fixture_preparation_seconds", "generation_seconds", "scoring_seconds", "total_wall_seconds"],
+              "properties": {
+                "timing_version": { "const": "capability_phase_timing_v1" },
+                "benchmarks": {
+                  "type": "object",
+                  "additionalProperties": { "$ref": "#/$defs/benchmarkPhaseTiming" }
+                },
+                "fixture_preparation_seconds": { "type": "number", "minimum": 0 },
+                "generation_seconds": { "type": "number", "minimum": 0 },
+                "scoring_seconds": { "type": "number", "minimum": 0 },
+                "total_wall_seconds": { "type": "number", "minimum": 0 }
+              },
+              "additionalProperties": false
+            },
             "measurement_sources": { "type": "array", "items": { "type": "string" } },
             "aggregation_method": { "type": "string" },
             "measurement_status": { "enum": ["measured", "not_reported_by_backend"] }
@@ -316,6 +332,18 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "benchmarkPhaseTiming": {
+      "type": "object",
+      "required": ["timing_version", "fixture_preparation_seconds", "generation_seconds", "scoring_seconds", "total_wall_seconds"],
+      "properties": {
+        "timing_version": { "const": "benchmark_phase_timing_v1" },
+        "fixture_preparation_seconds": { "type": ["number", "null"], "minimum": 0 },
+        "generation_seconds": { "type": ["number", "null"], "minimum": 0 },
+        "scoring_seconds": { "type": ["number", "null"], "minimum": 0 },
+        "total_wall_seconds": { "type": ["number", "null"], "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
     "memoryComponent": {
       "type": "object",
       "required": ["estimate_bytes", "lower_bound_bytes", "upper_bound_bytes", "source", "residency_group", "memory_domain", "offload_semantics"],

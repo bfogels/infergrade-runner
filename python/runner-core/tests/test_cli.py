@@ -332,6 +332,30 @@ class CliTests(unittest.TestCase):
         )
         self.assertIn('"stored": true', output.getvalue())
 
+    def test_standalone_run_upload_intent_stops_before_compute(self):
+        with mock.patch("infergrade.cli.run_infergrade") as run_mock:
+            with self.assertRaises(SystemExit) as caught:
+                main(
+                    [
+                        "--all",
+                        "run",
+                        "--model",
+                        "Qwen/Qwen3.5-4B",
+                        "--backend",
+                        "llama.cpp",
+                        "--tier",
+                        "canary",
+                        "--upload",
+                    ]
+                )
+
+        run_mock.assert_not_called()
+        message = str(caught.exception)
+        self.assertIn("no benchmark was started", message)
+        self.assertIn("Hub Build", message)
+        self.assertIn("infergrade start", message)
+        self.assertIn("upload-bundle", message)
+
     def test_cache_prune_partials_command_supports_dry_run(self):
         output = io.StringIO()
         with mock.patch(

@@ -8,10 +8,15 @@ from typing import Any, Callable, Dict, List, Optional
 from infergrade import __version__
 from infergrade.adapters import get_adapter
 from infergrade.artifacts import resolve_quant_artifact
-from infergrade.benchmark_catalog import normalize_request_selection, selection_metadata_for_request
+from infergrade.benchmark_catalog import (
+    capability_benchmark_ids_for_request,
+    normalize_request_selection,
+    selection_metadata_for_request,
+)
 from infergrade.cuda import WINDOWS_CUDA_BINARY_SET, windows_cuda_preflight
 from infergrade.environment import capture_environment
 from infergrade.capabilities import (
+    CAPABILITY_BENCHMARKS,
     attach_quant_fidelity_capability_artifact,
     remove_capability_case_checkpoints,
     summarize_capability_execution,
@@ -52,6 +57,24 @@ from infergrade.validators import validate_bundle, validate_request
 def _bundle_id(request: RunRequest) -> str:
     """Create a time-scoped bundle identifier for a run request."""
     return "qb_%s_%s" % (utcnow_iso().replace("-", "").replace(":", "").replace("T", "_").replace("Z", ""), stable_hash(request_to_dict(request), length=8))
+
+
+def _planned_capability_benchmarks(request: RunRequest) -> List[Dict[str, Any]]:
+    if request.capability == "none":
+        return []
+    planned = []
+    for benchmark_id in capability_benchmark_ids_for_request(request):
+        spec = CAPABILITY_BENCHMARKS.get(benchmark_id)
+        if spec is None:
+            continue
+        planned.append(
+            {
+                "benchmark_id": benchmark_id,
+                "display_name": spec.display_name,
+                "total_cases": spec.case_limits.get(request.tier),
+            }
+        )
+    return planned
 
 
 def _canonical_slice_ids(result: Dict[str, Any], request: RunRequest) -> List[str]:
@@ -612,7 +635,12 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             return _completed_bundle_result(output_dir, bundle_id)
 
     started_at = existing_progress.get("started_at") if existing_progress else utcnow_iso()
-    progress = existing_progress or initialize_progress(bundle_id, request, started_at)
+    progress = existing_progress or initialize_progress(
+        bundle_id,
+        request,
+        started_at,
+        planned_capability_benchmarks=_planned_capability_benchmarks(request),
+    )
     save_progress(output_dir, progress)
 
     current_stage = "initializing"
@@ -639,7 +667,10 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             output_dir,
             progress,
             current_stage,
-            metadata={"resolved": bool(resolved_artifact), "artifact": request.quant_artifact},
+            metadata={
+                "resolved": bool(resolved_artifact),
+                "artifact_cache_hit": resolved_artifact.cache_hit if resolved_artifact else None,
+            },
         )
 
         current_stage = "runtime_lock"

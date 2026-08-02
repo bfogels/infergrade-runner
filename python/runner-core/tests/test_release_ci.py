@@ -205,6 +205,17 @@ class ReleaseCiTests(unittest.TestCase):
         build_script = (ROOT / "scripts" / "build_release_images.sh").read_text(encoding="utf-8")
         self.assertIn('-t "ghcr.io/bfogels/${name}:${VERSION_TAG}"', build_script)
 
+    def test_full_gate_clears_developer_capability_image_overrides(self):
+        script = (ROOT / "scripts" / "test_all.sh").read_text(encoding="utf-8")
+
+        for variable in (
+            "INFERGRADE_IFEVAL_IMAGE",
+            "INFERGRADE_EVALPLUS_IMAGE",
+            "INFERGRADE_MMLU_PRO_IMAGE",
+            "INFERGRADE_GPQA_IMAGE",
+        ):
+            self.assertIn(variable, script)
+
     def test_release_image_verifier_is_anonymous_and_checks_every_image(self):
         script = (ROOT / "scripts" / "verify_release_images.sh").read_text(encoding="utf-8")
         verifier = (ROOT / "scripts" / "verify_release_images.py").read_text(encoding="utf-8")
@@ -1383,6 +1394,9 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn('"benchmark_check_ids": ["interactive_chat_v1"]', script)
         self.assertIn('validate-bundle "$deterministic_bundle"', script)
         self.assertIn('"manual_acceptance_remaining"', script)
+        self.assertIn('manual-first-success.md', script)
+        self.assertIn('A current-model recommendation opens Run with its Hugging Face reference already populated.', script)
+        self.assertIn('separates capability, time per task, and whole-run time.', script)
         self.assertIn('urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))', script)
         self.assertNotIn('export IG_ACCEPT_DMG_SOURCE="$DMG_SOURCE"', script)
 

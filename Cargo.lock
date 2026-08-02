@@ -1716,7 +1716,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade-runner-cli"
-version = "0.3.48"
+version = "0.3.49"
 dependencies = [
  "infergrade_runner_engine",
  "serde_json",
@@ -1725,7 +1725,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_desktop_runner"
-version = "0.3.48"
+version = "0.3.49"
 dependencies = [
  "infergrade_runner_engine",
  "keyring",
@@ -1741,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_runner_engine"
-version = "0.3.48"
+version = "0.3.49"
 dependencies = [
  "ed25519-dalek",
  "flate2",
@@ -2615,9 +2615,9 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "plist"
-version = "1.9.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "092791278e026273c1b65bbdcfbba3a300f2994c896bd01ab01da613c29c46f1"
+checksum = "7da1d65da6dd5d1e44199ac0f58712d241c0f439f80adea8924d832384087f85"
 dependencies = [
  "base64 0.22.1",
  "indexmap 2.14.0",
@@ -2756,9 +2756,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.39.3"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "721da970c312655cde9b4ffe0547f20a8494866a4af5ff51f18b7c633d0c870b"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
 ]

@@ -343,6 +343,24 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(remove_capability_case_checkpoints(self.tempdir), 1)
         self.assertFalse(os.path.exists(checkpoint_path))
 
+    def test_failed_capability_checkpoint_is_retained_for_resume(self):
+        benchmark_dir = os.path.join(
+            self.tempdir,
+            "artifacts",
+            "capability",
+            "ifeval",
+        )
+        os.makedirs(benchmark_dir)
+        checkpoint_path = os.path.join(benchmark_dir, "case-checkpoint.jsonl")
+        with open(checkpoint_path, "w", encoding="utf-8") as handle:
+            handle.write('{"record_type":"header"}\n')
+            handle.write('{"record_type":"prediction"}\n')
+        with open(os.path.join(benchmark_dir, "summary.json"), "w", encoding="utf-8") as handle:
+            json.dump({"benchmark_id": "ifeval", "status": "failed"}, handle)
+
+        self.assertEqual(remove_capability_case_checkpoints(self.tempdir), 0)
+        self.assertTrue(os.path.exists(checkpoint_path))
+
     def test_resume_rejects_mismatched_capability_checkpoint(self):
         request = RunRequest(
             model="Qwen/Qwen3-8B",
@@ -1004,15 +1022,21 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["generation_failure_severity"], "partial")
         self.assertEqual(result["metrics"]["malformed_output_count"], 1)
+        self.assertEqual(result["primary_metric"]["value"], 0.333333)
         capability_run_path = execution.artifacts["coding_static_repair_v1"]["capability_run_path"]
         with open(capability_run_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)
         self.assertEqual(artifact["summary"]["state"], "partial")
         self.assertEqual(
             {task["error_class"] for task in artifact["tasks"] if task["state"] == "failed"},
-            {"malformed_output", "generation_failed"},
+            {"generation_failed"},
         )
         self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored", "failed"})
+        malformed_task = next(
+            task for task in artifact["tasks"] if task.get("error_class") == "malformed_output"
+        )
+        self.assertEqual(malformed_task["state"], "scored")
+        self.assertEqual(malformed_task["score"], 0.0)
         self.assertIn("partial generation or malformed-output failures", artifact["claim_boundary"]["supported_claims"][0])
         self.assertNotIn("completed the pinned coding", " ".join(artifact["claim_boundary"]["supported_claims"]))
 
@@ -1043,11 +1067,24 @@ class CapabilityTests(unittest.TestCase):
 
         execution = execute_capability_suite(_ProseOnlyCodingAdapter(), request)
 
-        self.assertEqual(execution.status, "partial")
-        case_results = execution.benchmark_results["coding_static_repair_v1"]["case_results"]
+        self.assertEqual(execution.status, "completed")
+        result = execution.benchmark_results["coding_static_repair_v1"]
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(execution.component_scores["coding_static_repair_v1"], 0.666667)
+        self.assertEqual(result["metrics"]["malformed_output_count"], 1)
+        case_results = result["case_results"]
         clamp_result = next(item for item in case_results if item["case_id"] == "coding-static-clamp-score")
-        self.assertEqual(clamp_result["state"], "failed")
+        self.assertEqual(clamp_result["state"], "scored")
         self.assertEqual(clamp_result["error_class"], "malformed_output")
+        self.assertEqual(clamp_result["score"], 0.0)
+        capability_run_path = execution.artifacts["coding_static_repair_v1"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        malformed_task = next(
+            task for task in artifact["tasks"] if task.get("error_class") == "malformed_output"
+        )
+        self.assertEqual(malformed_task["state"], "scored")
+        self.assertEqual(malformed_task["score"], 0.0)
 
     def test_native_coding_static_rejects_unclosed_python_fence(self):
         class _UnclosedFenceCodingAdapter(object):
@@ -1079,11 +1116,12 @@ class CapabilityTests(unittest.TestCase):
 
         execution = execute_capability_suite(_UnclosedFenceCodingAdapter(), request)
 
-        self.assertEqual(execution.status, "partial")
+        self.assertEqual(execution.status, "completed")
         case_results = execution.benchmark_results["coding_static_repair_v1"]["case_results"]
         clamp_result = next(item for item in case_results if item["case_id"] == "coding-static-clamp-score")
-        self.assertEqual(clamp_result["state"], "failed")
+        self.assertEqual(clamp_result["state"], "scored")
         self.assertEqual(clamp_result["error_class"], "malformed_output")
+        self.assertEqual(clamp_result["score"], 0.0)
 
     def test_native_coding_static_rejects_multiple_python_fences(self):
         class _MultipleFenceCodingAdapter(object):
@@ -1119,11 +1157,12 @@ class CapabilityTests(unittest.TestCase):
 
         execution = execute_capability_suite(_MultipleFenceCodingAdapter(), request)
 
-        self.assertEqual(execution.status, "partial")
+        self.assertEqual(execution.status, "completed")
         case_results = execution.benchmark_results["coding_static_repair_v1"]["case_results"]
         clamp_result = next(item for item in case_results if item["case_id"] == "coding-static-clamp-score")
-        self.assertEqual(clamp_result["state"], "failed")
+        self.assertEqual(clamp_result["state"], "scored")
         self.assertEqual(clamp_result["error_class"], "malformed_output")
+        self.assertEqual(clamp_result["score"], 0.0)
 
     def test_execute_native_reasoning_exact_answer_scores_without_docker(self):
         request = RunRequest(
@@ -1804,6 +1843,40 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(len(predictions), 1)
         self.assertEqual(predictions[0]["direct_answer_protocol_recovery"]["status"], "failed")
 
+    @mock.patch("infergrade.gguf.infer_llama_cpp_architecture", return_value="gemma4")
+    def test_gpqa_protocol_canary_fails_fast_when_recovery_cannot_emit_answer(self, _architecture_mock):
+        adapter = mock.Mock()
+        adapter.generate_text.return_value = {
+            "text": "<|channel|>analysis only",
+            "status": "completed",
+            "output_tokens": 64,
+            "token_budget_exhausted": True,
+        }
+        request = RunRequest(
+            model="google/gemma-4-12b",
+            backend="llama.cpp",
+            tier="standard",
+            use_case="reasoning",
+            benchmark_check_ids=["gpqa_diamond_reference_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        cases = [
+            {"case_id": "gpqa/1", "task_id": "gpqa/1", "prompt": "Question one"},
+            {"case_id": "gpqa/2", "task_id": "gpqa/2", "prompt": "Question two"},
+        ]
+
+        predictions = _generate_predictions(
+            adapter,
+            request,
+            CAPABILITY_BENCHMARKS["gpqa_diamond_reference_v1"],
+            cases,
+        )
+
+        self.assertEqual(adapter.generate_text.call_count, 2)
+        self.assertEqual(len(predictions), 1)
+        self.assertEqual(predictions[0]["direct_answer_protocol_recovery"]["status"], "failed")
+
     def test_mmlu_dominant_malformed_output_is_quarantined_from_capability_score(self):
         def fake_prepare(spec, benchmark_dir, tier):
             cases = [
@@ -1878,6 +1951,20 @@ class CapabilityTests(unittest.TestCase):
                     execution = execute_capability_suite(adapter, request)
 
         result = execution.benchmark_results["mmlu_pro_reference_v1"]
+        self.assertEqual(result["phase_timings"]["timing_version"], "benchmark_phase_timing_v1")
+        self.assertGreaterEqual(result["phase_timings"]["total_wall_seconds"], 0.0)
+        self.assertEqual(
+            execution.task_performance["phase_timings"]["timing_version"],
+            "capability_phase_timing_v1",
+        )
+        aggregate_timing = execution.task_performance["phase_timings"]
+        self.assertEqual(aggregate_timing["total_wall_seconds"], result["phase_timings"]["total_wall_seconds"])
+        self.assertLessEqual(
+            sum(result["phase_timings"][key] for key in (
+                "fixture_preparation_seconds", "generation_seconds", "scoring_seconds"
+            )),
+            result["phase_timings"]["total_wall_seconds"] + 0.001,
+        )
         self.assertEqual(execution.status, "not_comparable")
         self.assertNotIn("mmlu_pro_reference_v1", execution.component_scores)
         self.assertIsNone(result["primary_metric"]["value"])
@@ -1921,6 +2008,74 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(gate["status"], "passed")
         self.assertEqual(gate["malformed_output_rate"], 0.5)
         self.assertEqual(gate["strict_primary_metric"]["value"], 0.5)
+
+    def test_mmlu_large_response_distribution_collapse_is_quarantined(self):
+        spec = CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"]
+        case_results = [
+            {
+                "expected": chr(ord("A") + (index % 10)),
+                "predicted": "A" if index < 50 else "B",
+            }
+            for index in range(60)
+        ]
+        summary = {
+            "primary_metric": {"name": "accuracy", "value": 0.1},
+            "metrics": {"total_count": 60, "invalid_count": 0},
+            "case_results": case_results,
+        }
+
+        from infergrade.capabilities import _multiple_choice_output_shape_gate
+
+        gate = _multiple_choice_output_shape_gate(spec, [], summary)
+
+        self.assertEqual(gate["status"], "blocked")
+        self.assertEqual(gate["policy_id"], "multiple_choice_output_shape_gate_v2")
+        self.assertIn("response_distribution_collapse", gate["reason_codes"])
+        self.assertEqual(gate["valid_answer_count"], 60)
+        self.assertEqual(gate["predicted_label_counts"], {"A": 50, "B": 10})
+        self.assertEqual(gate["predicted_top_label_rate"], 0.833333)
+        self.assertEqual(gate["expected_top_label_rate"], 0.1)
+
+    def test_mmlu_small_response_distribution_canary_is_not_quarantined(self):
+        spec = CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"]
+        case_results = [
+            {
+                "expected": chr(ord("A") + (index % 10)),
+                "predicted": "A",
+            }
+            for index in range(40)
+        ]
+        summary = {
+            "primary_metric": {"name": "accuracy", "value": 0.1},
+            "metrics": {"total_count": 40, "invalid_count": 0},
+            "case_results": case_results,
+        }
+
+        from infergrade.capabilities import _multiple_choice_output_shape_gate
+
+        gate = _multiple_choice_output_shape_gate(spec, [], summary)
+
+        self.assertEqual(gate["status"], "passed")
+        self.assertNotIn("response_distribution_collapse", gate["reason_codes"])
+        self.assertEqual(gate["valid_answer_count"], 40)
+
+    def test_mmlu_concentrated_reference_distribution_is_not_quarantined(self):
+        spec = CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"]
+        case_results = [{"expected": "A", "predicted": "A"} for _index in range(60)]
+        summary = {
+            "primary_metric": {"name": "accuracy", "value": 1.0},
+            "metrics": {"total_count": 60, "invalid_count": 0},
+            "case_results": case_results,
+        }
+
+        from infergrade.capabilities import _multiple_choice_output_shape_gate
+
+        gate = _multiple_choice_output_shape_gate(spec, [], summary)
+
+        self.assertEqual(gate["status"], "passed")
+        self.assertNotIn("response_distribution_collapse", gate["reason_codes"])
+        self.assertEqual(gate["expected_label_counts"], {"A": 60})
+        self.assertEqual(gate["expected_top_label_rate"], 1.0)
 
     def test_mmlu_pro_artifact_distinguishes_wrong_malformed_and_generation_failed_tasks(self):
         def fake_prepare(spec, benchmark_dir, tier):
@@ -2064,6 +2219,11 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(execution.score_details["observed_weighted_score"], 0.5)
         self.assertIn("insufficient_scored_components", execution.score_details["failed_gates"])
         self.assertEqual(execution.benchmark_results["evalplus_mbpp"]["status"], "failed")
+        failed_timing = execution.benchmark_results["evalplus_mbpp"]["phase_timings"]
+        self.assertIsNotNone(failed_timing["fixture_preparation_seconds"])
+        self.assertIsNotNone(failed_timing["generation_seconds"])
+        self.assertIsNone(failed_timing["scoring_seconds"])
+        self.assertGreaterEqual(failed_timing["total_wall_seconds"], failed_timing["generation_seconds"])
 
     def test_summarize_capability_execution_reports_state_and_coverage(self):
         request = RunRequest(
@@ -2397,6 +2557,11 @@ class CapabilityTests(unittest.TestCase):
         with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
             execution = execute_capability_suite(_FakeAdapter(), request)
 
+        timing = execution.benchmark_results["ifeval"]["phase_timings"]
+        self.assertIsNone(timing["fixture_preparation_seconds"])
+        self.assertIsNone(timing["generation_seconds"])
+        self.assertIsNone(timing["scoring_seconds"])
+        self.assertGreaterEqual(timing["total_wall_seconds"], 0.0)
         summary_path = execution.artifacts["ifeval"]["summary_path"]
         self.assertTrue(os.path.exists(summary_path))
         capability_summary_path = execution.artifacts["_summary"]["capability_summary_path"]

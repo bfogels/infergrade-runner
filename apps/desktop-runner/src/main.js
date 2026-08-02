@@ -1482,6 +1482,27 @@ function renderAssignmentFromFirstRunEvent(payload = {}) {
   }
 }
 
+function assignmentTimingSummary(timing = {}) {
+  if (timing?.timing_version !== "run_lifecycle_timing_v1") {
+    return "";
+  }
+  const phaseLabels = {
+    preflight: "Checking this machine",
+    artifact: "Preparing model",
+    runtime_model: "Loading runtime and model",
+    capability: "Running capability tasks",
+    deployment: "Measuring local speed",
+    finalization: "Building result bundle",
+    upload: "Publishing result",
+  };
+  const phaseId = String(timing.current_phase || "");
+  const elapsed = Number(timing?.phases?.[phaseId]?.elapsed_seconds);
+  const elapsedCopy = Number.isFinite(elapsed) && elapsed >= 1
+    ? ` · ${elapsed < 60 ? `${Math.round(elapsed)}s` : `${Math.round(elapsed / 60)}m`} elapsed`
+    : "";
+  return `${phaseLabels[phaseId] || "Benchmark in progress"}${elapsedCopy}`;
+}
+
 function renderAssignmentFromListenerEvent(payload = {}) {
   if (payload.type === "assignment_idle") {
     currentFirstRunUploadRunId() ? renderAssignmentFromHandoff() : renderAssignmentIdle();
@@ -1502,7 +1523,7 @@ function renderAssignmentFromListenerEvent(payload = {}) {
     description: redactSecrets(recovery?.description || payload.description || "Runner is processing Hub-assigned work."),
     progress: Number.isFinite(payload.progress) ? payload.progress : phase === "Complete" ? 100 : 32,
     checkName: redactSecrets(recovery?.checkName || payload.check_name || payload.checkName || payload.stage || ""),
-    remaining: redactSecrets(payload.remaining || ""),
+    remaining: redactSecrets(payload.remaining || assignmentTimingSummary(payload.lifecycle_timing)),
     runId,
   });
   if (phase === "Needs attention") {

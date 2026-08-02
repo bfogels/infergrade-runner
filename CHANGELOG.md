@@ -7,6 +7,37 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.49 (contract 0.3.29)
+
+- Records fixture preparation, model generation, scorer execution, and total
+  wall time per capability benchmark so Hub can calibrate duration without
+  changing canonical serial generation.
+- Records bounded seven-phase whole-run timing, retry history, and failed-phase
+  state so Hub can show truthful progress, compare plans with observed runs,
+  and route recovery to the phase that failed.
+- Keeps long capability runs responsive with work-unit progress while
+  preserving canonical serial generation and score comparability.
+- Rejects standalone upload requests that cannot be completed with the granted
+  run authority instead of accepting a run that can never publish.
+- Applies the same failed direct-answer recovery stop to GPQA as MMLU-Pro,
+  avoiding wasted follow-on cases after a model cannot emit a valid answer.
+- Quarantines large multiple-choice runs when valid answers collapse onto one
+  label despite a diverse reference distribution, preventing protocol failures
+  from becoming misleadingly low reasoning scores.
+- Routes Qwen3 deterministic direct-answer benchmarks through the native
+  llama.cpp chat template, preventing raw-completion control tokens from
+  corrupting capability answers.
+- Makes the Runner-owned coding default include every score-weighted coding
+  check, preventing a completed default run from silently covering only part of
+  the local coding score profile.
+- Scores malformed static-repair completions as wrong instead of silently
+  preserving fractional credit from an invalid output shape.
+- Adds a packaged clean-profile first-success acceptance path and keeps repeated
+  idle-listener outage messaging concise for Desktop users.
+- Makes the full release gate ignore ambient developer capability-image
+  overrides so protocol identity tests always exercise version-matched release
+  defaults.
+
 ## 0.3.47 (contract 0.3.27)
 
 - Routes Ministral 3 deterministic direct-answer benchmarks through native

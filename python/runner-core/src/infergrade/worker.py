@@ -11,7 +11,7 @@ from infergrade import __version__
 from infergrade.doctor import collect_runner_diagnostics, run_doctor
 from infergrade.pairing import load_runner_profile
 from infergrade.paths import resolve_worker_output_dir
-from infergrade.progress import load_progress
+from infergrade.progress import lifecycle_timing_snapshot, load_progress
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.runner import run_infergrade
 from infergrade.transport import (
@@ -28,6 +28,7 @@ from infergrade.transport import (
 
 DESKTOP_EVENT_ENV = "INFERGRADE_DESKTOP_EVENTS"
 DESKTOP_EVENT_PREFIX = "INFERGRADE_DESKTOP_EVENT "
+_PROGRESS_HEARTBEAT_INTERVAL_SECONDS = 10.0
 _DESKTOP_EVENT_SENSITIVE_KEY_MARKERS = (
     "access_token",
     "api_token",
@@ -128,6 +129,32 @@ def execute_run_job(
         )
 
     doctor_report = None
+    progress_reporting_warning_emitted = False
+    last_hub_progress_at = 0.0
+    last_hub_progress_key = None
+    worker_started_monotonic = time.perf_counter()
+    request = None
+    preflight_seconds = None
+    preflight_status = None
+    upload_seconds = None
+    upload_status = None
+
+    def _lifecycle_timing() -> Optional[Dict[str, Any]]:
+        output_dir = getattr(request, "output_dir", None)
+        if not output_dir:
+            return None
+        progress_payload = load_progress(output_dir) or {}
+        if not progress_payload and preflight_seconds is None:
+            return None
+        return lifecycle_timing_snapshot(
+            progress_payload,
+            preflight_seconds=preflight_seconds,
+            preflight_status=preflight_status,
+            upload_seconds=upload_seconds,
+            upload_status=upload_status,
+            worker_wall_seconds=time.perf_counter() - worker_started_monotonic,
+        )
+
     try:
         _emit_desktop_event(
             emit_progress,
@@ -174,9 +201,19 @@ def execute_run_job(
             progress=12,
             check_name="Local preflight",
         )
-        doctor_report = run_doctor(request=request, api_url=api_url)
+        preflight_started_monotonic = time.perf_counter()
+        preflight_status = "running"
+        try:
+            doctor_report = run_doctor(request=request, api_url=api_url)
+        except Exception:
+            preflight_status = "failed"
+            raise
+        finally:
+            preflight_seconds = time.perf_counter() - preflight_started_monotonic
         if not doctor_report.get("ok"):
+            preflight_status = "failed"
             raise RuntimeError(_doctor_failure_message(doctor_report))
+        preflight_status = "completed"
         heartbeat_run_job(
             api_url,
             run_id,
@@ -199,32 +236,78 @@ def execute_run_job(
         )
 
         def _emit(message: str) -> None:
+            nonlocal last_hub_progress_at, last_hub_progress_key, progress_reporting_warning_emitted
+            reporting_failed = False
+
             if emit_progress:
-                emit_progress(message)
-            _runner_heartbeat("busy", current_run_id=run_id, message=message)
-            stage, detail, desktop_detail, progress_percent = _runtime_progress_update(request.output_dir)
-            _emit_desktop_event(
-                emit_progress,
-                "assignment_update",
-                phase="Running",
-                run_id=run_id,
-                description="Runner is executing Hub-assigned work.",
-                progress=progress_percent,
-                check_name=desktop_detail or detail or stage or message,
+                try:
+                    emit_progress(message)
+                except Exception:
+                    reporting_failed = True
+            try:
+                stage, detail, desktop_detail, progress_percent = _runtime_progress_update(request.output_dir)
+            except Exception:
+                reporting_failed = True
+                stage, detail, desktop_detail, progress_percent = None, None, None, None
+            try:
+                _emit_desktop_event(
+                    emit_progress,
+                    "assignment_update",
+                    phase="Running",
+                    run_id=run_id,
+                    description="Runner is executing Hub-assigned work.",
+                    progress=progress_percent,
+                    check_name=desktop_detail or detail or stage or message,
+                    lifecycle_timing=_lifecycle_timing(),
+                )
+            except Exception:
+                reporting_failed = True
+
+            now = time.monotonic()
+            progress_key = (stage, detail)
+            lifecycle_message = any(
+                token in str(message or "").lower()
+                for token in (" started", " completed", " failed", "writing bundle")
             )
-            heartbeat_run_job(
-                api_url,
-                run_id,
-                worker_id,
-                stage=stage,
-                detail=detail,
-                message=message,
-                progress_percent=progress_percent,
-                api_token=api_token,
-                run_token=run_token,
+            should_report_to_hub = (
+                progress_key != last_hub_progress_key
+                or now - last_hub_progress_at >= _PROGRESS_HEARTBEAT_INTERVAL_SECONDS
+                or lifecycle_message
             )
+            if should_report_to_hub:
+                try:
+                    _runner_heartbeat("busy", current_run_id=run_id, message=message)
+                except Exception:
+                    reporting_failed = True
+                try:
+                    heartbeat_run_job(
+                        api_url,
+                        run_id,
+                        worker_id,
+                        stage=stage,
+                        detail=detail,
+                        message=message,
+                        progress_percent=progress_percent,
+                        lifecycle_timing=_lifecycle_timing(),
+                        api_token=api_token,
+                        run_token=run_token,
+                    )
+                except Exception:
+                    reporting_failed = True
+                last_hub_progress_at = now
+                last_hub_progress_key = progress_key
+
+            # Hub heartbeats and Desktop event delivery are observability side
+            # channels. A transient failure must never invalidate benchmark work.
+            if reporting_failed and emit_progress and not progress_reporting_warning_emitted:
+                progress_reporting_warning_emitted = True
+                try:
+                    emit_progress("Progress reporting is temporarily unavailable; benchmark execution continues.")
+                except Exception:
+                    pass
 
         result = run_infergrade(request, emit_progress=_emit)
+        upload_status = "running"
         _emit_desktop_event(
             emit_progress,
             "assignment_update",
@@ -233,15 +316,35 @@ def execute_run_job(
             description="Execution finished. Uploading the result bundle to Hub.",
             progress=95,
             check_name="Upload result bundle",
+            lifecycle_timing=_lifecycle_timing(),
         )
-        heartbeat_run_job(api_url, run_id, worker_id, stage="upload", message="Uploading completed bundle.", progress_percent=95.0, api_token=api_token, run_token=run_token)
-        upload = upload_run_bundle(result["output_dir"], api_url, run_id=run_id, run_token=run_token, api_token=api_token)
+        heartbeat_run_job(
+            api_url,
+            run_id,
+            worker_id,
+            stage="upload",
+            message="Uploading completed bundle.",
+            progress_percent=95.0,
+            lifecycle_timing=_lifecycle_timing(),
+            api_token=api_token,
+            run_token=run_token,
+        )
+        upload_started_monotonic = time.perf_counter()
+        try:
+            upload = upload_run_bundle(result["output_dir"], api_url, run_id=run_id, run_token=run_token, api_token=api_token)
+        except Exception:
+            upload_status = "failed"
+            raise
+        finally:
+            upload_seconds = time.perf_counter() - upload_started_monotonic
+        upload_status = "completed"
         completed = complete_run_job(
             api_url,
             run_id,
             worker_id,
             bundle_id=result["bundle_id"],
             upload=upload,
+            lifecycle_timing=_lifecycle_timing(),
             api_token=api_token,
             run_token=run_token,
         )
@@ -252,6 +355,7 @@ def execute_run_job(
             run_id=run_id,
             description="Hub-assigned work completed and uploaded.",
             progress=100,
+            lifecycle_timing=_lifecycle_timing(),
             check_name=result.get("bundle_id"),
         )
         _runner_heartbeat("listening", current_run_id=None, message="Runner is listening for the next run.")
@@ -274,6 +378,9 @@ def execute_run_job(
             ],
             "details": {"interruption": "keyboard_interrupt"},
         }
+        lifecycle_timing = _lifecycle_timing()
+        if lifecycle_timing:
+            failure["details"]["lifecycle_timing"] = lifecycle_timing
         try:
             fail_run_job(
                 api_url,
@@ -302,6 +409,9 @@ def execute_run_job(
         raise
     except Exception as exc:
         failure = _classify_worker_failure(exc, doctor_report=doctor_report)
+        lifecycle_timing = _lifecycle_timing()
+        if lifecycle_timing:
+            failure.setdefault("details", {})["lifecycle_timing"] = lifecycle_timing
         try:
             fail_run_job(
                 api_url,
@@ -461,6 +571,7 @@ def run_worker_loop(
     processed = 0
     completed = 0
     failed = 0
+    last_claim_error_summary: Optional[str] = None
     if emit_progress:
         emit_progress("✓ Runner connected · waiting for benchmarks from InferGrade Hub.")
     while True:
@@ -486,8 +597,10 @@ def run_worker_loop(
         except RunnerTokenInvalidError:
             raise
         except Exception as exc:
-            if emit_progress:
-                emit_progress("Claim failed: %s Retrying." % exc)
+            error_summary = _listener_error_summary(exc)
+            if emit_progress and error_summary != last_claim_error_summary:
+                emit_progress("Hub connection interrupted: %s Retrying quietly." % error_summary)
+            last_claim_error_summary = error_summary
             _safe_runner_heartbeat(
                 api_url,
                 runner_id=resolved_worker_id,
@@ -496,14 +609,18 @@ def run_worker_loop(
                 hostname=hostname or socket.gethostname(),
                 provider_id=provider_id,
                 instance_type_id=instance_type_id,
-                metadata={"message": "Last claim failed: %s" % exc},
+                metadata={"message": "Last claim failed: %s" % error_summary},
                 environment=runner_snapshot.get("environment"),
                 contract=runner_snapshot.get("contract"),
                 diagnostics=runner_snapshot.get("diagnostics"),
-                emit_progress=emit_progress,
+                emit_progress=None,
             )
             time.sleep(max(poll_interval_seconds, 0.1))
             continue
+        if last_claim_error_summary is not None:
+            if emit_progress:
+                emit_progress("✓ Hub connection restored.")
+            last_claim_error_summary = None
         if not result.get("claimed"):
             _safe_runner_heartbeat(
                 api_url,
@@ -532,6 +649,25 @@ def run_worker_loop(
         "completed_jobs": completed,
         "failed_jobs": failed,
     }
+
+
+def _listener_error_summary(exc: Exception) -> str:
+    """Turn transport failures into one bounded, human-readable listener status."""
+    raw = str(exc or "").strip()
+    html_status = re.search(r"<title>\s*(\d{3})\s*</title>", raw, flags=re.IGNORECASE)
+    if html_status:
+        return "Hub returned HTTP %s." % html_status.group(1)
+    http_status = re.search(r"\bHTTP(?:\s+Error)?\s*:?\s*(\d{3})\b", raw, flags=re.IGNORECASE)
+    if http_status:
+        return "Hub returned HTTP %s." % http_status.group(1)
+    summary = re.sub(r"\s+", " ", _redact_desktop_event_text(raw)).strip()
+    if not summary:
+        return "Hub is temporarily unavailable."
+    if len(summary) > 180:
+        summary = summary[:177].rstrip() + "..."
+    if summary[-1] not in ".!?":
+        summary += "."
+    return summary
 
 
 def _safe_runner_heartbeat(api_url: str, emit_progress: Optional[Callable[[str], None]] = None, **kwargs: Any) -> bool:
@@ -828,22 +964,19 @@ def _progress_percent(payload: Dict[str, Any]) -> Optional[float]:
         capability_benchmarks = payload.get("capability_benchmarks") or {}
         if not capability_benchmarks:
             return 52.0
-        total_benchmarks = max(len(capability_benchmarks), 1)
         span = 12.0
-        progress = 48.0
-        completed_benchmarks = len(
-            [item for item in capability_benchmarks.values() if item.get("status") == "completed"]
-        )
-        progress += (span * completed_benchmarks) / float(total_benchmarks)
-        running_benchmarks = [item for item in capability_benchmarks.values() if item.get("status") == "running"]
-        if running_benchmarks:
-            running = running_benchmarks[0]
-            total_cases = running.get("total_cases") or 0
-            completed_cases = running.get("completed_cases") or 0
-            if total_cases:
-                progress += (span / float(total_benchmarks)) * min(completed_cases / float(total_cases), 0.98)
-            else:
-                progress += min(span / float(total_benchmarks) * 0.15, 2.0)
+        terminal_statuses = {"completed", "partial", "degraded", "failed", "not_comparable", "skipped"}
+        total_work = 0.0
+        completed_work = 0.0
+        for benchmark in capability_benchmarks.values():
+            benchmark_work = float(benchmark.get("total_cases") or 1)
+            total_work += benchmark_work
+            if benchmark.get("status") in terminal_statuses:
+                completed_work += benchmark_work
+            elif benchmark.get("status") == "running":
+                completed_cases = float(benchmark.get("completed_cases") or 0)
+                completed_work += min(max(completed_cases, 0.0), benchmark_work)
+        progress = 48.0 + (span * completed_work / max(total_work, 1.0))
         return round(min(progress, 60.0), 1)
     if stage in stage_defaults:
         return stage_defaults[stage]
