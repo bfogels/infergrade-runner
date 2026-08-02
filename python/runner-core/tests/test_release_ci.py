@@ -375,6 +375,7 @@ class ReleaseCiTests(unittest.TestCase):
             for path in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
         )
         reviewed_actions = {
+            "actions/cache": ("55cc8345863c7cc4c66a329aec7e433d2d1c52a9", "v6.1.0"),
             "actions/checkout": ("3d3c42e5aac5ba805825da76410c181273ba90b1", "v7.0.1"),
             "actions/setup-node": ("820762786026740c76f36085b0efc47a31fe5020", "v7.0.0"),
             "actions/setup-python": ("5fda3b95a4ea91299a34e894583c3862153e4b97", "v7.0.0"),
