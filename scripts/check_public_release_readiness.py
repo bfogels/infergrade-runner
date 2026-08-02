@@ -56,6 +56,10 @@ SKIPPED_DIRS = {
     "target",
 }
 
+SKIPPED_GENERATED_PATHS = {
+    "apps/desktop-runner/src-tauri/desktop-python",
+}
+
 
 @dataclass(frozen=True)
 class CheckResult:
@@ -155,8 +159,14 @@ def check_untrusted_workflow_triggers(root: Path) -> CheckResult:
 def check_secret_filenames(root: Path) -> CheckResult:
     findings: list[str] = []
     for current_root, dirnames, filenames in os.walk(root):
-        dirnames[:] = [name for name in dirnames if name not in SKIPPED_DIRS]
         current_path = Path(current_root)
+        kept_dirs = []
+        for name in dirnames:
+            candidate = current_path / name
+            relative = candidate.relative_to(root).as_posix()
+            if name not in SKIPPED_DIRS and relative not in SKIPPED_GENERATED_PATHS:
+                kept_dirs.append(name)
+        dirnames[:] = kept_dirs
         for filename in filenames:
             relative = str((current_path / filename).relative_to(root))
             normalized = relative.replace(os.sep, "/")
