@@ -1488,8 +1488,18 @@ pub fn verify_runtime_download_manifest(entry: &Value) -> Result<(), String> {
             .iter()
             .any(|item| item.as_str().map(|value| value == name).unwrap_or(false))
     };
-    if !has_binary("llama-cli") || !has_binary("llama-server") {
-        return Err("expected_binaries must include llama-cli and llama-server".to_string());
+    let cli_name = entry
+        .pointer("/binary_names/cli")
+        .and_then(Value::as_str)
+        .unwrap_or("llama-cli");
+    let server_name = entry
+        .pointer("/binary_names/server")
+        .and_then(Value::as_str)
+        .unwrap_or("llama-server");
+    if !has_binary(cli_name) || !has_binary(server_name) {
+        return Err(format!(
+            "expected_binaries must include declared cli `{cli_name}` and server `{server_name}`"
+        ));
     }
     Ok(())
 }
@@ -3072,6 +3082,15 @@ mod tests {
             "rollback_runtime_id": "llama-cpp-homebrew-stable-2026-04",
         });
         assert!(verify_runtime_download_manifest(&valid).is_ok());
+
+        let mut windows = valid.clone();
+        windows["platform"] = json!({"system": "windows", "arch": "x86_64"});
+        windows["expected_binaries"] = json!(["llama-cli.exe", "llama-server.exe"]);
+        windows["binary_names"] = json!({
+            "cli": "llama-cli.exe",
+            "server": "llama-server.exe"
+        });
+        assert!(verify_runtime_download_manifest(&windows).is_ok());
 
         let mut insecure = valid.clone();
         insecure["archive"]["url"] =
