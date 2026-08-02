@@ -80,18 +80,30 @@ complete. Ordinary pushes and documentation promotions do not publish desktop
 artifacts. The workflow:
 
 1. resolves the desktop app version from `VERSION`
-2. refuses a non-`main` dispatch, a version override that differs from the checked-out `VERSION`, or a `vX.Y.Z` tag that does not resolve to the dispatched commit, then anonymously verifies all five matching GHCR image tags before spending signing or build time
-3. builds the source sidecar wrapper for the CI host's Rust target triple
-4. builds the macOS Apple Silicon desktop app
-5. verifies the protected release signing and notarization inputs before building user-downloadable artifacts
-6. signs and notarizes the Tauri updater archive and macOS bundle with the configured release credentials
-7. verifies the app bundle and DMG with `codesign`, Gatekeeper assessment, and stapled notarization-ticket checks
-8. renames the notarized DMG to the stable public asset `InferGrade.Runner.macOS-arm64.dmg`, creates or resumes the draft release for the exact `vX.Y.Z` tag, and uploads the DMG, updater archive, updater signature, updater manifest, and checksums
-9. removes draft assets outside the exact checksummed set, redownloads and verifies the draft, then publishes it as an immutable versioned GitHub release and anonymously probes the updater and installer through GitHub's `releases/latest` redirect
+2. refuses a non-`main` dispatch, a version override that differs from the checked-out `VERSION`, or a `vX.Y.Z` tag that does not resolve to the dispatched commit, then anonymously verifies all matching GHCR image tags before spending signing or build time
+3. builds the platform sidecar and desktop packages independently on macOS, Windows, and Linux hosts
+4. signs and notarizes the macOS Apple Silicon app and updater, then verifies the bundle and DMG with `codesign`, Gatekeeper assessment, and stapled notarization-ticket checks
+5. performs OS-native package acceptance: MSI administrative install plus NSIS install and launch on Windows, and `.deb` install plus AppImage extraction and launch under Xvfb on Linux; both lanes also execute the packaged sidecar self-test
+6. gives the verified packages stable public names and uploads each platform set as a short-lived workflow artifact
+7. waits for every platform job, combines their checksums into one exact release manifest, and creates or resumes the draft release for the exact `vX.Y.Z` tag
+8. removes draft assets outside the exact checksummed set, redownloads and verifies the full draft, then publishes it as an immutable versioned GitHub release and anonymously probes the updater, macOS DMG, Linux `.deb`, and Linux AppImage through GitHub's `releases/latest` redirect
 
 The desktop release deliberately does not fall back to older capability images. Scorer and dataset containers are part of the benchmark protocol identity; publishing an app whose matching tags are missing would either break selected benchmarks or silently change their evidence basis.
 
-The same workflow also runs unsigned Windows and Linux package smoke jobs. Those jobs build NSIS/MSI artifacts on `windows-latest` and AppImage/`.deb` artifacts on `ubuntu-22.04`, write `SHA256SUMS` manifests for the emitted packages, then upload them as GitHub Actions artifacts for maintainer inspection. They are package-readiness gates only; they do not publish to the desktop release tag and they do not replace Windows Authenticode signing, Linux install/launch validation, or platform-specific support notes.
+Linux x86_64 `.deb` and AppImage packages are published only after their install,
+sidecar, and launch smoke passes. Windows MSI and NSIS packages pass the same
+class of hosted-runner smoke but remain short-lived workflow artifacts by
+default because they are not Authenticode signed. A protected dispatch may opt
+into publishing them only under filenames containing
+`UNSIGNED-PREVIEW`; release notes must preserve the SmartScreen warning. Neither
+hosted lane proves CUDA, GPU detection, model execution, Hub upload, or a full
+Windows/NVIDIA contribution loop.
+
+The path-filtered `Desktop Platform Smoke` workflow runs the Windows and Linux
+package acceptance on relevant pull requests, while the normal Rust CI matrix
+compiles and tests Windows-specific code on every pull request. Standard hosted
+runners prove operating-system compatibility and packaging, not accelerator
+support.
 
 The protected GitHub workflow must not fall back to ad-hoc macOS signing or skip notarization. Local developer builds can still use ad-hoc signing, but any DMG published for users must be Developer ID signed, notarized, and verified on a clean macOS machine before external distribution.
 

@@ -318,6 +318,8 @@ class ReleaseCiTests(unittest.TestCase):
     def test_ci_checks_version_sync_before_running_tests(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
+        self.assertIn("os: [ubuntu-latest, macos-latest, windows-latest]", workflow)
+
         self.assertIn("python3 ./scripts/sync_versions.py --check", workflow)
         self.assertIn("python3 ./scripts/check_versions.py", workflow)
         self.assertIn("python3 ./scripts/check_llama_cpp_runtime_policy.py", workflow)
@@ -644,11 +646,11 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn('description: "SemVer desktop app version to publish; defaults to VERSION on main"', workflow)
         self.assertIn('default: ""', workflow)
-        self.assertIn('DESKTOP_VERSION="$(cat VERSION)"', workflow)
+        self.assertIn('desktop_version="$(cat VERSION)"', workflow)
         self.assertNotIn('default: "0.1.', workflow)
         self.assertIn('if [ "$GITHUB_REF" != "refs/heads/main" ]', workflow)
-        self.assertIn('if [ "$DESKTOP_VERSION" != "$(cat VERSION)" ]', workflow)
-        self.assertIn('echo "RELEASE_TAG=v$DESKTOP_VERSION"', workflow)
+        self.assertIn('if [ "$DESKTOP_VERSION" != "$source_version" ]', workflow)
+        self.assertIn('echo "release-tag=v$desktop_version"', workflow)
         self.assertIn("Verify immutable release tag", workflow)
         self.assertIn('if [ "$tag_commit" != "$GITHUB_SHA" ]', workflow)
         self.assertIn("./scripts/build_desktop_runner.sh --check-only", workflow)
@@ -661,7 +663,7 @@ class ReleaseCiTests(unittest.TestCase):
             workflow.index("./scripts/verify_desktop_macos_release.sh"),
         )
         self.assertIn("./scripts/write_desktop_release_checksums.py", workflow)
-        self.assertIn("target/release/bundle/macos/SHA256SUMS", workflow)
+        self.assertIn("target/release/public-macos/SHA256SUMS.macos", workflow)
         self.assertIn("prepare_desktop_release_dmg.py", workflow)
         self.assertIn("InferGrade.Runner.macOS-arm64.dmg", workflow)
         self.assertIn("gh release upload", workflow)
@@ -681,9 +683,13 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("--required-dmg-name \"$PUBLIC_DMG_NAME\"", workflow)
         self.assertIn("--reject-unexpected", workflow)
         self.assertIn("releases/latest/download/infergrade-runner-desktop-latest.json", workflow)
-        self.assertIn("releases/latest/download/${PUBLIC_DMG_NAME}", workflow)
+        self.assertIn("releases/latest/download/$asset_name", workflow)
         self.assertIn("curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2", workflow)
-        self.assertIn('test "$actual_dmg_sha" = "$expected_dmg_sha"', workflow)
+        self.assertIn('test "$actual_sha" = "$expected_sha"', workflow)
+        self.assertIn("needs: [release-metadata, macos-preview, windows-package-smoke, linux-package-smoke]", workflow)
+        self.assertIn("merge-multiple: true", workflow)
+        self.assertLess(workflow.index("Install and launch Windows packages"), workflow.index("Publish immutable versioned desktop release"))
+        self.assertLess(workflow.index("Install and launch Linux packages"), workflow.index("Publish immutable versioned desktop release"))
 
     def test_desktop_release_dmg_gets_stable_url_safe_public_name(self):
         with TemporaryDirectory() as tmp:
@@ -711,25 +717,29 @@ class ReleaseCiTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")
 
         self.assertIn("permissions:\n  contents: read", workflow)
-        self.assertIn("macos-preview:\n    name: Build and publish macOS desktop app\n    runs-on: macos-latest", workflow)
+        self.assertIn("macos-preview:\n    name: Build signed macOS desktop package", workflow)
         self.assertIn("macos-preview:", workflow)
-        self.assertIn("permissions:\n      contents: write", workflow)
+        self.assertIn("publish-release:\n    name: Publish verified cross-platform release", workflow)
         self.assertIn("windows-package-smoke:", workflow)
         self.assertIn("linux-package-smoke:", workflow)
         self.assertIn("runs-on: windows-latest", workflow)
         self.assertIn("runs-on: ubuntu-22.04", workflow)
-        self.assertIn("windows-package-smoke:\n    name: Build Windows desktop packages\n    runs-on: windows-latest", workflow)
-        self.assertIn("linux-package-smoke:\n    name: Build Linux desktop packages\n    runs-on: ubuntu-22.04", workflow)
+        self.assertIn("windows-package-smoke:\n    name: Build and smoke Windows desktop packages", workflow)
+        self.assertIn("linux-package-smoke:\n    name: Build and smoke Linux desktop packages", workflow)
         self.assertIn("npm run build:windows", workflow)
         self.assertIn("npm run build:linux", workflow)
         self.assertIn("libwebkit2gtk-4.1-dev", workflow)
         self.assertIn("libayatana-appindicator3-dev", workflow)
         self.assertIn("actions/upload-artifact@", workflow)
-        self.assertEqual(workflow.count("retention-days: 7"), 2)
+        self.assertEqual(workflow.count("retention-days: 7"), 3)
         self.assertIn("infergrade-runner-desktop-windows-${{ github.sha }}", workflow)
         self.assertIn("infergrade-runner-desktop-linux-${{ github.sha }}", workflow)
-        self.assertIn("target/release/bundle/nsis/*.exe", workflow)
-        self.assertIn("target/release/bundle/msi/*.msi", workflow)
+        self.assertIn("smoke_desktop_windows_packages.ps1", workflow)
+        self.assertIn("smoke_desktop_linux_packages.sh", workflow)
+        self.assertIn("InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe", workflow)
+        self.assertIn("InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi", workflow)
+        self.assertIn("InferGrade.Runner.Linux-x86_64.deb", workflow)
+        self.assertIn("InferGrade.Runner.Linux-x86_64.AppImage", workflow)
         self.assertIn("target/release/bundle/deb/*.deb", workflow)
         self.assertIn("target/release/bundle/appimage/*.AppImage", workflow)
         self.assertNotIn("target/release/bundle/rpm/*", workflow)
@@ -738,8 +748,31 @@ class ReleaseCiTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")
 
         self.assertEqual(workflow.count("./scripts/write_desktop_release_checksums.py"), 3)
-        self.assertIn("target/release/bundle/windows/SHA256SUMS", workflow)
-        self.assertIn("target/release/bundle/linux/SHA256SUMS", workflow)
+        self.assertIn("target/release/public-windows/SHA256SUMS.windows", workflow)
+        self.assertIn("target/release/public-linux/SHA256SUMS.linux", workflow)
+        self.assertIn("release-assets/SHA256SUMS", workflow)
+
+    def test_desktop_platform_smoke_runs_only_for_relevant_pr_changes(self):
+        workflow = (ROOT / ".github" / "workflows" / "desktop-platform-smoke.yml").read_text(encoding="utf-8")
+
+        self.assertIn("pull_request:", workflow)
+        self.assertIn('      - "apps/desktop-runner/**"', workflow)
+        self.assertIn("Windows install and launch smoke", workflow)
+        self.assertIn("Linux install and launch smoke", workflow)
+        self.assertIn("smoke_desktop_windows_packages.ps1", workflow)
+        self.assertIn("smoke_desktop_linux_packages.sh", workflow)
+        self.assertNotIn("pull_request_target", workflow)
+
+    def test_desktop_package_smoke_scripts_preserve_gpu_proof_boundary(self):
+        windows = (ROOT / "scripts" / "smoke_desktop_windows_packages.ps1").read_text(encoding="utf-8")
+        linux = (ROOT / "scripts" / "smoke_desktop_linux_packages.sh").read_text(encoding="utf-8")
+
+        self.assertIn("desktop-self-test", windows)
+        self.assertIn("Assert-DesktopLaunch", windows)
+        self.assertIn("desktop_windows_gpu_execution=not_tested", windows)
+        self.assertIn("desktop-self-test", linux)
+        self.assertIn("xvfb-run", linux)
+        self.assertIn("desktop_linux_gpu_execution=not_tested", linux)
 
     def test_local_desktop_dmg_smoke_script_records_release_evidence(self):
         script = (ROOT / "scripts" / "smoke_desktop_dmg.sh").read_text(encoding="utf-8")
@@ -1066,6 +1099,53 @@ class ReleaseCiTests(unittest.TestCase):
             finally:
                 sys.argv = old_argv
             self.assertIn("exactly one DMG", str(raised.exception))
+
+    def test_desktop_release_artifact_verifier_requires_named_cross_platform_assets(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            assets = [
+                root / "InferGrade.Runner.Linux-x86_64.deb",
+                root / "InferGrade.Runner.Linux-x86_64.AppImage",
+                root / "InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi",
+                root / "InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe",
+            ]
+            for index, artifact in enumerate(assets):
+                artifact.write_bytes(f"artifact-{index}".encode())
+            checksums = root / "SHA256SUMS"
+
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "write_desktop_release_checksums",
+                    "--output",
+                    str(checksums),
+                    *(str(artifact) for artifact in assets),
+                ]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(write_desktop_release_checksums(), 0)
+                sys.argv = [
+                    "verify_desktop_release_artifacts",
+                    "--directory",
+                    str(root),
+                    "--require-linux",
+                    "--require-windows-preview",
+                    "--reject-unexpected",
+                ]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(verify_desktop_release_artifacts(), 0)
+
+                assets[0].unlink()
+                sys.argv = [
+                    "verify_desktop_release_artifacts",
+                    "--directory",
+                    str(root),
+                    "--require-linux",
+                ]
+                with self.assertRaises(SystemExit) as raised:
+                    verify_desktop_release_artifacts()
+                self.assertIn("Missing checksummed artifact", str(raised.exception))
+            finally:
+                sys.argv = old_argv
 
     def test_desktop_release_artifact_verifier_rejects_bad_checksums_and_missing_signatures(self):
         with TemporaryDirectory() as tmp:

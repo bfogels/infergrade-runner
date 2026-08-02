@@ -30,6 +30,8 @@ REQUIRED_FILES = [
     "scripts/notarize_desktop_dmg.sh",
     "scripts/write_desktop_release_checksums.py",
     "scripts/verify_desktop_release_artifacts.py",
+    "scripts/smoke_desktop_linux_packages.sh",
+    "scripts/smoke_desktop_windows_packages.ps1",
     "scripts/prepare_desktop_release_dmg.py",
     "scripts/verify_release_images.py",
     "scripts/accept_desktop_release.sh",
@@ -128,7 +130,7 @@ def check_workflow_posture(root: Path) -> CheckResult:
         "scripts/notarize_desktop_dmg.sh",
         "scripts/verify_desktop_macos_release.sh",
         "scripts/write_desktop_release_checksums.py",
-        "target/release/bundle/macos/SHA256SUMS",
+        "target/release/public-macos/SHA256SUMS.macos",
         "must not fall back to ad-hoc signing or skip notarization",
     ]
     missing = [snippet for snippet in required_snippets if snippet not in workflow]
