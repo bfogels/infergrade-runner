@@ -1437,6 +1437,14 @@ mod tests {
         }
     }
 
+    fn test_llama_binary_extension() -> &'static str {
+        if cfg!(windows) {
+            ".exe"
+        } else {
+            ""
+        }
+    }
+
     #[test]
     fn acceptance_keyring_service_only_accepts_isolated_namespace() {
         assert_eq!(acceptance_keyring_service(None), KEYRING_SERVICE);
@@ -1912,7 +1920,7 @@ mod tests {
         let runtime_path = env::temp_dir().join(format!(
             "infergrade-desktop-llama-cli-{}{}",
             std::process::id(),
-            if cfg!(windows) { ".exe" } else { "" }
+            test_llama_binary_extension()
         ));
         write_test_llama_binary(&runtime_path);
         let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
@@ -2015,7 +2023,7 @@ mod tests {
         let runtime_path = env::temp_dir().join(format!(
             "infergrade-desktop-remove-llama-cli-{}{}",
             std::process::id(),
-            if cfg!(windows) { ".cmd" } else { "" }
+            test_llama_binary_extension()
         ));
         write_test_llama_binary(&runtime_path);
         select_existing_llama_cpp_runtime(Some(runtime_path.display().to_string()), None)
