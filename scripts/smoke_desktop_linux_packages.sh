@@ -81,6 +81,7 @@ fi
 kill "$desktop_pid" >/dev/null 2>&1 || true
 wait "$desktop_pid" >/dev/null 2>&1 || true
 desktop_pid=""
+sudo dpkg --purge "$package_name" >/dev/null
 
 chmod +x "$appimage_path"
 mkdir -p "$work_dir/appimage"

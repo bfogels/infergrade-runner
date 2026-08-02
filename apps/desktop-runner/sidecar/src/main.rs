@@ -39,6 +39,10 @@ fn find_bundled_runner_core_from(start: &Path) -> Option<PathBuf> {
         for candidate in [
             path.join("runner-core"),
             path.join("Resources").join("runner-core"),
+            path.join("usr")
+                .join("lib")
+                .join("InferGrade Runner")
+                .join("runner-core"),
             path.join("..").join("Resources").join("runner-core"),
             path.join("..")
                 .join("..")
@@ -620,6 +624,37 @@ mod tests {
             temp.join("InferGrade Runner.app")
                 .join("Contents")
                 .join("Resources")
+                .join("runner-core")
+                .canonicalize()
+                .expect("canonical bundled runner core")
+        );
+
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn finds_bundled_runner_core_resource_in_appimage_layout() {
+        let temp = env::temp_dir().join(format!(
+            "infergrade-sidecar-appimage-test-{}",
+            std::process::id()
+        ));
+        let sidecar_dir = temp.join("usr").join("bin");
+        let bundled_src = temp
+            .join("usr")
+            .join("lib")
+            .join("InferGrade Runner")
+            .join("runner-core")
+            .join("src")
+            .join("infergrade");
+        std::fs::create_dir_all(&sidecar_dir).expect("sidecar dir");
+        std::fs::create_dir_all(&bundled_src).expect("bundled infergrade package");
+
+        let resolved = find_bundled_runner_core_from(&sidecar_dir).expect("bundled runner core");
+        assert_eq!(
+            resolved,
+            temp.join("usr")
+                .join("lib")
+                .join("InferGrade Runner")
                 .join("runner-core")
                 .canonicalize()
                 .expect("canonical bundled runner core")
