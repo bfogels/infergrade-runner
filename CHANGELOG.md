@@ -7,6 +7,28 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.50 (contract 0.3.29)
+
+- Bundles an exact, checksum-verified CPython 3.12.13 runtime with macOS arm64,
+  Windows x64, and Linux x64 Desktop packages so the packaged Runner core no
+  longer depends on a separately installed Python interpreter.
+- Makes the Desktop sidecar prefer the bundled interpreter, report its runtime
+  provenance, and fail closed when a packaged runtime receipt or verified file
+  is invalid.
+- Builds, installs, launches, and retains short-lived checksummed Windows MSI,
+  Windows NSIS, Linux `.deb`, and Linux AppImage candidates in hosted CI while
+  keeping GPU execution outside that proof boundary.
+- Reseals Linux AppImage executable integrity after the explicit
+  `linuxdeploy_appimage_v1` packaging transform while retaining the original
+  source executable digest.
+- Adds GitHub build-provenance attestations for final release assets; unsigned
+  Windows packages remain technical-preview artifacts unless publication is
+  explicitly enabled.
+- Adds a checksum-reviewed Windows CUDA runtime candidate for a future physical
+  NVIDIA proof without promoting it to supported execution.
+- Moves official workflow actions onto Node 24-compatible releases and expands
+  the normal Rust matrix to Windows.
+
 ## 0.3.49 (contract 0.3.29)
 
 - Records fixture preparation, model generation, scorer execution, and total
