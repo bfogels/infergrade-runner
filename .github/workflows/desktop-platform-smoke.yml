@@ -17,6 +17,7 @@ on:
       - "schemas/**"
       - "scripts/build_desktop_sidecar.sh"
       - "scripts/prepare_desktop_python_runtime.py"
+      - "scripts/finalize_desktop_linux_appimage.py"
       - "scripts/smoke_desktop_linux_packages.sh"
       - "scripts/smoke_desktop_windows_packages.ps1"
       - "Cargo.lock"

@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "runtime" / "desktop_python_runtime.json"
 DEFAULT_OUTPUT = ROOT / "apps" / "desktop-runner" / "src-tauri" / "desktop-python"
 RECEIPT_NAME = "infergrade-python-runtime-receipt.json"
+PLACEHOLDER_CONTENT = "# Generated at build time; do not commit runtime contents.\n"
 
 
 def _sha256(path):
@@ -170,6 +171,53 @@ def _prune_runtime(runtime, prune_paths):
     return pruned
 
 
+def refresh_runtime_receipt(runtime, packaging_transform):
+    """Reseal integrity fields after a reviewed packager transforms runtime files."""
+    runtime = Path(runtime)
+    receipt_path = runtime / RECEIPT_NAME
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError("Desktop Python runtime receipt is missing or invalid") from exc
+    if receipt.get("schema_version") != "infergrade.desktop_python_runtime_receipt.v1":
+        raise ValueError("unsupported Desktop Python runtime receipt")
+    if not isinstance(packaging_transform, str) or not packaging_transform.strip():
+        raise ValueError("packaging transform must be a non-empty identifier")
+
+    digests = {}
+    for path_field, digest_field in (
+        ("executable", "executable_sha256"),
+        ("ca_bundle", "ca_bundle_sha256"),
+        ("license_path", "license_sha256"),
+    ):
+        raw_path = receipt.get(path_field)
+        if not isinstance(raw_path, str):
+            raise ValueError("Desktop Python runtime receipt is missing %s" % path_field)
+        relative = PurePosixPath(raw_path)
+        if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+            raise ValueError("unsafe Desktop Python receipt path: %s" % raw_path)
+        path = runtime.joinpath(*relative.parts)
+        if not path.is_file():
+            raise ValueError("Desktop Python runtime is missing receipt file: %s" % raw_path)
+        digests[digest_field] = _sha256(path)
+
+    previous_executable_sha = receipt.get("executable_sha256")
+    if not isinstance(previous_executable_sha, str):
+        raise ValueError("Desktop Python runtime receipt is missing executable_sha256")
+    receipt.setdefault("source_executable_sha256", previous_executable_sha)
+    transforms = receipt.setdefault("packaging_transforms", [])
+    if not isinstance(transforms, list) or any(not isinstance(value, str) for value in transforms):
+        raise ValueError("Desktop Python runtime receipt has invalid packaging_transforms")
+    if packaging_transform not in transforms:
+        transforms.append(packaging_transform)
+    receipt.update(digests)
+
+    temporary = receipt_path.with_suffix(receipt_path.suffix + ".partial")
+    temporary.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, receipt_path)
+    return receipt
+
+
 def prepare_runtime(manifest_path, target, output, cache_dir, archive_override=None, check_only=False):
     manifest, manifest_sha = _load_manifest(manifest_path)
     try:
@@ -184,6 +232,7 @@ def prepare_runtime(manifest_path, target, output, cache_dir, archive_override=N
     prune_paths = list(selected.get("prune_paths", []))
     output = Path(output)
     if _runtime_is_current(output, target, expected_sha, manifest_sha, executable, prune_paths):
+        (output / ".gitkeep").write_text(PLACEHOLDER_CONTENT, encoding="utf-8")
         print("desktop_python_runtime=%s" % output)
         print("desktop_python_runtime_status=current")
         return output
@@ -261,6 +310,8 @@ def prepare_runtime(manifest_path, target, output, cache_dir, archive_override=N
             raise
         shutil.rmtree(previous, ignore_errors=True)
 
+    (output / ".gitkeep").write_text(PLACEHOLDER_CONTENT, encoding="utf-8")
+
     print("desktop_python_runtime=%s" % output)
     print("desktop_python_runtime_status=prepared")
     print("desktop_python_runtime_target=%s" % target)
@@ -276,8 +327,19 @@ def main(argv=None):
     parser.add_argument("--cache-dir", default=os.environ.get("INFERGRADE_DESKTOP_PYTHON_CACHE", "~/.cache/infergrade/desktop-python"))
     parser.add_argument("--archive", default=None, help="Use a local archive; intended for verification and tests.")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument(
+        "--refresh-receipt",
+        metavar="TRANSFORM",
+        help="Reseal a prepared runtime after a reviewed packaging transform.",
+    )
     args = parser.parse_args(argv)
     try:
+        if args.refresh_receipt:
+            refresh_runtime_receipt(Path(args.output), args.refresh_receipt)
+            print("desktop_python_runtime=%s" % Path(args.output))
+            print("desktop_python_runtime_status=receipt_refreshed")
+            print("desktop_python_runtime_packaging_transform=%s" % args.refresh_receipt)
+            return 0
         prepare_runtime(
             Path(args.manifest),
             args.target or _target_triple(),

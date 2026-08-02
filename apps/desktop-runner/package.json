@@ -15,7 +15,7 @@
     "preview": "vite preview --host 127.0.0.1 --port 1421",
     "build:mac": "tauri build --bundles dmg",
     "build:windows": "tauri build --bundles nsis,msi",
-    "build:linux": "tauri build --bundles deb,appimage --verbose",
+    "build:linux": "tauri build --bundles deb,appimage --verbose && python3 ../../scripts/finalize_desktop_linux_appimage.py",
     "tauri": "tauri"
   },
   "dependencies": {

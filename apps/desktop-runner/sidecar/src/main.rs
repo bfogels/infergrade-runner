@@ -193,7 +193,7 @@ fn find_bundled_python_from(start: &Path) -> Result<Option<BundledPythonRuntime>
                 .join("infergrade-desktop-runner")
                 .join("python-runtime"),
         ] {
-            if candidate.is_dir() {
+            if candidate.join(BUNDLED_PYTHON_RECEIPT).is_file() {
                 return bundled_python_runtime_at(&candidate)
                     .map(Some)
                     .ok_or_else(|| {
@@ -212,7 +212,7 @@ fn find_bundled_python_from(start: &Path) -> Result<Option<BundledPythonRuntime>
         PathBuf::from("/usr/lib/InferGrade Runner/python-runtime"),
         PathBuf::from("/usr/lib/infergrade-desktop-runner/python-runtime"),
     ] {
-        if candidate.is_dir() {
+        if candidate.join(BUNDLED_PYTHON_RECEIPT).is_file() {
             return bundled_python_runtime_at(&candidate)
                 .map(Some)
                 .ok_or_else(|| {
@@ -1001,6 +1001,21 @@ mod tests {
         assert_eq!(resolved.root, root);
         std::fs::write(&ca_bundle, b"tampered-ca-bundle").expect("tamper CA bundle");
         assert!(find_bundled_python_from(&temp).is_err());
+
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn ignores_development_python_placeholder_without_a_receipt() {
+        let temp = env::temp_dir().join(format!(
+            "infergrade-bundled-python-placeholder-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(temp.join("python-runtime")).expect("placeholder runtime");
+
+        assert!(find_bundled_python_from(&temp)
+            .expect("placeholder search")
+            .is_none());
 
         let _ = std::fs::remove_dir_all(temp);
     }
