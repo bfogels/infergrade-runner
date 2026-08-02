@@ -173,7 +173,7 @@ fn llama_cpp_runtime_disables_prompt_echo_before_measuring_ttft() {
         write_executable(
             &runtime_path,
             &format!(
-                "@echo off\r\necho %* > \"{}\"\r\ntimeout /t 1 /nobreak > nul\r\necho generated token\r\necho llama_print_timings:        load time =     1500.00 ms 1>&2\r\necho llama_print_timings:        eval time =    1000.00 ms /    4 runs   (250.00 ms per token, 4.00 tokens per second) 1>&2\r\n",
+                "@echo off\r\necho %* > \"{}\"\r\nping -n 2 127.0.0.1 > nul\r\necho generated token\r\necho llama_print_timings:        load time =     1500.00 ms 1>&2\r\necho llama_print_timings:        eval time =    1000.00 ms /    4 runs   (250.00 ms per token, 4.00 tokens per second) 1>&2\r\n",
                 args_path.display()
             ),
         );

@@ -11,6 +11,11 @@ on:
         description: "Short release notes shown in the updater"
         default: "InferGrade Runner desktop update."
         required: false
+      publish_unsigned_windows_preview:
+        description: "Publish clearly labeled unsigned Windows technical-preview installers"
+        type: boolean
+        default: false
+        required: false
 
 permissions:
   contents: read
@@ -20,54 +25,57 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  macos-preview:
-    name: Build and publish macOS desktop app
-    runs-on: macos-latest
-    timeout-minutes: 120
-    permissions:
-      contents: write
-    environment: release
-    env:
-      DESKTOP_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
-      RELEASE_NOTES: ${{ github.event_name == 'workflow_dispatch' && inputs.notes || '' }}
-      PUBLIC_DMG_NAME: InferGrade.Runner.macOS-arm64.dmg
+  release-metadata:
+    name: Verify release identity
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    outputs:
+      desktop-version: ${{ steps.metadata.outputs.desktop-version }}
+      release-tag: ${{ steps.metadata.outputs.release-tag }}
+      release-notes: ${{ steps.metadata.outputs.release-notes }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-
       - name: Resolve release metadata
+        id: metadata
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_NOTES: ${{ inputs.notes }}
         run: |
           if [ "$GITHUB_REF" != "refs/heads/main" ]; then
             echo "::error::Protected desktop releases must be dispatched from main, not $GITHUB_REF."
             exit 1
           fi
-          if [ -z "$DESKTOP_VERSION" ]; then
-            DESKTOP_VERSION="$(cat VERSION)"
+          desktop_version="$REQUESTED_VERSION"
+          if [ -z "$desktop_version" ]; then
+            desktop_version="$(cat VERSION)"
           fi
-          if [ "$DESKTOP_VERSION" != "$(cat VERSION)" ]; then
-            echo "::error::Requested desktop version $DESKTOP_VERSION does not match VERSION $(cat VERSION)."
+          DESKTOP_VERSION="$desktop_version"
+          source_version="$(cat VERSION)"
+          if [ "$DESKTOP_VERSION" != "$source_version" ]; then
+            echo "::error::Requested desktop version $DESKTOP_VERSION does not match VERSION $source_version."
             exit 1
           fi
-          if [ -z "$RELEASE_NOTES" ]; then
-            RELEASE_NOTES="InferGrade Runner desktop update for ${GITHUB_SHA}."
+          release_notes="$REQUESTED_NOTES"
+          if [ -z "$release_notes" ]; then
+            release_notes="InferGrade Runner desktop update for ${GITHUB_SHA}."
           fi
-          echo "DESKTOP_VERSION=$DESKTOP_VERSION" >> "$GITHUB_ENV"
-          echo "RELEASE_TAG=v$DESKTOP_VERSION" >> "$GITHUB_ENV"
-          echo "RELEASE_NOTES=$RELEASE_NOTES" >> "$GITHUB_ENV"
+          {
+            echo "desktop-version=$desktop_version"
+            echo "release-tag=v$desktop_version"
+            echo "release-notes<<EOF"
+            echo "$release_notes"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Verify immutable release tag
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.metadata.outputs.release-tag }}
         run: |
           tag_commit="$(gh api "repos/${{ github.repository }}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha')"
           tag_type="$(gh api "repos/${{ github.repository }}/git/ref/tags/${RELEASE_TAG}" --jq '.object.type')"
@@ -80,13 +88,37 @@ jobs:
           fi
 
       - name: Verify matching public runtime and capability images
+        env:
+          DESKTOP_VERSION: ${{ steps.metadata.outputs.desktop-version }}
         run: |
-          source_version="$(cat VERSION)"
-          if [ "$DESKTOP_VERSION" != "$source_version" ]; then
-            echo "::error::Desktop version $DESKTOP_VERSION does not match source VERSION $source_version."
-            exit 1
-          fi
+          python3 ./scripts/sync_versions.py --check
+          python3 ./scripts/check_versions.py
           INFERGRADE_IMAGE_TAG="$DESKTOP_VERSION" ./scripts/verify_release_images.sh
+
+  macos-preview:
+    name: Build signed macOS desktop package
+    needs: release-metadata
+    runs-on: macos-latest
+    timeout-minutes: 120
+    environment: release
+    env:
+      DESKTOP_VERSION: ${{ needs.release-metadata.outputs.desktop-version }}
+      RELEASE_TAG: ${{ needs.release-metadata.outputs.release-tag }}
+      RELEASE_NOTES: ${{ needs.release-metadata.outputs.release-notes }}
+      PUBLIC_DMG_NAME: InferGrade.Runner.macOS-arm64.dmg
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Check desktop app dependencies
         run: ./scripts/build_desktop_runner.sh --check-only
@@ -187,19 +219,6 @@ jobs:
           chmod 600 "$key_path"
           echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
-      - name: Set desktop app version
-        run: |
-          node -e "if (!/^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(process.env.DESKTOP_VERSION)) { throw new Error('DESKTOP_VERSION must be SemVer-like'); }"
-          cd apps/desktop-runner
-          npm version "$DESKTOP_VERSION" --no-git-tag-version --allow-same-version
-          node <<'NODE'
-          const fs = require("fs");
-          const path = "src-tauri/tauri.conf.json";
-          const config = JSON.parse(fs.readFileSync(path, "utf8"));
-          config.version = process.env.DESKTOP_VERSION;
-          fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
-          NODE
-
       - name: Build signed updater artifacts
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -226,14 +245,11 @@ jobs:
       - name: Verify macOS signing and notarization
         run: ./scripts/verify_desktop_macos_release.sh
 
-      - name: Prepare stable public installer filename
+      - name: Prepare stable public macOS assets
         run: |
           python3 ./scripts/prepare_desktop_release_dmg.py \
             --dmg-dir target/release/bundle/dmg \
             --output-name "$PUBLIC_DMG_NAME"
-
-      - name: Write updater manifest
-        run: |
           BASE_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}"
           python3 ./scripts/write_desktop_update_manifest.py \
             --bundle-dir target/release/bundle/macos \
@@ -241,20 +257,258 @@ jobs:
             --base-url "$BASE_URL" \
             --notes "$RELEASE_NOTES" \
             --output target/release/bundle/macos/infergrade-runner-desktop-latest.json
-
-      - name: Write release checksums
-        run: |
+          mkdir -p target/release/public-macos
+          cp target/release/bundle/dmg/*.dmg target/release/public-macos/
+          cp target/release/bundle/macos/*.tar.gz target/release/public-macos/
+          cp target/release/bundle/macos/*.tar.gz.sig target/release/public-macos/
+          cp target/release/bundle/macos/infergrade-runner-desktop-latest.json target/release/public-macos/
           python3 ./scripts/write_desktop_release_checksums.py \
-            --output target/release/bundle/macos/SHA256SUMS \
-            target/release/bundle/dmg/*.dmg \
-            target/release/bundle/macos/*.tar.gz \
-            target/release/bundle/macos/*.tar.gz.sig \
-            target/release/bundle/macos/infergrade-runner-desktop-latest.json
+            --output target/release/public-macos/SHA256SUMS.macos \
+            target/release/public-macos/*.dmg \
+            target/release/public-macos/*.tar.gz \
+            target/release/public-macos/*.tar.gz.sig \
+            target/release/public-macos/infergrade-runner-desktop-latest.json
+
+      - name: Upload verified macOS release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infergrade-runner-desktop-macos-${{ github.sha }}
+          if-no-files-found: error
+          path: target/release/public-macos/
+          retention-days: 7
+          overwrite: true
+
+  windows-package-smoke:
+    name: Build and smoke Windows desktop packages
+    needs: release-metadata
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      DESKTOP_VERSION: ${{ needs.release-metadata.outputs.desktop-version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Build unsigned Windows packages
+        shell: bash
+        run: |
+          cd apps/desktop-runner
+          npm ci
+          npm run build:windows
+
+      - name: Install and launch Windows packages
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem target/release/bundle/msi/*.msi -File
+          $nsis = Get-ChildItem target/release/bundle/nsis/*.exe -File
+          if ($msi.Count -ne 1 -or $nsis.Count -ne 1) { throw "Expected exactly one MSI and one NSIS package." }
+          ./scripts/smoke_desktop_windows_packages.ps1 `
+            -MsiPath $msi.FullName `
+            -NsisPath $nsis.FullName `
+            -ExpectedVersion $env:DESKTOP_VERSION
+
+      - name: Prepare stable Windows preview assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force target/release/public-windows | Out-Null
+          Copy-Item (Get-ChildItem target/release/bundle/msi/*.msi -File).FullName `
+            target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi
+          Copy-Item (Get-ChildItem target/release/bundle/nsis/*.exe -File).FullName `
+            target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe
+          python ./scripts/write_desktop_release_checksums.py `
+            --output target/release/public-windows/SHA256SUMS.windows `
+            target/release/public-windows/*.msi `
+            target/release/public-windows/*.exe
+
+      - name: Upload verified Windows package artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infergrade-runner-desktop-windows-${{ github.sha }}
+          if-no-files-found: error
+          path: target/release/public-windows/
+          retention-days: 7
+          overwrite: true
+
+  linux-package-smoke:
+    name: Build and smoke Linux desktop packages
+    needs: release-metadata
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      DESKTOP_VERSION: ${{ needs.release-metadata.outputs.desktop-version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Tauri and launch-smoke dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            xvfb \
+            dbus-x11
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Set up build-time Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Build Linux packages
+        run: |
+          cd apps/desktop-runner
+          npm ci
+          npm run build:linux
+
+      - name: Install and launch Linux packages
+        run: |
+          deb=(target/release/bundle/deb/*.deb)
+          appimage=(target/release/bundle/appimage/*.AppImage)
+          test "${#deb[@]}" -eq 1
+          test "${#appimage[@]}" -eq 1
+          ./scripts/smoke_desktop_linux_packages.sh "${deb[0]}" "${appimage[0]}" "$DESKTOP_VERSION"
+
+      - name: Prepare stable Linux assets
+        run: |
+          mkdir -p target/release/public-linux
+          cp target/release/bundle/deb/*.deb target/release/public-linux/InferGrade.Runner.Linux-x86_64.deb
+          cp target/release/bundle/appimage/*.AppImage target/release/public-linux/InferGrade.Runner.Linux-x86_64.AppImage
+          python3 ./scripts/write_desktop_release_checksums.py \
+            --output target/release/public-linux/SHA256SUMS.linux \
+            target/release/public-linux/*.deb \
+            target/release/public-linux/*.AppImage
+
+      - name: Upload verified Linux package artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infergrade-runner-desktop-linux-${{ github.sha }}
+          if-no-files-found: error
+          path: target/release/public-linux/
+          retention-days: 7
+          overwrite: true
+
+  publish-release:
+    name: Publish verified cross-platform release
+    needs: [release-metadata, macos-preview, windows-package-smoke, linux-package-smoke]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    environment: release
+    env:
+      DESKTOP_VERSION: ${{ needs.release-metadata.outputs.desktop-version }}
+      RELEASE_TAG: ${{ needs.release-metadata.outputs.release-tag }}
+      RELEASE_NOTES: ${{ needs.release-metadata.outputs.release-notes }}
+      PUBLISH_WINDOWS_PREVIEW: ${{ inputs.publish_unsigned_windows_preview }}
+      PUBLIC_DMG_NAME: InferGrade.Runner.macOS-arm64.dmg
+      PUBLIC_LINUX_DEB: InferGrade.Runner.Linux-x86_64.deb
+      PUBLIC_LINUX_APPIMAGE: InferGrade.Runner.Linux-x86_64.AppImage
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download verified platform assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: infergrade-runner-desktop-*-${{ github.sha }}
+          path: release-assets
+          merge-multiple: true
+
+      - name: Assemble exact public asset set
+        run: |
+          checksum_parts=(release-assets/SHA256SUMS.macos release-assets/SHA256SUMS.linux)
+          if [ "$PUBLISH_WINDOWS_PREVIEW" = "true" ]; then
+            checksum_parts+=(release-assets/SHA256SUMS.windows)
+          else
+            rm -f release-assets/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe
+            rm -f release-assets/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi
+          fi
+          cat "${checksum_parts[@]}" | sort -k2 > release-assets/SHA256SUMS
+          rm -f release-assets/SHA256SUMS.macos release-assets/SHA256SUMS.linux release-assets/SHA256SUMS.windows
+          test -f "release-assets/$PUBLIC_DMG_NAME"
+          test -f "release-assets/$PUBLIC_LINUX_DEB"
+          test -f "release-assets/$PUBLIC_LINUX_APPIMAGE"
+
+      - name: Attest exact public release assets
+        id: provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: release-assets/*
+
+      - name: Verify release provenance policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          while IFS= read -r -d '' artifact; do
+            gh attestation verify "$artifact" \
+              --bundle "$ATTESTATION_BUNDLE" \
+              --repo "${{ github.repository }}" \
+              --signer-workflow "${{ github.repository }}/.github/workflows/desktop-runner-release.yml" \
+              --source-ref refs/heads/main \
+              --deny-self-hosted-runners
+          done < <(find release-assets -maxdepth 1 -type f -print0)
 
       - name: Create or resume versioned draft release
         env:
           GH_TOKEN: ${{ github.token }}
+          ATTESTATION_URL: ${{ steps.provenance.outputs.attestation-url }}
         run: |
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          test -n "$ATTESTATION_URL"
+          printf '%s\n\n' "$RELEASE_NOTES" > "$notes_file"
+          cat >> "$notes_file" <<EOF
+          Platform status:
+          - macOS arm64: Developer ID signed and notarized.
+          - Linux x86_64: checksummed technical-beta packages; install and launch smoke passed in GitHub Actions.
+          - Release assets: Sigstore-backed GitHub build provenance is available at $ATTESTATION_URL.
+          EOF
+          if [ "$PUBLISH_WINDOWS_PREVIEW" = "true" ]; then
+            cat >> "$notes_file" <<'EOF'
+          - Windows x64: UNSIGNED technical-preview installers; install and launch smoke passed, but Windows will show publisher/SmartScreen warnings. CUDA execution is not proven by hosted CI.
+          EOF
+          else
+            cat >> "$notes_file" <<'EOF'
+          - Windows x64: package install and launch smoke passed in CI; installers remain workflow artifacts until Authenticode signing is configured or unsigned preview publication is explicitly approved.
+          EOF
+          fi
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')"
             if [ "$is_draft" != "true" ]; then
@@ -266,16 +520,10 @@ jobs:
               --draft \
               --verify-tag \
               --title "InferGrade Runner $RELEASE_TAG" \
-              --notes "$RELEASE_NOTES"
+              --notes-file "$notes_file"
           fi
-          gh release edit "$RELEASE_TAG" --title "InferGrade Runner $RELEASE_TAG" --notes "$RELEASE_NOTES"
-          gh release upload "$RELEASE_TAG" \
-            target/release/bundle/dmg/*.dmg \
-            target/release/bundle/macos/*.tar.gz \
-            target/release/bundle/macos/*.tar.gz.sig \
-            target/release/bundle/macos/infergrade-runner-desktop-latest.json \
-            target/release/bundle/macos/SHA256SUMS \
-            --clobber
+          gh release edit "$RELEASE_TAG" --title "InferGrade Runner $RELEASE_TAG" --notes-file "$notes_file"
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
 
       - name: Reconcile desktop release asset set
         env:
@@ -283,7 +531,7 @@ jobs:
         run: |
           expected_assets="$RUNNER_TEMP/desktop-runner-expected-assets.txt"
           {
-            awk -F '  ' '{print $2}' target/release/bundle/macos/SHA256SUMS
+            awk -F '  ' '{print $2}' release-assets/SHA256SUMS
             echo SHA256SUMS
           } | sort -u > "$expected_assets"
           gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | while IFS= read -r asset_name; do
@@ -299,18 +547,23 @@ jobs:
           draft_dir="$RUNNER_TEMP/desktop-runner-draft"
           mkdir -p "$draft_dir"
           gh release download "$RELEASE_TAG" --dir "$draft_dir"
-          python3 ./scripts/verify_desktop_release_artifacts.py \
-            --directory "$draft_dir" \
-            --require-dmg \
-            --required-dmg-name "$PUBLIC_DMG_NAME" \
-            --require-updater \
+          verify_args=(
+            --directory "$draft_dir"
+            --require-dmg
+            --required-dmg-name "$PUBLIC_DMG_NAME"
+            --require-updater
+            --require-linux
             --reject-unexpected
+          )
+          if [ "$PUBLISH_WINDOWS_PREVIEW" = "true" ]; then
+            verify_args+=(--require-windows-preview)
+          fi
+          python3 ./scripts/verify_desktop_release_artifacts.py "${verify_args[@]}"
 
       - name: Publish immutable versioned desktop release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release edit "$RELEASE_TAG" --draft=false --latest
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest
 
       - name: Verify published desktop release
         env:
@@ -327,138 +580,51 @@ jobs:
           python3 ./scripts/verify_desktop_update_endpoint.py \
             --url "https://github.com/${{ github.repository }}/releases/latest/download/infergrade-runner-desktop-latest.json" \
             --expected-version "$DESKTOP_VERSION"
-          public_dmg="$RUNNER_TEMP/$PUBLIC_DMG_NAME"
-          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
-            --output "$public_dmg" \
-            "https://github.com/${{ github.repository }}/releases/latest/download/${PUBLIC_DMG_NAME}"
-          expected_dmg_sha="$(awk -F '  ' -v name="$PUBLIC_DMG_NAME" '$2 == name {print $1}' target/release/bundle/macos/SHA256SUMS)"
-          actual_dmg_sha="$(shasum -a 256 "$public_dmg" | awk '{print $1}')"
-          test -n "$expected_dmg_sha"
-          test "$actual_dmg_sha" = "$expected_dmg_sha"
-
-  windows-package-smoke:
-    name: Build Windows desktop packages
-    runs-on: windows-latest
-    timeout-minutes: 90
-    permissions:
-      contents: read
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
-
-      - name: Install desktop dependencies
-        shell: bash
-        run: |
-          cd apps/desktop-runner
-          npm ci
-          npm run build
-
-      - name: Build Windows sidecar
-        shell: bash
-        run: ./scripts/build_desktop_sidecar.sh
-
-      - name: Build unsigned Windows packages
-        shell: bash
-        run: |
-          cd apps/desktop-runner
-          npm run build:windows
-
-      - name: Write Windows package checksums
-        shell: bash
-        run: |
-          python3 ./scripts/write_desktop_release_checksums.py \
-            --output target/release/bundle/windows/SHA256SUMS \
-            target/release/bundle/nsis/*.exe \
-            target/release/bundle/msi/*.msi
-
-      - name: Upload Windows package artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: infergrade-runner-desktop-windows-${{ github.sha }}
-          if-no-files-found: error
-          path: |
-            target/release/bundle/nsis/*.exe
-            target/release/bundle/msi/*.msi
-            target/release/bundle/windows/SHA256SUMS
-          retention-days: 7
-
-  linux-package-smoke:
-    name: Build Linux desktop packages
-    runs-on: ubuntu-22.04
-    timeout-minutes: 90
-    permissions:
-      contents: read
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false
-
-      - name: Install Tauri Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev
-
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-
-      - name: Install desktop dependencies
-        run: |
-          cd apps/desktop-runner
-          npm ci
-          npm run build
-
-      - name: Build Linux sidecar
-        run: ./scripts/build_desktop_sidecar.sh
-
-      - name: Build unsigned Linux packages
-        run: |
-          cd apps/desktop-runner
-          npm run build:linux
-
-      - name: Write Linux package checksums
-        run: |
-          python3 ./scripts/write_desktop_release_checksums.py \
-            --output target/release/bundle/linux/SHA256SUMS \
-            target/release/bundle/deb/*.deb \
-            target/release/bundle/appimage/*.AppImage
-
-      - name: Upload Linux package artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: infergrade-runner-desktop-linux-${{ github.sha }}
-          if-no-files-found: error
-          path: |
-            target/release/bundle/deb/*.deb
-            target/release/bundle/appimage/*.AppImage
-            target/release/bundle/linux/SHA256SUMS
-          retention-days: 7
+          published_dir="$RUNNER_TEMP/desktop-runner-published"
+          mkdir -p "$published_dir"
+          gh release download "$RELEASE_TAG" --dir "$published_dir"
+          verify_args=(
+            --directory "$published_dir"
+            --require-dmg
+            --required-dmg-name "$PUBLIC_DMG_NAME"
+            --require-updater
+            --require-linux
+            --reject-unexpected
+          )
+          latest_assets=("$PUBLIC_DMG_NAME" "$PUBLIC_LINUX_DEB" "$PUBLIC_LINUX_APPIMAGE")
+          if [ "$PUBLISH_WINDOWS_PREVIEW" = "true" ]; then
+            verify_args+=(--require-windows-preview)
+            latest_assets+=(
+              InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe
+              InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi
+            )
+          fi
+          python3 ./scripts/verify_desktop_release_artifacts.py "${verify_args[@]}"
+          verify_public_attestation() {
+            local artifact="$1"
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              if gh attestation verify "$artifact" \
+                --repo "${{ github.repository }}" \
+                --signer-workflow "${{ github.repository }}/.github/workflows/desktop-runner-release.yml" \
+                --source-ref refs/heads/main \
+                --deny-self-hosted-runners; then
+                return 0
+              fi
+              sleep $((attempt * 2))
+            done
+            return 1
+          }
+          while IFS= read -r -d '' artifact; do
+            verify_public_attestation "$artifact"
+          done < <(find "$published_dir" -maxdepth 1 -type f -print0)
+          for asset_name in "${latest_assets[@]}"; do
+            downloaded="$RUNNER_TEMP/$asset_name"
+            curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
+              --output "$downloaded" \
+              "https://github.com/${{ github.repository }}/releases/latest/download/$asset_name"
+            expected_sha="$(awk -F '  ' -v name="$asset_name" '$2 == name {print $1}' release-assets/SHA256SUMS)"
+            actual_sha="$(sha256sum "$downloaded" | awk '{print $1}')"
+            test -n "$expected_sha"
+            test "$actual_sha" = "$expected_sha"
+          done

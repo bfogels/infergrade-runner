@@ -9,7 +9,7 @@ The desktop happy path is now native-first for macOS Apple Silicon: Docker will 
 ## What It Includes
 
 - Tauri 2 desktop shell with a vanilla JavaScript frontend
-- Sidecar wrapper for compatibility self-tests and legacy Python runner-core bridge paths
+- Sidecar wrapper plus a pinned self-contained Python runtime for Runner-core bridge paths
 - Pair-code redemption through the Rust/Tauri command adapter
 - Start, stop, status, and log streaming controls for the local Runner process
 - OS-backed token storage through the Rust `keyring` crate
@@ -47,7 +47,7 @@ Build the platform-specific sidecar wrapper for the current Rust host with:
 ../../scripts/build_desktop_sidecar.sh
 ```
 
-Tauri expects the generated file to use the target-triple suffix, for example `src-tauri/binaries/infergrade-sidecar-aarch64-apple-darwin` on Apple Silicon macOS or `src-tauri/binaries/infergrade-sidecar-x86_64-pc-windows-msvc.exe` on 64-bit Windows. Packaged builds include the Runner core source as a Tauri resource and the sidecar prefers that bundled/app-managed path. Development builds can still fall back to `INFERGRADE_RUNNER_REPO`, walking back to the Runner repo root, or finally `infergrade` from `PATH`.
+Tauri expects the generated file to use the target-triple suffix, for example `src-tauri/binaries/infergrade-sidecar-aarch64-apple-darwin` on Apple Silicon macOS or `src-tauri/binaries/infergrade-sidecar-x86_64-pc-windows-msvc.exe` on 64-bit Windows. Packaged builds include the Runner core source and a digest-pinned Python 3.12 runtime as Tauri resources. The sidecar validates the runtime receipt plus the executable, CA bundle, and license digests before using it; a present but altered runtime fails closed rather than silently selecting system Python. Development builds without that resource may still fall back to `INFERGRADE_RUNNER_REPO`, walking back to the Runner repo root, or finally `infergrade` from `PATH`.
 
 ## Runtime Selection
 
@@ -111,7 +111,22 @@ If a downloaded DMG opens with the macOS "`InferGrade Runner.app` is damaged and
 
 ## Windows And Linux
 
-The sidecar source can now generate matching platform sidecars on Windows and Linux build hosts. Windows and Linux packaging still need successful package attempts before those builds can be shipped. The next distribution decision is whether MSI/NSIS, AppImage, or `.deb` is the first beta lane, plus the matching signing and launch-smoke gate for each platform.
+GitHub-hosted Windows and Ubuntu runners build the matching platform sidecar,
+package the app, execute the packaged sidecar self-test, install the native
+package, and verify that the desktop process remains running after launch.
+The smoke blocks system-Python discovery and requires the sidecar to report the
+bundled runtime receipt, so end users do not need a separate Python installation
+for the packaged Runner core.
+Linux x86_64 `.deb` and AppImage assets may be published after this gate.
+Windows MSI and NSIS packages remain unsigned workflow artifacts by default;
+an explicitly approved unsigned technical preview uses filenames containing
+`UNSIGNED-PREVIEW` and will trigger normal Windows publisher or SmartScreen
+warnings.
+
+These hosted checks do not contain an NVIDIA GPU. They do not prove CUDA
+runtime selection, accelerated model execution, Hub upload, or the full
+Windows/NVIDIA evidence loop. That support claim still requires a physical or
+rented known-good NVIDIA host and a real benchmark receipt.
 
 ## Sidecar Contract
 
@@ -151,6 +166,7 @@ The native first-run lane is intentionally narrow:
 
 - macOS Apple Silicon with selected `llama.cpp` runtime: supported for local GGUF smoke and Hub upload.
 - Docker/Podman: optional; missing containers only disable advanced sandboxed benchmarks.
-- Python runner-core: still present for legacy/advanced execution bridge paths, but not required for the Rust native first-run benchmark itself.
-- Windows/Linux Desktop: preview until packaging and launch smoke are proven on those platforms.
+- Python runner-core: still present for advanced execution bridge paths and runs through the package's pinned self-contained runtime; no system Python prerequisite is intended.
+- Linux x86_64 Desktop: package install and launch are CI-proven; runtime and benchmark support remain best-effort CLI/technical-beta territory.
+- Windows x64 Desktop: package install and launch are CI-proven, but public distribution remains gated by signing or an explicitly labeled unsigned preview; Windows/NVIDIA execution still needs real GPU proof.
 - Managed runtime install: explicit macOS Apple Silicon Metal lane available; broader channels and independent signature verification are planned.

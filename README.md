@@ -20,8 +20,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the component map and design decision
 Treat the current code as preview software:
 
 - **Working today:** Runner-owned schemas, benchmark catalog metadata, local/native and container-aware execution paths, Rust native first-run execution for selected `llama.cpp` GGUF runs, native-first-run Hub upload, result bundle generation, support export, signed macOS desktop release wiring, and explicit checksum-verified macOS Apple Silicon managed `llama.cpp` runtime install.
-- **Being hardened:** macOS installer-and-go smoke, hosted Hub handoff, broader clean-machine install validation, and stronger runtime provenance/signature checks.
-- **Planned or limited:** managed runtime lanes beyond macOS Apple Silicon Metal, Windows and Linux public desktop installers, fully managed cloud worker provisioning, and heavier reference/gold benchmark lanes that need stronger dataset, sandbox, or cost controls before becoming default local paths.
+- **Being hardened:** macOS installer-and-go smoke, hosted Hub handoff, real Windows/NVIDIA execution, broader clean-machine validation, and stronger runtime provenance/signature checks.
+- **Planned or limited:** managed runtime lanes beyond macOS Apple Silicon Metal, Authenticode-signed Windows distribution, real Windows/NVIDIA execution proof, fully managed cloud worker provisioning, and heavier reference/gold benchmark lanes that need stronger dataset, sandbox, or cost controls before becoming default local paths.
 
 Security-sensitive release credentials, Apple signing materials, Hub tokens, local runner profiles, and `.env` files must never be committed. See [SECURITY.md](SECURITY.md) before reporting vulnerabilities or sharing security-sensitive logs.
 
@@ -224,7 +224,7 @@ docker run --rm \
   infergrade-runner-core:$(cat VERSION) start --api-url http://host.docker.internal:8000
 ```
 
-For security and reproducibility on container-friendly hosts, the recommended container path runs the Runner inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. The desktop first-run path is intentionally different: it runs native local benchmarks without making Docker, a globally installed CLI, or a local repo checkout part of onboarding.
+For security and reproducibility on container-friendly hosts, the recommended container path runs the Runner inside the `infergrade-runner-core` container with a mounted Docker socket and explicit artifact/output mounts. The desktop first-run path is intentionally different: it runs native local benchmarks without making Docker, a system Python installation, a globally installed CLI, or a local repo checkout part of onboarding. Desktop packages carry a digest-pinned Python runtime for the remaining Runner-core bridge paths.
 
 When that listener container talks to a Hub running on your Mac host, use `http://host.docker.internal:8000` inside the container rather than `http://localhost:8000`.
 

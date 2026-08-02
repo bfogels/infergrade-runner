@@ -46,12 +46,12 @@ class RuntimeManagementTests(unittest.TestCase):
         self.assertEqual(preview["install_command"], [])
         self.assertIsNone(preview["checksum"])
         self.assertEqual(candidate["status"], "candidate_pinned_not_validated")
-        self.assertEqual(candidate["upstream"]["tag"], "b9371")
+        self.assertEqual(candidate["upstream"]["tag"], "b10217")
         self.assertEqual(candidate["platform"]["cuda_runtime"], "12.4")
         self.assertEqual(candidate["artifacts"][0]["role"], "llama_cpp_binaries")
         self.assertEqual(
             candidate["artifacts"][0]["sha256"],
-            "762585777eb39884848ce410f62140f79d21305203fe948ca57f54ec89dc2255",
+            "dd9d505fdf527b0fbad9683581a2af59dda2782a51a346a9d391b9256b4a2af5",
         )
         self.assertEqual(candidate["artifacts"][1]["role"], "cuda_runtime_dlls")
         self.assertFalse(candidate["managed_download_enabled"])
@@ -59,7 +59,7 @@ class RuntimeManagementTests(unittest.TestCase):
         self.assertEqual(candidate["review"]["status"], "blocked")
         review_checks = {item["id"]: item for item in candidate["review"]["checks"]}
         self.assertEqual(review_checks["asset_sha256_digests_pinned"]["status"], "recorded")
-        self.assertEqual(review_checks["archive_contents_inspected"]["status"], "pending")
+        self.assertEqual(review_checks["archive_contents_inspected"]["status"], "passed")
         self.assertEqual(review_checks["license_and_runtime_dll_distribution_reviewed"]["status"], "pending")
         self.assertEqual(review_checks["secret_free_support_export_captured"]["status"], "pending")
         self.assertIn("managed download remains disabled", " ".join(preview["notes"]))

@@ -61,6 +61,49 @@ def validate_policy(policy: Dict[str, Any], root: pathlib.Path = ROOT) -> List[s
             _parse_timestamp(str(pin.get("upstream_published_at") or ""))
         except (TypeError, ValueError):
             failures.append(f"{pin_id}: upstream_published_at is invalid")
+        review_receipt = pin.get("review_receipt")
+        if review_receipt:
+            receipt_relative = pathlib.Path(str(review_receipt))
+            receipt_path = root / receipt_relative
+            if receipt_relative.is_absolute() or ".." in receipt_relative.parts:
+                failures.append(f"{pin_id}: unsafe review receipt path {receipt_relative}")
+            elif not receipt_path.is_file():
+                failures.append(f"{pin_id}: review receipt is missing: {receipt_relative}")
+            else:
+                try:
+                    receipt = load_json(receipt_path)
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    failures.append(f"{pin_id}: review receipt is invalid: {exc}")
+                else:
+                    upstream = receipt.get("upstream")
+                    if not isinstance(upstream, dict) or upstream.get("release") != value:
+                        failures.append(f"{pin_id}: review receipt release does not match pin {value}")
+                    artifacts = receipt.get("artifacts")
+                    if not isinstance(artifacts, list) or not artifacts:
+                        failures.append(f"{pin_id}: review receipt artifacts must be a non-empty list")
+                    else:
+                        for artifact in artifacts:
+                            if not isinstance(artifact, dict):
+                                failures.append(f"{pin_id}: review receipt artifact must be an object")
+                                continue
+                            expected = str(artifact.get("github_asset_sha256") or "")
+                            observed = str(artifact.get("downloaded_sha256") or "")
+                            if len(expected) != 64 or any(character not in "0123456789abcdef" for character in expected):
+                                failures.append(f"{pin_id}: review receipt has an invalid GitHub asset digest")
+                            if observed != expected:
+                                failures.append(f"{pin_id}: downloaded artifact digest does not match GitHub metadata")
+                            members = artifact.get("members")
+                            required = artifact.get("required_members")
+                            if not isinstance(members, list) or len(members) != artifact.get("member_count"):
+                                failures.append(f"{pin_id}: review receipt member inventory is incomplete")
+                            if (
+                                not isinstance(required, list)
+                                or not all(isinstance(item, str) for item in required)
+                                or not isinstance(members, list)
+                                or not all(isinstance(item, str) for item in members)
+                                or not set(required).issubset(set(members))
+                            ):
+                                failures.append(f"{pin_id}: review receipt is missing required archive members")
         locations = pin.get("locations")
         if not isinstance(locations, list) or not locations:
             failures.append(f"{pin_id}: locations must be a non-empty list")

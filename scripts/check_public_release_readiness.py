@@ -16,6 +16,7 @@ REQUIRED_FILES = [
     "LICENSE",
     "SECURITY.md",
     "CONTRIBUTING.md",
+    ".gitattributes",
     ".github/CODEOWNERS",
     ".github/dependabot.yml",
     ".github/PULL_REQUEST_TEMPLATE.md",
@@ -30,6 +31,8 @@ REQUIRED_FILES = [
     "scripts/notarize_desktop_dmg.sh",
     "scripts/write_desktop_release_checksums.py",
     "scripts/verify_desktop_release_artifacts.py",
+    "scripts/smoke_desktop_linux_packages.sh",
+    "scripts/smoke_desktop_windows_packages.ps1",
     "scripts/prepare_desktop_release_dmg.py",
     "scripts/verify_release_images.py",
     "scripts/accept_desktop_release.sh",
@@ -51,6 +54,10 @@ SKIPPED_DIRS = {
     "dist",
     "node_modules",
     "target",
+}
+
+SKIPPED_GENERATED_PATHS = {
+    "apps/desktop-runner/src-tauri/desktop-python",
 }
 
 
@@ -128,7 +135,7 @@ def check_workflow_posture(root: Path) -> CheckResult:
         "scripts/notarize_desktop_dmg.sh",
         "scripts/verify_desktop_macos_release.sh",
         "scripts/write_desktop_release_checksums.py",
-        "target/release/bundle/macos/SHA256SUMS",
+        "target/release/public-macos/SHA256SUMS.macos",
         "must not fall back to ad-hoc signing or skip notarization",
     ]
     missing = [snippet for snippet in required_snippets if snippet not in workflow]
@@ -152,8 +159,14 @@ def check_untrusted_workflow_triggers(root: Path) -> CheckResult:
 def check_secret_filenames(root: Path) -> CheckResult:
     findings: list[str] = []
     for current_root, dirnames, filenames in os.walk(root):
-        dirnames[:] = [name for name in dirnames if name not in SKIPPED_DIRS]
         current_path = Path(current_root)
+        kept_dirs = []
+        for name in dirnames:
+            candidate = current_path / name
+            relative = candidate.relative_to(root).as_posix()
+            if name not in SKIPPED_DIRS and relative not in SKIPPED_GENERATED_PATHS:
+                kept_dirs.append(name)
+        dirnames[:] = kept_dirs
         for filename in filenames:
             relative = str((current_path / filename).relative_to(root))
             normalized = relative.replace(os.sep, "/")

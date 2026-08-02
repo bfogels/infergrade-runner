@@ -1,0 +1,222 @@
+name: Desktop Platform Smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - ".github/workflows/desktop-platform-smoke.yml"
+      - ".github/workflows/desktop-runner-release.yml"
+      - "apps/desktop-runner/**"
+      - "apps/runner-cli/**"
+      - "crates/runner-engine/**"
+      - "python/runner-core/src/**"
+      - "runtime/desktop_python_runtime.json"
+      - "schemas/**"
+      - "scripts/build_desktop_sidecar.sh"
+      - "scripts/prepare_desktop_python_runtime.py"
+      - "scripts/finalize_desktop_linux_appimage.py"
+      - "scripts/smoke_desktop_linux_packages.sh"
+      - "scripts/smoke_desktop_windows_packages.ps1"
+      - "Cargo.lock"
+      - "Cargo.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-package:
+    name: Windows install and launch smoke
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Build Windows packages
+        shell: bash
+        run: |
+          cd apps/desktop-runner
+          npm ci
+          npm run build:windows
+
+      - name: Install and launch Windows packages
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem target/release/bundle/msi/*.msi -File
+          $nsis = Get-ChildItem target/release/bundle/nsis/*.exe -File
+          if ($msi.Count -ne 1 -or $nsis.Count -ne 1) { throw "Expected exactly one MSI and one NSIS package." }
+          ./scripts/smoke_desktop_windows_packages.ps1 `
+            -MsiPath $msi.FullName `
+            -NsisPath $nsis.FullName `
+            -ExpectedVersion (Get-Content VERSION -Raw).Trim()
+
+      - name: Prepare verified Windows candidate artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force target/release/public-windows | Out-Null
+          Copy-Item (Get-ChildItem target/release/bundle/msi/*.msi -File).FullName `
+            target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi
+          Copy-Item (Get-ChildItem target/release/bundle/nsis/*.exe -File).FullName `
+            target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe
+          @"
+          CI candidate only; not an InferGrade release.
+          Source ref: $env:GITHUB_REF
+          Source commit: $env:GITHUB_SHA
+          The Windows installers are unsigned and GPU execution was not tested.
+          "@ | Set-Content -Encoding utf8 target/release/public-windows/CI-CANDIDATE-NOT-A-RELEASE.txt
+          $checksumInputs = @(
+            (Resolve-Path target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi).Path
+            (Resolve-Path target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe).Path
+            (Resolve-Path target/release/public-windows/CI-CANDIDATE-NOT-A-RELEASE.txt).Path
+          )
+          python ./scripts/write_desktop_release_checksums.py `
+            --output target/release/public-windows/SHA256SUMS `
+            @checksumInputs
+          python ./scripts/verify_desktop_release_artifacts.py `
+            --directory target/release/public-windows `
+            --require-windows-preview `
+            --reject-unexpected
+
+      - name: Upload verified Windows candidate artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infergrade-runner-windows-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: target/release/public-windows/
+          retention-days: 7
+
+      - name: Upload package diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-package-smoke-diagnostics-${{ github.sha }}
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/infergrade-windows-package-smoke/
+          retention-days: 3
+
+  linux-package:
+    name: Linux install and launch smoke
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Tauri and launch-smoke dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            xvfb \
+            dbus-x11
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Set up build-time Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Build Linux packages
+        run: |
+          cd apps/desktop-runner
+          npm ci
+          npm run build:linux
+
+      - name: Install and launch Linux packages
+        run: |
+          deb=(target/release/bundle/deb/*.deb)
+          appimage=(target/release/bundle/appimage/*.AppImage)
+          test "${#deb[@]}" -eq 1
+          test "${#appimage[@]}" -eq 1
+          ./scripts/smoke_desktop_linux_packages.sh \
+            "${deb[0]}" \
+            "${appimage[0]}" \
+            "$(cat VERSION)"
+
+      - name: Prepare verified Linux candidate artifacts
+        run: |
+          mkdir -p target/release/public-linux
+          cp target/release/bundle/deb/*.deb target/release/public-linux/InferGrade.Runner.Linux-x86_64.deb
+          cp target/release/bundle/appimage/*.AppImage target/release/public-linux/InferGrade.Runner.Linux-x86_64.AppImage
+          printf '%s\n' \
+            'CI candidate only; not an InferGrade release.' \
+            "Source ref: $GITHUB_REF" \
+            "Source commit: $GITHUB_SHA" \
+            'GPU execution was not tested.' \
+            > target/release/public-linux/CI-CANDIDATE-NOT-A-RELEASE.txt
+          python3 ./scripts/write_desktop_release_checksums.py \
+            --output target/release/public-linux/SHA256SUMS \
+            target/release/public-linux/*.deb \
+            target/release/public-linux/*.AppImage \
+            target/release/public-linux/CI-CANDIDATE-NOT-A-RELEASE.txt
+          python3 ./scripts/verify_desktop_release_artifacts.py \
+            --directory target/release/public-linux \
+            --require-linux \
+            --reject-unexpected
+
+      - name: Upload verified Linux candidate artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infergrade-runner-linux-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: target/release/public-linux/
+          retention-days: 7
+
+      - name: Collect Linux package diagnostics on failure
+        if: failure()
+        run: |
+          diagnostic_dir="$RUNNER_TEMP/infergrade-linux-package-smoke"
+          mkdir -p "$diagnostic_dir"
+          find target/release/bundle -maxdepth 4 -printf '%y %s %p -> %l\n' \
+            > "$diagnostic_dir/bundle-inventory.txt" 2>&1 || true
+          if [ -f target/release/bundle/appimage/build_appimage.sh ]; then
+            cp target/release/bundle/appimage/build_appimage.sh "$diagnostic_dir/"
+          fi
+
+      - name: Upload Linux package diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-package-smoke-diagnostics-${{ github.sha }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/infergrade-linux-package-smoke/
+          retention-days: 3

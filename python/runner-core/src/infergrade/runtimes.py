@@ -17,15 +17,15 @@ WINDOWS_CUDA_BINARY_SET = "llama_cpp_windows_cuda_x86_64"
 WINDOWS_CUDA_CLAIM_BOUNDARY = (
     "Windows/NVIDIA CUDA is preview-only until a pinned, checksummed runtime and full Hub loop are proven."
 )
-WINDOWS_CUDA_CANDIDATE_TAG = "b9371"
-WINDOWS_CUDA_CANDIDATE_RELEASE_URL = "https://github.com/ggml-org/llama.cpp/releases/tag/b9371"
+WINDOWS_CUDA_CANDIDATE_TAG = "b10217"
+WINDOWS_CUDA_CANDIDATE_RELEASE_URL = "https://github.com/ggml-org/llama.cpp/releases/tag/b10217"
 WINDOWS_CUDA_CANDIDATE_ASSET_URL = (
-    "https://github.com/ggml-org/llama.cpp/releases/download/b9371/llama-b9371-bin-win-cuda-12.4-x64.zip"
+    "https://github.com/ggml-org/llama.cpp/releases/download/b10217/llama-b10217-bin-win-cuda-12.4-x64.zip"
 )
-WINDOWS_CUDA_CANDIDATE_SHA256 = "762585777eb39884848ce410f62140f79d21305203fe948ca57f54ec89dc2255"
-WINDOWS_CUDA_CANDIDATE_SIZE_BYTES = 260199565
+WINDOWS_CUDA_CANDIDATE_SHA256 = "dd9d505fdf527b0fbad9683581a2af59dda2782a51a346a9d391b9256b4a2af5"
+WINDOWS_CUDA_CANDIDATE_SIZE_BYTES = 250449171
 WINDOWS_CUDA_CANDIDATE_CUDART_URL = (
-    "https://github.com/ggml-org/llama.cpp/releases/download/b9371/cudart-llama-bin-win-cuda-12.4-x64.zip"
+    "https://github.com/ggml-org/llama.cpp/releases/download/b10217/cudart-llama-bin-win-cuda-12.4-x64.zip"
 )
 WINDOWS_CUDA_CANDIDATE_CUDART_SHA256 = "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
 WINDOWS_CUDA_CANDIDATE_CUDART_SIZE_BYTES = 391443627
@@ -42,8 +42,12 @@ WINDOWS_CUDA_CANDIDATE_REVIEW_CHECKS = [
     },
     {
         "id": "archive_contents_inspected",
-        "status": "pending",
-        "evidence": "Archive contents have not been inspected for expected binaries and unexpected payloads.",
+        "status": "passed",
+        "evidence": (
+            "Both downloaded archives matched GitHub's release-asset digests. The runtime archive contains the "
+            "expected llama-cli.exe, llama-server.exe, and llama-perplexity.exe sibling set; the companion contains "
+            "only cublas64_12.dll, cublasLt64_12.dll, and cudart64_12.dll."
+        ),
     },
     {
         "id": "license_and_runtime_dll_distribution_reviewed",
@@ -131,7 +135,7 @@ def windows_cuda_candidate_manifest() -> Dict[str, Any]:
     """Return the pinned-but-unvalidated Windows CUDA runtime candidate."""
     return {
         "status": "candidate_pinned_not_validated",
-        "selected_for_review_at": "2026-05-28",
+        "selected_for_review_at": "2026-08-02",
         "upstream": {
             "project": "ggml-org/llama.cpp",
             "tag": WINDOWS_CUDA_CANDIDATE_TAG,
@@ -175,7 +179,7 @@ def windows_cuda_candidate_manifest() -> Dict[str, Any]:
         ],
         "review": {
             "status": "blocked",
-            "status_reason": "artifact_metadata_recorded_but_candidate_not_reviewed",
+            "status_reason": "static_archive_review_complete_hardware_and_license_pending",
             "checks": [dict(item) for item in WINDOWS_CUDA_CANDIDATE_REVIEW_CHECKS],
         },
         "managed_download_enabled": False,

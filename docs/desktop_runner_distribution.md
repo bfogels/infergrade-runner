@@ -2,13 +2,14 @@
 
 The desktop Runner distribution lane defines how the local companion app is built, signed, published, and updated.
 
-The current release lane is intentionally narrow:
+The current release lane is intentionally staged by platform:
 
-1. build a macOS Apple Silicon DMG
-2. publish the DMG, updater archive, updater signature, and updater manifest from GitHub Actions
-3. use Tauri updater signing for app-update integrity
-4. use ad-hoc macOS signing only as a development fallback
-5. require Developer ID signing and notarization before treating the DMG as public-user-ready
+1. build and verify the signed/notarized macOS Apple Silicon release
+2. build, install, self-test, and launch-smoke Linux x86_64 `.deb` and AppImage packages
+3. build, install, self-test, and launch-smoke Windows x64 MSI and NSIS packages
+4. publish the macOS and Linux packages only after every platform build gate passes
+5. retain unsigned Windows packages as short-lived workflow artifacts unless an operator explicitly publishes a clearly named unsigned technical preview
+6. use Tauri updater signing for macOS app-update integrity
 
 ## Local Build Lane
 
@@ -24,6 +25,7 @@ The script runs:
 - `npm run build`
 - `npm audit --audit-level=moderate`
 - `cargo check --locked`
+- digest verification and extraction of the pinned platform Python runtime
 - clear the previous DMG output directory
 - `npm run tauri -- build -- --locked`
 
@@ -62,10 +64,21 @@ apps/desktop-runner/sidecar/
 apps/desktop-runner/src-tauri/binaries/infergrade-sidecar-<target-triple>[.exe]
 ```
 
-The desktop release workflow now runs non-publishing package smoke jobs for Windows and Linux. Those jobs upload Actions artifacts plus `SHA256SUMS` manifests for inspection, but they are not public release artifacts and they do not imply signed-user-ready support.
+Pull requests that change the desktop, Runner engine, packaged core, schemas, or packaging scripts run a read-only Windows/Linux package workflow. It builds the actual installer formats, verifies their contents, installs them, invokes the installed sidecar against its packaged Runner core, launches the GUI briefly, and removes the install. The protected release workflow repeats those gates from the immutable release commit.
 
-- Windows: build on `x86_64-pc-windows-msvc` and produce NSIS/MSI artifacts, then add an Authenticode signing path before public beta.
-- Linux: build on `x86_64-unknown-linux-gnu` and produce AppImage/`.deb` artifacts, then validate install and launch behavior on a clean Linux desktop before public beta.
+Successful pull-request package jobs retain the checksummed Linux candidates
+and explicitly named unsigned Windows candidates for seven days. These are
+review artifacts tied to one commit, not a versioned public release. Each
+bundle carries a checksummed `CI-CANDIDATE-NOT-A-RELEASE.txt`; proposed-code
+artifacts must be treated as untrusted until their source is reviewed and the
+protected release lane rebuilds them from `main`.
+
+- Windows: the verified MSI/NSIS files remain seven-day workflow artifacts by default. Public release requires either Authenticode signing or explicit opt-in to filenames containing `UNSIGNED-PREVIEW`. Hosted CI does not prove CUDA, NVIDIA inference, pairing, upload, or SmartScreen reputation.
+- Linux: the verified AppImage/`.deb` files join the next versioned release with stable names and checksums. This is package acceptance on Ubuntu, not proof of every Linux distribution, GPU backend, desktop environment, or full Hub loop.
+
+The package jobs use Python while building, but the installed application does not rely on it. Each package carries the reviewed `python-build-standalone` archive selected in `runtime/desktop_python_runtime.json`. The preparer verifies the exact archive size and SHA-256, rejects unsafe archive paths and links, preserves the included license files, and writes a receipt containing the executable, CA bundle, and license digests. Package smoke blocks system-Python discovery and requires both the installed sidecar and GUI to remain functional with the bundled runtime.
+
+This proves the packaged Runner core is self-contained on the hosted Windows and Ubuntu images. It does not prove CUDA execution, all Linux distributions, Windows SmartScreen acceptance, or the complete Hub contribution loop.
 
 The sidecar contract should remain the same: call the existing `infergrade` CLI when available, otherwise resolve the bundled or repo-local Runner core.
 
@@ -108,9 +121,17 @@ Maintainers deliberately dispatch the protected GitHub Actions workflow from
 the exact `vX.Y.Z` tag, attaches and verifies the complete asset set, and only
 then publishes the release. Published releases and their assets are immutable;
 GitHub's `releases/latest` redirect selects the current version without requiring
-an overwriteable release asset. The workflow publishes the DMG and updater
-artifacts only after Developer ID signing, notarization, Gatekeeper verification,
-and stapled-ticket checks pass.
+an overwriteable release asset. The workflow publishes the DMG, updater
+artifacts, and verified Linux packages only after Developer ID signing,
+notarization, Gatekeeper verification, stapled-ticket checks, and both hosted
+package gates pass. Windows installers are excluded from the public asset set
+unless the dispatch explicitly enables the clearly labeled unsigned preview.
+
+Before creating the draft, the publisher also records Sigstore-backed GitHub
+build provenance for the exact final asset set. It verifies that provenance
+against this repository, the protected desktop release workflow, and the
+`main` source ref before publication, then repeats checksum and provenance
+verification after downloading the immutable public release.
 
 The protected workflow also runs `scripts/verify_desktop_macos_release.sh` before upload. That script verifies the built app bundle with `codesign`, assesses the app and DMG with Gatekeeper, and validates stapled notarization tickets for both artifacts. If any of those checks fail, the workflow must stop before updating the downloadable release.
 
@@ -122,6 +143,7 @@ scripts/verify_desktop_release_artifacts.py \
   --require-dmg \
   --required-dmg-name InferGrade.Runner.macOS-arm64.dmg \
   --require-updater \
+  --require-linux \
   --reject-unexpected
 ```
 
@@ -219,5 +241,5 @@ because a full-display screenshot may contain unrelated private UI.
 
 - no signing secrets in the repo
 - no auto-update keys in the repo
-- no claim that Windows/Linux installers are supported until a build has been attempted
+- no claim that hosted package smoke proves real Windows/NVIDIA or Linux GPU execution
 - no claim that managed runtime downloads are independently signed until a signature verification lane is implemented

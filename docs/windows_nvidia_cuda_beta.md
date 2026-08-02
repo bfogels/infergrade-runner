@@ -9,21 +9,37 @@ InferGrade may proceed toward a Windows/NVIDIA technical beta only after one rea
 - Target runtime family: `llama.cpp`.
 - Target binary set: `llama_cpp_windows_cuda_x86_64`.
 - Current delivery mode: explicit user selection of an existing CUDA-capable `llama.cpp` binary.
-- Candidate managed runtime artifact: `ggml-org/llama.cpp` release `b9371`,
-  `llama-b9371-bin-win-cuda-12.4-x64.zip`, SHA-256
-  `762585777eb39884848ce410f62140f79d21305203fe948ca57f54ec89dc2255`,
-  selected from GitHub release asset metadata on 2026-05-28. The matching
+- Candidate managed runtime artifact: `ggml-org/llama.cpp` release `b10217`,
+  `llama-b10217-bin-win-cuda-12.4-x64.zip`, SHA-256
+  `dd9d505fdf527b0fbad9683581a2af59dda2782a51a346a9d391b9256b4a2af5`,
+  selected after the 24-hour intake coalescing window from GitHub release asset
+  metadata on 2026-08-02. The matching
   `cudart-llama-bin-win-cuda-12.4-x64.zip` runtime-DLL package is recorded as a
   host-dependent companion artifact with SHA-256
   `8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6`.
+- Both archives were downloaded during review and matched the SHA-256 digests
+  reported by GitHub. The runtime archive contains the required
+  `llama-cli.exe`, `llama-server.exe`, and `llama-perplexity.exe` sibling set;
+  the companion archive contains only `cublas64_12.dll`, `cublasLt64_12.dll`,
+  and `cudart64_12.dll`. Neither archive contains license notices, so CUDA DLL
+  redistribution and notice obligations remain a separate pending review.
+  The durable member inventory and review boundary are recorded in
+  `runtime/reviews/windows-cuda-b10217.json`; the runtime-policy checker rejects
+  pin, digest, member-count, or required-member drift in that receipt.
+- The static license pass reviewed the official CUDA 12.4.1 EULA and llama.cpp
+  MIT license. NVIDIA identifies versioned CUDA runtime, cuBLAS, and cuBLASLt
+  DLL variants as distributable subject to its application, access, and
+  distribution-term requirements. That is not yet a packaging approval:
+  InferGrade must still supply required notices and terms and inventory
+  `libomp140.x86_64.dll` plus other third-party binary obligations.
 - This candidate is pinned for review only. It is not downloaded by InferGrade,
   not exposed as a managed install lane, and not a support promise until archive
   contents, licensing/runtime-DLL distribution, Windows hardware smoke, Hub
   upload, Result review, and support export all pass.
 - The candidate manifest and `delivery.runtime_delivery_gate.candidate_review`
   distinguish recorded metadata from completed review. The current recorded
-  checks are the upstream release and asset SHA-256 digests. Archive contents,
-  license/runtime-DLL distribution, Windows/NVIDIA smoke, known-good GGUF run,
+  checks are the upstream release, asset SHA-256 digests, and archive contents.
+  License/runtime-DLL distribution, Windows/NVIDIA smoke, known-good GGUF run,
   Hub upload plus Result review, and secret-free support export remain pending.
 - A selected Windows CUDA preview runtime must record `binary_set`,
   `support_tier: preview`, checksum status, bounded binary fingerprints, and
