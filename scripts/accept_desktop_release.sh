@@ -244,10 +244,40 @@ receipt = {
 receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 
+cat >"$report_dir_absolute/manual-first-success.md" <<'CHECKLIST'
+# InferGrade first-success acceptance
+
+Use the isolated app opened by this script. Record evidence, not impressions.
+
+- [ ] Pairing completes without opening Terminal.
+- [ ] A current-model recommendation opens Run with its Hugging Face reference already populated.
+- [ ] The selected immutable artifact resolves and shows a concrete quant and size.
+- [ ] Runner reports exact runtime/model preflight as ready, or presents one actionable repair path.
+- [ ] The queued assignment is claimed without a stale or repeated idle message.
+- [ ] Preparing, download, model load, benchmark, finalization, and upload progress remain distinguishable.
+- [ ] A failed phase can be retried without discarding compatible completed local state.
+- [ ] A completed run uploads and opens its Result page.
+- [ ] The Result remains readable while signed out and separates capability, time per task, and whole-run time.
+
+Record the run id, Result URL, model + quant, machine, first-run elapsed time, cached retry elapsed time, and any recovery action used below. Do not paste tokens, local paths, prompts, or model outputs.
+
+## Evidence
+
+- Run id:
+- Result URL:
+- Model + quant:
+- Machine:
+- First-run elapsed:
+- Cached retry elapsed:
+- Recovery used:
+- Blocking issue:
+CHECKLIST
+
 "${clean_env[@]}" "$runner_path" >"$report_dir_absolute/app.log" 2>&1 &
 app_pid="$!"
 if [ "$INTERACTIVE" -eq 1 ]; then
-  echo "The isolated Runner is open. Complete the acceptance flow, then press Enter here."
+  echo "The isolated Runner is open. Checklist: $report_dir_absolute/manual-first-success.md"
+  echo "Complete the acceptance flow, then press Enter here."
   read -r _
 else
   sleep "$LAUNCH_SECONDS"
@@ -309,6 +339,7 @@ payload = {
         "upload",
         "signed-out Result page",
     ],
+    "manual_checklist": "manual-first-success.md",
 }
 json_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 checks = "\n".join(f"- {name}: {status}" for name, status in payload["checks"].items())
