@@ -1,10 +1,12 @@
 import importlib.util
 import json
+import os
 import sys
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -17,6 +19,10 @@ FINALIZER_PATH = ROOT / "scripts" / "finalize_desktop_linux_appimage.py"
 FINALIZER_SPEC = importlib.util.spec_from_file_location("finalize_desktop_linux_appimage", FINALIZER_PATH)
 FINALIZER = importlib.util.module_from_spec(FINALIZER_SPEC)
 FINALIZER_SPEC.loader.exec_module(FINALIZER)
+SIGNER_PATH = ROOT / "scripts" / "sign_desktop_macos_runtime.py"
+SIGNER_SPEC = importlib.util.spec_from_file_location("sign_desktop_macos_runtime", SIGNER_PATH)
+SIGNER = importlib.util.module_from_spec(SIGNER_SPEC)
+SIGNER_SPEC.loader.exec_module(SIGNER)
 
 
 class DesktopPythonRuntimeTests(unittest.TestCase):
@@ -231,6 +237,79 @@ class DesktopPythonRuntimeTests(unittest.TestCase):
         self.assertIn("INFERGRADE_PYTHON_FALLBACK_MARKER", linux_smoke)
         package = json.loads((ROOT / "apps/desktop-runner/package.json").read_text(encoding="utf-8"))
         self.assertIn("finalize_desktop_linux_appimage.py", package["scripts"]["build:linux"])
+
+    def test_macos_signer_signs_unique_macho_files_and_reseals_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary)
+            executable = runtime / "bin" / "python3.12"
+            executable.parent.mkdir()
+            executable.write_bytes(b"mach-o executable")
+            executable_alias = runtime / "bin" / "python"
+            os.link(executable, executable_alias)
+            extension = runtime / "lib" / "python3.12" / "lib-dynload" / "_ssl.so"
+            extension.parent.mkdir(parents=True)
+            extension.write_bytes(b"mach-o extension")
+            ca_bundle = runtime / "certs" / "cacert.pem"
+            ca_bundle.parent.mkdir()
+            ca_bundle.write_bytes(b"certificate")
+            license_file = runtime / "LICENSE.txt"
+            license_file.write_bytes(b"license")
+            source_digest = MODULE._sha256(executable)
+            (runtime / MODULE.RECEIPT_NAME).write_text(
+                json.dumps(
+                    {
+                        "schema_version": "infergrade.desktop_python_runtime_receipt.v1",
+                        "executable": "bin/python3.12",
+                        "executable_sha256": source_digest,
+                        "ca_bundle": "certs/cacert.pem",
+                        "ca_bundle_sha256": MODULE._sha256(ca_bundle),
+                        "license_path": "LICENSE.txt",
+                        "license_sha256": MODULE._sha256(license_file),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            calls = []
+
+            def fake_runner(command, check, capture_output=False, text=False):
+                calls.append(command)
+                if command[0] == "/usr/bin/file":
+                    target = Path(command[-1])
+                    kind = (
+                        "Mach-O 64-bit"
+                        if target.name in {"python", "python3.12", "_ssl.so"}
+                        else "ASCII text"
+                    )
+                    return SimpleNamespace(returncode=0, stdout=kind)
+                if command[1] == "--force":
+                    Path(command[-1]).write_bytes(Path(command[-1]).read_bytes() + b" signed")
+                return SimpleNamespace(returncode=0, stdout="")
+
+            signed = SIGNER.sign_runtime(
+                runtime,
+                "Developer ID Application: InferGrade",
+                keychain=Path("/tmp/release.keychain-db"),
+                runner=fake_runner,
+            )
+
+            self.assertEqual(len(signed), 2)
+            self.assertIn(extension.resolve(), signed)
+            self.assertEqual(len([path for path in signed if path.parent == executable.parent.resolve()]), 1)
+            sign_calls = [call for call in calls if call[0] == "/usr/bin/codesign" and "--force" in call]
+            verify_calls = [call for call in calls if call[0] == "/usr/bin/codesign" and "--verify" in call]
+            self.assertEqual(len(sign_calls), 2)
+            self.assertEqual(len(verify_calls), 2)
+            self.assertTrue(all("--timestamp" in call and "runtime" in call for call in sign_calls))
+            self.assertTrue(all("/tmp/release.keychain-db" in call for call in sign_calls))
+            refreshed = json.loads((runtime / MODULE.RECEIPT_NAME).read_text(encoding="utf-8"))
+            self.assertEqual(refreshed["source_executable_sha256"], source_digest)
+            self.assertEqual(refreshed["executable_sha256"], MODULE._sha256(executable))
+            self.assertEqual(refreshed["packaging_transforms"], [SIGNER.TRANSFORM])
+
+    def test_macos_signer_rejects_adhoc_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(ValueError, "Developer ID"):
+                SIGNER.sign_runtime(Path(temporary), "-")
 
 
 if __name__ == "__main__":
