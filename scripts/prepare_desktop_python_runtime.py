@@ -115,7 +115,7 @@ def _download(url, output, expected_size):
         partial.unlink(missing_ok=True)
 
 
-def _runtime_is_current(output, target, archive_sha, manifest_sha, executable):
+def _runtime_is_current(output, target, archive_sha, manifest_sha, executable, prune_paths=()):
     receipt_path = output / RECEIPT_NAME
     if not receipt_path.is_file():
         return False
@@ -129,6 +129,7 @@ def _runtime_is_current(output, target, archive_sha, manifest_sha, executable):
         and receipt.get("archive_sha256") == archive_sha
         and receipt.get("manifest_sha256") == manifest_sha
         and receipt.get("executable") == executable
+        and receipt.get("pruned_paths", []) == list(prune_paths)
     )
     if not identity_matches:
         return False
@@ -150,6 +151,25 @@ def _runtime_is_current(output, target, archive_sha, manifest_sha, executable):
     return True
 
 
+def _prune_runtime(runtime, prune_paths):
+    pruned = []
+    for raw_path in prune_paths:
+        relative = PurePosixPath(raw_path)
+        if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+            raise ValueError("unsafe Desktop Python prune path: %s" % raw_path)
+        path = runtime.joinpath(*relative.parts)
+        if not path.exists() and not path.is_symlink():
+            raise ValueError("Desktop Python prune path is missing: %s" % raw_path)
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+        else:
+            raise ValueError("unsupported Desktop Python prune path: %s" % raw_path)
+        pruned.append(raw_path)
+    return pruned
+
+
 def prepare_runtime(manifest_path, target, output, cache_dir, archive_override=None, check_only=False):
     manifest, manifest_sha = _load_manifest(manifest_path)
     try:
@@ -161,8 +181,9 @@ def prepare_runtime(manifest_path, target, output, cache_dir, archive_override=N
     executable = str(selected["executable"])
     ca_bundle = str(selected["ca_bundle"])
     license_file = str(selected["license"])
+    prune_paths = list(selected.get("prune_paths", []))
     output = Path(output)
-    if _runtime_is_current(output, target, expected_sha, manifest_sha, executable):
+    if _runtime_is_current(output, target, expected_sha, manifest_sha, executable, prune_paths):
         print("desktop_python_runtime=%s" % output)
         print("desktop_python_runtime_status=current")
         return output
@@ -187,6 +208,7 @@ def prepare_runtime(manifest_path, target, output, cache_dir, archive_override=N
         extraction_root.mkdir()
         _extract_archive(archive, extraction_root)
         runtime = extraction_root / "python"
+        pruned_paths = _prune_runtime(runtime, prune_paths)
         executable_path = runtime / executable
         ca_path = runtime / ca_bundle
         license_path = runtime / license_file
@@ -223,6 +245,7 @@ def prepare_runtime(manifest_path, target, output, cache_dir, archive_override=N
             "license_path": license_file,
             "license_sha256": _sha256(license_path),
             "ssl_version": version_payload.get("ssl"),
+            "pruned_paths": pruned_paths,
         }
         (runtime / RECEIPT_NAME).write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         previous = Path(str(output) + ".previous")

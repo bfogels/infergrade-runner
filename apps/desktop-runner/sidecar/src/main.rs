@@ -135,7 +135,10 @@ fn relative_receipt_path(root: &Path, value: &Value) -> Option<PathBuf> {
 fn file_sha256(path: &Path) -> Option<String> {
     let mut file = File::open(path).ok()?;
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    // Windows processes commonly start with a 1 MiB main-thread stack. Keep
+    // the integrity buffer on the heap so receipt verification cannot exhaust
+    // that stack before the bundled interpreter is launched.
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let count = file.read(&mut buffer).ok()?;
         if count == 0 {

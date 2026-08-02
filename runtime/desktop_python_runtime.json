@@ -35,7 +35,20 @@
       "sha256": "7ceaf4360f4b4ab44f31d8217cfdc70df8e12b61d9561b4900ee7af87176e50d",
       "executable": "bin/python3.12",
       "ca_bundle": "lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
-      "license": "lib/python3.12/LICENSE.txt"
+      "license": "lib/python3.12/LICENSE.txt",
+      "prune_paths": [
+        "lib/itcl4.3.5",
+        "lib/libtcl9.0.so",
+        "lib/libtcl9tk9.0.so",
+        "lib/tcl9",
+        "lib/tcl9.0",
+        "lib/thread3.0.4",
+        "lib/tk9.0",
+        "lib/python3.12/idlelib",
+        "lib/python3.12/lib-dynload/_tkinter.cpython-312-x86_64-linux-gnu.so",
+        "lib/python3.12/tkinter",
+        "lib/python3.12/turtledemo"
+      ]
     }
   }
 }

@@ -33,6 +33,8 @@ class DesktopPythonRuntimeTests(unittest.TestCase):
             self.assertTrue(target["executable"])
             self.assertTrue(target["ca_bundle"].endswith("cacert.pem"))
             self.assertTrue(target["license"].endswith("LICENSE.txt"))
+        linux = manifest["targets"]["x86_64-unknown-linux-gnu"]
+        self.assertIn("lib/python3.12/lib-dynload/_tkinter.cpython-312-x86_64-linux-gnu.so", linux["prune_paths"])
 
     def test_archive_guard_rejects_traversal_and_external_links(self):
         MODULE._safe_member(tarfile.TarInfo("python/bin/python3"))
@@ -73,22 +75,61 @@ class DesktopPythonRuntimeTests(unittest.TestCase):
                 "ca_bundle_sha256": MODULE._sha256(ca_bundle),
                 "license_path": "LICENSE.txt",
                 "license_sha256": MODULE._sha256(license_file),
+                "pruned_paths": ["lib/python3.12/tkinter"],
             }
             (root / MODULE.RECEIPT_NAME).write_text(json.dumps(receipt), encoding="utf-8")
             self.assertTrue(
-                MODULE._runtime_is_current(root, "test-target", "a" * 64, "b" * 64, "bin/python3")
+                MODULE._runtime_is_current(
+                    root,
+                    "test-target",
+                    "a" * 64,
+                    "b" * 64,
+                    "bin/python3",
+                    ["lib/python3.12/tkinter"],
+                )
             )
             del receipt["license_sha256"]
             (root / MODULE.RECEIPT_NAME).write_text(json.dumps(receipt), encoding="utf-8")
             self.assertFalse(
-                MODULE._runtime_is_current(root, "test-target", "a" * 64, "b" * 64, "bin/python3")
+                MODULE._runtime_is_current(
+                    root,
+                    "test-target",
+                    "a" * 64,
+                    "b" * 64,
+                    "bin/python3",
+                    ["lib/python3.12/tkinter"],
+                )
             )
             receipt["license_sha256"] = MODULE._sha256(license_file)
             executable.write_bytes(b"tampered")
             (root / MODULE.RECEIPT_NAME).write_text(json.dumps(receipt), encoding="utf-8")
             self.assertFalse(
-                MODULE._runtime_is_current(root, "test-target", "a" * 64, "b" * 64, "bin/python3")
+                MODULE._runtime_is_current(
+                    root,
+                    "test-target",
+                    "a" * 64,
+                    "b" * 64,
+                    "bin/python3",
+                    ["lib/python3.12/tkinter"],
+                )
             )
+
+    def test_runtime_pruning_is_explicit_and_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary)
+            optional_module = runtime / "lib" / "python3.12" / "tkinter"
+            optional_module.mkdir(parents=True)
+            (optional_module / "__init__.py").write_text("", encoding="utf-8")
+
+            self.assertEqual(
+                ["lib/python3.12/tkinter"],
+                MODULE._prune_runtime(runtime, ["lib/python3.12/tkinter"]),
+            )
+            self.assertFalse(optional_module.exists())
+            with self.assertRaises(ValueError):
+                MODULE._prune_runtime(runtime, ["lib/python3.12/tkinter"])
+            with self.assertRaises(ValueError):
+                MODULE._prune_runtime(runtime, ["../outside"])
 
     def test_desktop_packages_prepare_and_require_the_bundled_runtime(self):
         tauri = json.loads((ROOT / "apps/desktop-runner/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
