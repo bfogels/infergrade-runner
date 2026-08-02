@@ -142,8 +142,8 @@ def execute_run_job(
         output_dir = getattr(request, "output_dir", None)
         if not output_dir:
             return None
-        progress_payload = load_progress(output_dir)
-        if not progress_payload:
+        progress_payload = load_progress(output_dir) or {}
+        if not progress_payload and preflight_seconds is None:
             return None
         return lifecycle_timing_snapshot(
             progress_payload,

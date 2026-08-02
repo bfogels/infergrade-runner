@@ -543,6 +543,11 @@ class WorkerTests(unittest.TestCase):
         fail_mock.assert_called_once()
         self.assertEqual(fail_mock.call_args.kwargs["error_code"], "missing_runtime_image")
         self.assertTrue(fail_mock.call_args.kwargs["recovery"])
+        failure_timing = fail_mock.call_args.kwargs["details"]["lifecycle_timing"]
+        self.assertEqual(failure_timing["timing_version"], "run_lifecycle_timing_v1")
+        self.assertEqual(failure_timing["phases"]["preflight"]["status"], "completed")
+        self.assertIsNotNone(failure_timing["phases"]["preflight"]["elapsed_seconds"])
+        self.assertNotIn("output_dir", json.dumps(failure_timing))
 
     def test_worker_once_marks_interrupted_job_failed_before_exiting(self):
         claimed_run = {
