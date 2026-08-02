@@ -85,8 +85,10 @@ artifacts. The workflow:
 4. signs and notarizes the macOS Apple Silicon app and updater, then verifies the bundle and DMG with `codesign`, Gatekeeper assessment, and stapled notarization-ticket checks
 5. performs OS-native package acceptance: MSI administrative install plus NSIS install and launch on Windows, and `.deb` install plus AppImage extraction and launch under Xvfb on Linux; both lanes also execute the packaged sidecar self-test
 6. gives the verified packages stable public names and uploads each platform set as a short-lived workflow artifact
-7. waits for every platform job, combines their checksums into one exact release manifest, and creates or resumes the draft release for the exact `vX.Y.Z` tag
-8. removes draft assets outside the exact checksummed set, redownloads and verifies the full draft, then publishes it as an immutable versioned GitHub release and anonymously probes the updater, macOS DMG, Linux `.deb`, and Linux AppImage through GitHub's `releases/latest` redirect
+7. waits for every platform job, combines their checksums into one exact release manifest, and creates Sigstore-backed GitHub build-provenance attestations for the final asset set
+8. verifies the attestation signer workflow and `main` source-ref policy, then creates or resumes the draft release for the exact `vX.Y.Z` tag
+9. removes draft assets outside the exact checksummed set, redownloads and verifies the full draft, then publishes it as an immutable versioned GitHub release
+10. redownloads the published versioned asset set, verifies checksums and provenance again, and probes the stable updater, macOS DMG, Linux `.deb`, Linux AppImage, and any explicitly published Windows preview through GitHub's `releases/latest` redirect
 
 The desktop release deliberately does not fall back to older capability images. Scorer and dataset containers are part of the benchmark protocol identity; publishing an app whose matching tags are missing would either break selected benchmarks or silently change their evidence basis.
 
@@ -103,7 +105,21 @@ The path-filtered `Desktop Platform Smoke` workflow runs the Windows and Linux
 package acceptance on relevant pull requests, while the normal Rust CI matrix
 compiles and tests Windows-specific code on every pull request. Standard hosted
 runners prove operating-system compatibility and packaging, not accelerator
-support.
+support. After successful package acceptance, the workflow retains the
+checksummed Linux candidates and clearly named unsigned Windows candidates for
+seven days so maintainers can inspect or install the exact bytes CI tested.
+Every candidate bundle contains a checksummed
+`CI-CANDIDATE-NOT-A-RELEASE.txt` recording its source ref and commit. Pull
+request candidates are untrusted proposed code; they are not signed, attested,
+or suitable for ordinary user distribution.
+
+The protected release publisher creates GitHub artifact attestations with the
+official `actions/attest` action and verifies each asset against the exact
+Runner repository, desktop release workflow, and `refs/heads/main`. These
+Sigstore-backed provenance statements make the producing workflow and source
+ref independently inspectable. They complement checksums and platform signing;
+they do not replace Apple notarization, Windows Authenticode, SmartScreen
+acceptance, or real GPU execution.
 
 The protected GitHub workflow must not fall back to ad-hoc macOS signing or skip notarization. Local developer builds can still use ad-hoc signing, but any DMG published for users must be Developer ID signed, notarized, and verified on a clean macOS machine before external distribution.
 
@@ -168,6 +184,15 @@ scripts/verify_desktop_release_artifacts.py \
 ```
 
 This check verifies `SHA256SUMS`, confirms the updater manifest points at a local updater archive, and confirms the updater signature artifact exists and is non-empty. It is a manifest consistency check only. It does not replace Developer ID signing, notarization, Gatekeeper assessment, stapled-ticket checks, or clean-machine launch smoke.
+
+Verify the published build provenance for an individual downloaded asset with:
+
+```bash
+gh attestation verify /path/to/InferGrade.Runner.Linux-x86_64.AppImage \
+  --repo bfogels/infergrade-runner \
+  --signer-workflow bfogels/infergrade-runner/.github/workflows/desktop-runner-release.yml \
+  --source-ref refs/heads/main
+```
 
 ## Prepare The Release Images
 
