@@ -69,6 +69,38 @@ jobs:
             -NsisPath $nsis.FullName `
             -ExpectedVersion (Get-Content VERSION -Raw).Trim()
 
+      - name: Prepare verified Windows candidate artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force target/release/public-windows | Out-Null
+          Copy-Item (Get-ChildItem target/release/bundle/msi/*.msi -File).FullName `
+            target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi
+          Copy-Item (Get-ChildItem target/release/bundle/nsis/*.exe -File).FullName `
+            target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe
+          @"
+          CI candidate only; not an InferGrade release.
+          Source ref: $env:GITHUB_REF
+          Source commit: $env:GITHUB_SHA
+          The Windows installers are unsigned and GPU execution was not tested.
+          "@ | Set-Content -Encoding utf8 target/release/public-windows/CI-CANDIDATE-NOT-A-RELEASE.txt
+          python ./scripts/write_desktop_release_checksums.py `
+            --output target/release/public-windows/SHA256SUMS `
+            target/release/public-windows/*.msi `
+            target/release/public-windows/*.exe `
+            target/release/public-windows/CI-CANDIDATE-NOT-A-RELEASE.txt
+          python ./scripts/verify_desktop_release_artifacts.py `
+            --directory target/release/public-windows `
+            --require-windows-preview `
+            --reject-unexpected
+
+      - name: Upload verified Windows candidate artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: infergrade-runner-windows-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: target/release/public-windows/
+          retention-days: 7
+
       - name: Upload package diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -128,3 +160,32 @@ jobs:
             "${deb[0]}" \
             "${appimage[0]}" \
             "$(cat VERSION)"
+
+      - name: Prepare verified Linux candidate artifacts
+        run: |
+          mkdir -p target/release/public-linux
+          cp target/release/bundle/deb/*.deb target/release/public-linux/InferGrade.Runner.Linux-x86_64.deb
+          cp target/release/bundle/appimage/*.AppImage target/release/public-linux/InferGrade.Runner.Linux-x86_64.AppImage
+          printf '%s\n' \
+            'CI candidate only; not an InferGrade release.' \
+            "Source ref: $GITHUB_REF" \
+            "Source commit: $GITHUB_SHA" \
+            'GPU execution was not tested.' \
+            > target/release/public-linux/CI-CANDIDATE-NOT-A-RELEASE.txt
+          python3 ./scripts/write_desktop_release_checksums.py \
+            --output target/release/public-linux/SHA256SUMS \
+            target/release/public-linux/*.deb \
+            target/release/public-linux/*.AppImage \
+            target/release/public-linux/CI-CANDIDATE-NOT-A-RELEASE.txt
+          python3 ./scripts/verify_desktop_release_artifacts.py \
+            --directory target/release/public-linux \
+            --require-linux \
+            --reject-unexpected
+
+      - name: Upload verified Linux candidate artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: infergrade-runner-linux-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: target/release/public-linux/
+          retention-days: 7

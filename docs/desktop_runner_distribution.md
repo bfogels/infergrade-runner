@@ -65,6 +65,13 @@ apps/desktop-runner/src-tauri/binaries/infergrade-sidecar-<target-triple>[.exe]
 
 Pull requests that change the desktop, Runner engine, packaged core, schemas, or packaging scripts run a read-only Windows/Linux package workflow. It builds the actual installer formats, verifies their contents, installs them, invokes the installed sidecar against its packaged Runner core, launches the GUI briefly, and removes the install. The protected release workflow repeats those gates from the immutable release commit.
 
+Successful pull-request package jobs retain the checksummed Linux candidates
+and explicitly named unsigned Windows candidates for seven days. These are
+review artifacts tied to one commit, not a versioned public release. Each
+bundle carries a checksummed `CI-CANDIDATE-NOT-A-RELEASE.txt`; proposed-code
+artifacts must be treated as untrusted until their source is reviewed and the
+protected release lane rebuilds them from `main`.
+
 - Windows: the verified MSI/NSIS files remain seven-day workflow artifacts by default. Public release requires either Authenticode signing or explicit opt-in to filenames containing `UNSIGNED-PREVIEW`. Hosted CI does not prove CUDA, NVIDIA inference, pairing, upload, or SmartScreen reputation.
 - Linux: the verified AppImage/`.deb` files join the next versioned release with stable names and checksums. This is package acceptance on Ubuntu, not proof of every Linux distribution, GPU backend, desktop environment, or full Hub loop.
 
@@ -116,6 +123,12 @@ artifacts, and verified Linux packages only after Developer ID signing,
 notarization, Gatekeeper verification, stapled-ticket checks, and both hosted
 package gates pass. Windows installers are excluded from the public asset set
 unless the dispatch explicitly enables the clearly labeled unsigned preview.
+
+Before creating the draft, the publisher also records Sigstore-backed GitHub
+build provenance for the exact final asset set. It verifies that provenance
+against this repository, the protected desktop release workflow, and the
+`main` source ref before publication, then repeats checksum and provenance
+verification after downloading the immutable public release.
 
 The protected workflow also runs `scripts/verify_desktop_macos_release.sh` before upload. That script verifies the built app bundle with `codesign`, assesses the app and DMG with Gatekeeper, and validates stapled notarization tickets for both artifacts. If any of those checks fail, the workflow must stop before updating the downloadable release.
 
