@@ -49,6 +49,12 @@ new managed pin requires a Runner release. A future remotely delivered,
 signed/checksummed manifest could decouple safe runtime promotion from Runner
 product semver, but the intake report must not claim that separation today.
 
+The Windows CUDA preview candidate is b10217, selected after the 24-hour intake
+coalescing window and checked against GitHub's published archive digests. Static
+archive inspection passed, but license review, Windows/NVIDIA execution, a
+known-good GGUF run, Hub publication, Result review, and support export remain
+blocked; managed download and technical-beta support therefore remain disabled.
+
 The current stable macOS managed runtime remains b9050, and the release-default
 Linux container remains pinned to stable commit
 `9f102a1407ed5d73b8c954f32edab50f8dfa3f58`. The reviewed b9994 macOS candidate

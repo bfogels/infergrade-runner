@@ -83,19 +83,22 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertTrue(selector["delivery"]["runtime_delivery_gate"]["pinned_manifest_available"])
         self.assertTrue(selector["delivery"]["runtime_delivery_gate"]["checksum_verification_available"])
         self.assertFalse(selector["delivery"]["runtime_delivery_gate"]["managed_download_available"])
-        self.assertEqual(selector["delivery"]["runtime_delivery_gate"]["candidate_release"]["tag"], "b9371")
+        self.assertEqual(selector["delivery"]["runtime_delivery_gate"]["candidate_release"]["tag"], "b10217")
         artifact_names = [
             item["name"]
             for item in selector["delivery"]["runtime_delivery_gate"]["candidate_artifacts"]
         ]
-        self.assertIn("llama-b9371-bin-win-cuda-12.4-x64.zip", artifact_names)
+        self.assertIn("llama-b10217-bin-win-cuda-12.4-x64.zip", artifact_names)
         self.assertIn("cudart-llama-bin-win-cuda-12.4-x64.zip", artifact_names)
         candidate_review = selector["delivery"]["runtime_delivery_gate"]["candidate_review"]
         self.assertEqual(candidate_review["status"], "blocked")
-        self.assertEqual(candidate_review["status_reason"], "artifact_metadata_recorded_but_candidate_not_reviewed")
+        self.assertEqual(
+            candidate_review["status_reason"],
+            "static_archive_review_complete_hardware_and_license_pending",
+        )
         review_checks = {item["id"]: item for item in candidate_review["checks"]}
         self.assertEqual(review_checks["asset_sha256_digests_pinned"]["status"], "recorded")
-        self.assertEqual(review_checks["archive_contents_inspected"]["status"], "pending")
+        self.assertEqual(review_checks["archive_contents_inspected"]["status"], "passed")
         self.assertEqual(review_checks["license_and_runtime_dll_distribution_reviewed"]["status"], "pending")
         self.assertEqual(review_checks["windows_nvidia_version_smoke_completed"]["status"], "pending")
         self.assertEqual(selector["support"]["tier"], "preview")
@@ -275,7 +278,7 @@ class WindowsCudaPreflightTests(unittest.TestCase):
         self.assertEqual(selector["delivery"]["runtime_delivery_gate"]["status"], "blocked")
         self.assertEqual(
             selector["delivery"]["runtime_delivery_gate"]["candidate_artifacts"][0]["sha256"],
-            "762585777eb39884848ce410f62140f79d21305203fe948ca57f54ec89dc2255",
+            "dd9d505fdf527b0fbad9683581a2af59dda2782a51a346a9d391b9256b4a2af5",
         )
         self.assertIn("candidate_runtime_not_validated", selector["delivery"]["runtime_delivery_gate"]["reason_codes"])
         self.assertIn("candidate_review_not_complete", selector["delivery"]["runtime_delivery_gate"]["reason_codes"])
@@ -491,7 +494,7 @@ class WindowsCudaPreflightTests(unittest.TestCase):
             expected_name = artifact["url"].rsplit("/", 1)[-1]
             self.assertIn(expected_name, artifacts_by_name)
             self.assertEqual(artifacts_by_name[expected_name]["sha256"], artifact["sha256"])
-        self.assertTrue(artifacts_by_name["llama-b9371-bin-win-cuda-12.4-x64.zip"]["required"])
+        self.assertTrue(artifacts_by_name["llama-b10217-bin-win-cuda-12.4-x64.zip"]["required"])
         self.assertFalse(artifacts_by_name["cudart-llama-bin-win-cuda-12.4-x64.zip"]["required"])
 
 

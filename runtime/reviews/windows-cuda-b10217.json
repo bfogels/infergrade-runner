@@ -1,0 +1,114 @@
+{
+  "review_version": 1,
+  "reviewed_at": "2026-08-02",
+  "upstream": {
+    "repository": "ggml-org/llama.cpp",
+    "release": "b10217",
+    "published_at": "2026-08-01T06:50:00Z"
+  },
+  "claim_boundary": "Static archive and digest review only. No Windows or NVIDIA execution occurred.",
+  "artifacts": [
+    {
+      "name": "llama-b10217-bin-win-cuda-12.4-x64.zip",
+      "role": "runtime_archive",
+      "size_bytes": 250449171,
+      "github_asset_sha256": "dd9d505fdf527b0fbad9683581a2af59dda2782a51a346a9d391b9256b4a2af5",
+      "downloaded_sha256": "dd9d505fdf527b0fbad9683581a2af59dda2782a51a346a9d391b9256b4a2af5",
+      "member_count": 52,
+      "required_members": [
+        "llama-cli.exe",
+        "llama-server.exe",
+        "llama-perplexity.exe"
+      ],
+      "members": [
+        "ggml-base.dll",
+        "ggml-cpu-alderlake.dll",
+        "ggml-cpu-cannonlake.dll",
+        "ggml-cpu-cascadelake.dll",
+        "ggml-cpu-cooperlake.dll",
+        "ggml-cpu-haswell.dll",
+        "ggml-cpu-icelake.dll",
+        "ggml-cpu-ivybridge.dll",
+        "ggml-cpu-piledriver.dll",
+        "ggml-cpu-sandybridge.dll",
+        "ggml-cpu-sapphirerapids.dll",
+        "ggml-cpu-skylakex.dll",
+        "ggml-cpu-sse42.dll",
+        "ggml-cpu-x64.dll",
+        "ggml-cpu-zen4.dll",
+        "ggml-cuda.dll",
+        "ggml-rpc-server.exe",
+        "ggml-rpc.dll",
+        "ggml.dll",
+        "libomp140.x86_64.dll",
+        "llama-batched-bench-impl.dll",
+        "llama-batched-bench.exe",
+        "llama-bench-impl.dll",
+        "llama-bench.exe",
+        "llama-cli-impl.dll",
+        "llama-cli.exe",
+        "llama-common.dll",
+        "llama-completion-impl.dll",
+        "llama-completion.exe",
+        "llama-fit-params-impl.dll",
+        "llama-fit-params.exe",
+        "llama-gemma3-cli.exe",
+        "llama-gguf-split.exe",
+        "llama-imatrix.exe",
+        "llama-llava-cli.exe",
+        "llama-minicpmv-cli.exe",
+        "llama-mtmd-cli.exe",
+        "llama-mtmd-debug.exe",
+        "llama-perplexity-impl.dll",
+        "llama-perplexity.exe",
+        "llama-quantize-impl.dll",
+        "llama-quantize.exe",
+        "llama-qwen2vl-cli.exe",
+        "llama-results.exe",
+        "llama-server-impl.dll",
+        "llama-server.exe",
+        "llama-template-analysis.exe",
+        "llama-tokenize.exe",
+        "llama-tts.exe",
+        "llama.dll",
+        "llama.exe",
+        "mtmd.dll"
+      ]
+    },
+    {
+      "name": "cudart-llama-bin-win-cuda-12.4-x64.zip",
+      "role": "cuda_runtime_companion",
+      "size_bytes": 391443627,
+      "github_asset_sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+      "downloaded_sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+      "member_count": 3,
+      "required_members": [
+        "cublas64_12.dll",
+        "cublasLt64_12.dll",
+        "cudart64_12.dll"
+      ],
+      "members": [
+        "cublas64_12.dll",
+        "cublasLt64_12.dll",
+        "cudart64_12.dll"
+      ]
+    }
+  ],
+  "license_review": {
+    "status": "pending",
+    "sources_reviewed": [
+      "https://docs.nvidia.com/cuda/archive/12.4.1/eula/index.html",
+      "https://github.com/ggml-org/llama.cpp/blob/master/LICENSE"
+    ],
+    "reason": "NVIDIA's CUDA 12.4.1 EULA identifies versioned cudart, cuBLAS, and cuBLASLt variants as distributable subject to its application, access, and distribution-term requirements. llama.cpp is MIT-licensed and requires its notice. The upstream archives contain no license notices, and the libomp plus other third-party binary notices have not been inventoried. InferGrade packaging, notice, and user-license controls therefore require separate review before managed download."
+  },
+  "hardware_validation": {
+    "status": "not_run",
+    "required": [
+      "windows_nvidia_version_smoke",
+      "known_good_gguf_run",
+      "hub_upload_and_result_review",
+      "secret_free_support_export"
+    ]
+  }
+}
