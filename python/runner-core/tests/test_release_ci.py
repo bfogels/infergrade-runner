@@ -9,7 +9,10 @@ from tempfile import TemporaryDirectory
 from pathlib import Path
 
 from scripts.sync_versions import sync_versions
-from scripts.check_public_release_readiness import main as check_public_release_readiness
+from scripts.check_public_release_readiness import (
+    check_secret_filenames,
+    main as check_public_release_readiness,
+)
 from scripts.check_release_tag import validate_release_tag
 from scripts.check_version_bump import parse_release_version, validate_forward_version
 from scripts.prepare_desktop_release_dmg import DEFAULT_PUBLIC_DMG_NAME, prepare_public_dmg
@@ -1576,6 +1579,21 @@ class ReleaseCiTests(unittest.TestCase):
             self.assertIn("fail\tgit_repository_state\t", output)
             self.assertIn("fail\tsecret_filename_scan\t", output)
             self.assertIn("deploy.key", output)
+
+    def test_secret_filename_scan_skips_only_generated_desktop_python_runtime(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            generated = root / "apps" / "desktop-runner" / "src-tauri" / "desktop-python"
+            generated.mkdir(parents=True)
+            (generated / "cacert.pem").write_text("public CA bundle\n", encoding="utf-8")
+
+            self.assertEqual("pass", check_secret_filenames(root).status)
+
+            (root / "deploy.key").write_text("not a real secret\n", encoding="utf-8")
+            result = check_secret_filenames(root)
+            self.assertEqual("fail", result.status)
+            self.assertIn("deploy.key", result.detail)
+            self.assertNotIn("cacert.pem", result.detail)
 
     def test_public_release_readiness_fails_for_dirty_git_worktree(self):
         with TemporaryDirectory() as tmp:
