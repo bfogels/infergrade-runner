@@ -1,0 +1,130 @@
+name: Desktop Platform Smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - ".github/workflows/desktop-platform-smoke.yml"
+      - ".github/workflows/desktop-runner-release.yml"
+      - "apps/desktop-runner/**"
+      - "apps/runner-cli/**"
+      - "crates/runner-engine/**"
+      - "python/runner-core/src/**"
+      - "schemas/**"
+      - "scripts/build_desktop_sidecar.sh"
+      - "scripts/smoke_desktop_linux_packages.sh"
+      - "scripts/smoke_desktop_windows_packages.ps1"
+      - "Cargo.lock"
+      - "Cargo.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-package:
+    name: Windows install and launch smoke
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Build Windows packages
+        shell: bash
+        run: |
+          cd apps/desktop-runner
+          npm ci
+          npm run build:windows
+
+      - name: Install and launch Windows packages
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem target/release/bundle/msi/*.msi -File
+          $nsis = Get-ChildItem target/release/bundle/nsis/*.exe -File
+          if ($msi.Count -ne 1 -or $nsis.Count -ne 1) { throw "Expected exactly one MSI and one NSIS package." }
+          ./scripts/smoke_desktop_windows_packages.ps1 `
+            -MsiPath $msi.FullName `
+            -NsisPath $nsis.FullName `
+            -ExpectedVersion (Get-Content VERSION -Raw).Trim()
+
+      - name: Upload package diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-package-smoke-diagnostics-${{ github.sha }}
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/infergrade-windows-package-smoke/
+          retention-days: 3
+
+  linux-package:
+    name: Linux install and launch smoke
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Tauri and launch-smoke dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            xvfb \
+            dbus-x11
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Build Linux packages
+        run: |
+          cd apps/desktop-runner
+          npm ci
+          npm run build:linux
+
+      - name: Install and launch Linux packages
+        run: |
+          deb=(target/release/bundle/deb/*.deb)
+          appimage=(target/release/bundle/appimage/*.AppImage)
+          test "${#deb[@]}" -eq 1
+          test "${#appimage[@]}" -eq 1
+          ./scripts/smoke_desktop_linux_packages.sh \
+            "${deb[0]}" \
+            "${appimage[0]}" \
+            "$(cat VERSION)"

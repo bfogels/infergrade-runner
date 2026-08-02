@@ -1488,8 +1488,18 @@ pub fn verify_runtime_download_manifest(entry: &Value) -> Result<(), String> {
             .iter()
             .any(|item| item.as_str().map(|value| value == name).unwrap_or(false))
     };
-    if !has_binary("llama-cli") || !has_binary("llama-server") {
-        return Err("expected_binaries must include llama-cli and llama-server".to_string());
+    let cli_name = entry
+        .pointer("/binary_names/cli")
+        .and_then(Value::as_str)
+        .unwrap_or("llama-cli");
+    let server_name = entry
+        .pointer("/binary_names/server")
+        .and_then(Value::as_str)
+        .unwrap_or("llama-server");
+    if !has_binary(cli_name) || !has_binary(server_name) {
+        return Err(format!(
+            "expected_binaries must include declared cli `{cli_name}` and server `{server_name}`"
+        ));
     }
     Ok(())
 }
@@ -1814,17 +1824,20 @@ fn fetch_runtime_archive(url: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+#[cfg(unix)]
 fn set_executable_if_needed(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = fs::metadata(path)
-            .map_err(|error| format!("could not read `{}` permissions: {error}", path.display()))?
-            .permissions();
-        permissions.set_mode(permissions.mode() | 0o755);
-        fs::set_permissions(path, permissions)
-            .map_err(|error| format!("could not mark `{}` executable: {error}", path.display()))?;
-    }
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = fs::metadata(path)
+        .map_err(|error| format!("could not read `{}` permissions: {error}", path.display()))?
+        .permissions();
+    permissions.set_mode(permissions.mode() | 0o755);
+    fs::set_permissions(path, permissions)
+        .map_err(|error| format!("could not mark `{}` executable: {error}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_executable_if_needed(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
@@ -2744,11 +2757,33 @@ mod tests {
 
     fn write_test_llama_binary(path: &Path, binary_label: &str) {
         #[cfg(windows)]
-        fs::write(
-            path,
-            format!("@echo off\r\necho {binary_label} version 0.0-test\r\n"),
-        )
-        .expect("test llama binary");
+        {
+            let _ = binary_label;
+            static TEST_RUNTIME: OnceLock<PathBuf> = OnceLock::new();
+            let source = TEST_RUNTIME.get_or_init(|| {
+                let root = env::temp_dir().join(format!(
+                    "infergrade-runner-engine-native-test-runtime-{}",
+                    std::process::id()
+                ));
+                fs::create_dir_all(&root).expect("native test runtime directory");
+                let source_path = root.join("runtime.rs");
+                let executable_path = root.join("runtime.exe");
+                fs::write(
+                    &source_path,
+                    "fn main() { println!(\"llama.cpp test runtime version 0.0-test\"); }\n",
+                )
+                .expect("native test runtime source");
+                let status = StdCommand::new("rustc")
+                    .arg(&source_path)
+                    .arg("-o")
+                    .arg(&executable_path)
+                    .status()
+                    .expect("run rustc for native test runtime");
+                assert!(status.success(), "compile native test runtime");
+                executable_path
+            });
+            fs::copy(source, path).expect("test llama executable");
+        }
         #[cfg(not(windows))]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -2765,7 +2800,26 @@ mod tests {
         }
     }
 
+    fn test_runtime_binary_name(binary_label: &str) -> String {
+        if cfg!(windows) {
+            format!("{binary_label}.cmd")
+        } else {
+            binary_label.to_string()
+        }
+    }
+
+    fn test_runtime_binary_body(binary_label: &str, marker: &str) -> Vec<u8> {
+        if cfg!(windows) {
+            format!("@echo off\r\necho {binary_label} version {marker}\r\n").into_bytes()
+        } else {
+            format!("#!/bin/sh\necho '{binary_label} version {marker}'\n").into_bytes()
+        }
+    }
+
     fn test_runtime_manifest_entry(archive_bytes: &[u8]) -> Value {
+        let cli_name = test_runtime_binary_name("llama-cli");
+        let server_name = test_runtime_binary_name("llama-server");
+        let perplexity_name = test_runtime_binary_name("llama-perplexity");
         json!({
             "runtime_id": "llama-cpp-managed-test",
             "channel": "infergrade_stable",
@@ -2787,11 +2841,11 @@ mod tests {
             "download": {
                 "requires_explicit_user_action": true
             },
-            "expected_binaries": ["llama-cli", "llama-server", "llama-perplexity"],
+            "expected_binaries": [&cli_name, &server_name, &perplexity_name],
             "binary_names": {
-                "cli": "llama-cli",
-                "server": "llama-server",
-                "perplexity": "llama-perplexity"
+                "cli": &cli_name,
+                "server": &server_name,
+                "perplexity": &perplexity_name
             },
             "rollback_runtime_id": LLAMA_CPP_RUNTIME_ID,
             "provenance": "Test archive with checksum verification only.",
@@ -2816,25 +2870,28 @@ mod tests {
     fn test_runtime_archive_with_marker(marker: &str) -> Vec<u8> {
         let encoder = GzEncoder::new(Vec::new(), Compression::default());
         let mut builder = Builder::new(encoder);
-        let cli = format!("#!/bin/sh\necho 'llama-cli version {marker}'\n");
-        let server = format!("#!/bin/sh\necho 'llama-server version {marker}'\n");
-        let perplexity = format!("#!/bin/sh\necho 'llama-perplexity version {marker}'\n");
+        let cli_name = test_runtime_binary_name("llama-cli");
+        let server_name = test_runtime_binary_name("llama-server");
+        let perplexity_name = test_runtime_binary_name("llama-perplexity");
+        let cli = test_runtime_binary_body("llama-cli", marker);
+        let server = test_runtime_binary_body("llama-server", marker);
+        let perplexity = test_runtime_binary_body("llama-perplexity", marker);
         append_tar_file(
             &mut builder,
-            "llama-test/bin/llama-cli",
-            cli.as_bytes(),
+            &format!("llama-test/bin/{cli_name}"),
+            &cli,
             0o755,
         );
         append_tar_file(
             &mut builder,
-            "llama-test/bin/llama-server",
-            server.as_bytes(),
+            &format!("llama-test/bin/{server_name}"),
+            &server,
             0o755,
         );
         append_tar_file(
             &mut builder,
-            "llama-test/bin/llama-perplexity",
-            perplexity.as_bytes(),
+            &format!("llama-test/bin/{perplexity_name}"),
+            &perplexity,
             0o755,
         );
         let encoder = builder.into_inner().expect("finish tar");
@@ -2848,16 +2905,18 @@ mod tests {
     fn test_runtime_archive_without_perplexity() -> Vec<u8> {
         let encoder = GzEncoder::new(Vec::new(), Compression::default());
         let mut builder = Builder::new(encoder);
+        let cli_name = test_runtime_binary_name("llama-cli");
+        let server_name = test_runtime_binary_name("llama-server");
         append_tar_file(
             &mut builder,
-            "llama-test/bin/llama-cli",
-            b"#!/bin/sh\necho 'llama-cli version managed-test'\n",
+            &format!("llama-test/bin/{cli_name}"),
+            &test_runtime_binary_body("llama-cli", "managed-test"),
             0o755,
         );
         append_tar_file(
             &mut builder,
-            "llama-test/bin/llama-server",
-            b"#!/bin/sh\necho 'llama-server version managed-test'\n",
+            &format!("llama-test/bin/{server_name}"),
+            &test_runtime_binary_body("llama-server", "managed-test"),
             0o755,
         );
         let encoder = builder.into_inner().expect("finish tar");
@@ -2883,6 +2942,7 @@ mod tests {
         encoder.finish().expect("finish gzip")
     }
 
+    #[cfg(unix)]
     fn internal_symlink_runtime_archive() -> Vec<u8> {
         let encoder = GzEncoder::new(Vec::new(), Compression::default());
         let mut builder = Builder::new(encoder);
@@ -3022,6 +3082,15 @@ mod tests {
             "rollback_runtime_id": "llama-cpp-homebrew-stable-2026-04",
         });
         assert!(verify_runtime_download_manifest(&valid).is_ok());
+
+        let mut windows = valid.clone();
+        windows["platform"] = json!({"system": "windows", "arch": "x86_64"});
+        windows["expected_binaries"] = json!(["llama-cli.exe", "llama-server.exe"]);
+        windows["binary_names"] = json!({
+            "cli": "llama-cli.exe",
+            "server": "llama-server.exe"
+        });
+        assert!(verify_runtime_download_manifest(&windows).is_ok());
 
         let mut insecure = valid.clone();
         insecure["archive"]["url"] =
@@ -3460,6 +3529,7 @@ mod tests {
         let _ = fs::remove_dir_all(runtime_cache_dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn managed_runtime_install_allows_internal_symlink_entries() {
         let _guard = env_test_lock().lock().expect("env lock");
@@ -3537,7 +3607,10 @@ mod tests {
         env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &runtime_cache_dir);
         let archive = test_runtime_archive_without_perplexity();
         let mut entry = test_runtime_manifest_entry(&archive);
-        entry["expected_binaries"] = json!(["llama-cli", "llama-server"]);
+        entry["expected_binaries"] = json!([
+            test_runtime_binary_name("llama-cli"),
+            test_runtime_binary_name("llama-server")
+        ]);
 
         let result = install_managed_llama_cpp_runtime_from_manifest_entry(
             entry,
@@ -3802,7 +3875,7 @@ mod tests {
         let runtime_path = env::temp_dir().join(format!(
             "infergrade-runner-engine-llama-cli-{}{}",
             std::process::id(),
-            if cfg!(windows) { ".cmd" } else { "" }
+            if cfg!(windows) { ".exe" } else { "" }
         ));
         write_test_llama_binary(&runtime_path, "llama-cli");
         let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
@@ -3862,7 +3935,7 @@ mod tests {
         let runtime_path = env::temp_dir().join(format!(
             "infergrade-runner-engine-derived-llama-cli-{}{}",
             std::process::id(),
-            if cfg!(windows) { ".cmd" } else { "" }
+            if cfg!(windows) { ".exe" } else { "" }
         ));
         write_test_llama_binary(&runtime_path, "llama-cli");
         let expected_sha256 = sha256_file(&runtime_path).expect("runtime fingerprint");

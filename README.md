@@ -20,8 +20,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the component map and design decision
 Treat the current code as preview software:
 
 - **Working today:** Runner-owned schemas, benchmark catalog metadata, local/native and container-aware execution paths, Rust native first-run execution for selected `llama.cpp` GGUF runs, native-first-run Hub upload, result bundle generation, support export, signed macOS desktop release wiring, and explicit checksum-verified macOS Apple Silicon managed `llama.cpp` runtime install.
-- **Being hardened:** macOS installer-and-go smoke, hosted Hub handoff, broader clean-machine install validation, and stronger runtime provenance/signature checks.
-- **Planned or limited:** managed runtime lanes beyond macOS Apple Silicon Metal, Windows and Linux public desktop installers, fully managed cloud worker provisioning, and heavier reference/gold benchmark lanes that need stronger dataset, sandbox, or cost controls before becoming default local paths.
+- **Being hardened:** macOS installer-and-go smoke, hosted Hub handoff, Windows/Linux package acceptance, broader clean-machine install validation, and stronger runtime provenance/signature checks.
+- **Planned or limited:** managed runtime lanes beyond macOS Apple Silicon Metal, Authenticode-signed Windows distribution, real Windows/NVIDIA execution proof, fully managed cloud worker provisioning, and heavier reference/gold benchmark lanes that need stronger dataset, sandbox, or cost controls before becoming default local paths.
 
 Security-sensitive release credentials, Apple signing materials, Hub tokens, local runner profiles, and `.env` files must never be committed. See [SECURITY.md](SECURITY.md) before reporting vulnerabilities or sharing security-sensitive logs.
 

@@ -1272,13 +1272,16 @@ mod tests {
             extension
         ));
         std::fs::write(&model_path, b"fake gguf path validation only").expect("model file");
-        if cfg!(windows) {
+        #[cfg(windows)]
+        {
             std::fs::write(
                 &runtime_path,
                 "@echo off\r\necho hello from llama\r\necho llama_print_timings:        load time =     617.57 ms 1>&2\r\necho llama_print_timings:        eval time =    1285.25 ms /    6 runs   (40.16 ms per token, 24.90 tokens per second) 1>&2\r\n",
             )
             .expect("runtime script");
-        } else {
+        }
+        #[cfg(not(windows))]
+        {
             use std::os::unix::fs::PermissionsExt;
             std::fs::write(
                 &runtime_path,
@@ -1375,13 +1378,16 @@ mod tests {
             extension
         ));
         std::fs::write(&model_path, b"fake gguf path validation only").expect("model file");
-        if cfg!(windows) {
+        #[cfg(windows)]
+        {
             std::fs::write(
                 &runtime_path,
                 "@echo off\r\necho INFERGRADE_NATIVE_FIRST_RUN_METRICS {\"load_time_ms\":12,\"time_to_first_token_ms\":3,\"decode_tokens_per_second\":4.5,\"generated_tokens\":6,\"peak_memory_bytes\":789}\r\n",
             )
             .expect("runtime script");
-        } else {
+        }
+        #[cfg(not(windows))]
+        {
             use std::os::unix::fs::PermissionsExt;
             std::fs::write(
                 &runtime_path,
@@ -1476,13 +1482,16 @@ mod tests {
         ));
         let (api_url, received) = spawn_cli_hub_server();
         std::fs::write(&model_path, b"fake gguf path validation only").expect("model file");
-        if cfg!(windows) {
+        #[cfg(windows)]
+        {
             std::fs::write(
                 &runtime_path,
                 "@echo off\r\necho hello from upload runtime\r\necho llama_print_timings:        load time =      10.00 ms 1>&2\r\necho llama_print_timings:        eval time =     100.00 ms /    5 runs   (20.00 ms per token, 50.00 tokens per second) 1>&2\r\n",
             )
             .expect("runtime script");
-        } else {
+        }
+        #[cfg(not(windows))]
+        {
             use std::os::unix::fs::PermissionsExt;
             std::fs::write(
                 &runtime_path,

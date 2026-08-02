@@ -35,6 +35,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Require an updater manifest, updater archive, and updater signature.",
     )
     parser.add_argument(
+        "--require-linux",
+        action="store_true",
+        help="Require the stable x86_64 Debian and AppImage release assets.",
+    )
+    parser.add_argument(
+        "--require-windows-preview",
+        action="store_true",
+        help="Require the clearly labeled unsigned x64 Windows preview MSI and NSIS assets.",
+    )
+    parser.add_argument(
         "--reject-unexpected",
         action="store_true",
         help="Reject release-directory files not covered by SHA256SUMS (except SHA256SUMS itself).",
@@ -180,9 +190,27 @@ def main() -> int:
         dmg_names = sorted(path.name for path in directory.glob("*.dmg") if path.is_file())
         if dmg_names != [args.required_dmg_name]:
             raise SystemExit(f"Public release must contain exactly one DMG named {args.required_dmg_name}.")
+    verified_names = {path.name for path in verified}
+    if args.require_linux:
+        required_linux = {
+            "InferGrade.Runner.Linux-x86_64.deb",
+            "InferGrade.Runner.Linux-x86_64.AppImage",
+        }
+        missing_linux = sorted(required_linux - verified_names)
+        if missing_linux:
+            raise SystemExit(f"Required Linux release asset(s) were not verified: {', '.join(missing_linux)}")
+    if args.require_windows_preview:
+        required_windows = {
+            "InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi",
+            "InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe",
+        }
+        missing_windows = sorted(required_windows - verified_names)
+        if missing_windows:
+            raise SystemExit(
+                "Required unsigned Windows preview asset(s) were not verified: " + ", ".join(missing_windows)
+            )
     if args.reject_unexpected:
         verify_exact_release_set(directory, checksum_path, verified)
-    verified_names = {path.name for path in verified}
     verify_update_manifest(directory, update_manifest_path, args.require_updater, verified_names)
 
     print(f"desktop_release_artifact_dir={directory}")
