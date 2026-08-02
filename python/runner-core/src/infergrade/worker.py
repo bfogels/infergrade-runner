@@ -135,6 +135,7 @@ def execute_run_job(
     worker_started_monotonic = time.perf_counter()
     request = None
     preflight_seconds = None
+    preflight_status = None
     upload_seconds = None
     upload_status = None
 
@@ -148,6 +149,7 @@ def execute_run_job(
         return lifecycle_timing_snapshot(
             progress_payload,
             preflight_seconds=preflight_seconds,
+            preflight_status=preflight_status,
             upload_seconds=upload_seconds,
             upload_status=upload_status,
             worker_wall_seconds=time.perf_counter() - worker_started_monotonic,
@@ -200,12 +202,18 @@ def execute_run_job(
             check_name="Local preflight",
         )
         preflight_started_monotonic = time.perf_counter()
+        preflight_status = "running"
         try:
             doctor_report = run_doctor(request=request, api_url=api_url)
+        except Exception:
+            preflight_status = "failed"
+            raise
         finally:
             preflight_seconds = time.perf_counter() - preflight_started_monotonic
         if not doctor_report.get("ok"):
+            preflight_status = "failed"
             raise RuntimeError(_doctor_failure_message(doctor_report))
+        preflight_status = "completed"
         heartbeat_run_job(
             api_url,
             run_id,
@@ -322,8 +330,13 @@ def execute_run_job(
             run_token=run_token,
         )
         upload_started_monotonic = time.perf_counter()
-        upload = upload_run_bundle(result["output_dir"], api_url, run_id=run_id, run_token=run_token, api_token=api_token)
-        upload_seconds = time.perf_counter() - upload_started_monotonic
+        try:
+            upload = upload_run_bundle(result["output_dir"], api_url, run_id=run_id, run_token=run_token, api_token=api_token)
+        except Exception:
+            upload_status = "failed"
+            raise
+        finally:
+            upload_seconds = time.perf_counter() - upload_started_monotonic
         upload_status = "completed"
         completed = complete_run_job(
             api_url,

@@ -160,6 +160,7 @@ def lifecycle_timing_snapshot(
     *,
     observed_at: Optional[str] = None,
     preflight_seconds: Optional[float] = None,
+    preflight_status: Optional[str] = None,
     upload_seconds: Optional[float] = None,
     upload_status: Optional[str] = None,
     worker_wall_seconds: Optional[float] = None,
@@ -168,7 +169,7 @@ def lifecycle_timing_snapshot(
     observed = observed_at or utcnow_iso()
     phases = {
         "preflight": {
-            "status": "completed" if preflight_seconds is not None else "pending",
+            "status": preflight_status or ("completed" if preflight_seconds is not None else "pending"),
             "elapsed_seconds": round(max(float(preflight_seconds or 0.0), 0.0), 3) if preflight_seconds is not None else None,
         },
         "artifact": _combined_stage_timing(progress, ["artifact_resolution"], observed),
@@ -196,7 +197,13 @@ def lifecycle_timing_snapshot(
         "deployment": "deployment",
         "finalization": "finalization",
     }
-    current_phase = "upload" if upload_status == "running" else stage_to_phase.get(progress.get("current_stage"))
+    current_phase = (
+        "upload"
+        if upload_status == "running"
+        else "preflight"
+        if preflight_status == "running"
+        else stage_to_phase.get(progress.get("current_stage"))
+    )
     return {
         "timing_version": "run_lifecycle_timing_v1",
         "observed_at": observed,
