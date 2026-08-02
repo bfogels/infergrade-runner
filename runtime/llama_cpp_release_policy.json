@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy_version": "2026-07-20",
+  "policy_version": "2026-08-02",
   "upstream": {
     "repository": "ggml-org/llama.cpp",
     "latest_release_api": "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
@@ -90,12 +90,13 @@
       "id": "windows_x64_cuda_preview",
       "channel": "preview",
       "kind": "release_tag",
-      "value": "b9371",
-      "upstream_published_at": "2026-05-27T23:45:52Z",
+      "value": "b10217",
+      "upstream_published_at": "2026-08-01T06:50:00Z",
+      "review_receipt": "runtime/reviews/windows-cuda-b10217.json",
       "locations": [
         {
           "path": "python/runner-core/src/infergrade/runtimes.py",
-          "needle": "WINDOWS_CUDA_CANDIDATE_TAG = \"b9371\""
+          "needle": "WINDOWS_CUDA_CANDIDATE_TAG = \"b10217\""
         }
       ]
     }
