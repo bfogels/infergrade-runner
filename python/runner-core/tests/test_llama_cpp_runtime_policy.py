@@ -40,6 +40,20 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
         failures = self.module.validate_policy(policy, root=ROOT)
         self.assertTrue(any("full 40-character" in item for item in failures))
 
+    def test_reviewed_archive_pin_requires_its_receipt(self):
+        policy = copy.deepcopy(self.policy)
+        windows_pin = next(item for item in policy["pins"] if item["id"] == "windows_x64_cuda_preview")
+        windows_pin["review_receipt"] = "runtime/reviews/missing.json"
+        failures = self.module.validate_policy(policy, root=ROOT)
+        self.assertTrue(any("review receipt is missing" in item for item in failures))
+
+    def test_windows_candidate_receipt_matches_the_reviewed_pin(self):
+        windows_pin = next(item for item in self.policy["pins"] if item["id"] == "windows_x64_cuda_preview")
+        receipt = json.loads((ROOT / windows_pin["review_receipt"]).read_text(encoding="utf-8"))
+        self.assertEqual(receipt["upstream"]["release"], windows_pin["value"])
+        self.assertEqual(receipt["hardware_validation"]["status"], "not_run")
+        self.assertEqual(receipt["license_review"]["status"], "pending")
+
     def test_release_default_and_candidate_containers_are_separate_lanes(self):
         pins = {item["id"]: item for item in self.policy["pins"]}
         stable = pins["container_linux_cpu_stable"]
