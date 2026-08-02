@@ -25,6 +25,7 @@ The script runs:
 - `npm run build`
 - `npm audit --audit-level=moderate`
 - `cargo check --locked`
+- digest verification and extraction of the pinned platform Python runtime
 - clear the previous DMG output directory
 - `npm run tauri -- build -- --locked`
 
@@ -75,7 +76,9 @@ protected release lane rebuilds them from `main`.
 - Windows: the verified MSI/NSIS files remain seven-day workflow artifacts by default. Public release requires either Authenticode signing or explicit opt-in to filenames containing `UNSIGNED-PREVIEW`. Hosted CI does not prove CUDA, NVIDIA inference, pairing, upload, or SmartScreen reputation.
 - Linux: the verified AppImage/`.deb` files join the next versioned release with stable names and checksums. This is package acceptance on Ubuntu, not proof of every Linux distribution, GPU backend, desktop environment, or full Hub loop.
 
-The package jobs run in clean GitHub-hosted virtual machines, but they are not a no-prerequisite end-user proof. Python is installed in the build environment while the transition bridge still delegates some execution paths to packaged Python runner-core. Removing that dependency or validating a clear prerequisite flow remains part of Windows clean-machine acceptance.
+The package jobs use Python while building, but the installed application does not rely on it. Each package carries the reviewed `python-build-standalone` archive selected in `runtime/desktop_python_runtime.json`. The preparer verifies the exact archive size and SHA-256, rejects unsafe archive paths and links, preserves the included license files, and writes a receipt containing the executable, CA bundle, and license digests. Package smoke blocks system-Python discovery and requires both the installed sidecar and GUI to remain functional with the bundled runtime.
+
+This proves the packaged Runner core is self-contained on the hosted Windows and Ubuntu images. It does not prove CUDA execution, all Linux distributions, Windows SmartScreen acceptance, or the complete Hub contribution loop.
 
 The sidecar contract should remain the same: call the existing `infergrade` CLI when available, otherwise resolve the bundled or repo-local Runner core.
 

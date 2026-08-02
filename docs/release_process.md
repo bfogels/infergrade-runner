@@ -83,7 +83,7 @@ artifacts. The workflow:
 2. refuses a non-`main` dispatch, a version override that differs from the checked-out `VERSION`, or a `vX.Y.Z` tag that does not resolve to the dispatched commit, then anonymously verifies all matching GHCR image tags before spending signing or build time
 3. builds the platform sidecar and desktop packages independently on macOS, Windows, and Linux hosts
 4. signs and notarizes the macOS Apple Silicon app and updater, then verifies the bundle and DMG with `codesign`, Gatekeeper assessment, and stapled notarization-ticket checks
-5. performs OS-native package acceptance: MSI administrative install plus NSIS install and launch on Windows, and `.deb` install plus AppImage extraction and launch under Xvfb on Linux; both lanes also execute the packaged sidecar self-test
+5. performs OS-native package acceptance: MSI administrative install plus NSIS install and launch on Windows, and `.deb` install plus AppImage extraction and launch under Xvfb on Linux; both lanes execute the packaged sidecar self-test with system-Python discovery blocked and require the pinned bundled runtime receipt
 6. gives the verified packages stable public names and uploads each platform set as a short-lived workflow artifact
 7. waits for every platform job, combines their checksums into one exact release manifest, and creates Sigstore-backed GitHub build-provenance attestations for the final asset set
 8. verifies the attestation signer workflow and `main` source-ref policy, then creates or resumes the draft release for the exact `vX.Y.Z` tag

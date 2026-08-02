@@ -25,6 +25,7 @@ if (!exeSuffix) {
   chmodSync(outputBinary, 0o755);
 }
 console.log(`desktop_runner_sidecar=${outputBinary}`);
+preparePythonRuntime(targetTriple);
 
 function rustHostTriple() {
   const result = spawnSync("rustc", ["-Vv"], { encoding: "utf8" });
@@ -46,4 +47,22 @@ function run(command, args, purpose) {
     console.error(`Could not ${purpose}${result.error ? `: ${result.error.message}` : "."}`);
     process.exit(result.status || 1);
   }
+}
+
+function preparePythonRuntime(target) {
+  const script = resolve(rootDir, "scripts/prepare_desktop_python_runtime.py");
+  const candidates = process.platform === "win32" ? ["python", "py"] : ["python3", "python"];
+  for (const command of candidates) {
+    const args = command === "py"
+      ? ["-3", script, "--target", target]
+      : [script, "--target", target];
+    const result = spawnSync(command, args, { stdio: "inherit" });
+    if (!result.error && result.status === 0) return;
+    if (result.error?.code !== "ENOENT") {
+      console.error(`Could not prepare the pinned Desktop Python runtime with ${command}.`);
+      process.exit(result.status || 1);
+    }
+  }
+  console.error("Python is required only to build the self-contained Desktop package; install Python 3 and retry.");
+  process.exit(1);
 }

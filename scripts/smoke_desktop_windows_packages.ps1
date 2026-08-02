@@ -35,13 +35,49 @@ function Assert-DesktopLaunch([string]$Executable, [string]$Label) {
 }
 
 function Assert-PackagedSidecar([string]$Root, [string]$Label) {
-    $sidecar = Get-ChildItem -Path $Root -Recurse -File -Filter "infergrade-sidecar*.exe" |
-        Select-Object -First 1
+    $sidecar = @(
+        Get-ChildItem -Path $Root -File -Filter "infergrade-sidecar*.exe" -ErrorAction SilentlyContinue
+        Get-ChildItem -Path (Join-Path $Root "binaries") -File -Filter "infergrade-sidecar*.exe" -ErrorAction SilentlyContinue
+    ) | Select-Object -First 1
     if ($null -eq $sidecar) { throw "$Label is missing the packaged sidecar." }
-    $output = & $sidecar.FullName desktop-self-test
-    if ($LASTEXITCODE -ne 0) { throw "$Label sidecar self-test failed." }
+
+    $diagnosticStem = $Label.ToLowerInvariant().Replace(" ", "-")
+    $stdoutPath = Join-Path $WorkDir "$diagnosticStem-sidecar-self-test.stdout"
+    $stderrPath = Join-Path $WorkDir "$diagnosticStem-sidecar-self-test.stderr"
+    $process = Start-Process `
+        -FilePath $sidecar.FullName `
+        -ArgumentList "desktop-self-test" `
+        -RedirectStandardOutput $stdoutPath `
+        -RedirectStandardError $stderrPath `
+        -Wait `
+        -PassThru
+    if ($process.ExitCode -ne 0) {
+        $stderr = if (Test-Path $stderrPath) { (Get-Content $stderrPath -Raw).Trim() } else { "" }
+        throw "$Label sidecar self-test failed with code $($process.ExitCode): $stderr"
+    }
+    $output = Get-Content $stdoutPath -Raw
     $payload = $output | ConvertFrom-Json
     if ($payload.invocation -ne "ok") { throw "$Label sidecar did not report invocation=ok." }
+    if ($payload.python_runtime.source -ne "bundled" -or -not $payload.python_runtime.self_contained) {
+        throw "$Label sidecar did not use the self-contained Python runtime."
+    }
+}
+
+function Use-PythonFreePath([scriptblock]$Action) {
+    $originalPath = $env:PATH
+    $env:PATH = @(
+        (Join-Path $env:SystemRoot "System32"),
+        $env:SystemRoot,
+        (Join-Path $env:SystemRoot "System32\Wbem"),
+        (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0")
+    ) -join ";"
+    try {
+        if (Get-Command python -ErrorAction SilentlyContinue) { throw "Python unexpectedly remains on the clean-runtime PATH." }
+        if (Get-Command python3 -ErrorAction SilentlyContinue) { throw "Python 3 unexpectedly remains on the clean-runtime PATH." }
+        & $Action
+    } finally {
+        $env:PATH = $originalPath
+    }
 }
 
 Remove-Item -Recurse -Force $WorkDir -ErrorAction SilentlyContinue
@@ -62,8 +98,10 @@ try {
         Where-Object { $_.Name -in @("InferGrade Runner.exe", "infergrade_desktop_runner.exe") } |
         Select-Object -First 1
     if ($null -eq $msiExecutable) { throw "MSI install is missing the desktop executable." }
-    Assert-PackagedSidecar $msiExecutable.Directory.FullName "MSI"
-    Assert-DesktopLaunch $msiExecutable.FullName "MSI desktop app"
+    Use-PythonFreePath {
+        Assert-PackagedSidecar $msiExecutable.Directory.FullName "MSI"
+        Assert-DesktopLaunch $msiExecutable.FullName "MSI desktop app"
+    }
 } finally {
     $uninstallArgs = "/x $productCode /qn /norestart"
     $msiUninstall = Start-Process msiexec.exe -ArgumentList $uninstallArgs -Wait -PassThru
@@ -78,8 +116,10 @@ $nsisExecutable = Get-ChildItem -Path $NsisInstallDir -Recurse -File |
     Where-Object { $_.Name -in @("InferGrade Runner.exe", "infergrade_desktop_runner.exe") } |
     Select-Object -First 1
 if ($null -eq $nsisExecutable) { throw "NSIS install is missing the desktop executable." }
-Assert-PackagedSidecar $NsisInstallDir "NSIS"
-Assert-DesktopLaunch $nsisExecutable.FullName "NSIS desktop app"
+Use-PythonFreePath {
+    Assert-PackagedSidecar $NsisInstallDir "NSIS"
+    Assert-DesktopLaunch $nsisExecutable.FullName "NSIS desktop app"
+}
 
 $uninstaller = Get-ChildItem -Path $NsisInstallDir -File -Filter "uninstall*.exe" | Select-Object -First 1
 if ($null -ne $uninstaller) {
@@ -94,4 +134,5 @@ Write-Output "desktop_windows_package_version=$productVersion"
 Write-Output "desktop_windows_product_code=$productCode"
 Write-Output "desktop_windows_msi_signature=$msiSignature"
 Write-Output "desktop_windows_nsis_signature=$nsisSignature"
+Write-Output "desktop_windows_python_runtime=bundled_self_contained"
 Write-Output "desktop_windows_gpu_execution=not_tested"

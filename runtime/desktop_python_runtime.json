@@ -1,0 +1,54 @@
+{
+  "schema_version": "infergrade.desktop_python_runtime.v1",
+  "distribution": "astral-sh/python-build-standalone",
+  "release": "20260728",
+  "python_version": "3.12.13",
+  "archive_flavor": "install_only_stripped",
+  "source_url": "https://github.com/astral-sh/python-build-standalone/releases/tag/20260728",
+  "license_policy": {
+    "preserve_archive_notices": true,
+    "source_project_license_url": "https://github.com/astral-sh/python-build-standalone/blob/main/LICENSE"
+  },
+  "targets": {
+    "aarch64-apple-darwin": {
+      "archive": "cpython-3.12.13+20260728-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260728/cpython-3.12.13%2B20260728-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "size_bytes": 24983743,
+      "sha256": "2f18cdef4125ca1440dd1ba00ebcb267526efb532138c0860438f755ea4eebac",
+      "executable": "bin/python3.12",
+      "ca_bundle": "lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+      "license": "lib/python3.12/LICENSE.txt"
+    },
+    "x86_64-pc-windows-msvc": {
+      "archive": "cpython-3.12.13+20260728-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260728/cpython-3.12.13%2B20260728-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "size_bytes": 21932566,
+      "sha256": "242b94b37682ac55f9bf9eb624348dc8d17c64f74f56028104545ea3ffe35e26",
+      "executable": "python.exe",
+      "ca_bundle": "Lib/site-packages/pip/_vendor/certifi/cacert.pem",
+      "license": "LICENSE.txt"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "archive": "cpython-3.12.13+20260728-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260728/cpython-3.12.13%2B20260728-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "size_bytes": 34175396,
+      "sha256": "7ceaf4360f4b4ab44f31d8217cfdc70df8e12b61d9561b4900ee7af87176e50d",
+      "executable": "bin/python3.12",
+      "ca_bundle": "lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+      "license": "lib/python3.12/LICENSE.txt",
+      "prune_paths": [
+        "lib/itcl4.3.5",
+        "lib/libtcl9.0.so",
+        "lib/libtcl9tk9.0.so",
+        "lib/tcl9",
+        "lib/tcl9.0",
+        "lib/thread3.0.4",
+        "lib/tk9.0",
+        "lib/python3.12/idlelib",
+        "lib/python3.12/lib-dynload/_tkinter.cpython-312-x86_64-linux-gnu.so",
+        "lib/python3.12/tkinter",
+        "lib/python3.12/turtledemo"
+      ]
+    }
+  }
+}

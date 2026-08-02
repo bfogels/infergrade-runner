@@ -25,6 +25,16 @@ if [ "$package_version" != "$expected_version" ]; then
 fi
 
 work_dir="$(mktemp -d)"
+mkdir -p "$work_dir/python-block"
+cat > "$work_dir/python-block/python" <<'SH'
+#!/usr/bin/env sh
+echo invoked > "${INFERGRADE_PYTHON_FALLBACK_MARKER:?}"
+exit 97
+SH
+cp "$work_dir/python-block/python" "$work_dir/python-block/python3"
+chmod +x "$work_dir/python-block/python" "$work_dir/python-block/python3"
+export INFERGRADE_PYTHON_FALLBACK_MARKER="$work_dir/system-python-invoked"
+export PATH="$work_dir/python-block:$PATH"
 cleanup() {
   if [ -n "${desktop_pid:-}" ]; then
     kill "$desktop_pid" >/dev/null 2>&1 || true
@@ -56,14 +66,14 @@ if [ -z "$installed_sidecar" ]; then
   exit 1
 fi
 "$installed_sidecar" desktop-self-test > "$work_dir/deb-sidecar-self-test.json"
-python3 - "$work_dir/deb-sidecar-self-test.json" <<'PY'
-import json
-import sys
-
-payload = json.load(open(sys.argv[1], encoding="utf-8"))
-if payload.get("invocation") != "ok":
-    raise SystemExit("Installed Linux sidecar self-test did not report invocation=ok")
-PY
+node --input-type=module - "$work_dir/deb-sidecar-self-test.json" <<'JS'
+import fs from "node:fs";
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (payload.invocation !== "ok") throw new Error("Installed Linux sidecar self-test did not report invocation=ok");
+if (payload.python_runtime?.source !== "bundled" || payload.python_runtime?.self_contained !== true) {
+  throw new Error("Installed Linux sidecar did not use the self-contained Python runtime");
+}
+JS
 if [ -z "$installed_executable" ]; then
   echo "Installed Debian package did not expose the desktop executable." >&2
   exit 1
@@ -81,6 +91,10 @@ fi
 kill "$desktop_pid" >/dev/null 2>&1 || true
 wait "$desktop_pid" >/dev/null 2>&1 || true
 desktop_pid=""
+if [ -e "$INFERGRADE_PYTHON_FALLBACK_MARKER" ]; then
+  echo "Installed Debian app invoked a system Python fallback." >&2
+  exit 1
+fi
 sudo dpkg --purge "$package_name" >/dev/null
 
 chmod +x "$appimage_path"
@@ -95,6 +109,13 @@ if [ -z "$appimage_sidecar" ]; then
   exit 1
 fi
 "$appimage_sidecar" desktop-self-test > "$work_dir/appimage-sidecar-self-test.json"
+node --input-type=module - "$work_dir/appimage-sidecar-self-test.json" <<'JS'
+import fs from "node:fs";
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (payload.python_runtime?.source !== "bundled" || payload.python_runtime?.self_contained !== true) {
+  throw new Error("AppImage sidecar did not use the self-contained Python runtime");
+}
+JS
 
 APPIMAGE_EXTRACT_AND_RUN=1 dbus-run-session -- xvfb-run -a "$appimage_path" > "$work_dir/appimage-launch.log" 2>&1 &
 desktop_pid=$!
@@ -108,8 +129,13 @@ fi
 kill "$desktop_pid" >/dev/null 2>&1 || true
 wait "$desktop_pid" >/dev/null 2>&1 || true
 desktop_pid=""
+if [ -e "$INFERGRADE_PYTHON_FALLBACK_MARKER" ]; then
+  echo "AppImage invoked a system Python fallback." >&2
+  exit 1
+fi
 
 echo "desktop_linux_package_smoke=pass"
 echo "desktop_linux_deb_package=$package_name"
 echo "desktop_linux_package_version=$package_version"
+echo "desktop_linux_python_runtime=bundled_self_contained"
 echo "desktop_linux_gpu_execution=not_tested"

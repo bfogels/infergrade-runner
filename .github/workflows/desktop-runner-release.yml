@@ -381,6 +381,11 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
+      - name: Set up build-time Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
       - name: Build Linux packages
         run: |
           cd apps/desktop-runner

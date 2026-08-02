@@ -13,8 +13,11 @@ on:
       - "apps/runner-cli/**"
       - "crates/runner-engine/**"
       - "python/runner-core/src/**"
+      - "runtime/desktop_python_runtime.json"
       - "schemas/**"
       - "scripts/build_desktop_sidecar.sh"
+      - "scripts/prepare_desktop_python_runtime.py"
+      - "scripts/finalize_desktop_linux_appimage.py"
       - "scripts/smoke_desktop_linux_packages.sh"
       - "scripts/smoke_desktop_windows_packages.ps1"
       - "Cargo.lock"
@@ -147,6 +150,11 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
+      - name: Set up build-time Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
       - name: Build Linux packages
         run: |
           cd apps/desktop-runner
@@ -192,3 +200,23 @@ jobs:
           if-no-files-found: error
           path: target/release/public-linux/
           retention-days: 7
+
+      - name: Collect Linux package diagnostics on failure
+        if: failure()
+        run: |
+          diagnostic_dir="$RUNNER_TEMP/infergrade-linux-package-smoke"
+          mkdir -p "$diagnostic_dir"
+          find target/release/bundle -maxdepth 4 -printf '%y %s %p -> %l\n' \
+            > "$diagnostic_dir/bundle-inventory.txt" 2>&1 || true
+          if [ -f target/release/bundle/appimage/build_appimage.sh ]; then
+            cp target/release/bundle/appimage/build_appimage.sh "$diagnostic_dir/"
+          fi
+
+      - name: Upload Linux package diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-package-smoke-diagnostics-${{ github.sha }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/infergrade-linux-package-smoke/
+          retention-days: 3

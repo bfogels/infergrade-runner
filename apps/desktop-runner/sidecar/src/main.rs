@@ -1,6 +1,9 @@
-use serde_json::json;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::env;
 use std::ffi::OsString;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Output, Stdio};
 
@@ -13,6 +16,15 @@ const MACOS_GUI_PATH_DEFAULTS: &[&str] = &[
     "/usr/sbin",
     "/sbin",
 ];
+const BUNDLED_PYTHON_RECEIPT: &str = "infergrade-python-runtime-receipt.json";
+
+#[derive(Clone, Debug)]
+struct BundledPythonRuntime {
+    root: PathBuf,
+    executable: PathBuf,
+    ca_bundle: PathBuf,
+    receipt: Value,
+}
 
 fn runner_core_src(repo_root: &Path) -> PathBuf {
     repo_root.join("python").join("runner-core").join("src")
@@ -20,6 +32,13 @@ fn runner_core_src(repo_root: &Path) -> PathBuf {
 
 fn bundled_runner_core_src(bundle_root: &Path) -> PathBuf {
     bundle_root.join("src")
+}
+
+fn requires_bundled_python(runner_root: &Path) -> bool {
+    bundled_runner_core_src(runner_root)
+        .join("infergrade")
+        .is_dir()
+        && !runner_core_src(runner_root).join("infergrade").is_dir()
 }
 
 fn find_repo_root_from(start: &Path) -> Option<PathBuf> {
@@ -82,12 +101,6 @@ fn fallback_repo_root() -> Option<PathBuf> {
         }
     }
 
-    let executable = env::current_exe().ok()?;
-    let executable_dir = executable.parent()?;
-    if let Some(path) = find_bundled_runner_core_from(executable_dir) {
-        return Some(path);
-    }
-
     if let Some(value) = env::var_os("INFERGRADE_RUNNER_REPO") {
         let path = PathBuf::from(value);
         if runner_core_src(&path).join("infergrade").is_dir() {
@@ -95,7 +108,140 @@ fn fallback_repo_root() -> Option<PathBuf> {
         }
     }
 
-    find_repo_root_from(executable_dir)
+    let executable = env::current_exe().ok()?;
+    let executable_dir = executable.parent()?;
+    if let Some(path) = find_repo_root_from(executable_dir) {
+        return Some(path);
+    }
+    if let Some(path) = find_bundled_runner_core_from(executable_dir) {
+        return Some(path);
+    }
+    None
+}
+
+fn relative_receipt_path(root: &Path, value: &Value) -> Option<PathBuf> {
+    let raw = value.as_str()?;
+    let path = PathBuf::from(raw);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+    Some(root.join(path))
+}
+
+fn file_sha256(path: &Path) -> Option<String> {
+    let mut file = File::open(path).ok()?;
+    let mut digest = Sha256::new();
+    // Windows processes commonly start with a 1 MiB main-thread stack. Keep
+    // the integrity buffer on the heap so receipt verification cannot exhaust
+    // that stack before the bundled interpreter is launched.
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer).ok()?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Some(format!("{:x}", digest.finalize()))
+}
+
+fn bundled_python_runtime_at(root: &Path) -> Option<BundledPythonRuntime> {
+    let receipt_path = root.join(BUNDLED_PYTHON_RECEIPT);
+    let receipt: Value = serde_json::from_slice(&std::fs::read(receipt_path).ok()?).ok()?;
+    if receipt.get("schema_version")?.as_str()? != "infergrade.desktop_python_runtime_receipt.v1" {
+        return None;
+    }
+    let executable = relative_receipt_path(root, receipt.get("executable")?)?;
+    let ca_bundle = relative_receipt_path(root, receipt.get("ca_bundle")?)?;
+    let license = relative_receipt_path(root, receipt.get("license_path")?)?;
+    if !executable.is_file() || !ca_bundle.is_file() || !license.is_file() {
+        return None;
+    }
+    for (path, field) in [
+        (&executable, "executable_sha256"),
+        (&ca_bundle, "ca_bundle_sha256"),
+        (&license, "license_sha256"),
+    ] {
+        if file_sha256(path)?.as_str() != receipt.get(field)?.as_str()? {
+            return None;
+        }
+    }
+    Some(BundledPythonRuntime {
+        root: root.to_path_buf(),
+        executable,
+        ca_bundle,
+        receipt,
+    })
+}
+
+fn find_bundled_python_from(start: &Path) -> Result<Option<BundledPythonRuntime>, String> {
+    let mut current = Some(start);
+    while let Some(path) = current {
+        for candidate in [
+            path.join("python-runtime"),
+            path.join("Resources").join("python-runtime"),
+            path.join("usr")
+                .join("lib")
+                .join("InferGrade Runner")
+                .join("python-runtime"),
+            path.join("usr")
+                .join("lib")
+                .join("infergrade-desktop-runner")
+                .join("python-runtime"),
+        ] {
+            if candidate.join(BUNDLED_PYTHON_RECEIPT).is_file() {
+                return bundled_python_runtime_at(&candidate)
+                    .map(Some)
+                    .ok_or_else(|| {
+                        format!(
+                        "bundled Python runtime failed its receipt or file-integrity check at {}",
+                        candidate.display()
+                    )
+                    });
+            }
+        }
+        current = path.parent();
+    }
+
+    #[cfg(target_os = "linux")]
+    for candidate in [
+        PathBuf::from("/usr/lib/InferGrade Runner/python-runtime"),
+        PathBuf::from("/usr/lib/infergrade-desktop-runner/python-runtime"),
+    ] {
+        if candidate.join(BUNDLED_PYTHON_RECEIPT).is_file() {
+            return bundled_python_runtime_at(&candidate)
+                .map(Some)
+                .ok_or_else(|| {
+                    format!(
+                        "bundled Python runtime failed its receipt or file-integrity check at {}",
+                        candidate.display()
+                    )
+                });
+        }
+    }
+    Ok(None)
+}
+
+fn bundled_python_runtime() -> Result<Option<BundledPythonRuntime>, String> {
+    if let Some(value) = env::var_os("INFERGRADE_BUNDLED_PYTHON_ROOT") {
+        let root = PathBuf::from(value);
+        return bundled_python_runtime_at(&root).map(Some).ok_or_else(|| {
+            format!(
+                "configured bundled Python runtime failed its receipt or file-integrity check at {}",
+                root.display()
+            )
+        });
+    }
+    let executable = env::current_exe()
+        .map_err(|error| format!("could not resolve the sidecar executable: {error}"))?;
+    let executable_dir = executable
+        .parent()
+        .ok_or_else(|| "sidecar executable has no parent directory".to_string())?;
+    find_bundled_python_from(executable_dir)
 }
 
 fn pythonpath_with_runner(
@@ -176,6 +322,48 @@ fn run_command_output(
     command.output()
 }
 
+fn configure_bundled_python(command: &mut Command, runtime: &BundledPythonRuntime) {
+    command.env("PYTHONHOME", &runtime.root);
+    command.env("PYTHONNOUSERSITE", "1");
+    command.env("PYTHONDONTWRITEBYTECODE", "1");
+    if env::var_os("SSL_CERT_FILE").is_none() {
+        command.env("SSL_CERT_FILE", &runtime.ca_bundle);
+    }
+}
+
+fn run_bundled_python(
+    runtime: &BundledPythonRuntime,
+    args: &[OsString],
+    pythonpath: OsString,
+) -> std::io::Result<ExitStatus> {
+    let mut command = Command::new(&runtime.executable);
+    command.args(args);
+    command.stdin(Stdio::inherit());
+    command.stdout(Stdio::inherit());
+    command.stderr(Stdio::inherit());
+    command.env("PYTHONPATH", pythonpath);
+    configure_bundled_python(&mut command, runtime);
+    if let Some(value) = path_with_macos_gui_defaults(env::var_os("PATH")) {
+        command.env("PATH", value);
+    }
+    command.status()
+}
+
+fn run_bundled_python_output(
+    runtime: &BundledPythonRuntime,
+    args: &[OsString],
+    pythonpath: OsString,
+) -> std::io::Result<Output> {
+    let mut command = Command::new(&runtime.executable);
+    command.args(args);
+    command.env("PYTHONPATH", pythonpath);
+    configure_bundled_python(&mut command, runtime);
+    if let Some(value) = path_with_macos_gui_defaults(env::var_os("PATH")) {
+        command.env("PATH", value);
+    }
+    command.output()
+}
+
 #[cfg(unix)]
 fn exec_command(program: &str, args: &[OsString], pythonpath: Option<OsString>) -> std::io::Error {
     use std::os::unix::process::CommandExt;
@@ -188,6 +376,27 @@ fn exec_command(program: &str, args: &[OsString], pythonpath: Option<OsString>) 
     if let Some(value) = pythonpath {
         command.env("PYTHONPATH", value);
     }
+    if let Some(value) = path_with_macos_gui_defaults(env::var_os("PATH")) {
+        command.env("PATH", value);
+    }
+    command.exec()
+}
+
+#[cfg(unix)]
+fn exec_bundled_python(
+    runtime: &BundledPythonRuntime,
+    args: &[OsString],
+    pythonpath: OsString,
+) -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+
+    let mut command = Command::new(&runtime.executable);
+    command.args(args);
+    command.stdin(Stdio::inherit());
+    command.stdout(Stdio::inherit());
+    command.stderr(Stdio::inherit());
+    command.env("PYTHONPATH", pythonpath);
+    configure_bundled_python(&mut command, runtime);
     if let Some(value) = path_with_macos_gui_defaults(env::var_os("PATH")) {
         command.env("PATH", value);
     }
@@ -216,20 +425,52 @@ fn command_exists_quiet(program: &str, args: &[&str]) -> bool {
     matches!(run_command_output(program, &args, None), Ok(output) if output.status.success())
 }
 
-fn verify_repo_python_invocation(repo_root: &Path) -> Result<String, String> {
+fn verify_repo_python_invocation(
+    repo_root: &Path,
+) -> Result<(String, Option<BundledPythonRuntime>), String> {
     let pythonpath = pythonpath_with_runner(repo_root, env::var_os("PYTHONPATH"))?;
     let args = repo_python_args(&[OsString::from("--version")]);
+    if let Some(runtime) = bundled_python_runtime()? {
+        match run_bundled_python_output(&runtime, &args, pythonpath.clone()) {
+            Ok(output) if output.status.success() => {
+                let detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                return Ok((detail, Some(runtime)));
+            }
+            Ok(output) => {
+                let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                return Err(format!(
+                    "bundled Python exited with code {}{}",
+                    output.status.code().unwrap_or(1),
+                    if detail.is_empty() {
+                        String::new()
+                    } else {
+                        format!(": {detail}")
+                    }
+                ));
+            }
+            Err(error) => return Err(format!("bundled Python could not launch: {error}")),
+        }
+    }
+    if requires_bundled_python(repo_root) {
+        return Err(
+            "packaged Runner core is present but its self-contained Python runtime is missing"
+                .to_string(),
+        );
+    }
     let mut last_not_found = None;
     let mut failures = Vec::new();
     for program in python_programs() {
         match run_command_output(program, &args, Some(pythonpath.clone())) {
             Ok(output) if output.status.success() => {
                 let detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                return Ok(if detail.is_empty() {
-                    format!("{program} -m infergrade --version")
-                } else {
-                    detail
-                });
+                return Ok((
+                    if detail.is_empty() {
+                        format!("{program} -m infergrade --version")
+                    } else {
+                        detail
+                    },
+                    None,
+                ));
             }
             Ok(output) => {
                 let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -361,13 +602,34 @@ fn desktop_self_test() -> Result<String, String> {
             .next()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "unknown".to_string());
-        let version = verify_repo_python_invocation(&repo_root)?;
+        let (version, bundled_python) = verify_repo_python_invocation(&repo_root)?;
+        let python_runtime = bundled_python
+            .as_ref()
+            .map(|runtime| {
+                json!({
+                    "source": "bundled",
+                    "self_contained": true,
+                    "distribution": runtime.receipt.get("distribution"),
+                    "release": runtime.receipt.get("release"),
+                    "python_version": runtime.receipt.get("python_version"),
+                    "target": runtime.receipt.get("target"),
+                    "archive_sha256": runtime.receipt.get("archive_sha256"),
+                    "ca_bundle": "bundled_verified",
+                })
+            })
+            .unwrap_or_else(|| {
+                json!({
+                    "source": "system_fallback",
+                    "self_contained": false,
+                })
+            });
         return Ok(json!({
             "status": "ok",
             "runner_core": "bundled_or_repo",
             "invocation": "ok",
             "path": first_path,
             "version": version,
+            "python_runtime": python_runtime,
         })
         .to_string());
     }
@@ -387,6 +649,16 @@ fn desktop_self_test() -> Result<String, String> {
 fn run_repo_python(repo_root: &Path, args: &[OsString]) -> Result<ExitStatus, String> {
     let pythonpath = pythonpath_with_runner(repo_root, env::var_os("PYTHONPATH"))?;
     let python_args = repo_python_args(args);
+    if let Some(runtime) = bundled_python_runtime()? {
+        return run_bundled_python(&runtime, &python_args, pythonpath)
+            .map_err(|error| format!("could not launch bundled Python: {error}"));
+    }
+    if requires_bundled_python(repo_root) {
+        return Err(
+            "packaged Runner core is present but its self-contained Python runtime is missing"
+                .to_string(),
+        );
+    }
     let mut last_not_found = None;
     for program in python_programs() {
         match run_command(program, &python_args, Some(pythonpath.clone())) {
@@ -409,6 +681,16 @@ fn run_repo_python(repo_root: &Path, args: &[OsString]) -> Result<ExitStatus, St
 fn exec_repo_python(repo_root: &Path, args: &[OsString]) -> Result<(), String> {
     let pythonpath = pythonpath_with_runner(repo_root, env::var_os("PYTHONPATH"))?;
     let python_args = repo_python_args(args);
+    if let Some(runtime) = bundled_python_runtime()? {
+        let error = exec_bundled_python(&runtime, &python_args, pythonpath);
+        return Err(format!("could not launch bundled Python: {error}"));
+    }
+    if requires_bundled_python(repo_root) {
+        return Err(
+            "packaged Runner core is present but its self-contained Python runtime is missing"
+                .to_string(),
+        );
+    }
     let mut last_not_found = None;
     for program in python_programs() {
         let error = exec_command(program, &python_args, Some(pythonpath.clone()));
@@ -659,6 +941,81 @@ mod tests {
                 .canonicalize()
                 .expect("canonical bundled runner core")
         );
+
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn packaged_runner_core_requires_the_bundled_python_runtime() {
+        let temp = env::temp_dir().join(format!(
+            "infergrade-sidecar-packaged-runtime-test-{}",
+            std::process::id()
+        ));
+        let bundled_src = temp.join("src").join("infergrade");
+        std::fs::create_dir_all(&bundled_src).expect("bundled infergrade package");
+
+        assert!(requires_bundled_python(&temp));
+
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn bundled_python_requires_receipt_and_matching_file_digests() {
+        let temp = env::temp_dir().join(format!(
+            "infergrade-bundled-python-test-{}",
+            std::process::id()
+        ));
+        let root = temp.join("python-runtime");
+        let executable = root.join("bin").join("python-test");
+        let ca_bundle = root.join("certs").join("cacert.pem");
+        let license = root.join("LICENSE.txt");
+        std::fs::create_dir_all(executable.parent().expect("executable parent"))
+            .expect("executable parent");
+        std::fs::create_dir_all(ca_bundle.parent().expect("CA parent")).expect("CA parent");
+        std::fs::write(&executable, b"python-runtime").expect("executable");
+        std::fs::write(&ca_bundle, b"ca-bundle").expect("CA bundle");
+        std::fs::write(&license, b"license").expect("license");
+        let receipt = json!({
+            "schema_version": "infergrade.desktop_python_runtime_receipt.v1",
+            "distribution": "test",
+            "release": "test",
+            "python_version": "3.12.0",
+            "target": "test-target",
+            "archive_sha256": "a".repeat(64),
+            "executable": "bin/python-test",
+            "executable_sha256": file_sha256(&executable).expect("executable digest"),
+            "ca_bundle": "certs/cacert.pem",
+            "ca_bundle_sha256": file_sha256(&ca_bundle).expect("CA digest"),
+            "license_path": "LICENSE.txt",
+            "license_sha256": file_sha256(&license).expect("license digest"),
+        });
+        std::fs::write(
+            root.join(BUNDLED_PYTHON_RECEIPT),
+            serde_json::to_vec(&receipt).expect("receipt JSON"),
+        )
+        .expect("receipt");
+
+        let resolved = find_bundled_python_from(&temp)
+            .expect("runtime search")
+            .expect("bundled Python");
+        assert_eq!(resolved.root, root);
+        std::fs::write(&ca_bundle, b"tampered-ca-bundle").expect("tamper CA bundle");
+        assert!(find_bundled_python_from(&temp).is_err());
+
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn ignores_development_python_placeholder_without_a_receipt() {
+        let temp = env::temp_dir().join(format!(
+            "infergrade-bundled-python-placeholder-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(temp.join("python-runtime")).expect("placeholder runtime");
+
+        assert!(find_bundled_python_from(&temp)
+            .expect("placeholder search")
+            .is_none());
 
         let _ = std::fs::remove_dir_all(temp);
     }
