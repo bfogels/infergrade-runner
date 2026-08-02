@@ -1814,17 +1814,20 @@ fn fetch_runtime_archive(url: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+#[cfg(unix)]
 fn set_executable_if_needed(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = fs::metadata(path)
-            .map_err(|error| format!("could not read `{}` permissions: {error}", path.display()))?
-            .permissions();
-        permissions.set_mode(permissions.mode() | 0o755);
-        fs::set_permissions(path, permissions)
-            .map_err(|error| format!("could not mark `{}` executable: {error}", path.display()))?;
-    }
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = fs::metadata(path)
+        .map_err(|error| format!("could not read `{}` permissions: {error}", path.display()))?
+        .permissions();
+    permissions.set_mode(permissions.mode() | 0o755);
+    fs::set_permissions(path, permissions)
+        .map_err(|error| format!("could not mark `{}` executable: {error}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_executable_if_needed(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
