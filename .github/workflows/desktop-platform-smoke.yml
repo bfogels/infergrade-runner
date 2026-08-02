@@ -199,3 +199,23 @@ jobs:
           if-no-files-found: error
           path: target/release/public-linux/
           retention-days: 7
+
+      - name: Collect Linux package diagnostics on failure
+        if: failure()
+        run: |
+          diagnostic_dir="$RUNNER_TEMP/infergrade-linux-package-smoke"
+          mkdir -p "$diagnostic_dir"
+          find target/release/bundle -maxdepth 4 -printf '%y %s %p -> %l\n' \
+            > "$diagnostic_dir/bundle-inventory.txt" 2>&1 || true
+          if [ -f target/release/bundle/appimage/build_appimage.sh ]; then
+            cp target/release/bundle/appimage/build_appimage.sh "$diagnostic_dir/"
+          fi
+
+      - name: Upload Linux package diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-package-smoke-diagnostics-${{ github.sha }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/infergrade-linux-package-smoke/
+          retention-days: 3

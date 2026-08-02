@@ -35,11 +35,27 @@ function Assert-DesktopLaunch([string]$Executable, [string]$Label) {
 }
 
 function Assert-PackagedSidecar([string]$Root, [string]$Label) {
-    $sidecar = Get-ChildItem -Path $Root -Recurse -File -Filter "infergrade-sidecar*.exe" |
-        Select-Object -First 1
+    $sidecar = @(
+        Get-ChildItem -Path $Root -File -Filter "infergrade-sidecar*.exe" -ErrorAction SilentlyContinue
+        Get-ChildItem -Path (Join-Path $Root "binaries") -File -Filter "infergrade-sidecar*.exe" -ErrorAction SilentlyContinue
+    ) | Select-Object -First 1
     if ($null -eq $sidecar) { throw "$Label is missing the packaged sidecar." }
-    $output = & $sidecar.FullName desktop-self-test
-    if ($LASTEXITCODE -ne 0) { throw "$Label sidecar self-test failed." }
+
+    $diagnosticStem = $Label.ToLowerInvariant().Replace(" ", "-")
+    $stdoutPath = Join-Path $WorkDir "$diagnosticStem-sidecar-self-test.stdout"
+    $stderrPath = Join-Path $WorkDir "$diagnosticStem-sidecar-self-test.stderr"
+    $process = Start-Process `
+        -FilePath $sidecar.FullName `
+        -ArgumentList "desktop-self-test" `
+        -RedirectStandardOutput $stdoutPath `
+        -RedirectStandardError $stderrPath `
+        -Wait `
+        -PassThru
+    if ($process.ExitCode -ne 0) {
+        $stderr = if (Test-Path $stderrPath) { (Get-Content $stderrPath -Raw).Trim() } else { "" }
+        throw "$Label sidecar self-test failed with code $($process.ExitCode): $stderr"
+    }
+    $output = Get-Content $stdoutPath -Raw
     $payload = $output | ConvertFrom-Json
     if ($payload.invocation -ne "ok") { throw "$Label sidecar did not report invocation=ok." }
     if ($payload.python_runtime.source -ne "bundled" -or -not $payload.python_runtime.self_contained) {
