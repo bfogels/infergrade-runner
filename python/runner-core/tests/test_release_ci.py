@@ -1383,6 +1383,9 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn('"benchmark_check_ids": ["interactive_chat_v1"]', script)
         self.assertIn('validate-bundle "$deterministic_bundle"', script)
         self.assertIn('"manual_acceptance_remaining"', script)
+        self.assertIn('manual-first-success.md', script)
+        self.assertIn('A current-model recommendation opens Run with its Hugging Face reference already populated.', script)
+        self.assertIn('separates capability, time per task, and whole-run time.', script)
         self.assertIn('urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))', script)
         self.assertNotIn('export IG_ACCEPT_DMG_SOURCE="$DMG_SOURCE"', script)
 
