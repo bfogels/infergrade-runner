@@ -1398,8 +1398,32 @@ mod tests {
 
     fn write_test_llama_binary(path: &std::path::Path) {
         #[cfg(windows)]
-        fs::write(path, "@echo off\r\necho llama-cli version 0.0-test\r\n")
-            .expect("test llama binary");
+        {
+            static TEST_RUNTIME: OnceLock<PathBuf> = OnceLock::new();
+            let source = TEST_RUNTIME.get_or_init(|| {
+                let root = env::temp_dir().join(format!(
+                    "infergrade-desktop-native-test-runtime-{}",
+                    std::process::id()
+                ));
+                fs::create_dir_all(&root).expect("native test runtime directory");
+                let source_path = root.join("runtime.rs");
+                let executable_path = root.join("runtime.exe");
+                fs::write(
+                    &source_path,
+                    "fn main() { println!(\"llama.cpp test runtime version 0.0-test\"); }\n",
+                )
+                .expect("native test runtime source");
+                let status = std::process::Command::new("rustc")
+                    .arg(&source_path)
+                    .arg("-o")
+                    .arg(&executable_path)
+                    .status()
+                    .expect("run rustc for native test runtime");
+                assert!(status.success(), "compile native test runtime");
+                executable_path
+            });
+            fs::copy(source, path).expect("test llama executable");
+        }
         #[cfg(not(windows))]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1888,7 +1912,7 @@ mod tests {
         let runtime_path = env::temp_dir().join(format!(
             "infergrade-desktop-llama-cli-{}{}",
             std::process::id(),
-            if cfg!(windows) { ".cmd" } else { "" }
+            if cfg!(windows) { ".exe" } else { "" }
         ));
         write_test_llama_binary(&runtime_path);
         let previous_cache_dir = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
