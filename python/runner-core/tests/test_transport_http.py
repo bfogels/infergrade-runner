@@ -15,7 +15,9 @@ from infergrade.transport import (
     RunnerTokenInvalidError,
     _resolve_api_token,
     bundle_payload,
+    complete_run_job,
     fetch_run_config,
+    heartbeat_run_job,
     list_run_configs,
     publish_run_config,
     redeem_runner_pairing,
@@ -352,6 +354,30 @@ class TransportHttpTests(unittest.TestCase):
                 heartbeat_runner(server.base_url, "runner-revoked", api_token="qbhr_revoked")
 
         self.assertIn("re-pair", str(caught.exception))
+
+    def test_run_job_updates_include_lifecycle_timing(self):
+        timing = {
+            "timing_version": "run_lifecycle_timing_v1",
+            "current_phase": "upload",
+            "phases": {"upload": {"status": "running", "elapsed_seconds": 1.5}},
+        }
+        with _HttpHarness() as server:
+            heartbeat_run_job(
+                server.base_url,
+                "run-example",
+                "worker-example",
+                lifecycle_timing=timing,
+            )
+            complete_run_job(
+                server.base_url,
+                "run-example",
+                "worker-example",
+                "bundle-example",
+                lifecycle_timing=timing,
+            )
+
+        self.assertEqual(_CaptureHandler.requests[-2]["payload"]["lifecycle_timing"], timing)
+        self.assertEqual(_CaptureHandler.requests[-1]["payload"]["lifecycle_timing"], timing)
 
 
 if __name__ == "__main__":

@@ -588,21 +588,25 @@ def heartbeat_run_job(
     detail: str = None,
     message: str = None,
     progress_percent: float = None,
+    lifecycle_timing: Dict[str, Any] = None,
     api_token: str = None,
     run_token: str = None,
 ) -> Dict[str, Any]:
     """Send a worker heartbeat for a running job."""
+    request_payload = {
+        "worker_id": worker_id,
+        "stage": stage,
+        "detail": detail,
+        "message": message,
+        "progress_percent": progress_percent,
+    }
+    if lifecycle_timing is not None:
+        request_payload["lifecycle_timing"] = lifecycle_timing
     _, payload = _json_request(
         api_url,
         "/v1/runs/%s/heartbeat" % run_id,
         method="POST",
-        payload={
-            "worker_id": worker_id,
-            "stage": stage,
-            "detail": detail,
-            "message": message,
-            "progress_percent": progress_percent,
-        },
+        payload=request_payload,
         api_token=api_token,
         run_token=run_token,
     )
@@ -615,19 +619,23 @@ def complete_run_job(
     worker_id: str,
     bundle_id: str,
     upload: Dict[str, Any] = None,
+    lifecycle_timing: Dict[str, Any] = None,
     api_token: str = None,
     run_token: str = None,
 ) -> Dict[str, Any]:
     """Mark a run job as completed."""
+    request_payload = {
+        "worker_id": worker_id,
+        "bundle_id": bundle_id,
+        "upload": upload,
+    }
+    if lifecycle_timing is not None:
+        request_payload["lifecycle_timing"] = lifecycle_timing
     _, payload = _json_request(
         api_url,
         "/v1/runs/%s/complete" % run_id,
         method="POST",
-        payload={
-            "worker_id": worker_id,
-            "bundle_id": bundle_id,
-            "upload": upload,
-        },
+        payload=request_payload,
         api_token=api_token,
         run_token=run_token,
     )

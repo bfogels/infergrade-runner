@@ -667,7 +667,10 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             output_dir,
             progress,
             current_stage,
-            metadata={"resolved": bool(resolved_artifact), "artifact": request.quant_artifact},
+            metadata={
+                "resolved": bool(resolved_artifact),
+                "artifact_cache_hit": resolved_artifact.cache_hit if resolved_artifact else None,
+            },
         )
 
         current_stage = "runtime_lock"

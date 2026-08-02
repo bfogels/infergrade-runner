@@ -209,6 +209,11 @@ class WorkerTests(unittest.TestCase):
             api_token=None,
         )
         complete_mock.assert_called_once()
+        completion_timing = complete_mock.call_args.kwargs["lifecycle_timing"]
+        self.assertEqual(completion_timing["timing_version"], "run_lifecycle_timing_v1")
+        self.assertEqual(completion_timing["phases"]["upload"]["status"], "completed")
+        self.assertIsNotNone(completion_timing["phases"]["upload"]["elapsed_seconds"])
+        self.assertNotIn("output_dir", json.dumps(completion_timing))
         heartbeat_mock.assert_called()
         self.assertTrue(
             any(
@@ -216,6 +221,7 @@ class WorkerTests(unittest.TestCase):
                 and call.kwargs.get("detail") == "interactive_chat_v1"
                 and call.kwargs.get("progress_percent") is not None
                 and call.kwargs.get("progress_percent") >= 60.0
+                and (call.kwargs.get("lifecycle_timing") or {}).get("timing_version") == "run_lifecycle_timing_v1"
                 for call in heartbeat_mock.call_args_list
             )
         )
@@ -246,6 +252,52 @@ class WorkerTests(unittest.TestCase):
                 if event["type"] == "assignment_update" and event["phase"] == "Running"
             )
         )
+
+    def test_upload_failure_closes_publish_phase_with_elapsed_time(self):
+        claimed_run = {
+            "run_id": "run_upload_failure",
+            "run_config_id": "rcfg_upload_failure",
+            "execution_mode": "local_native",
+            "output_dir": "runs/run_upload_failure",
+            "cloud": None,
+        }
+        fake_request = mock.Mock(
+            execution_mode="local_native",
+            resume=False,
+            output_dir=None,
+            cloud_provider=None,
+            cloud_instance_type=None,
+        )
+        with tempfile.TemporaryDirectory() as output_root:
+            with mock.patch.dict("os.environ", {"INFERGRADE_RUNNER_OUTPUT_ROOT": output_root}, clear=False):
+                with mock.patch("infergrade.worker.claim_run_job", return_value={"run": claimed_run}):
+                    with mock.patch("infergrade.worker.fetch_run_config", return_value={"run_config_id": "rcfg_upload_failure"}):
+                        with mock.patch("infergrade.worker.request_from_run_config_document", return_value=fake_request):
+                            with mock.patch("infergrade.worker.run_doctor", return_value={"ok": True, "checks": []}):
+                                with mock.patch(
+                                    "infergrade.worker.load_progress",
+                                    return_value={"current_stage": "finalization", "stages": {"finalization": {"status": "completed"}}},
+                                ):
+                                    with mock.patch(
+                                        "infergrade.worker.run_infergrade",
+                                        return_value={"bundle_id": "qb_bundle", "output_dir": "runs/run_upload_failure"},
+                                    ):
+                                        with mock.patch("infergrade.worker.upload_run_bundle", side_effect=RuntimeError("upload unavailable")):
+                                            with mock.patch("infergrade.worker.heartbeat_run_job"):
+                                                with mock.patch(
+                                                    "infergrade.worker.fail_run_job",
+                                                    return_value={"run": {"run_id": "run_upload_failure", "status": "failed"}},
+                                                ) as fail_mock:
+                                                    result = run_worker_once(
+                                                        api_url="http://localhost:8000",
+                                                        execution_mode="local_native",
+                                                        worker_id="worker-1",
+                                                    )
+
+        self.assertFalse(result["completed"])
+        failure_timing = fail_mock.call_args.kwargs["details"]["lifecycle_timing"]
+        self.assertEqual(failure_timing["phases"]["upload"]["status"], "failed")
+        self.assertIsNotNone(failure_timing["phases"]["upload"]["elapsed_seconds"])
 
     def test_transient_progress_heartbeat_failure_does_not_abort_benchmark(self):
         claimed_run = {
@@ -537,6 +589,11 @@ class WorkerTests(unittest.TestCase):
         fail_mock.assert_called_once()
         self.assertEqual(fail_mock.call_args.kwargs["error_code"], "missing_runtime_image")
         self.assertTrue(fail_mock.call_args.kwargs["recovery"])
+        failure_timing = fail_mock.call_args.kwargs["details"]["lifecycle_timing"]
+        self.assertEqual(failure_timing["timing_version"], "run_lifecycle_timing_v1")
+        self.assertEqual(failure_timing["phases"]["preflight"]["status"], "failed")
+        self.assertIsNotNone(failure_timing["phases"]["preflight"]["elapsed_seconds"])
+        self.assertNotIn("output_dir", json.dumps(failure_timing))
 
     def test_worker_once_marks_interrupted_job_failed_before_exiting(self):
         claimed_run = {

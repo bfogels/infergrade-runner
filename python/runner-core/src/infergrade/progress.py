@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from infergrade.request import request_to_dict
@@ -78,6 +79,143 @@ def load_progress(output_dir: str) -> Optional[Dict[str, Any]]:
 def save_progress(output_dir: str, progress: Dict[str, Any]) -> None:
     progress["updated_at"] = utcnow_iso()
     write_json(progress_path(output_dir), progress)
+
+
+def _timestamp_seconds(value: Any) -> Optional[float]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _elapsed_seconds(started_at: Any, completed_at: Any, observed_at: Any) -> Optional[float]:
+    started = _timestamp_seconds(started_at)
+    completed = _timestamp_seconds(completed_at) or _timestamp_seconds(observed_at)
+    if started is None or completed is None or completed < started:
+        return None
+    return round(completed - started, 3)
+
+
+def _combined_stage_timing(
+    progress: Dict[str, Any],
+    stage_names: List[str],
+    observed_at: str,
+) -> Dict[str, Any]:
+    stages = progress.get("stages") or {}
+    selected = [stages.get(name) or {} for name in stage_names]
+    present = [item for item in selected if item]
+    if not present:
+        return {"status": "pending", "elapsed_seconds": None}
+    statuses = {str(item.get("status") or "pending") for item in present}
+    if "running" in statuses:
+        status = "running"
+    elif statuses and statuses.issubset({"completed", "skipped"}) and len(present) == len(stage_names):
+        status = "completed"
+    elif "failed" in statuses:
+        status = "failed"
+    else:
+        status = "partial"
+    elapsed_values = [
+        _elapsed_seconds(item.get("started_at"), item.get("completed_at"), observed_at)
+        for item in present
+    ]
+    elapsed = round(sum(value for value in elapsed_values if value is not None), 3)
+    return {
+        "status": status,
+        "elapsed_seconds": elapsed,
+    }
+
+
+def _deployment_timing(progress: Dict[str, Any], observed_at: str) -> Dict[str, Any]:
+    profiles = list((progress.get("deployment_profiles") or {}).values())
+    if not profiles:
+        return {"status": "pending", "elapsed_seconds": None}
+    statuses = {str(item.get("status") or "pending") for item in profiles}
+    if "running" in statuses:
+        status = "running"
+    elif statuses.issubset({"completed", "skipped"}):
+        status = "completed"
+    elif "failed" in statuses:
+        status = "failed"
+    else:
+        status = "partial"
+    elapsed_values = [
+        _elapsed_seconds(item.get("started_at"), item.get("completed_at"), observed_at)
+        for item in profiles
+    ]
+    return {
+        "status": status,
+        "elapsed_seconds": round(sum(value for value in elapsed_values if value is not None), 3),
+    }
+
+
+def lifecycle_timing_snapshot(
+    progress: Dict[str, Any],
+    *,
+    observed_at: Optional[str] = None,
+    preflight_seconds: Optional[float] = None,
+    preflight_status: Optional[str] = None,
+    upload_seconds: Optional[float] = None,
+    upload_status: Optional[str] = None,
+    worker_wall_seconds: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Return a path-free operational timing envelope for Hub and Desktop UI."""
+    observed = observed_at or utcnow_iso()
+    phases = {
+        "preflight": {
+            "status": preflight_status or ("completed" if preflight_seconds is not None else "pending"),
+            "elapsed_seconds": round(max(float(preflight_seconds or 0.0), 0.0), 3) if preflight_seconds is not None else None,
+        },
+        "artifact": _combined_stage_timing(progress, ["artifact_resolution"], observed),
+        "runtime_model": _combined_stage_timing(progress, ["runtime_lock", "backend_resolution"], observed),
+        "capability": _combined_stage_timing(progress, ["capability"], observed),
+        "deployment": _deployment_timing(progress, observed),
+        "finalization": _combined_stage_timing(progress, ["finalization"], observed),
+        "upload": {
+            "status": upload_status or ("completed" if upload_seconds is not None else "pending"),
+            "elapsed_seconds": round(max(float(upload_seconds or 0.0), 0.0), 3) if upload_seconds is not None else None,
+        },
+    }
+    completed_seconds = round(sum(
+        float(item["elapsed_seconds"])
+        for item in phases.values()
+        if item.get("elapsed_seconds") is not None and item.get("status") in {"completed", "partial", "failed"}
+    ), 3)
+    artifact_metadata = ((progress.get("stages") or {}).get("artifact_resolution") or {}).get("metadata") or {}
+    stage_to_phase = {
+        "initializing": "preflight",
+        "artifact_resolution": "artifact",
+        "runtime_lock": "runtime_model",
+        "backend_resolution": "runtime_model",
+        "capability": "capability",
+        "deployment": "deployment",
+        "finalization": "finalization",
+    }
+    current_phase = (
+        "upload"
+        if upload_status == "running"
+        else "preflight"
+        if preflight_status == "running"
+        else stage_to_phase.get(progress.get("current_stage"))
+    )
+    return {
+        "timing_version": "run_lifecycle_timing_v1",
+        "observed_at": observed,
+        "current_phase": current_phase,
+        "phases": phases,
+        "completed_phase_seconds": completed_seconds,
+        "worker_wall_seconds": round(max(float(worker_wall_seconds or 0.0), 0.0), 3) if worker_wall_seconds is not None else None,
+        "artifact_cache_hit": artifact_metadata.get("artifact_cache_hit"),
+        "claim_boundary": (
+            "Operational Runner timing for progress and duration calibration; capability score evidence remains in the immutable result record."
+        ),
+    }
 
 
 def mark_stage_started(output_dir: str, progress: Dict[str, Any], stage: str, detail: Optional[str] = None) -> None:
@@ -312,16 +450,29 @@ def mark_failed(
     detail: Optional[str],
     message: str,
 ) -> None:
+    now = utcnow_iso()
     progress["status"] = "failed"
     progress["current_stage"] = stage
     progress["current_detail"] = detail
     progress["completed_at"] = None
+    if stage in (progress.get("stages") or {}):
+        stage_payload = dict(progress["stages"].get(stage) or {})
+        stage_payload["status"] = "failed"
+        stage_payload.setdefault("started_at", now)
+        stage_payload["completed_at"] = now
+        progress["stages"][stage] = stage_payload
+    if stage == "deployment" and detail in (progress.get("deployment_profiles") or {}):
+        profile_payload = dict(progress["deployment_profiles"].get(detail) or {})
+        profile_payload["status"] = "failed"
+        profile_payload.setdefault("started_at", now)
+        profile_payload["completed_at"] = now
+        progress["deployment_profiles"][detail] = profile_payload
     progress["errors"].append(
         {
             "stage": stage,
             "detail": detail,
             "message": message,
-            "timestamp": utcnow_iso(),
+            "timestamp": now,
         }
     )
     save_progress(output_dir, progress)

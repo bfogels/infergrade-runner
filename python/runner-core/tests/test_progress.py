@@ -1,15 +1,96 @@
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.models import RunRequest
 from infergrade.benchmark_catalog import normalize_request_selection
-from infergrade.progress import initialize_progress
+from infergrade.progress import initialize_progress, lifecycle_timing_snapshot, mark_failed
 from infergrade.runner import _planned_capability_benchmarks
 
 
 class ProgressTests(unittest.TestCase):
+    def test_lifecycle_timing_snapshot_separates_operational_phases(self):
+        progress = {
+            "current_stage": "deployment",
+            "stages": {
+                "artifact_resolution": {
+                    "status": "completed",
+                    "started_at": "2026-08-01T12:00:00Z",
+                    "completed_at": "2026-08-01T12:02:00Z",
+                    "metadata": {"artifact_cache_hit": False},
+                },
+                "runtime_lock": {
+                    "status": "completed",
+                    "started_at": "2026-08-01T12:02:00Z",
+                    "completed_at": "2026-08-01T12:02:05Z",
+                },
+                "backend_resolution": {
+                    "status": "completed",
+                    "started_at": "2026-08-01T12:02:05Z",
+                    "completed_at": "2026-08-01T12:03:05Z",
+                },
+                "capability": {
+                    "status": "completed",
+                    "started_at": "2026-08-01T12:03:05Z",
+                    "completed_at": "2026-08-01T12:13:05Z",
+                },
+            },
+            "deployment_profiles": {
+                "interactive_chat_v1": {
+                    "status": "running",
+                    "started_at": "2026-08-01T12:13:05Z",
+                    "completed_at": None,
+                },
+            },
+        }
+
+        timing = lifecycle_timing_snapshot(
+            progress,
+            observed_at="2026-08-01T12:14:05Z",
+            preflight_seconds=10.25,
+            worker_wall_seconds=850.25,
+        )
+
+        self.assertEqual(timing["timing_version"], "run_lifecycle_timing_v1")
+        self.assertEqual(timing["phases"]["artifact"]["elapsed_seconds"], 120.0)
+        self.assertEqual(timing["phases"]["runtime_model"]["elapsed_seconds"], 65.0)
+        self.assertEqual(timing["phases"]["capability"]["elapsed_seconds"], 600.0)
+        self.assertEqual(timing["phases"]["deployment"]["status"], "running")
+        self.assertEqual(timing["current_phase"], "deployment")
+        self.assertEqual(timing["phases"]["deployment"]["elapsed_seconds"], 60.0)
+        self.assertFalse(timing["artifact_cache_hit"])
+        self.assertIsNone(timing["phases"]["upload"]["elapsed_seconds"])
+
+        uploading = lifecycle_timing_snapshot(progress, observed_at="2026-08-01T12:14:05Z", upload_status="running")
+        self.assertEqual(uploading["current_phase"], "upload")
+
+    def test_mark_failed_closes_the_active_phase_for_timing(self):
+        progress = {
+            "status": "running",
+            "current_stage": "artifact_resolution",
+            "current_detail": None,
+            "completed_at": None,
+            "stages": {
+                "artifact_resolution": {
+                    "status": "running",
+                    "started_at": "2026-08-01T12:00:00Z",
+                    "completed_at": None,
+                }
+            },
+            "deployment_profiles": {},
+            "errors": [],
+        }
+
+        with mock.patch("infergrade.progress.utcnow_iso", return_value="2026-08-01T12:01:00Z"):
+            with mock.patch("infergrade.progress.save_progress"):
+                mark_failed("runs/example", progress, "artifact_resolution", None, "download failed")
+
+        timing = lifecycle_timing_snapshot(progress, observed_at="2026-08-01T12:02:00Z")
+        self.assertEqual(timing["phases"]["artifact"]["status"], "failed")
+        self.assertEqual(timing["phases"]["artifact"]["elapsed_seconds"], 60.0)
+
     def test_planned_capability_benchmarks_use_normalized_catalog_case_limits(self):
         request = RunRequest(
             model="Qwen/Qwen3.5-4B",
