@@ -205,6 +205,17 @@ class ReleaseCiTests(unittest.TestCase):
         build_script = (ROOT / "scripts" / "build_release_images.sh").read_text(encoding="utf-8")
         self.assertIn('-t "ghcr.io/bfogels/${name}:${VERSION_TAG}"', build_script)
 
+    def test_full_gate_clears_developer_capability_image_overrides(self):
+        script = (ROOT / "scripts" / "test_all.sh").read_text(encoding="utf-8")
+
+        for variable in (
+            "INFERGRADE_IFEVAL_IMAGE",
+            "INFERGRADE_EVALPLUS_IMAGE",
+            "INFERGRADE_MMLU_PRO_IMAGE",
+            "INFERGRADE_GPQA_IMAGE",
+        ):
+            self.assertIn(variable, script)
+
     def test_release_image_verifier_is_anonymous_and_checks_every_image(self):
         script = (ROOT / "scripts" / "verify_release_images.sh").read_text(encoding="utf-8")
         verifier = (ROOT / "scripts" / "verify_release_images.py").read_text(encoding="utf-8")

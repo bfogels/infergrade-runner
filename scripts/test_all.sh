@@ -3,6 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Release-identity tests must exercise the Runner's version-matched defaults,
+# not developer image overrides inherited from the invoking shell.
+unset \
+  INFERGRADE_IFEVAL_IMAGE \
+  INFERGRADE_EVALPLUS_IMAGE \
+  INFERGRADE_MMLU_PRO_IMAGE \
+  INFERGRADE_GPQA_IMAGE
+
 PYTHONPATH="$ROOT_DIR/python/runner-core/src${PYTHONPATH:+:$PYTHONPATH}" \
   python3 -m unittest discover -s "$ROOT_DIR/python/runner-core/tests"
 
