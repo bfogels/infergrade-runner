@@ -1,0 +1,4 @@
+# Signed runtime-catalog metadata is verified byte-for-byte. Never let a
+# platform checkout rewrite line endings inside these trust artifacts.
+runtime/catalog/signed/*.json -text
+runtime/catalog/roots/*.json -text

@@ -774,6 +774,12 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("xvfb-run", linux)
         self.assertIn("desktop_linux_gpu_execution=not_tested", linux)
 
+    def test_signed_runtime_catalog_bytes_are_not_rewritten_by_platform_checkouts(self):
+        attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+
+        self.assertIn("runtime/catalog/signed/*.json -text", attributes)
+        self.assertIn("runtime/catalog/roots/*.json -text", attributes)
+
     def test_local_desktop_dmg_smoke_script_records_release_evidence(self):
         script = (ROOT / "scripts" / "smoke_desktop_dmg.sh").read_text(encoding="utf-8")
 
