@@ -38,26 +38,32 @@ trap cleanup EXIT
 dpkg-deb --extract "$deb_path" "$work_dir/deb"
 deb_executable="$(find "$work_dir/deb" -type f -perm -u+x -name 'infergrade_desktop_runner' -print -quit)"
 deb_sidecar="$(find "$work_dir/deb" -type f -perm -u+x -name 'infergrade-sidecar*' -print -quit)"
-if [ -z "$deb_executable" ] || [ -z "$deb_sidecar" ]; then
+deb_runner_core="$(find "$work_dir/deb" -type d -path '*/runner-core/src/infergrade' -print -quit)"
+if [ -z "$deb_executable" ] || [ -z "$deb_sidecar" ] || [ -z "$deb_runner_core" ]; then
   echo "Debian package is missing the desktop executable or sidecar." >&2
   exit 1
 fi
-
-"$deb_sidecar" desktop-self-test > "$work_dir/deb-sidecar-self-test.json"
-python3 - "$work_dir/deb-sidecar-self-test.json" <<'PY'
-import json
-import sys
-
-payload = json.load(open(sys.argv[1], encoding="utf-8"))
-if payload.get("invocation") != "ok":
-    raise SystemExit("Packaged Linux sidecar self-test did not report invocation=ok")
-PY
 
 sudo apt-get install -y "$deb_path"
 installed_executable="$(command -v infergrade_desktop_runner || true)"
 if [ -z "$installed_executable" ]; then
   installed_executable="$(find /usr/bin /usr/lib /opt -type f -name 'infergrade_desktop_runner' -print -quit 2>/dev/null || true)"
 fi
+
+installed_sidecar="$(find /usr/bin /usr/lib /opt -type f -perm -u+x -name 'infergrade-sidecar*' -print -quit 2>/dev/null || true)"
+if [ -z "$installed_sidecar" ]; then
+  echo "Installed Debian package did not expose the packaged sidecar." >&2
+  exit 1
+fi
+"$installed_sidecar" desktop-self-test > "$work_dir/deb-sidecar-self-test.json"
+python3 - "$work_dir/deb-sidecar-self-test.json" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+if payload.get("invocation") != "ok":
+    raise SystemExit("Installed Linux sidecar self-test did not report invocation=ok")
+PY
 if [ -z "$installed_executable" ]; then
   echo "Installed Debian package did not expose the desktop executable." >&2
   exit 1

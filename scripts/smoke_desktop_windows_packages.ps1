@@ -8,6 +8,7 @@ $ErrorActionPreference = "Stop"
 $MsiPath = (Resolve-Path $MsiPath).Path
 $NsisPath = (Resolve-Path $NsisPath).Path
 $WorkDir = Join-Path $env:RUNNER_TEMP "infergrade-windows-package-smoke"
+$MsiInstallDir = Join-Path $WorkDir "msi-install"
 $NsisInstallDir = Join-Path $WorkDir "nsis-install"
 
 function Get-MsiProperty([string]$Path, [string]$Property) {
@@ -52,15 +53,15 @@ if ($productVersion -ne $ExpectedVersion) {
     throw "MSI version $productVersion does not match $ExpectedVersion."
 }
 
-$msiArgs = "/i `"$MsiPath`" /qn /norestart"
+$msiArgs = "/i `"$MsiPath`" INSTALLDIR=`"$MsiInstallDir`" /qn /norestart"
 $msi = Start-Process msiexec.exe -ArgumentList $msiArgs -Wait -PassThru
 if ($msi.ExitCode -notin @(0, 3010)) { throw "MSI install failed with code $($msi.ExitCode)." }
 try {
-    $msiRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA) |
-        Where-Object { $_ -and (Test-Path $_) }
-    $msiExecutable = Get-ChildItem -Path $msiRoots -Recurse -File -Filter "InferGrade Runner.exe" `
-        -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $msiExecutable) { throw "MSI install is missing InferGrade Runner.exe." }
+    if (-not (Test-Path $MsiInstallDir)) { throw "MSI did not honor its requested install directory." }
+    $msiExecutable = Get-ChildItem -Path $MsiInstallDir -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -in @("InferGrade Runner.exe", "infergrade_desktop_runner.exe") } |
+        Select-Object -First 1
+    if ($null -eq $msiExecutable) { throw "MSI install is missing the desktop executable." }
     Assert-PackagedSidecar $msiExecutable.Directory.FullName "MSI"
     Assert-DesktopLaunch $msiExecutable.FullName "MSI desktop app"
 } finally {
@@ -73,9 +74,10 @@ try {
 
 $nsis = Start-Process -FilePath $NsisPath -ArgumentList "/S", "/D=$NsisInstallDir" -Wait -PassThru
 if ($nsis.ExitCode -ne 0) { throw "NSIS install failed with code $($nsis.ExitCode)." }
-$nsisExecutable = Get-ChildItem -Path $NsisInstallDir -Recurse -File -Filter "InferGrade Runner.exe" |
+$nsisExecutable = Get-ChildItem -Path $NsisInstallDir -Recurse -File |
+    Where-Object { $_.Name -in @("InferGrade Runner.exe", "infergrade_desktop_runner.exe") } |
     Select-Object -First 1
-if ($null -eq $nsisExecutable) { throw "NSIS install is missing InferGrade Runner.exe." }
+if ($null -eq $nsisExecutable) { throw "NSIS install is missing the desktop executable." }
 Assert-PackagedSidecar $NsisInstallDir "NSIS"
 Assert-DesktopLaunch $nsisExecutable.FullName "NSIS desktop app"
 

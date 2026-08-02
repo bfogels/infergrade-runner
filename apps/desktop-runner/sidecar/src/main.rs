@@ -54,6 +54,19 @@ fn find_bundled_runner_core_from(start: &Path) -> Option<PathBuf> {
         }
         current = path.parent();
     }
+
+    #[cfg(target_os = "linux")]
+    for candidate in [
+        PathBuf::from("/usr/lib/InferGrade Runner/runner-core"),
+        PathBuf::from("/usr/lib/infergrade-desktop-runner/runner-core"),
+    ] {
+        if bundled_runner_core_src(&candidate)
+            .join("infergrade")
+            .is_dir()
+        {
+            return candidate.canonicalize().ok().or(Some(candidate));
+        }
+    }
     None
 }
 
@@ -417,6 +430,7 @@ fn python_programs() -> &'static [&'static str] {
     }
 }
 
+#[cfg(unix)]
 fn is_listener_start_command(args: &[OsString]) -> bool {
     args.first()
         .and_then(|value| value.to_str())
@@ -561,6 +575,7 @@ mod tests {
         assert_eq!(python_args[3], OsString::from("--version"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn listener_start_command_is_the_long_running_worker() {
         assert!(is_listener_start_command(&[OsString::from("start")]));
