@@ -5,14 +5,18 @@ import {
   assignmentClockTransition,
   assignmentEventRecovery,
   assignmentFailureRecovery,
+  assignmentPreflightPresentation,
   assignmentTitleFromRunId,
   desktopReadinessPresentation,
   hubAuthenticationFailure,
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
+  handoffListenerStartDisposition,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
+  requiredDesktopReadinessFailure,
+  shouldPreserveActiveAssignment,
   shouldClearCompletedHandoff,
   shouldAppendAssignmentEventLog,
   userSafeStartFailure,
@@ -133,6 +137,101 @@ test("recognizes every terminal Hub handoff status", () => {
   assert.equal(isTerminalHandoffStatus("queued"), false);
 });
 
+test("turns app-first preflight state into one honest next action", () => {
+  assert.deepEqual(
+    assignmentPreflightPresentation({ staleRuntimeCleared: true }),
+    {
+      kind: "runtime_repaired",
+      blocking: true,
+      phase: "Runtime needed",
+      description:
+        "InferGrade cleared a selected executable that no longer exists. Immutable runtime files were retained; choose the managed runtime or select an installed llama.cpp binary.",
+      checkName: "Stale runtime selection cleared",
+      progress: 100,
+      waitingForListener: true,
+    }
+  );
+  const queued = assignmentPreflightPresentation({
+    runId: "run_queued",
+    status: "awaiting_execution",
+    listening: false,
+    setupReady: true,
+  });
+  assert.equal(queued.kind, "assignment_ready_to_start");
+  assert.match(queued.description, /exact artifact digest and model load remain pending/i);
+  const ready = assignmentPreflightPresentation({
+    runId: "run_queued",
+    status: "awaiting_execution",
+    listening: true,
+    setupReady: true,
+  });
+  assert.equal(ready.kind, "assignment_ready_to_claim");
+  assert.match(ready.description, /bind an immutable runtime/i);
+  const terminal = assignmentPreflightPresentation({
+    runId: "run_done",
+    status: "completed",
+    terminal: true,
+    setupReady: true,
+  });
+  assert.equal(terminal.kind, "terminal_handoff_cleared");
+  assert.match(terminal.description, /cleared the stale handoff/i);
+});
+
+test("preflight never treats an unobserved queue or running orphan as ready", () => {
+  const noHandoff = assignmentPreflightPresentation({ setupReady: true });
+  assert.equal(noHandoff.kind, "queue_unconfirmed");
+  assert.match(noHandoff.description, /Open Hub to queue/i);
+
+  const observedIdle = assignmentPreflightPresentation({ setupReady: true, observedIdle: true });
+  assert.equal(observedIdle.kind, "queue_empty");
+  assert.match(observedIdle.description, /no matching queued benchmark/i);
+
+  const running = assignmentPreflightPresentation({
+    runId: "run_stale_running",
+    status: "running",
+    setupReady: true,
+    listening: false,
+  });
+  assert.equal(running.kind, "assignment_already_running");
+  assert.match(running.description, /instead of starting duplicate work/i);
+});
+
+test("every listener start path blocks paused and already-running Hub handoffs", () => {
+  const paused = handoffListenerStartDisposition({ runId: "run_paused", status: "paused" });
+  assert.equal(paused.allowed, false);
+  assert.equal(paused.kind, "assignment_paused");
+  assert.equal(paused.presentation.blocking, true);
+  assert.equal(
+    assignmentPreflightPresentation({ runId: "run_paused", status: "paused", setupReady: false }).kind,
+    "assignment_paused"
+  );
+
+  const running = handoffListenerStartDisposition({ runId: "run_running", status: "running" });
+  assert.equal(running.allowed, false);
+  assert.equal(running.kind, "assignment_already_running");
+  assert.equal(running.presentation.blocking, true);
+  assert.equal(
+    assignmentPreflightPresentation({ runId: "run_running", status: "running", setupReady: false }).kind,
+    "assignment_already_running"
+  );
+
+  const queued = handoffListenerStartDisposition({ runId: "run_queued", status: "awaiting_execution" });
+  assert.equal(queued.allowed, true);
+  assert.equal(queued.kind, "assignment_ready_to_start");
+});
+
+test("readiness checks preserve active assignment phases", () => {
+  for (const phase of ["Preparing", "Downloading", "Running", "Uploading"]) {
+    assert.equal(
+      shouldPreserveActiveAssignment({ listening: true, runId: "run_active", phase }),
+      true
+    );
+  }
+  assert.equal(shouldPreserveActiveAssignment({ listening: false, runId: "run_active", phase: "Running" }), false);
+  assert.equal(shouldPreserveActiveAssignment({ listening: true, runId: "", phase: "Running" }), false);
+  assert.equal(shouldPreserveActiveAssignment({ listening: true, runId: "run_queued", phase: "Ready to claim" }), false);
+});
+
 test("logs assignment idle once per idle transition", () => {
   assert.equal(shouldAppendAssignmentEventLog("", "assignment_idle"), true);
   assert.equal(shouldAppendAssignmentEventLog("assignment_idle", "assignment_idle"), false);
@@ -163,6 +262,19 @@ test("requires an authenticated Hub check before presenting the Runner as ready"
     desktopReadinessPresentation({ paired: true, listening: true, runtimeAvailable: false, hubVerified: true }).title,
     "Runtime needed"
   );
+});
+
+test("explicit app preflight requires structured desktop readiness", () => {
+  assert.match(requiredDesktopReadinessFailure(), /only available inside the desktop app/i);
+  assert.match(
+    requiredDesktopReadinessFailure({ sidecarAvailable: true, status: "fallback" }),
+    /did not return a successful structured status/i
+  );
+  assert.match(
+    requiredDesktopReadinessFailure({ sidecarAvailable: true, status: "error" }),
+    /did not return a successful structured status/i
+  );
+  assert.equal(requiredDesktopReadinessFailure({ sidecarAvailable: true, status: "ok" }), null);
 });
 
 test("normalizes hosted and local desktop API URLs before sidecar invocation", () => {

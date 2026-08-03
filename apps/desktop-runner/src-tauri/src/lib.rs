@@ -695,14 +695,30 @@ fn llama_cpp_runtime_plan() -> Value {
 }
 
 fn hub_run_handoff_summary(run_id: &str, body: &Value) -> Value {
-    let status = body
-        .pointer("/run/status")
+    let run = body.get("run").unwrap_or(&Value::Null);
+    let status = run
+        .get("status")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
+    let worker_id = run
+        .pointer("/worker/worker_id")
+        .or_else(|| run.pointer("/worker/id"))
+        .cloned()
+        .unwrap_or(Value::Null);
     json!({
         "run_id": run_id,
         "status": status,
         "terminal": matches!(status, "completed" | "failed" | "cancelled"),
+        "run_config_id": run.get("run_config_id").cloned().unwrap_or(Value::Null),
+        "execution_mode": run.get("execution_mode").cloned().unwrap_or(Value::Null),
+        "model": run.get("model").cloned().unwrap_or(Value::Null),
+        "backend": run.get("backend_engine").cloned().unwrap_or(Value::Null),
+        "worker_id": worker_id,
+        "current_stage": run.get("current_stage").cloned().unwrap_or(Value::Null),
+        "claim_boundary": concat!(
+            "This is authenticated Hub assignment state only. Runner Core verifies the exact artifact, ",
+            "binds an immutable runtime, and loads the model after claim and before benchmark scoring."
+        ),
     })
 }
 
@@ -2378,9 +2394,24 @@ mod tests {
         let queued = hub_run_handoff_summary(
             "run_queued",
             &json!({
-                "run": {"status": "queued"}
+                "run": {
+                    "status": "awaiting_execution",
+                    "run_config_id": "rcfg_queued",
+                    "execution_mode": "local_native",
+                    "model": "Qwen/Qwen3.5-4B",
+                    "backend_engine": "llama.cpp",
+                    "worker": null
+                }
             }),
         );
         assert_eq!(queued["terminal"], false);
+        assert_eq!(queued["run_config_id"], "rcfg_queued");
+        assert_eq!(queued["execution_mode"], "local_native");
+        assert_eq!(queued["model"], "Qwen/Qwen3.5-4B");
+        assert_eq!(queued["backend"], "llama.cpp");
+        assert!(queued["claim_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("after claim and before benchmark scoring"));
     }
 }

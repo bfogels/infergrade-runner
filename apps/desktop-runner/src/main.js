@@ -4,14 +4,18 @@ import {
   assignmentClockTransition,
   assignmentEventRecovery,
   assignmentFailureRecovery,
+  assignmentPreflightPresentation,
   assignmentTitleFromRunId,
   desktopReadinessPresentation,
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
+  handoffListenerStartDisposition,
   hubAuthenticationFailure,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
+  requiredDesktopReadinessFailure,
+  shouldPreserveActiveAssignment,
   shouldClearCompletedHandoff,
   shouldAppendAssignmentEventLog,
   userSafeStartFailure,
@@ -79,6 +83,7 @@ const containerRuntimeStatus = document.querySelector("[data-container-runtime-s
 const modelCacheStatus = document.querySelector("[data-model-cache-status]");
 const modelCacheList = document.querySelector("[data-model-cache-list]");
 const modelPathStatus = document.querySelector("[data-model-path-status]");
+const modelPreflightStatus = document.querySelector("[data-model-preflight-status]");
 const firstRunStepNodes = new Map(
   [...document.querySelectorAll("[data-first-run-step]")].map((node) => [node.dataset.firstRunStep, node])
 );
@@ -135,6 +140,7 @@ let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp job
 let nativeSuiteReadiness = "Run a readiness check to verify local execution for Hub-assigned work.";
 let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxed benchmarks.";
 let modelPathReadiness = "Hub assigns model artifacts when work is queued.";
+let modelPreflightReadiness = "Waiting for a Hub assignment. Exact artifact and model-load checks run before scoring.";
 let llamaRuntimeAvailable = false;
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
@@ -514,6 +520,89 @@ function renderAssignmentFromHandoff({ force = false } = {}) {
   });
 }
 
+function renderAssignmentPreflightOutcome(result = null, { staleRuntimeCleared = false } = {}) {
+  if (
+    !staleRuntimeCleared &&
+    shouldPreserveActiveAssignment({
+      listening: Boolean(childProcess),
+      runId: currentAssignmentRunId,
+      phase: currentAssignmentPhase,
+    })
+  ) {
+    return { kind: "active_assignment_preserved", active: true };
+  }
+  const runId = String(result?.run_id || currentFirstRunUploadRunId() || "").trim();
+  const presentation = assignmentPreflightPresentation({
+    runId,
+    status: result?.status || "",
+    terminal: result?.terminal === true,
+    listening: Boolean(childProcess),
+    setupReady: pairedForUi() && llamaRuntimeAvailable && hubConnectionVerified,
+    staleRuntimeCleared,
+    observedIdle: lastAssignmentEventType === "assignment_idle",
+  });
+  if (!presentation) {
+    return null;
+  }
+  if (presentation.kind === "runtime_repaired") {
+    modelPreflightReadiness = "Blocked until a runnable llama.cpp runtime is selected. No artifact or model-load claim was made.";
+  } else if (presentation.kind === "terminal_handoff_cleared") {
+    modelPreflightReadiness = "Previous assignment is terminal. Queue a new Hub run before exact model checks can begin.";
+  } else if (presentation.kind === "assignment_ready_to_start" || presentation.kind === "assignment_ready_to_claim") {
+    modelPreflightReadiness =
+      "Pending claim: Runner Core will verify exact artifact bytes, bind an immutable runtime, and load the model before scoring.";
+  } else if (presentation.kind === "assignment_already_running" || presentation.kind === "assignment_paused") {
+    modelPreflightReadiness = "Not re-run here. Inspect the existing Hub assignment before attempting any model work.";
+  } else {
+    modelPreflightReadiness = "Waiting for a claimable Hub assignment. No model compatibility evidence exists yet.";
+  }
+  renderAssignmentActive({
+    title: runId ? assignmentTitleFromRunId(runId) : "First benchmark preflight",
+    phase: presentation.phase,
+    description: presentation.description,
+    progress: presentation.progress,
+    checkName: presentation.checkName,
+    runId,
+    waitingForListener: presentation.waitingForListener,
+  });
+  const canStartListener = ["assignment_ready_to_start", "queue_unconfirmed", "queue_empty"].includes(presentation.kind);
+  if (assignmentStartListeningButton) {
+    assignmentStartListeningButton.hidden = !canStartListener;
+  }
+  const startDisposition = handoffListenerStartDisposition({
+    runId,
+    status: result?.status || "",
+    terminal: result?.terminal === true,
+  });
+  if (!childProcess) {
+    setRunnerButtonsDisabled("start", !startDisposition.allowed || presentation.kind === "runtime_repaired");
+  }
+  const blocked = presentation.blocking === true;
+  setStatus(blocked ? presentation.phase : childProcess ? "Ready" : "Ready to listen", blocked ? "warning" : "good");
+  renderLocalReadinessChecklist();
+  return { ...presentation, listenerStartAllowed: startDisposition.allowed };
+}
+
+function renderModelPreflightFromAssignment(payload = {}) {
+  const preflight = payload.preflight || {};
+  const stage = String(preflight.stage || "").trim();
+  const state = String(preflight.status || "checking").trim();
+  const messages = {
+    non_executing: "Run config, local dependencies, reviewed artifact reference, and Hub reachability checked. Exact bytes and model load remain pending.",
+    artifact:
+      state === "passed"
+        ? "Exact model artifact resolved; configured size and digest constraints passed."
+        : "Resolving the exact model artifact and enforcing configured size and digest constraints.",
+    runtime_lock: state === "passed" ? "Immutable runtime bound to this run." : "Binding this run to an immutable runtime build.",
+    model_load: state === "passed" ? "Exact model loaded with the locked runtime before scoring." : "Loading the exact model with the locked runtime before scoring.",
+    complete: "Exact artifact, immutable runtime, and model-load preflight passed. Benchmark work may now produce evidence.",
+  };
+  if (messages[stage]) {
+    modelPreflightReadiness = messages[stage];
+    renderLocalReadinessChecklist();
+  }
+}
+
 function applyPreviewStateFromUrl() {
   if (isTauriRuntime() || previewStateApplied) {
     return;
@@ -768,6 +857,9 @@ function renderLocalReadinessChecklist() {
   if (modelPathStatus) {
     modelPathStatus.textContent = modelPathReadiness;
   }
+  if (modelPreflightStatus) {
+    modelPreflightStatus.textContent = modelPreflightReadiness;
+  }
   renderFirstRunChecklist();
   renderPrimaryReadiness();
 }
@@ -997,7 +1089,7 @@ async function refreshRunnerCliVersion() {
   }
 }
 
-async function checkRunnerStartupSelfTest() {
+async function checkRunnerStartupSelfTest({ required = false } = {}) {
   if (runtimeRunnerVersion) {
     runtimeRunnerVersion.textContent = "Checking Runner startup self-test...";
   }
@@ -1006,7 +1098,10 @@ async function checkRunnerStartupSelfTest() {
     if (runtimeRunnerVersion) {
       runtimeRunnerVersion.textContent = "Startup self-test runs inside the desktop app.";
     }
-    return;
+    if (required) {
+      throw new Error("Runner startup self-test is only available inside the desktop app.");
+    }
+    return false;
   }
   try {
     if (output.code !== 0) {
@@ -1017,40 +1112,71 @@ async function checkRunnerStartupSelfTest() {
       runtimeRunnerVersion.textContent = "Runner core available.";
     }
     appendLog(`Startup self-test passed: ${detail}`);
+    return true;
   } catch (error) {
     if (runtimeRunnerVersion) {
       runtimeRunnerVersion.textContent = "Runner core unavailable. Run startup self-test for details.";
     }
     appendLog(`Startup self-test failed: ${error.message || error}`);
+    if (required) {
+      throw error;
+    }
+    return false;
   }
 }
 
-async function checkDesktopReadiness() {
+async function checkDesktopReadiness({ required = false } = {}) {
   const output = await runDesktopSidecarDiagnostic(["desktop-readiness"]);
   if (!output) {
     renderDesktopReadiness({});
     setStatus("Development view", "warning");
-    return;
+    const failure = requiredDesktopReadinessFailure({ sidecarAvailable: false });
+    if (required && failure) {
+      throw new Error(failure);
+    }
+    return null;
   }
   try {
     if (output.code !== 0) {
       throw new Error(output.stderr || output.stdout || `readiness command exited with code ${output.code}`);
     }
     const payload = parseDesktopReadinessOutput(output.stdout);
+    const failure = requiredDesktopReadinessFailure({
+      sidecarAvailable: true,
+      status: payload.status,
+    });
+    if (required && failure) {
+      throw new Error(failure);
+    }
     renderDesktopReadiness(payload);
     if (payload.status === "fallback") {
       appendLog(`Desktop readiness fallback: ${payload.runner_core_message}`);
     } else {
       appendLog(`Desktop readiness: ${output.stdout.trim()}`);
     }
+    return payload;
   } catch (error) {
     containerRuntimeReadiness = "Could not check optional Docker/Podman support. Native benchmark setup can continue.";
     appendLog(`Desktop readiness check failed: ${error.message || error}`);
     renderLocalReadinessChecklist();
+    if (required) {
+      throw error;
+    }
+    return null;
   }
 }
 
 async function runReadinessCheck() {
+  if (
+    shouldPreserveActiveAssignment({
+      listening: Boolean(childProcess),
+      runId: currentAssignmentRunId,
+      phase: currentAssignmentPhase,
+    })
+  ) {
+    appendLog("Readiness check skipped while the active assignment is running; its current status was preserved.");
+    return;
+  }
   if (readinessCheckButton) {
     readinessCheckButton.disabled = true;
   }
@@ -1061,19 +1187,29 @@ async function runReadinessCheck() {
     if (!pairedForUi()) {
       throw new Error("Pair with Hub before running the readiness check.");
     }
-    await checkRunnerStartupSelfTest();
-    await checkDesktopReadiness();
-    await inspectRuntimePlan();
+    await checkRunnerStartupSelfTest({ required: true });
+    await checkDesktopReadiness({ required: true });
+    const runtimePlan = await inspectRuntimePlan({ reconcileStale: true });
     await verifyHubConnection();
     pairingAuthFailure = null;
-    await reconcileCurrentHandoff();
+    const handoff = await reconcileCurrentHandoff({ preserveTerminalNotice: true });
+    const staleRuntimeCleared = runtimePlan?.runtime_reconciliation?.stale_selection_cleared === true;
+    const preflightOutcome = renderAssignmentPreflightOutcome(handoff, { staleRuntimeCleared });
     lastReadinessCheckAt = new Date();
-    if (llamaRuntimeAvailable) {
+    if (preflightOutcome?.active) {
+      appendLog("App preflight preserved the active assignment status.");
+      return;
+    } else if (preflightOutcome?.blocking) {
+      appendLog(`App preflight stopped before listener start: ${preflightOutcome.checkName}.`);
+      return;
+    } else if (llamaRuntimeAvailable) {
       setStatus(childProcess ? "Ready" : "Ready to listen", "good");
-      appendLog("Readiness check passed. Assigned-model compatibility will be checked before benchmark scoring begins.");
+      appendLog(
+        "App preflight passed. Exact artifact constraints, immutable runtime binding, and model load remain claim-bound checks before scoring."
+      );
     } else {
       setStatus("Runtime needed", "warning");
-      appendLog("Readiness check reached Hub, but a usable llama.cpp runtime is still required.");
+      appendLog("App preflight reached Hub, but a usable llama.cpp runtime is still required before claiming work.");
     }
   } catch (error) {
     const authFailure = applyHubAuthenticationFailure(error);
@@ -1513,6 +1649,7 @@ function renderAssignmentFromListenerEvent(payload = {}) {
   }
   const phase = payload.phase || "Running";
   const runId = payload.run_id || payload.runId || "";
+  renderModelPreflightFromAssignment(payload);
   const recovery = phase === "Needs attention" ? assignmentEventRecovery(payload) : null;
   if (recovery) {
     pendingRequiredRuntime = recovery.requiredRuntime;
@@ -1803,7 +1940,7 @@ function setRuntimeActionDisabled(disabled) {
   }
 }
 
-async function inspectRuntimePlan() {
+async function inspectRuntimePlan({ reconcileStale = false } = {}) {
   llamaRuntimeReadiness = "Checking the llama.cpp runtime plan...";
   renderLocalReadinessChecklist();
   const invoke = await loadTauriInvoke();
@@ -1813,8 +1950,23 @@ async function inspectRuntimePlan() {
     renderLocalReadinessChecklist();
     return null;
   }
-  const plan = await invoke("llama_cpp_runtime_plan");
-  llamaRuntimeReadiness = runtimePlanSummary(plan);
+  let plan = await invoke("llama_cpp_runtime_plan");
+  if (reconcileStale && plan?.selected_runtime?.status === "stale") {
+    const removed = await invoke("remove_selected_llama_cpp_runtime", {
+      removeManagedFiles: false,
+    });
+    plan = await invoke("llama_cpp_runtime_plan");
+    plan.runtime_reconciliation = {
+      stale_selection_cleared: removed?.removed_selection === true,
+      immutable_runtime_files_retained: removed?.removed_managed_files !== true,
+    };
+    appendLog(
+      "Cleared a stale selected runtime path during the explicit readiness check. Immutable runtime files were retained."
+    );
+  }
+  llamaRuntimeReadiness = plan?.runtime_reconciliation?.stale_selection_cleared
+    ? `Stale selected executable cleared; immutable runtime files were retained. ${runtimePlanSummary(plan)}`
+    : runtimePlanSummary(plan);
   llamaRuntimeAvailable = plan?.native_runtime_status === "available";
   renderLocalReadinessChecklist();
   appendLog(`llama.cpp runtime plan: ${JSON.stringify(plan)}`);
@@ -2044,7 +2196,7 @@ async function initFirstRunDeepLinkHandoff() {
   }
 }
 
-async function reconcileCurrentHandoff() {
+async function reconcileCurrentHandoff({ preserveTerminalNotice = false } = {}) {
   const runId = currentFirstRunUploadRunId();
   if (!runId) {
     return null;
@@ -2059,11 +2211,12 @@ async function reconcileCurrentHandoff() {
   });
   if (result?.run_id === runId && (result.terminal === true || isTerminalHandoffStatus(result.status))) {
     const terminalStatus = String(result.status || "finished").toLowerCase();
-    clearFirstRunHandoff();
+    clearFirstRunHandoff({ renderAssignment: !preserveTerminalNotice });
     if (firstRunHandoffStatus) {
       firstRunHandoffStatus.textContent = `The previous Hub run is ${terminalStatus}. Start a new run from Hub to continue.`;
     }
     appendLog(`Cleared terminal Hub handoff ${runId} (${terminalStatus}).`);
+    return { ...result, stale_handoff_cleared: true };
   }
   return result;
 }
@@ -2235,9 +2388,25 @@ async function startRunner({ confirmStarted = false } = {}) {
     return;
   }
 
-  await reconcileCurrentHandoff().catch((error) => {
+  let handoff = null;
+  try {
+    handoff = await reconcileCurrentHandoff({ preserveTerminalNotice: true });
+  } catch (error) {
     appendLog(`Could not confirm saved Hub handoff before listening: ${error.message || error}`);
+    throw error;
+  }
+  const startDisposition = handoffListenerStartDisposition({
+    runId: handoff?.run_id || "",
+    status: handoff?.status || "",
+    terminal: handoff?.terminal === true,
   });
+  if (!startDisposition.allowed) {
+    renderAssignmentPreflightOutcome(handoff);
+    setRunnerButtonsDisabled("start", true);
+    setRunnerButtonsDisabled("stop", true);
+    appendLog(`Runner listener start blocked: ${startDisposition.presentation.checkName}.`);
+    return { started: false, disposition: startDisposition };
+  }
 
   await ensureRunnerListenerEvents();
   runnerStartupLines = [];
@@ -2264,6 +2433,7 @@ async function startRunner({ confirmStarted = false } = {}) {
       throw earlyFailure;
     }
   }
+  return { started: true };
 }
 
 async function pairRunner() {
@@ -2284,6 +2454,7 @@ async function pairRunner() {
   }
 
   pairButton.disabled = true;
+  let listenerStartBlocked = false;
   setRunnerButtonsDisabled("start", true);
   pairState.textContent = "Redeeming pairing code...";
   try {
@@ -2303,8 +2474,11 @@ async function pairRunner() {
       pairingReadinessStatus.textContent = "Pairing saved. Starting the listener...";
     }
     try {
-      await startRunner({ confirmStarted: true });
-      pairState.textContent = "Paired and listening for Hub runs.";
+      const startResult = await startRunner({ confirmStarted: true });
+      listenerStartBlocked = startResult?.started === false;
+      pairState.textContent = startResult?.started === false
+        ? `Paired. ${startResult.disposition.presentation.description}`
+        : "Paired and listening for Hub runs.";
     } catch (startError) {
       const safeMessage = userSafeStartFailure(startError.message || startError);
       pairState.textContent = `Paired. Runner could not start automatically. ${safeMessage}`;
@@ -2315,7 +2489,7 @@ async function pairRunner() {
   } finally {
     pairButton.disabled = false;
     if (!childProcess) {
-      setRunnerButtonsDisabled("start", false);
+      setRunnerButtonsDisabled("start", listenerStartBlocked);
     }
   }
 }
