@@ -1,6 +1,6 @@
 [package]
 name = "infergrade_runner_engine"
-version = "0.3.51"
+version = "0.3.52"
 edition = "2021"
 license = "Apache-2.0"
 description = "Shared Rust runner engine logic for InferGrade desktop and CLI frontends"
