@@ -310,6 +310,125 @@ export function isTerminalHandoffStatus(status = "") {
   return ["completed", "failed", "cancelled"].includes(String(status || "").trim().toLowerCase());
 }
 
+export function assignmentPreflightPresentation({
+  runId = "",
+  status = "",
+  terminal = false,
+  listening = false,
+  setupReady = false,
+  staleRuntimeCleared = false,
+  observedIdle = false,
+} = {}) {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  if (staleRuntimeCleared) {
+    return {
+      kind: "runtime_repaired",
+      blocking: true,
+      phase: "Runtime needed",
+      description:
+        "InferGrade cleared a selected executable that no longer exists. Immutable runtime files were retained; choose the managed runtime or select an installed llama.cpp binary.",
+      checkName: "Stale runtime selection cleared",
+      progress: 100,
+      waitingForListener: true,
+    };
+  }
+  if (terminal || isTerminalHandoffStatus(normalizedStatus)) {
+    return {
+      kind: "terminal_handoff_cleared",
+      blocking: true,
+      phase: "New run needed",
+      description: `The saved Hub assignment is ${normalizedStatus || "finished"}. InferGrade cleared the stale handoff; start a new benchmark from Hub.`,
+      checkName: "Terminal Hub handoff cleared",
+      progress: 100,
+      waitingForListener: true,
+    };
+  }
+  if (normalizedStatus === "paused") {
+    return {
+      kind: "assignment_paused",
+      blocking: true,
+      phase: "Hub action needed",
+      description:
+        "This Hub assignment is paused. Resume or replace it in Hub before Runner can claim work; no benchmark has started here.",
+      checkName: "Assignment paused",
+      progress: 100,
+      waitingForListener: true,
+    };
+  }
+  if (normalizedStatus === "running" && !listening) {
+    return {
+      kind: "assignment_already_running",
+      blocking: true,
+      phase: "Check in Hub",
+      description:
+        "Hub already marks this assignment running, but this app is not listening. Inspect or resume it in Hub instead of starting duplicate work.",
+      checkName: "Existing Hub assignment",
+      progress: 100,
+      waitingForListener: true,
+    };
+  }
+  if (!setupReady) {
+    return null;
+  }
+  if (!runId) {
+    return {
+      kind: observedIdle ? "queue_empty" : "queue_unconfirmed",
+      phase: observedIdle ? "No assignment" : "Hub run needed",
+      description: observedIdle
+        ? "Pairing, Hub access, and the selected runtime are ready. Hub reported no matching queued benchmark for this Runner."
+        : "Pairing, Hub access, and the selected runtime are ready. Open Hub to queue a benchmark for this machine.",
+      checkName: observedIdle ? "Queue checked · no matching work" : "Queue a benchmark in Hub",
+      progress: 100,
+      waitingForListener: true,
+    };
+  }
+  if (normalizedStatus === "awaiting_execution") {
+    return {
+      kind: listening ? "assignment_ready_to_claim" : "assignment_ready_to_start",
+      phase: listening ? "Ready to claim" : "Ready to start",
+      description: listening
+        ? "Local setup and Hub assignment checks passed. Runner will verify the exact artifact digest, bind an immutable runtime, and load the model before benchmark scoring."
+        : "Local setup and Hub assignment checks passed. Start listening to claim this run; exact artifact digest and model load remain pending until the immutable runtime is bound.",
+      checkName: listening ? "Waiting for claim-bound preflight" : "Start listening when ready",
+      progress: 10,
+      waitingForListener: !listening,
+    };
+  }
+  return {
+    kind: "assignment_observed",
+    phase: normalizedStatus === "running" ? "Preparing" : "Hub assignment found",
+    description:
+      "Hub assignment state is available. Runner Core remains authoritative for exact artifact, immutable runtime, and model-load preflight before scoring.",
+    checkName: normalizedStatus ? `Hub status: ${normalizedStatus.replaceAll("_", " ")}` : "Hub assignment checked",
+    progress: normalizedStatus === "running" ? 16 : 8,
+    waitingForListener: false,
+  };
+}
+
+export function handoffListenerStartDisposition({ runId = "", status = "", terminal = false } = {}) {
+  const presentation = assignmentPreflightPresentation({
+    runId,
+    status,
+    terminal,
+    listening: false,
+    setupReady: true,
+  });
+  const blocked = ["assignment_paused", "assignment_already_running"].includes(presentation?.kind);
+  return {
+    allowed: !blocked,
+    kind: presentation?.kind || "no_handoff",
+    presentation,
+  };
+}
+
+export function shouldPreserveActiveAssignment({ listening = false, runId = "", phase = "" } = {}) {
+  return Boolean(
+    listening
+      && String(runId || "").trim()
+      && ["preparing", "downloading", "running", "uploading"].includes(String(phase || "").trim().toLowerCase())
+  );
+}
+
 export function shouldAppendAssignmentEventLog(previousType = "", nextType = "") {
   return nextType !== "assignment_idle" || previousType !== "assignment_idle";
 }
@@ -373,6 +492,16 @@ export function desktopReadinessPresentation({
     hubFact: "Hub verified",
     hubFactState: "ready",
   };
+}
+
+export function requiredDesktopReadinessFailure({ sidecarAvailable = false, status = "" } = {}) {
+  if (!sidecarAvailable) {
+    return "Runner desktop readiness is only available inside the desktop app.";
+  }
+  if (String(status || "").trim() !== "ok") {
+    return "Runner desktop readiness did not return a successful structured status.";
+  }
+  return null;
 }
 
 export function isCredentialCanceled(message = "") {

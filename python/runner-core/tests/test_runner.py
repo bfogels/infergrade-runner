@@ -265,6 +265,7 @@ class RunnerTests(unittest.TestCase):
             llama_cpp_perplexity_path=paths["perplexity"],
             simulate=False,
         )
+        messages = []
         with mock.patch("infergrade.runner.get_adapter") as get_adapter_mock, mock.patch(
             "infergrade.runner.capture_environment",
             return_value={"accelerator_type": "metal", "accelerator_count": 1},
@@ -294,7 +295,10 @@ class RunnerTests(unittest.TestCase):
                 },
                 status="completed",
             )
-            run_infergrade(request)
+            run_infergrade(request, emit_progress=messages.append)
+
+        self.assertIn("Immutable runtime bound to this run.", messages)
+        self.assertIn("Exact model loaded with the locked runtime before scoring.", messages)
 
         record = self.read_json(os.path.join(output_dir, "results", "interactive_chat_v1.json"))
         receipt = record["execution"]["runtime_receipt"]
@@ -543,8 +547,14 @@ class RunnerTests(unittest.TestCase):
             runtime_selector=runtime_selector,
             simulate=False,
         )
+        messages = []
         with mock.patch("infergrade.runner.get_adapter", return_value=FakeAdapter()):
-            run_infergrade(request)
+            run_infergrade(request, emit_progress=messages.append)
+        self.assertIn(
+            "Exact model artifact resolved; configured size and digest constraints passed.",
+            messages,
+        )
+        self.assertNotIn("Exact model loaded with the locked runtime before scoring.", messages)
         self.assertTrue(os.path.exists(os.path.join(output_dir, "artifacts", "receipts", "artifact_resolution.json")))
         with open(os.path.join(output_dir, "provenance", "model_artifact.json"), "r", encoding="utf-8") as handle:
             provenance = json.load(handle)
