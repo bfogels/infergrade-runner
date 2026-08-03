@@ -10,6 +10,7 @@ import {
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
+  handoffListenerStartDisposition,
   hubAuthenticationFailure,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
@@ -566,12 +567,18 @@ function renderAssignmentPreflightOutcome(result = null, { staleRuntimeCleared =
   if (assignmentStartListeningButton) {
     assignmentStartListeningButton.hidden = !canStartListener;
   }
-  const blocked = ["runtime_repaired", "terminal_handoff_cleared", "assignment_paused", "assignment_already_running"].includes(
-    presentation.kind
-  );
+  const startDisposition = handoffListenerStartDisposition({
+    runId,
+    status: result?.status || "",
+    terminal: result?.terminal === true,
+  });
+  if (!childProcess) {
+    setRunnerButtonsDisabled("start", !startDisposition.allowed || presentation.kind === "runtime_repaired");
+  }
+  const blocked = presentation.blocking === true;
   setStatus(blocked ? presentation.phase : childProcess ? "Ready" : "Ready to listen", blocked ? "warning" : "good");
   renderLocalReadinessChecklist();
-  return presentation;
+  return { ...presentation, listenerStartAllowed: startDisposition.allowed };
 }
 
 function renderModelPreflightFromAssignment(payload = {}) {
@@ -1175,13 +1182,11 @@ async function runReadinessCheck() {
     pairingAuthFailure = null;
     const handoff = await reconcileCurrentHandoff({ preserveTerminalNotice: true });
     const staleRuntimeCleared = runtimePlan?.runtime_reconciliation?.stale_selection_cleared === true;
-    renderAssignmentPreflightOutcome(handoff, { staleRuntimeCleared });
+    const preflightOutcome = renderAssignmentPreflightOutcome(handoff, { staleRuntimeCleared });
     lastReadinessCheckAt = new Date();
-    if (staleRuntimeCleared) {
-      setStatus("Runtime needed", "warning");
-      appendLog(
-        "App preflight cleared a stale runtime selection. Choose a runnable llama.cpp runtime before claiming work."
-      );
+    if (preflightOutcome?.blocking) {
+      appendLog(`App preflight stopped before listener start: ${preflightOutcome.checkName}.`);
+      return;
     } else if (llamaRuntimeAvailable) {
       setStatus(childProcess ? "Ready" : "Ready to listen", "good");
       appendLog(
@@ -2368,9 +2373,25 @@ async function startRunner({ confirmStarted = false } = {}) {
     return;
   }
 
-  await reconcileCurrentHandoff().catch((error) => {
+  let handoff = null;
+  try {
+    handoff = await reconcileCurrentHandoff({ preserveTerminalNotice: true });
+  } catch (error) {
     appendLog(`Could not confirm saved Hub handoff before listening: ${error.message || error}`);
+    throw error;
+  }
+  const startDisposition = handoffListenerStartDisposition({
+    runId: handoff?.run_id || "",
+    status: handoff?.status || "",
+    terminal: handoff?.terminal === true,
   });
+  if (!startDisposition.allowed) {
+    renderAssignmentPreflightOutcome(handoff);
+    setRunnerButtonsDisabled("start", true);
+    setRunnerButtonsDisabled("stop", true);
+    appendLog(`Runner listener start blocked: ${startDisposition.presentation.checkName}.`);
+    return { started: false, disposition: startDisposition };
+  }
 
   await ensureRunnerListenerEvents();
   runnerStartupLines = [];
@@ -2397,6 +2418,7 @@ async function startRunner({ confirmStarted = false } = {}) {
       throw earlyFailure;
     }
   }
+  return { started: true };
 }
 
 async function pairRunner() {
@@ -2417,6 +2439,7 @@ async function pairRunner() {
   }
 
   pairButton.disabled = true;
+  let listenerStartBlocked = false;
   setRunnerButtonsDisabled("start", true);
   pairState.textContent = "Redeeming pairing code...";
   try {
@@ -2436,8 +2459,11 @@ async function pairRunner() {
       pairingReadinessStatus.textContent = "Pairing saved. Starting the listener...";
     }
     try {
-      await startRunner({ confirmStarted: true });
-      pairState.textContent = "Paired and listening for Hub runs.";
+      const startResult = await startRunner({ confirmStarted: true });
+      listenerStartBlocked = startResult?.started === false;
+      pairState.textContent = startResult?.started === false
+        ? `Paired. ${startResult.disposition.presentation.description}`
+        : "Paired and listening for Hub runs.";
     } catch (startError) {
       const safeMessage = userSafeStartFailure(startError.message || startError);
       pairState.textContent = `Paired. Runner could not start automatically. ${safeMessage}`;
@@ -2448,7 +2474,7 @@ async function pairRunner() {
   } finally {
     pairButton.disabled = false;
     if (!childProcess) {
-      setRunnerButtonsDisabled("start", false);
+      setRunnerButtonsDisabled("start", listenerStartBlocked);
     }
   }
 }

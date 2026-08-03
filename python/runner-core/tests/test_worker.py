@@ -272,16 +272,22 @@ class WorkerTests(unittest.TestCase):
             "Exact model artifact resolved; configured size and digest constraints passed.",
         )
         self.assertEqual(artifact_passed["preflight"], {"stage": "artifact", "status": "passed"})
-        runtime_passed = _desktop_progress_projection("runtime_lock", "Immutable runtime bound to this run.")
+        runtime_passed = _desktop_progress_projection(
+            "runtime_lock",
+            "Immutable runtime bound to this run.",
+            execution_mode="local_native",
+        )
         self.assertEqual(runtime_passed["preflight"], {"stage": "runtime_lock", "status": "passed"})
         model_checking = _desktop_progress_projection(
             "backend_resolution",
             "Checking model/runtime compatibility...",
+            execution_mode="local_native",
         )
         self.assertEqual(model_checking["preflight"], {"stage": "model_load", "status": "checking"})
         model_passed = _desktop_progress_projection(
             "backend_resolution",
             "Exact model loaded with the locked runtime before scoring.",
+            execution_mode="local_native",
         )
         self.assertEqual(model_passed["preflight"], {"stage": "model_load", "status": "passed"})
         scoring = _desktop_progress_projection(
@@ -297,6 +303,36 @@ class WorkerTests(unittest.TestCase):
             execution_mode="local_container",
         )
         self.assertNotIn("preflight", container_scoring)
+        container_model = _desktop_progress_projection(
+            "backend_resolution",
+            "Checking model/runtime compatibility...",
+            execution_mode="local_container",
+        )
+        self.assertNotIn("preflight", container_model)
+        self.assertNotIn("locked runtime", container_model["description"].lower())
+        simulated_model = _desktop_progress_projection(
+            "backend_resolution",
+            "Checking model/runtime compatibility...",
+            execution_mode="local_native",
+            simulate=True,
+        )
+        self.assertNotIn("preflight", simulated_model)
+        self.assertNotIn("locked runtime", simulated_model["description"].lower())
+        container_runtime = _desktop_progress_projection(
+            "runtime_lock",
+            "Immutable runtime bound to this run.",
+            execution_mode="local_container",
+        )
+        self.assertNotIn("preflight", container_runtime)
+        self.assertNotIn("immutable runtime", container_runtime["description"].lower())
+        simulated_runtime = _desktop_progress_projection(
+            "runtime_lock",
+            "Immutable runtime bound to this run.",
+            execution_mode="local_native",
+            simulate=True,
+        )
+        self.assertNotIn("preflight", simulated_runtime)
+        self.assertNotIn("immutable runtime", simulated_runtime["description"].lower())
 
     def test_upload_failure_closes_publish_phase_with_elapsed_time(self):
         claimed_run = {

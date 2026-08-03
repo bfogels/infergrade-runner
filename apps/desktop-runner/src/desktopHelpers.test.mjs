@@ -12,6 +12,7 @@ import {
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
+  handoffListenerStartDisposition,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
   requiredDesktopReadinessFailure,
@@ -140,6 +141,7 @@ test("turns app-first preflight state into one honest next action", () => {
     assignmentPreflightPresentation({ staleRuntimeCleared: true }),
     {
       kind: "runtime_repaired",
+      blocking: true,
       phase: "Runtime needed",
       description:
         "InferGrade cleared a selected executable that no longer exists. Immutable runtime files were retained; choose the managed runtime or select an installed llama.cpp binary.",
@@ -191,6 +193,30 @@ test("preflight never treats an unobserved queue or running orphan as ready", ()
   });
   assert.equal(running.kind, "assignment_already_running");
   assert.match(running.description, /instead of starting duplicate work/i);
+});
+
+test("every listener start path blocks paused and already-running Hub handoffs", () => {
+  const paused = handoffListenerStartDisposition({ runId: "run_paused", status: "paused" });
+  assert.equal(paused.allowed, false);
+  assert.equal(paused.kind, "assignment_paused");
+  assert.equal(paused.presentation.blocking, true);
+  assert.equal(
+    assignmentPreflightPresentation({ runId: "run_paused", status: "paused", setupReady: false }).kind,
+    "assignment_paused"
+  );
+
+  const running = handoffListenerStartDisposition({ runId: "run_running", status: "running" });
+  assert.equal(running.allowed, false);
+  assert.equal(running.kind, "assignment_already_running");
+  assert.equal(running.presentation.blocking, true);
+  assert.equal(
+    assignmentPreflightPresentation({ runId: "run_running", status: "running", setupReady: false }).kind,
+    "assignment_already_running"
+  );
+
+  const queued = handoffListenerStartDisposition({ runId: "run_queued", status: "awaiting_execution" });
+  assert.equal(queued.allowed, true);
+  assert.equal(queued.kind, "assignment_ready_to_start");
 });
 
 test("logs assignment idle once per idle transition", () => {

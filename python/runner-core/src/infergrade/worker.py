@@ -939,6 +939,7 @@ def _desktop_progress_projection(
     """Describe Core-owned preflight stages without upgrading checks into evidence."""
     normalized_stage = str(stage or "")
     normalized_message = str(message or "").lower()
+    exact_native = execution_mode == "local_native" and not simulate
     if normalized_stage == "artifact_resolution":
         passed = "artifact resolved" in normalized_message
         return {
@@ -952,6 +953,12 @@ def _desktop_progress_projection(
             "preflight": {"stage": "artifact", "status": "passed" if passed else "checking"},
         }
     if normalized_stage == "runtime_lock":
+        if not exact_native:
+            return {
+                "phase": "Preparing",
+                "description": "Runner is resolving execution dependencies before backend startup.",
+                "check_name": "Resolve execution dependencies",
+            }
         passed = "runtime bound" in normalized_message
         return {
             "phase": "Preparing",
@@ -964,6 +971,12 @@ def _desktop_progress_projection(
             "preflight": {"stage": "runtime_lock", "status": "passed" if passed else "checking"},
         }
     if normalized_stage == "backend_resolution":
+        if not exact_native:
+            return {
+                "phase": "Preparing",
+                "description": "Runner is resolving the configured backend and its required pre-execution checks.",
+                "check_name": "Resolve configured backend",
+            }
         passed = "exact model loaded" in normalized_message
         return {
             "phase": "Preparing",
@@ -980,7 +993,7 @@ def _desktop_progress_projection(
             "phase": "Running",
             "description": "Runner is executing Hub-assigned work after its required pre-execution checks passed.",
         }
-        if execution_mode == "local_native" and not simulate:
+        if exact_native:
             projection["preflight"] = {"stage": "complete", "status": "passed"}
         return projection
     if normalized_stage == "finalization":
@@ -988,7 +1001,7 @@ def _desktop_progress_projection(
             "phase": "Finalizing",
             "description": "Benchmark execution finished. Runner is finalizing its local result bundle.",
         }
-        if execution_mode == "local_native" and not simulate:
+        if exact_native:
             projection["preflight"] = {"stage": "complete", "status": "passed"}
         return projection
     return {

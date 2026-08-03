@@ -323,6 +323,7 @@ export function assignmentPreflightPresentation({
   if (staleRuntimeCleared) {
     return {
       kind: "runtime_repaired",
+      blocking: true,
       phase: "Runtime needed",
       description:
         "InferGrade cleared a selected executable that no longer exists. Immutable runtime files were retained; choose the managed runtime or select an installed llama.cpp binary.",
@@ -334,9 +335,34 @@ export function assignmentPreflightPresentation({
   if (terminal || isTerminalHandoffStatus(normalizedStatus)) {
     return {
       kind: "terminal_handoff_cleared",
+      blocking: true,
       phase: "New run needed",
       description: `The saved Hub assignment is ${normalizedStatus || "finished"}. InferGrade cleared the stale handoff; start a new benchmark from Hub.`,
       checkName: "Terminal Hub handoff cleared",
+      progress: 100,
+      waitingForListener: true,
+    };
+  }
+  if (normalizedStatus === "paused") {
+    return {
+      kind: "assignment_paused",
+      blocking: true,
+      phase: "Hub action needed",
+      description:
+        "This Hub assignment is paused. Resume or replace it in Hub before Runner can claim work; no benchmark has started here.",
+      checkName: "Assignment paused",
+      progress: 100,
+      waitingForListener: true,
+    };
+  }
+  if (normalizedStatus === "running" && !listening) {
+    return {
+      kind: "assignment_already_running",
+      blocking: true,
+      phase: "Check in Hub",
+      description:
+        "Hub already marks this assignment running, but this app is not listening. Inspect or resume it in Hub instead of starting duplicate work.",
+      checkName: "Existing Hub assignment",
       progress: 100,
       waitingForListener: true,
     };
@@ -352,28 +378,6 @@ export function assignmentPreflightPresentation({
         ? "Pairing, Hub access, and the selected runtime are ready. Hub reported no matching queued benchmark for this Runner."
         : "Pairing, Hub access, and the selected runtime are ready. Open Hub to queue a benchmark for this machine.",
       checkName: observedIdle ? "Queue checked · no matching work" : "Queue a benchmark in Hub",
-      progress: 100,
-      waitingForListener: true,
-    };
-  }
-  if (normalizedStatus === "paused") {
-    return {
-      kind: "assignment_paused",
-      phase: "Hub action needed",
-      description:
-        "This Hub assignment is paused. Resume or replace it in Hub before Runner can claim work; no benchmark has started here.",
-      checkName: "Assignment paused",
-      progress: 100,
-      waitingForListener: true,
-    };
-  }
-  if (normalizedStatus === "running" && !listening) {
-    return {
-      kind: "assignment_already_running",
-      phase: "Check in Hub",
-      description:
-        "Hub already marks this assignment running, but this app is not listening. Inspect or resume it in Hub instead of starting duplicate work.",
-      checkName: "Existing Hub assignment",
       progress: 100,
       waitingForListener: true,
     };
@@ -398,6 +402,22 @@ export function assignmentPreflightPresentation({
     checkName: normalizedStatus ? `Hub status: ${normalizedStatus.replaceAll("_", " ")}` : "Hub assignment checked",
     progress: normalizedStatus === "running" ? 16 : 8,
     waitingForListener: false,
+  };
+}
+
+export function handoffListenerStartDisposition({ runId = "", status = "", terminal = false } = {}) {
+  const presentation = assignmentPreflightPresentation({
+    runId,
+    status,
+    terminal,
+    listening: false,
+    setupReady: true,
+  });
+  const blocked = ["assignment_paused", "assignment_already_running"].includes(presentation?.kind);
+  return {
+    allowed: !blocked,
+    kind: presentation?.kind || "no_handoff",
+    presentation,
   };
 }
 
