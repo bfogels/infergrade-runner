@@ -7,6 +7,17 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.51 (contract 0.3.29)
+
+- Developer ID signs every embedded Mach-O file in the bundled macOS Python
+  runtime before packaging, allowing the signed app to satisfy Apple's hardened
+  runtime and notarization requirements.
+- Preserves the signed embedded runtime through the Tauri build and verifies
+  its post-signing receipt before publication.
+- Generates Windows preview checksums from resolved installer paths so the
+  already-verified MSI and NSIS packages can reach the release publication
+  gate.
+
 ## 0.3.50 (contract 0.3.29)
 
 - Bundles an exact, checksum-verified CPython 3.12.13 runtime with macOS arm64,
