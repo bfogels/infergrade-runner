@@ -238,6 +238,7 @@ jobs:
             -s \
             -k "$keychain_password" \
             "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
           identities="$(security find-identity -v -p codesigning "$keychain_path")"
           identity_count="$(printf '%s\n' "$identities" | awk '/"Developer ID Application:/{count++} END{print count+0}')"
           if [ "$identity_count" -ne 1 ]; then
@@ -250,7 +251,9 @@ jobs:
             exit 1
           fi
           rm -f "$cert_path"
+          echo "::add-mask::$keychain_password"
           echo "INFERGRADE_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+          echo "INFERGRADE_RELEASE_KEYCHAIN_PASSWORD=$keychain_password" >> "$GITHUB_ENV"
           echo "INFERGRADE_MACOS_SIGNING_IDENTITY=$signing_identity" >> "$GITHUB_ENV"
 
       - name: Build signed updater artifacts
@@ -264,7 +267,11 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-        run: ./scripts/build_desktop_runner.sh --with-updater --skip-checks
+        run: |
+          security unlock-keychain \
+            -p "$INFERGRADE_RELEASE_KEYCHAIN_PASSWORD" \
+            "$INFERGRADE_RELEASE_KEYCHAIN"
+          ./scripts/build_desktop_runner.sh --with-updater --skip-checks
 
       - name: Notarize macOS DMG
         env:
