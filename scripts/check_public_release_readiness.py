@@ -137,6 +137,7 @@ def check_workflow_posture(root: Path) -> CheckResult:
         "security find-identity -v -p codesigning",
         "security list-keychains -d user -s",
         "INFERGRADE_RELEASE_KEYCHAIN_PASSWORD=$keychain_password",
+        "INFERGRADE_MACOS_CODESIGN_IDENTITY=$codesign_identity",
         "INFERGRADE_MACOS_SIGNING_IDENTITY=$signing_identity",
         "Remove temporary signing keychain",
         "scripts/notarize_desktop_dmg.sh",
