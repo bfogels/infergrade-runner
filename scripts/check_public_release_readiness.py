@@ -135,6 +135,8 @@ def check_workflow_posture(root: Path) -> CheckResult:
         "APPLE_NOTARIZATION_MODE",
         "Install Developer ID certificate for embedded runtime signing",
         "security find-identity -v -p codesigning",
+        "security list-keychains -d user -s",
+        "INFERGRADE_RELEASE_KEYCHAIN_PASSWORD=$keychain_password",
         "INFERGRADE_MACOS_SIGNING_IDENTITY=$signing_identity",
         "Remove temporary signing keychain",
         "scripts/notarize_desktop_dmg.sh",
