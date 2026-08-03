@@ -51,6 +51,11 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn('-p "$INFERGRADE_RELEASE_KEYCHAIN_PASSWORD"', workflow)
         self.assertIn("Remove temporary signing keychain", workflow)
         self.assertIn("sign_desktop_macos_runtime.py", build_script)
+        self.assertIn(
+            'MACOS_CODESIGN_IDENTITY="${INFERGRADE_MACOS_CODESIGN_IDENTITY:-$MACOS_SIGNING_IDENTITY}"',
+            build_script,
+        )
+        self.assertIn('--identity "$MACOS_CODESIGN_IDENTITY"', build_script)
         self.assertIn('node scripts/prepare-sidecar.mjs', build_script)
         self.assertIn('"$APP_DIR/node_modules/.bin/tauri" build', build_script)
 
@@ -885,6 +890,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertNotIn("secrets.APPLE_SIGNING_IDENTITY", workflow)
         self.assertIn("APPLE_TEAM_ID", workflow)
         self.assertIn('security find-identity -v -p codesigning "$keychain_path"', workflow)
+        self.assertIn("INFERGRADE_MACOS_CODESIGN_IDENTITY=$codesign_identity", workflow)
         self.assertIn("INFERGRADE_MACOS_SIGNING_IDENTITY=$signing_identity", workflow)
         self.assertIn('"Developer ID Application:', workflow)
         self.assertIn("Missing desktop release signing/notarization input(s)", workflow)
