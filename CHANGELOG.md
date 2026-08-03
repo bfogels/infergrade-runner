@@ -7,6 +7,12 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.53 (contract 0.3.29)
+
+- Keeps the ephemeral Developer ID keychain visible and unlocked across the
+  protected GitHub Actions signing-step boundary while masking and discarding
+  its random job-scoped password.
+
 ## 0.3.52 (contract 0.3.29)
 
 - Derives the protected macOS release signing fingerprint from the imported

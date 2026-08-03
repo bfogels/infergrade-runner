@@ -44,6 +44,11 @@ class ReleaseCiTests(unittest.TestCase):
 
         self.assertIn("Install Developer ID certificate for embedded runtime signing", workflow)
         self.assertIn("security set-key-partition-list", workflow)
+        self.assertIn('security list-keychains -d user -s "$keychain_path"', workflow)
+        self.assertIn("::add-mask::$keychain_password", workflow)
+        self.assertIn("INFERGRADE_RELEASE_KEYCHAIN_PASSWORD=$keychain_password", workflow)
+        self.assertIn("security unlock-keychain", workflow)
+        self.assertIn('-p "$INFERGRADE_RELEASE_KEYCHAIN_PASSWORD"', workflow)
         self.assertIn("Remove temporary signing keychain", workflow)
         self.assertIn("sign_desktop_macos_runtime.py", build_script)
         self.assertIn('node scripts/prepare-sidecar.mjs', build_script)
