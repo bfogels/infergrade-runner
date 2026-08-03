@@ -38,6 +38,17 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("verify_desktop_update_endpoint.py", workflow)
         self.assertIn('--expected-version "$DESKTOP_VERSION"', workflow)
 
+    def test_desktop_release_signs_embedded_python_before_notarization(self):
+        workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(encoding="utf-8")
+        build_script = (ROOT / "scripts" / "build_desktop_runner.sh").read_text(encoding="utf-8")
+
+        self.assertIn("Install Developer ID certificate for embedded runtime signing", workflow)
+        self.assertIn("security set-key-partition-list", workflow)
+        self.assertIn("Remove temporary signing keychain", workflow)
+        self.assertIn("sign_desktop_macos_runtime.py", build_script)
+        self.assertIn('node scripts/prepare-sidecar.mjs', build_script)
+        self.assertIn('"$APP_DIR/node_modules/.bin/tauri" build', build_script)
+
     def test_desktop_update_endpoint_requires_anonymous_manifest_and_archive_access(self):
         class Response:
             status = 200
@@ -771,6 +782,9 @@ class ReleaseCiTests(unittest.TestCase):
 
         self.assertEqual(workflow.count("./scripts/write_desktop_release_checksums.py"), 3)
         self.assertIn("target/release/public-windows/SHA256SUMS.windows", workflow)
+        self.assertIn("$checksumInputs = @(", workflow)
+        self.assertNotIn("target/release/public-windows/*.msi `", workflow)
+        self.assertNotIn("target/release/public-windows/*.exe", workflow)
         self.assertIn("target/release/public-linux/SHA256SUMS.linux", workflow)
         self.assertIn("release-assets/SHA256SUMS", workflow)
 
