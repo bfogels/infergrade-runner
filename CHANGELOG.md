@@ -7,6 +7,14 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.52 (contract 0.3.29)
+
+- Derives the protected macOS release signing fingerprint from the imported
+  Developer ID Application certificate, eliminating drift between the
+  certificate and a separately configured identity string.
+- Requires exactly one valid Developer ID Application identity in the
+  ephemeral signing keychain before packaging starts.
+
 ## 0.3.51 (contract 0.3.29)
 
 - Developer ID signs every embedded Mach-O file in the bundled macOS Python
