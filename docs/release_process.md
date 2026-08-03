@@ -132,7 +132,7 @@ Developer ID signature, hardened runtime, or secure timestamp.
 
 Release signing and notarization secrets must live in the GitHub `release` environment, not as broad repository secrets. The `release` environment should be restricted to deployments from `main`. When the repository plan supports it, add required maintainer review to the environment before jobs can access the signing secrets.
 
-The release workflow accepts either Apple ID app-specific password notarization credentials or App Store Connect API-key credentials. The API-key lane uses `APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_PRIVATE_KEY`; the workflow writes the private key into the runner temp directory as `APPLE_API_KEY_PATH` before invoking Tauri. The signing identity can come from `INFERGRADE_MACOS_SIGNING_IDENTITY` as a release environment variable or from the `APPLE_SIGNING_IDENTITY` secret.
+The release workflow accepts either Apple ID app-specific password notarization credentials or App Store Connect API-key credentials. The API-key lane uses `APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_PRIVATE_KEY`; the workflow writes the private key into the runner temp directory as `APPLE_API_KEY_PATH` before invoking Tauri. The workflow imports `APPLE_CERTIFICATE` into an ephemeral keychain, requires exactly one valid Developer ID Application identity, and derives the exact signing fingerprint from that certificate instead of relying on a separately maintained identity string.
 
 Before the full Tauri build starts, CI decodes `APPLE_CERTIFICATE` as a `.p12` file and verifies that it opens with `APPLE_CERTIFICATE_PASSWORD`. If that preflight fails, re-export the Developer ID Application certificate and update both GitHub release-environment secrets together.
 

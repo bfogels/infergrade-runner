@@ -135,7 +135,6 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
-          INFERGRADE_MACOS_SIGNING_IDENTITY: ${{ vars.INFERGRADE_MACOS_SIGNING_IDENTITY || secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           missing=()
           for name in \
@@ -143,8 +142,7 @@ jobs:
             TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
             APPLE_CERTIFICATE \
             APPLE_CERTIFICATE_PASSWORD \
-            APPLE_TEAM_ID \
-            INFERGRADE_MACOS_SIGNING_IDENTITY
+            APPLE_TEAM_ID
           do
             if [ -z "${!name:-}" ]; then
               missing+=("$name")
@@ -168,10 +166,6 @@ jobs:
           if [ "${#missing[@]}" -ne 0 ]; then
             printf '::error::Missing desktop release signing/notarization input(s): %s\n' "${missing[*]}"
             echo "The desktop release workflow publishes user-downloadable artifacts, so it must not fall back to ad-hoc signing or skip notarization."
-            exit 1
-          fi
-          if [ "$INFERGRADE_MACOS_SIGNING_IDENTITY" = "-" ]; then
-            echo "::error::INFERGRADE_MACOS_SIGNING_IDENTITY must be a Developer ID signing identity for protected desktop releases, not ad-hoc '-'."
             exit 1
           fi
           if [ "$use_api_key" -eq 1 ]; then
@@ -244,8 +238,20 @@ jobs:
             -s \
             -k "$keychain_password" \
             "$keychain_path"
+          identities="$(security find-identity -v -p codesigning "$keychain_path")"
+          identity_count="$(printf '%s\n' "$identities" | awk '/"Developer ID Application:/{count++} END{print count+0}')"
+          if [ "$identity_count" -ne 1 ]; then
+            echo "::error::APPLE_CERTIFICATE must contain exactly one valid Developer ID Application identity; found $identity_count."
+            exit 1
+          fi
+          signing_identity="$(printf '%s\n' "$identities" | awk '/"Developer ID Application:/{print $2; exit}')"
+          if [[ ! "$signing_identity" =~ ^[0-9A-Fa-f]{40}$ ]]; then
+            echo "::error::Could not derive the Developer ID Application fingerprint from APPLE_CERTIFICATE."
+            exit 1
+          fi
           rm -f "$cert_path"
           echo "INFERGRADE_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+          echo "INFERGRADE_MACOS_SIGNING_IDENTITY=$signing_identity" >> "$GITHUB_ENV"
 
       - name: Build signed updater artifacts
         env:
@@ -258,7 +264,6 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          INFERGRADE_MACOS_SIGNING_IDENTITY: ${{ vars.INFERGRADE_MACOS_SIGNING_IDENTITY || secrets.APPLE_SIGNING_IDENTITY }}
         run: ./scripts/build_desktop_runner.sh --with-updater --skip-checks
 
       - name: Notarize macOS DMG
