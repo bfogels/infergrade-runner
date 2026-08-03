@@ -421,6 +421,14 @@ export function handoffListenerStartDisposition({ runId = "", status = "", termi
   };
 }
 
+export function shouldPreserveActiveAssignment({ listening = false, runId = "", phase = "" } = {}) {
+  return Boolean(
+    listening
+      && String(runId || "").trim()
+      && ["preparing", "downloading", "running", "uploading"].includes(String(phase || "").trim().toLowerCase())
+  );
+}
+
 export function shouldAppendAssignmentEventLog(previousType = "", nextType = "") {
   return nextType !== "assignment_idle" || previousType !== "assignment_idle";
 }

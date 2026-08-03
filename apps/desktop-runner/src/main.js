@@ -15,6 +15,7 @@ import {
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
   requiredDesktopReadinessFailure,
+  shouldPreserveActiveAssignment,
   shouldClearCompletedHandoff,
   shouldAppendAssignmentEventLog,
   userSafeStartFailure,
@@ -520,14 +521,15 @@ function renderAssignmentFromHandoff({ force = false } = {}) {
 }
 
 function renderAssignmentPreflightOutcome(result = null, { staleRuntimeCleared = false } = {}) {
-  const activePhase = String(currentAssignmentPhase || "").trim().toLowerCase();
   if (
     !staleRuntimeCleared &&
-    childProcess &&
-    currentAssignmentRunId &&
-    ["preparing", "downloading", "running", "uploading"].includes(activePhase)
+    shouldPreserveActiveAssignment({
+      listening: Boolean(childProcess),
+      runId: currentAssignmentRunId,
+      phase: currentAssignmentPhase,
+    })
   ) {
-    return null;
+    return { kind: "active_assignment_preserved", active: true };
   }
   const runId = String(result?.run_id || currentFirstRunUploadRunId() || "").trim();
   const presentation = assignmentPreflightPresentation({
@@ -1165,6 +1167,16 @@ async function checkDesktopReadiness({ required = false } = {}) {
 }
 
 async function runReadinessCheck() {
+  if (
+    shouldPreserveActiveAssignment({
+      listening: Boolean(childProcess),
+      runId: currentAssignmentRunId,
+      phase: currentAssignmentPhase,
+    })
+  ) {
+    appendLog("Readiness check skipped while the active assignment is running; its current status was preserved.");
+    return;
+  }
   if (readinessCheckButton) {
     readinessCheckButton.disabled = true;
   }
@@ -1184,7 +1196,10 @@ async function runReadinessCheck() {
     const staleRuntimeCleared = runtimePlan?.runtime_reconciliation?.stale_selection_cleared === true;
     const preflightOutcome = renderAssignmentPreflightOutcome(handoff, { staleRuntimeCleared });
     lastReadinessCheckAt = new Date();
-    if (preflightOutcome?.blocking) {
+    if (preflightOutcome?.active) {
+      appendLog("App preflight preserved the active assignment status.");
+      return;
+    } else if (preflightOutcome?.blocking) {
       appendLog(`App preflight stopped before listener start: ${preflightOutcome.checkName}.`);
       return;
     } else if (llamaRuntimeAvailable) {

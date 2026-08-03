@@ -201,6 +201,8 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(js.includes("handoffListenerStartDisposition"));
   assert.ok(js.includes("return { started: false, disposition: startDisposition };"));
   assert.ok(js.includes("if (preflightOutcome?.blocking)"));
+  assert.ok(js.includes("shouldPreserveActiveAssignment"));
+  assert.ok(js.includes("Readiness check skipped while the active assignment is running"));
   assert.ok(js.includes("preserveTerminalNotice: true"));
   assert.ok(js.includes("remain claim-bound checks before scoring"));
   assert.ok(js.includes('invoke("select_existing_llama_cpp_runtime"'));

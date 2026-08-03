@@ -16,6 +16,7 @@ import {
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
   requiredDesktopReadinessFailure,
+  shouldPreserveActiveAssignment,
   shouldClearCompletedHandoff,
   shouldAppendAssignmentEventLog,
   userSafeStartFailure,
@@ -217,6 +218,18 @@ test("every listener start path blocks paused and already-running Hub handoffs",
   const queued = handoffListenerStartDisposition({ runId: "run_queued", status: "awaiting_execution" });
   assert.equal(queued.allowed, true);
   assert.equal(queued.kind, "assignment_ready_to_start");
+});
+
+test("readiness checks preserve active assignment phases", () => {
+  for (const phase of ["Preparing", "Downloading", "Running", "Uploading"]) {
+    assert.equal(
+      shouldPreserveActiveAssignment({ listening: true, runId: "run_active", phase }),
+      true
+    );
+  }
+  assert.equal(shouldPreserveActiveAssignment({ listening: false, runId: "run_active", phase: "Running" }), false);
+  assert.equal(shouldPreserveActiveAssignment({ listening: true, runId: "", phase: "Running" }), false);
+  assert.equal(shouldPreserveActiveAssignment({ listening: true, runId: "run_queued", phase: "Ready to claim" }), false);
 });
 
 test("logs assignment idle once per idle transition", () => {
