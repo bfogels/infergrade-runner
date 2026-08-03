@@ -129,6 +129,7 @@ test("desktop pairing keeps successful pairing when automatic start fails", () =
   assert.ok(js.includes("before listening"));
   assert.equal(js.includes("pairState.textContent = \"Pairing failed. Check that the code has not expired, then try again.\";"), false);
   assert.ok(js.includes("checkRunnerStartupSelfTest"));
+  assert.ok(js.includes("checkRunnerStartupSelfTest({ required: true })"));
   assert.ok(js.includes("Checking Runner startup self-test"));
 });
 
@@ -166,7 +167,8 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(html.includes("data-pairing-readiness-status"));
   assert.ok(html.includes("data-runtime-llama-status"));
   assert.ok(html.includes("Model preflight"));
-  assert.ok(html.includes("After assignment · before scoring"));
+  assert.ok(html.includes("data-model-preflight-status"));
+  assert.ok(html.includes("Check before benchmark"));
   assert.ok(html.includes("data-runtime-install-managed"));
   assert.ok(html.includes("data-runtime-reinstall-managed"));
   assert.ok(html.includes("data-runtime-remove-selected"));
@@ -193,6 +195,11 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(js.includes('invoke("llama_cpp_runtime_plan"'));
   assert.ok(js.includes('invoke("install_managed_llama_cpp_runtime"'));
   assert.ok(js.includes('invoke("remove_selected_llama_cpp_runtime"'));
+  assert.ok(js.includes("inspectRuntimePlan({ reconcileStale: true })"));
+  assert.ok(js.includes("removeManagedFiles: false"));
+  assert.ok(js.includes("renderAssignmentPreflightOutcome"));
+  assert.ok(js.includes("preserveTerminalNotice: true"));
+  assert.ok(js.includes("remain claim-bound checks before scoring"));
   assert.ok(js.includes('invoke("select_existing_llama_cpp_runtime"'));
   assert.ok(js.includes("runtimeId: runtimeIdInput?.value.trim() || null"));
   assert.ok(js.includes("SHA-256 verified"));
@@ -209,6 +216,8 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(rust.includes("fn install_managed_llama_cpp_runtime"));
   assert.ok(rust.includes("engine_install_managed_llama_cpp_runtime"));
   assert.ok(rust.includes("fn remove_selected_llama_cpp_runtime"));
+  assert.ok(rust.includes("This is authenticated Hub assignment state only."));
+  assert.ok(rust.includes("after claim and before benchmark scoring"));
   assert.ok(rust.includes("engine_remove_selected_llama_cpp_runtime"));
   assert.ok(rust.includes("fn select_existing_llama_cpp_runtime"));
   assert.ok(rust.includes("fn desktop_model_cache_status"));
@@ -253,7 +262,7 @@ test("desktop runtime panel keeps readiness truthful and Docker optional", () =>
   assert.ok(js.includes("Local execution readiness is available for Hub-assigned work."));
   assert.ok(readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8").includes("Run the readiness check to verify Hub access."));
   assert.ok(js.includes('invoke("worker_protocol_ping"'));
-  assert.ok(js.includes("Assigned-model compatibility will be checked before benchmark scoring begins."));
+  assert.ok(js.includes("Exact artifact constraints, immutable runtime binding, and model load remain claim-bound"));
   assert.ok(js.includes('invoke("desktop_sidecar_diagnostic", { args })'));
   assert.ok(js.includes('runDesktopSidecarDiagnostic(["desktop-readiness"])'));
   assert.ok(js.includes('runDesktopSidecarDiagnostic(["desktop-self-test"])'));

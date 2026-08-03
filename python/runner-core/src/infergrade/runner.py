@@ -663,6 +663,10 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             request.quant_artifact_resolved_path = resolved_artifact.resolved_path
             request.quant_artifact_sha256 = request.quant_artifact_sha256 or resolved_artifact.sha256
             request.quant_artifact_filename = request.quant_artifact_filename or resolved_artifact.filename
+            _emit_progress(
+                emit_progress,
+                "Exact model artifact resolved; configured size and digest constraints passed.",
+            )
         mark_stage_completed(
             output_dir,
             progress,
@@ -698,6 +702,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             request.runtime_lock = runtime_lock_summary
             progress["runtime_lock"] = runtime_lock_summary
             save_progress(output_dir, progress)
+            _emit_progress(emit_progress, "Immutable runtime bound to this run.")
         mark_stage_completed(
             output_dir,
             progress,
@@ -718,6 +723,11 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         if callable(preflight_model):
             _emit_progress(emit_progress, "Checking model/runtime compatibility...")
             preflight_model(request)
+            if request.execution_mode == "local_native" and not request.simulate:
+                _emit_progress(
+                    emit_progress,
+                    "Exact model loaded with the locked runtime before scoring.",
+                )
         mark_stage_completed(output_dir, progress, current_stage, metadata={"backend_version": adapter_version})
 
         current_stage = "ontology_build"

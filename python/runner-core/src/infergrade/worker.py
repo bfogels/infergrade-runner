@@ -219,8 +219,11 @@ def execute_run_job(
             run_id,
             worker_id,
             stage="preflight_complete",
-            detail="Artifact, runtime, benchmark images, disk, and Hub access are ready.",
-            message="Exact run preflight passed.",
+            detail=(
+                "Hub reachability, runtime executables, reviewed artifact reference and size, disk, and required images "
+                "are ready. Exact artifact bytes, immutable runtime binding, and model load remain pending."
+            ),
+            message="Non-executing run preflight passed.",
             progress_percent=8.0,
             api_token=api_token,
             run_token=run_token,
@@ -230,9 +233,13 @@ def execute_run_job(
             "assignment_update",
             phase="Preparing",
             run_id=run_id,
-            description="This exact setup passed local readiness checks.",
+            description=(
+                "Run config and non-executing readiness checks passed. Exact artifact constraints, immutable runtime "
+                "binding, and model load remain pending."
+            ),
             progress=16,
-            check_name="Ready to run",
+            check_name="Claim-bound checks pending",
+            preflight={"stage": "non_executing", "status": "passed"},
         )
 
         def _emit(message: str) -> None:
@@ -250,14 +257,21 @@ def execute_run_job(
                 reporting_failed = True
                 stage, detail, desktop_detail, progress_percent = None, None, None, None
             try:
+                projection = _desktop_progress_projection(
+                    stage,
+                    message,
+                    execution_mode=request.execution_mode,
+                    simulate=request.simulate,
+                )
                 _emit_desktop_event(
                     emit_progress,
                     "assignment_update",
-                    phase="Running",
+                    phase=projection["phase"],
                     run_id=run_id,
-                    description="Runner is executing Hub-assigned work.",
+                    description=projection["description"],
                     progress=progress_percent,
-                    check_name=desktop_detail or detail or stage or message,
+                    check_name=projection.get("check_name") or desktop_detail or detail or stage or message,
+                    preflight=projection.get("preflight"),
                     lifecycle_timing=_lifecycle_timing(),
                 )
             except Exception:
@@ -916,6 +930,73 @@ def _runtime_progress_update(output_dir: Optional[str]) -> Tuple[Optional[str], 
     return payload.get("current_stage"), detail, _progress_detail(payload), _progress_percent(payload)
 
 
+def _desktop_progress_projection(
+    stage: Optional[str],
+    message: Optional[str],
+    execution_mode: Optional[str] = None,
+    simulate: bool = False,
+) -> Dict[str, Any]:
+    """Describe Core-owned preflight stages without upgrading checks into evidence."""
+    normalized_stage = str(stage or "")
+    normalized_message = str(message or "").lower()
+    if normalized_stage == "artifact_resolution":
+        passed = "artifact resolved" in normalized_message
+        return {
+            "phase": "Preparing",
+            "description": (
+                "Exact model artifact resolved; configured size and digest constraints passed."
+                if passed
+                else "Resolving the exact model artifact and enforcing its configured size and digest constraints."
+            ),
+            "check_name": "Artifact constraints passed" if passed else "Resolve exact artifact",
+            "preflight": {"stage": "artifact", "status": "passed" if passed else "checking"},
+        }
+    if normalized_stage == "runtime_lock":
+        passed = "runtime bound" in normalized_message
+        return {
+            "phase": "Preparing",
+            "description": (
+                "Immutable runtime bound to this run."
+                if passed
+                else "Binding this run to an immutable runtime before model load."
+            ),
+            "check_name": "Immutable runtime bound" if passed else "Bind immutable runtime",
+            "preflight": {"stage": "runtime_lock", "status": "passed" if passed else "checking"},
+        }
+    if normalized_stage == "backend_resolution":
+        passed = "exact model loaded" in normalized_message
+        return {
+            "phase": "Preparing",
+            "description": (
+                "Exact model loaded with the locked runtime before scoring."
+                if passed
+                else "Checking model compatibility by loading it with the locked runtime before scoring."
+            ),
+            "check_name": "Model load passed" if passed else "Load model with locked runtime",
+            "preflight": {"stage": "model_load", "status": "passed" if passed else "checking"},
+        }
+    if normalized_stage in {"capability", "deployment"}:
+        projection = {
+            "phase": "Running",
+            "description": "Runner is executing Hub-assigned work after its required pre-execution checks passed.",
+        }
+        if execution_mode == "local_native" and not simulate:
+            projection["preflight"] = {"stage": "complete", "status": "passed"}
+        return projection
+    if normalized_stage == "finalization":
+        projection = {
+            "phase": "Finalizing",
+            "description": "Benchmark execution finished. Runner is finalizing its local result bundle.",
+        }
+        if execution_mode == "local_native" and not simulate:
+            projection["preflight"] = {"stage": "complete", "status": "passed"}
+        return projection
+    return {
+        "phase": "Preparing",
+        "description": "Runner is preparing Hub-assigned work; benchmark scoring has not started.",
+    }
+
+
 def _progress_detail(payload: Dict[str, Any]) -> Optional[str]:
     """Return a human-readable current benchmark or deployment detail."""
     stage = payload.get("current_stage")
@@ -957,6 +1038,7 @@ def _progress_percent(payload: Dict[str, Any]) -> Optional[float]:
     stage_defaults = {
         "environment_capture": 12.0,
         "artifact_resolution": 24.0,
+        "runtime_lock": 30.0,
         "backend_resolution": 36.0,
         "ontology_build": 44.0,
     }
