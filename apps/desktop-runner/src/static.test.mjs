@@ -265,6 +265,8 @@ test("desktop runtime panel keeps readiness truthful and Docker optional", () =>
   assert.ok(js.includes("Exact artifact constraints, immutable runtime binding, and model load remain claim-bound"));
   assert.ok(js.includes('invoke("desktop_sidecar_diagnostic", { args })'));
   assert.ok(js.includes('runDesktopSidecarDiagnostic(["desktop-readiness"])'));
+  assert.ok(js.includes("checkDesktopReadiness({ required: true })"));
+  assert.ok(js.includes("if (required) {\n      throw error;"));
   assert.ok(js.includes('runDesktopSidecarDiagnostic(["desktop-self-test"])'));
   assert.ok(js.includes('runDesktopSidecarDiagnostic(["--version"])'));
   assert.ok(rust.includes("desktop_sidecar_diagnostic"));

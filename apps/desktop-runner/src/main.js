@@ -13,6 +13,7 @@ import {
   hubAuthenticationFailure,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
+  requiredDesktopReadinessFailure,
   shouldClearCompletedHandoff,
   shouldAppendAssignmentEventLog,
   userSafeStartFailure,
@@ -1115,28 +1116,44 @@ async function checkRunnerStartupSelfTest({ required = false } = {}) {
   }
 }
 
-async function checkDesktopReadiness() {
+async function checkDesktopReadiness({ required = false } = {}) {
   const output = await runDesktopSidecarDiagnostic(["desktop-readiness"]);
   if (!output) {
     renderDesktopReadiness({});
     setStatus("Development view", "warning");
-    return;
+    const failure = requiredDesktopReadinessFailure({ sidecarAvailable: false });
+    if (required && failure) {
+      throw new Error(failure);
+    }
+    return null;
   }
   try {
     if (output.code !== 0) {
       throw new Error(output.stderr || output.stdout || `readiness command exited with code ${output.code}`);
     }
     const payload = parseDesktopReadinessOutput(output.stdout);
+    const failure = requiredDesktopReadinessFailure({
+      sidecarAvailable: true,
+      status: payload.status,
+    });
+    if (required && failure) {
+      throw new Error(failure);
+    }
     renderDesktopReadiness(payload);
     if (payload.status === "fallback") {
       appendLog(`Desktop readiness fallback: ${payload.runner_core_message}`);
     } else {
       appendLog(`Desktop readiness: ${output.stdout.trim()}`);
     }
+    return payload;
   } catch (error) {
     containerRuntimeReadiness = "Could not check optional Docker/Podman support. Native benchmark setup can continue.";
     appendLog(`Desktop readiness check failed: ${error.message || error}`);
     renderLocalReadinessChecklist();
+    if (required) {
+      throw error;
+    }
+    return null;
   }
 }
 
@@ -1152,7 +1169,7 @@ async function runReadinessCheck() {
       throw new Error("Pair with Hub before running the readiness check.");
     }
     await checkRunnerStartupSelfTest({ required: true });
-    await checkDesktopReadiness();
+    await checkDesktopReadiness({ required: true });
     const runtimePlan = await inspectRuntimePlan({ reconcileStale: true });
     await verifyHubConnection();
     pairingAuthFailure = null;

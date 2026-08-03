@@ -466,6 +466,16 @@ export function desktopReadinessPresentation({
   };
 }
 
+export function requiredDesktopReadinessFailure({ sidecarAvailable = false, status = "" } = {}) {
+  if (!sidecarAvailable) {
+    return "Runner desktop readiness is only available inside the desktop app.";
+  }
+  if (String(status || "").trim() !== "ok") {
+    return "Runner desktop readiness did not return a successful structured status.";
+  }
+  return null;
+}
+
 export function isCredentialCanceled(message = "") {
   return /cancelled|canceled|user interaction|user.*cancel/i.test(String(message || ""));
 }

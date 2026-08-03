@@ -14,6 +14,7 @@ import {
   firstRunHandoffFromParams,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
+  requiredDesktopReadinessFailure,
   shouldClearCompletedHandoff,
   shouldAppendAssignmentEventLog,
   userSafeStartFailure,
@@ -222,6 +223,19 @@ test("requires an authenticated Hub check before presenting the Runner as ready"
     desktopReadinessPresentation({ paired: true, listening: true, runtimeAvailable: false, hubVerified: true }).title,
     "Runtime needed"
   );
+});
+
+test("explicit app preflight requires structured desktop readiness", () => {
+  assert.match(requiredDesktopReadinessFailure(), /only available inside the desktop app/i);
+  assert.match(
+    requiredDesktopReadinessFailure({ sidecarAvailable: true, status: "fallback" }),
+    /did not return a successful structured status/i
+  );
+  assert.match(
+    requiredDesktopReadinessFailure({ sidecarAvailable: true, status: "error" }),
+    /did not return a successful structured status/i
+  );
+  assert.equal(requiredDesktopReadinessFailure({ sidecarAvailable: true, status: "ok" }), null);
 });
 
 test("normalizes hosted and local desktop API URLs before sidecar invocation", () => {
