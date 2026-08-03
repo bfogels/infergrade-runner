@@ -7,6 +7,15 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.55 (contract 0.3.29)
+
+- Adds an app-first benchmark preflight that checks pairing, Hub reachability,
+  runtime readiness, and saved assignment state before listening.
+- Recovers stale runtime selections without deleting immutable runtime files,
+  and blocks duplicate listener starts for paused or already-running work.
+- Keeps exact artifact, immutable-runtime, and model-load readiness claims
+  bound to real non-simulated native execution in Runner Core.
+
 ## 0.3.54 (contract 0.3.29)
 
 - Separates the Developer ID certificate name required by Tauri from the exact
