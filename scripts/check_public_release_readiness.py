@@ -134,6 +134,8 @@ def check_workflow_posture(root: Path) -> CheckResult:
         "APPLE_API_PRIVATE_KEY",
         "APPLE_NOTARIZATION_MODE",
         "Install Developer ID certificate for embedded runtime signing",
+        "security find-identity -v -p codesigning",
+        "INFERGRADE_MACOS_SIGNING_IDENTITY=$signing_identity",
         "Remove temporary signing keychain",
         "scripts/notarize_desktop_dmg.sh",
         "scripts/verify_desktop_macos_release.sh",

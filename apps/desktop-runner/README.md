@@ -84,7 +84,9 @@ Tauri updater signing is separate from Apple code signing:
 - `INFERGRADE_MACOS_SIGNING_IDENTITY=-` creates a local ad-hoc macOS signature.
 - `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, and `APPLE_TEAM_ID` allow CI to use Developer ID signing.
 - Either `APPLE_ID` plus `APPLE_PASSWORD` or `APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_PRIVATE_KEY` allow CI to notarize protected release artifacts.
-- `INFERGRADE_MACOS_SIGNING_IDENTITY` can be configured as a release environment variable; CI also accepts the `APPLE_SIGNING_IDENTITY` secret for the same value.
+- The protected release workflow derives the exact Developer ID Application
+  fingerprint from the imported `APPLE_CERTIFICATE`; no separately maintained
+  signing-identity variable is required.
 
 The protected release lane also uses that Developer ID identity to sign every
 Mach-O executable and library inside the bundled Python runtime before Tauri
