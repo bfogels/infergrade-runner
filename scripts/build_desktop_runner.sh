@@ -67,7 +67,7 @@ if [ "$CREATE_UPDATER_ARTIFACTS" -eq 1 ]; then
 fi
 
 cd "$APP_DIR"
-"$ROOT_DIR/scripts/build_desktop_sidecar.sh"
+node scripts/prepare-sidecar.mjs
 MACOS_SIGNING_IDENTITY="${INFERGRADE_MACOS_SIGNING_IDENTITY:-}"
 
 unset_if_empty() {
@@ -106,6 +106,18 @@ if [ -z "$MACOS_SIGNING_IDENTITY" ] && [ -z "${APPLE_CERTIFICATE:-}" ]; then
   MACOS_SIGNING_IDENTITY="-"
 fi
 export CREATE_UPDATER_ARTIFACTS MACOS_SIGNING_IDENTITY
+
+if [ "$(uname -s)" = "Darwin" ] && [ "$MACOS_SIGNING_IDENTITY" != "-" ]; then
+  runtime_signing_args=(
+    --runtime "$TAURI_DIR/desktop-python"
+    --identity "$MACOS_SIGNING_IDENTITY"
+  )
+  if [ -n "${INFERGRADE_RELEASE_KEYCHAIN:-}" ]; then
+    runtime_signing_args+=(--keychain "$INFERGRADE_RELEASE_KEYCHAIN")
+  fi
+  python3 "$ROOT_DIR/scripts/sign_desktop_macos_runtime.py" "${runtime_signing_args[@]}"
+fi
+
 build_config="$(python3 - <<'PY'
 import json
 import os
@@ -122,7 +134,7 @@ if not config["bundle"]["macOS"]:
 print(json.dumps(config, separators=(",", ":")))
 PY
 )"
-npm run tauri -- build --config "$build_config" -- --locked
+"$APP_DIR/node_modules/.bin/tauri" build --config "$build_config" -- --locked
 
 if [ ! -d "$DMG_DIR" ]; then
   echo "No DMG output directory found at $DMG_DIR" >&2
