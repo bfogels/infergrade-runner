@@ -245,15 +245,21 @@ jobs:
             echo "::error::APPLE_CERTIFICATE must contain exactly one valid Developer ID Application identity; found $identity_count."
             exit 1
           fi
-          signing_identity="$(printf '%s\n' "$identities" | awk '/"Developer ID Application:/{print $2; exit}')"
-          if [[ ! "$signing_identity" =~ ^[0-9A-Fa-f]{40}$ ]]; then
+          codesign_identity="$(printf '%s\n' "$identities" | awk '/"Developer ID Application:/{print $2; exit}')"
+          signing_identity="$(printf '%s\n' "$identities" | awk '/"Developer ID Application:/{sub(/^[^"]*"/, ""); sub(/"[^"]*$/, ""); print; exit}')"
+          if [[ ! "$codesign_identity" =~ ^[0-9A-Fa-f]{40}$ ]]; then
             echo "::error::Could not derive the Developer ID Application fingerprint from APPLE_CERTIFICATE."
+            exit 1
+          fi
+          if [[ "$signing_identity" != "Developer ID Application: "* ]]; then
+            echo "::error::Could not derive the Developer ID Application name from APPLE_CERTIFICATE."
             exit 1
           fi
           rm -f "$cert_path"
           echo "::add-mask::$keychain_password"
           echo "INFERGRADE_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
           echo "INFERGRADE_RELEASE_KEYCHAIN_PASSWORD=$keychain_password" >> "$GITHUB_ENV"
+          echo "INFERGRADE_MACOS_CODESIGN_IDENTITY=$codesign_identity" >> "$GITHUB_ENV"
           echo "INFERGRADE_MACOS_SIGNING_IDENTITY=$signing_identity" >> "$GITHUB_ENV"
 
       - name: Build signed updater artifacts

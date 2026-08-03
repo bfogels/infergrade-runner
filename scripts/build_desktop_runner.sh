@@ -69,6 +69,7 @@ fi
 cd "$APP_DIR"
 node scripts/prepare-sidecar.mjs
 MACOS_SIGNING_IDENTITY="${INFERGRADE_MACOS_SIGNING_IDENTITY:-}"
+MACOS_CODESIGN_IDENTITY="${INFERGRADE_MACOS_CODESIGN_IDENTITY:-$MACOS_SIGNING_IDENTITY}"
 
 unset_if_empty() {
   local name="$1"
@@ -110,7 +111,7 @@ export CREATE_UPDATER_ARTIFACTS MACOS_SIGNING_IDENTITY
 if [ "$(uname -s)" = "Darwin" ] && [ "$MACOS_SIGNING_IDENTITY" != "-" ]; then
   runtime_signing_args=(
     --runtime "$TAURI_DIR/desktop-python"
-    --identity "$MACOS_SIGNING_IDENTITY"
+    --identity "$MACOS_CODESIGN_IDENTITY"
   )
   if [ -n "${INFERGRADE_RELEASE_KEYCHAIN:-}" ]; then
     runtime_signing_args+=(--keychain "$INFERGRADE_RELEASE_KEYCHAIN")

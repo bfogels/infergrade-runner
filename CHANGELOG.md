@@ -7,6 +7,12 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.54 (contract 0.3.29)
+
+- Separates the Developer ID certificate name required by Tauri from the exact
+  fingerprint used by direct embedded-runtime `codesign` calls, deriving both
+  from the single verified release certificate.
+
 ## 0.3.53 (contract 0.3.29)
 
 - Keeps the ephemeral Developer ID keychain visible and unlocked across the
