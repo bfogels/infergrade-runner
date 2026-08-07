@@ -4,7 +4,7 @@ InferGrade Desktop Runner is the local companion app for people who want to pair
 
 The Hub remains the model selection, benchmark planning, recommendation, and results surface. This app should stay focused on pairing, readiness, Runner lifecycle, local runtime controls, logs, updates, and support export.
 
-The desktop happy path is now native-first for macOS Apple Silicon: Docker will not be required for the first local benchmark, and the app can run a local GGUF through either the recommended managed Metal `llama.cpp` runtime or a selected existing `llama-cli` binary, write local artifacts, and upload `native_first_run` evidence back to Hub. Managed runtime install is explicit, checksum-verified, and not independently signed yet. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
+The desktop happy path is now native-first for macOS Apple Silicon: Docker will not be required for the first local benchmark, and the app can run a local GGUF through a Runner-pinned managed fallback, an exact build from the signed runtime catalog, or a selected existing `llama-cli` binary. Downloads are explicit and checksum-verified; signed catalog metadata authenticates InferGrade's build assertion, not an upstream artifact signature. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
 
 ## What It Includes
 
@@ -51,14 +51,20 @@ Tauri expects the generated file to use the target-triple suffix, for example `s
 
 ## Runtime Selection
 
-The app does not install or upgrade `llama.cpp` silently. The Runtime panel records an explicit user-selected `llama-cli` path through `runner-engine`, validates that it is runnable, and stores a selected-runtime manifest in the InferGrade runtime cache. The same engine path is used by the Rust CLI:
+The app does not install, upgrade, or switch `llama.cpp` silently. Open **Details and support → Runtime options** and choose one lane:
+
+- **Managed fallback** installs the Runner-pinned compatibility build.
+- **Signed runtime catalog** lists compatible reviewed upstream or specialized-fork builds and installs only the exact build the user selects.
+- **Custom llama.cpp build** selects a local `llama-cli`, validates it, discovers sibling binaries, and derives the runtime identity from the executable digest.
+
+Every selection is stored in the InferGrade runtime cache; each evidence-producing run then locks one exact immutable runtime. The same engine paths are available through the Rust CLI:
 
 ```text
 infergrade-runner runtime plan
+infergrade-runner runtime catalog-refresh
+infergrade-runner runtime catalog-use --target <catalog-target> --consent-build <sha256>
 infergrade-runner runtime select-existing --runtime-path /path/to/llama-cli
 ```
-
-The default path stays on the Runner-pinned compatibility lane. Advanced support sessions can inspect a named runtime lane or select existing sibling `llama-cli` / `llama-server` / `llama-perplexity` binaries. Managed downloads remain planned until runtime manifests include checksums, signatures, compatibility metadata, and rollback information.
 
 ## Build And Release
 

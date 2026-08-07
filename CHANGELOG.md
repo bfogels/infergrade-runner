@@ -7,6 +7,15 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.56 (contract 0.3.29)
+
+- Makes desktop llama.cpp selection usable across the managed fallback,
+  signed runtime catalog, and explicit custom-binary lanes.
+- Adds cached-model paging, a pairing-intent handoff, and clearer benchmark
+  phase progress without exposing pairing secrets in custom URLs.
+- Refreshes reviewed Runner dependencies, including the Ed25519 runtime
+  catalog verifier, while preserving the existing signed-catalog trust model.
+
 ## 0.3.55 (contract 0.3.29)
 
 - Adds an app-first benchmark preflight that checks pairing, Hub reachability,

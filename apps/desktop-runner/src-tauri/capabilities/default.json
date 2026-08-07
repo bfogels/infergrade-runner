@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "deep-link:default",
+    "dialog:allow-open",
     "process:allow-restart",
     "updater:default",
     "shell:allow-open",
