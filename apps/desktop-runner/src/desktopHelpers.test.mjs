@@ -13,6 +13,7 @@ import {
   firstRunHandoffFromDeepLink,
   firstRunHandoffFromParams,
   handoffListenerStartDisposition,
+  isPairingIntentDeepLink,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
   requiredDesktopReadinessFailure,
@@ -23,6 +24,13 @@ import {
   userSafeUpdateFailure,
   userSafeTokenFailure,
 } from "./desktopHelpers.js";
+
+test("accepts only the non-secret pairing intent deep link", () => {
+  assert.equal(isPairingIntentDeepLink("infergrade-runner://open?intent=pair"), true);
+  assert.equal(isPairingIntentDeepLink("infergrade-runner://open?intent=run"), false);
+  assert.equal(isPairingIntentDeepLink("https://infergrade.com/?intent=pair"), false);
+  assert.equal(isPairingIntentDeepLink("not a URL"), false);
+});
 
 test("turns runtime failures into actionable assignment recovery", () => {
   const required = assignmentFailureRecovery(

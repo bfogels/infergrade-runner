@@ -206,7 +206,9 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(js.includes("preserveTerminalNotice: true"));
   assert.ok(js.includes("remain claim-bound checks before scoring"));
   assert.ok(js.includes('invoke("select_existing_llama_cpp_runtime"'));
-  assert.ok(js.includes("runtimeId: runtimeIdInput?.value.trim() || null"));
+  assert.ok(js.includes("runtimePath,"));
+  assert.ok(js.includes("runtimeId: null"));
+  assert.ok(js.includes("Choose or paste the path to llama-cli"));
   assert.ok(js.includes("SHA-256 verified"));
   assert.ok(js.includes("no independent signature"));
   assert.ok(js.includes("Retry install, remove the selected runtime, or select an existing llama.cpp binary."));
@@ -304,7 +306,7 @@ test("desktop legacy local smoke support is not exposed in the product UI", () =
 
   assert.equal(html.includes("Hub handoff recovery"), false);
   assert.equal(html.includes("name=\"firstRunModelPath\""), false);
-  assert.equal(html.includes("name=\"firstRunRuntimePath\""), false);
+  assert.ok(html.includes("name=\"firstRunRuntimePath\""));
   assert.equal(html.includes("name=\"firstRunUploadRunId\""), false);
   assert.equal(html.includes("name=\"firstRunUploadWorkerId\""), false);
   assert.equal(html.includes("data-first-run-handoff-status"), false);
@@ -322,6 +324,9 @@ test("desktop legacy local smoke support is not exposed in the product UI", () =
   assert.ok(js.includes("initFirstRunDeepLinkHandoff"));
   assert.ok(helpers.includes("infergrade-runner:"));
   assert.ok(js.includes("@tauri-apps/plugin-deep-link"));
+  assert.ok(js.includes("@tauri-apps/plugin-dialog"));
+  assert.ok(js.includes('invoke("refresh_desktop_runtime_catalog"'));
+  assert.ok(rust.includes("refresh_desktop_runtime_catalog"));
   assert.ok(helpers.includes("first_run_run_id"));
   assert.ok(helpers.includes("first_run_worker_id"));
   assert.ok(helpers.includes("sensitive handoff parameter"));
@@ -459,6 +464,9 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes('artifact: "Preparing model"'));
   assert.ok(js.includes('capability: "Running capability tasks"'));
   assert.ok(js.includes("assignmentTimingSummary(payload.lifecycle_timing)"));
+  assert.ok(js.includes('remaining: redactSecrets(payload.remaining || assignmentTimingSummary(payload.lifecycle_timing))'));
+  assert.equal(js.includes('`${payload.remaining}${/remaining/i.test(payload.remaining)'), false);
+  assert.ok(js.includes("in this phase"));
   assert.ok(js.includes("Hub assignment ${payload.phase || \"update\"}"));
   assert.ok(js.includes("renderAssignmentActive({"));
   assert.ok(js.includes("phase === \"Complete\" ? 100 : 32"));
