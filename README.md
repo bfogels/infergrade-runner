@@ -39,7 +39,7 @@ The clearest first path is:
 
 The broader Runner architecture remains available, but the default path is intentionally narrower than a general benchmark platform.
 
-The Desktop Runner has a native first-run lane for macOS Apple Silicon with a local GGUF model and either an explicit selected `llama.cpp` runtime or the recommended managed Metal runtime installed through the app. Docker will not be required for the first local benchmark. Runtime install is intentional: the app does not silently download, upgrade, or switch runtimes, and the current managed runtime is checksum-verified rather than independently signed. Managed packages are stored as immutable content-addressed builds; evidence-producing native runner-core benchmarks lock one exact build for the attempt and emit a path-free runtime receipt. The separate Rust CLI native-first-run preview remains experimental and explicitly reports that it does not yet record this receipt. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
+The Desktop Runner has a native first-run lane for macOS Apple Silicon with a local GGUF model and a Runner-pinned managed fallback, a reviewed build selected from signed runtime-catalog metadata, or an explicit local `llama-cli`. Docker will not be required for the first local benchmark. Runtime install is intentional: the app does not silently download, upgrade, or switch runtimes. Runtime archives are checksum-verified; the signed catalog authenticates InferGrade's assertions but does not represent an upstream artifact signature. Managed packages are stored as immutable content-addressed builds; evidence-producing native runner-core benchmarks lock one exact build for the attempt and emit a path-free runtime receipt. The separate Rust CLI native-first-run preview remains experimental and explicitly reports that it does not yet record this receipt. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
 
 ## Decision Suite vs Reference Suite
 
@@ -173,9 +173,11 @@ The Rust runner and Desktop app expose the shared managed-runtime lane:
 infergrade-runner runtime list
 infergrade-runner runtime status
 infergrade-runner runtime install
+infergrade-runner runtime catalog-refresh
+infergrade-runner runtime catalog-use --target <catalog-target> --consent-build <sha256>
 ```
 
-`infergrade-runner runtime install` is the explicit install action: it downloads the pinned macOS Apple Silicon Metal `llama.cpp` archive, verifies SHA-256, extracts it into the InferGrade runtime cache, checks expected binaries, runs a version smoke, and writes the selected-runtime record. The Desktop app exposes the same shared-engine behavior through its runtime install action.
+`infergrade-runner runtime install` is the explicit fallback-lane install action: it downloads the pinned macOS Apple Silicon Metal `llama.cpp` archive, verifies SHA-256, extracts it into the InferGrade runtime cache, checks expected binaries, runs a version smoke, and writes the selected-runtime record. `runtime catalog-refresh` verifies the rollback-protected signed metadata, while `runtime catalog-use` requires explicit consent to one exact build ID before download. The Desktop app exposes all three choices under Runtime options.
 
 InferGrade never silently installs or upgrades `llama.cpp`. The legacy Python command requires `--execute` before any manifest install command is run; the Rust `runtime install` command and Desktop install button are the explicit user consent path. The current managed runtime is checksum-verified, not independently signed.
 

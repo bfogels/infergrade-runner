@@ -912,6 +912,63 @@ h4 {
   white-space: nowrap;
 }
 
+.cache-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.cache-pagination[hidden] {
+  display: none;
+}
+
+.runtime-choice-intro {
+  margin: 0 0 12px;
+}
+
+.runtime-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.runtime-choice-card {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--surface-muted);
+}
+
+.runtime-choice-card label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.runtime-choice-card input,
+.runtime-choice-card select {
+  min-width: 0;
+  width: 100%;
+}
+
+.runtime-maintenance-actions {
+  margin-top: 12px;
+}
+
+@media (max-width: 760px) {
+  .runtime-choice-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

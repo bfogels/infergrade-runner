@@ -12,6 +12,7 @@ import {
   firstRunHandoffFromParams,
   handoffListenerStartDisposition,
   hubAuthenticationFailure,
+  isPairingIntentDeepLink,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
   requiredDesktopReadinessFailure,
@@ -43,6 +44,12 @@ const runtimeInstallManagedButton = document.querySelector("[data-runtime-instal
 const runtimeReinstallManagedButton = document.querySelector("[data-runtime-reinstall-managed]");
 const runtimeRemoveSelectedButton = document.querySelector("[data-runtime-remove-selected]");
 const runtimeSelectExistingButton = document.querySelector("[data-runtime-select-existing]");
+const runtimeBrowseExistingButton = document.querySelector("[data-runtime-browse-existing]");
+const runtimeCatalogRefreshButton = document.querySelector("[data-runtime-catalog-refresh]");
+const runtimeCatalogInstallButton = document.querySelector("[data-runtime-catalog-install]");
+const runtimeCatalogSelect = document.querySelector('[name="runtimeCatalogTarget"]');
+const runtimeCatalogStatus = document.querySelector("[data-runtime-catalog-status]");
+const runtimeTools = document.querySelector("[data-runtime-tools]");
 const refreshModelCacheButton = document.querySelector("[data-refresh-model-cache]");
 const clearModelCacheButton = document.querySelector("[data-clear-model-cache]");
 const downloadStarterGgufButton = document.querySelector("[data-download-starter-gguf]");
@@ -82,6 +89,10 @@ const runtimeLlamaStatus = document.querySelector("[data-runtime-llama-status]")
 const containerRuntimeStatus = document.querySelector("[data-container-runtime-status]");
 const modelCacheStatus = document.querySelector("[data-model-cache-status]");
 const modelCacheList = document.querySelector("[data-model-cache-list]");
+const modelCachePagination = document.querySelector("[data-model-cache-pagination]");
+const modelCachePreviousButton = document.querySelector("[data-model-cache-previous]");
+const modelCacheNextButton = document.querySelector("[data-model-cache-next]");
+const modelCachePageLabel = document.querySelector("[data-model-cache-page]");
 const modelPathStatus = document.querySelector("[data-model-path-status]");
 const modelPreflightStatus = document.querySelector("[data-model-preflight-status]");
 const firstRunStepNodes = new Map(
@@ -142,6 +153,9 @@ let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxe
 let modelPathReadiness = "Hub assigns model artifacts when work is queued.";
 let modelPreflightReadiness = "Waiting for a Hub assignment. Exact artifact and model-load checks run before scoring.";
 let llamaRuntimeAvailable = false;
+let runtimeCatalogPayload = null;
+let modelCachePayload = null;
+let modelCachePage = 0;
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
 let hubConnectionVerified = false;
@@ -363,7 +377,7 @@ function renderAssignmentTime() {
     return;
   }
   assignmentTime.textContent = currentAssignmentRemaining
-    ? `${formatElapsed()} · ${currentAssignmentRemaining} remaining`
+    ? `${formatElapsed()} · ${currentAssignmentRemaining}`
     : formatElapsed();
 }
 
@@ -662,7 +676,7 @@ function applyPreviewStateFromUrl() {
       description: "Runner is processing Hub-assigned work.",
       progress: 48,
       checkName: "llama.cpp readiness check",
-      remaining: "about 6 min",
+      remaining: "about 6 min remaining",
       runId: "run_preview_assignment",
     });
   } else if (mockAssignment === "paused") {
@@ -865,6 +879,7 @@ function renderLocalReadinessChecklist() {
 }
 
 function renderModelCache(payload = null) {
+  modelCachePayload = payload;
   const artifacts = Array.isArray(payload?.artifacts) ? payload.artifacts : [];
   const count = Number(payload?.artifact_count ?? artifacts.length) || 0;
   const bytes = Number(payload?.artifact_bytes) || 0;
@@ -877,7 +892,10 @@ function renderModelCache(payload = null) {
     return;
   }
   modelCacheList.replaceChildren();
-  artifacts.slice(0, 5).forEach((artifact) => {
+  const pageSize = 5;
+  const pageCount = Math.max(1, Math.ceil(artifacts.length / pageSize));
+  modelCachePage = Math.max(0, Math.min(modelCachePage, pageCount - 1));
+  artifacts.slice(modelCachePage * pageSize, (modelCachePage + 1) * pageSize).forEach((artifact) => {
     const item = document.createElement("li");
     const name = document.createElement("strong");
     name.textContent = displayCacheArtifactName(artifact.name);
@@ -886,12 +904,11 @@ function renderModelCache(payload = null) {
     item.append(name, size);
     modelCacheList.append(item);
   });
-  if (artifacts.length > 5) {
-    const item = document.createElement("li");
-    const name = document.createElement("strong");
-    name.textContent = `${artifacts.length - 5} more cached model${artifacts.length - 5 === 1 ? "" : "s"}`;
-    item.append(name);
-    modelCacheList.append(item);
+  if (modelCachePagination && modelCachePageLabel && modelCachePreviousButton && modelCacheNextButton) {
+    modelCachePagination.hidden = artifacts.length <= pageSize;
+    modelCachePageLabel.textContent = `Page ${modelCachePage + 1} of ${pageCount}`;
+    modelCachePreviousButton.disabled = modelCachePage === 0;
+    modelCacheNextButton.disabled = modelCachePage >= pageCount - 1;
   }
 }
 
@@ -1634,7 +1651,7 @@ function assignmentTimingSummary(timing = {}) {
   const phaseId = String(timing.current_phase || "");
   const elapsed = Number(timing?.phases?.[phaseId]?.elapsed_seconds);
   const elapsedCopy = Number.isFinite(elapsed) && elapsed >= 1
-    ? ` · ${elapsed < 60 ? `${Math.round(elapsed)}s` : `${Math.round(elapsed / 60)}m`} elapsed`
+    ? ` · ${elapsed < 60 ? `${Math.round(elapsed)}s` : `${Math.round(elapsed / 60)}m`} in this phase`
     : "";
   return `${phaseLabels[phaseId] || "Benchmark in progress"}${elapsedCopy}`;
 }
@@ -1908,6 +1925,95 @@ function runtimePlanSummary(plan = {}) {
     .join(" ");
 }
 
+function populateManagedRuntimeOptions(plan = {}) {
+  if (!runtimeIdInput) return;
+  const current = runtimeIdInput.value;
+  const runtimes = plan?.managed_runtime_manifest?.runtimes || [];
+  runtimeIdInput.replaceChildren(new Option("Runner-pinned default", ""));
+  runtimes.forEach((runtime) => {
+    const channel = runtime.channel === "infergrade_stable" ? "Stable fallback" : "Reviewed candidate";
+    runtimeIdInput.add(new Option(`${channel} · ${runtime.version_label || runtime.runtime_id}`, runtime.runtime_id));
+  });
+  if ([...runtimeIdInput.options].some((option) => option.value === current)) runtimeIdInput.value = current;
+}
+
+function populateRuntimeCatalog(payload = {}) {
+  runtimeCatalogPayload = payload;
+  if (!runtimeCatalogSelect || !runtimeCatalogStatus) return;
+  const catalog = payload.catalog || {};
+  const platform = payload.platform || {};
+  const targets = Object.entries(catalog.targets || {}).filter(([, target]) => {
+    const custom = target?.custom || {};
+    return custom.system === platform.system && custom.arch === platform.arch && custom.maturity !== "revoked";
+  });
+  runtimeCatalogSelect.replaceChildren();
+  if (!targets.length) {
+    runtimeCatalogSelect.add(new Option("No compatible reviewed build", ""));
+    runtimeCatalogSelect.disabled = true;
+    if (runtimeCatalogInstallButton) runtimeCatalogInstallButton.disabled = true;
+  } else {
+    targets.forEach(([name, target]) => {
+      const custom = target.custom || {};
+      const origin = custom.runtime_family === "llama.cpp" ? "upstream" : "specialized fork";
+      const option = new Option(
+        `${custom.version_label || custom.runtime_id || name} · ${origin} · ${custom.support_tier || custom.maturity || "reviewed"}`,
+        name,
+      );
+      option.dataset.runtimeBuildId = custom.runtime_build_id || "";
+      runtimeCatalogSelect.add(option);
+    });
+    runtimeCatalogSelect.disabled = false;
+    if (runtimeCatalogInstallButton) runtimeCatalogInstallButton.disabled = false;
+  }
+  runtimeCatalogStatus.textContent = `Signed catalog v${catalog.versions?.targets || "?"} · ${targets.length} compatible reviewed build${targets.length === 1 ? "" : "s"}.`;
+}
+
+async function refreshRuntimeCatalog() {
+  if (runtimeCatalogStatus) runtimeCatalogStatus.textContent = "Checking the signed runtime catalog...";
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    if (runtimeCatalogStatus) runtimeCatalogStatus.textContent = "Signed runtime catalog is available inside the desktop app.";
+    return null;
+  }
+  const payload = await invoke("refresh_desktop_runtime_catalog");
+  populateRuntimeCatalog(payload || {});
+  appendLog(`Signed runtime catalog ready: targets v${payload?.catalog?.versions?.targets || "unknown"}.`);
+  return payload;
+}
+
+async function installSelectedCatalogRuntime() {
+  const targetName = runtimeCatalogSelect?.value || "";
+  const selected = runtimeCatalogSelect?.selectedOptions?.[0];
+  const runtimeBuildId = selected?.dataset.runtimeBuildId || "";
+  if (!targetName || !runtimeBuildId) throw new Error("Choose a reviewed runtime build first.");
+  if (runtimeCatalogInstallButton) runtimeCatalogInstallButton.disabled = true;
+  llamaRuntimeReadiness = `Installing ${selected.textContent.trim()}...`;
+  renderLocalReadinessChecklist();
+  const invoke = await loadTauriInvoke();
+  if (!invoke) throw new Error("Open the desktop app to install a reviewed runtime.");
+  const result = await invoke("install_required_runtime_catalog_target", {
+    targetName,
+    consentRuntimeBuildId: runtimeBuildId,
+  });
+  llamaRuntimeReadiness = managedRuntimeInstallSummary(result);
+  llamaRuntimeAvailable = true;
+  renderLocalReadinessChecklist();
+  appendLog(`Installed signed-catalog runtime: ${JSON.stringify(result)}`);
+  return result;
+}
+
+async function browseExistingRuntime() {
+  if (!isTauriRuntime()) throw new Error("Open the desktop app to choose a llama.cpp binary.");
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({ multiple: false, directory: false, title: "Choose llama-cli" });
+  if (typeof selected === "string" && firstRunRuntimePathInput) {
+    firstRunRuntimePathInput.value = selected;
+    llamaRuntimeReadiness = "Custom llama-cli selected. Click Use this binary to validate and activate it.";
+    renderLocalReadinessChecklist();
+  }
+  return selected;
+}
+
 function managedRuntimeInstallSummary(result = {}) {
   const selection = result.selection || {};
   const archive = selection.archive || {};
@@ -1968,6 +2074,7 @@ async function inspectRuntimePlan({ reconcileStale = false } = {}) {
     ? `Stale selected executable cleared; immutable runtime files were retained. ${runtimePlanSummary(plan)}`
     : runtimePlanSummary(plan);
   llamaRuntimeAvailable = plan?.native_runtime_status === "available";
+  populateManagedRuntimeOptions(plan);
   renderLocalReadinessChecklist();
   appendLog(`llama.cpp runtime plan: ${JSON.stringify(plan)}`);
   return plan;
@@ -2117,6 +2224,15 @@ function firstRunHandoffFromDeepLinks(urls) {
   return { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" };
 }
 
+function applyPairingIntentFromDeepLinks(urls) {
+  if (!(Array.isArray(urls) ? urls : []).some(isPairingIntentDeepLink)) return false;
+  form.scrollIntoView({ behavior: "smooth", block: "center" });
+  form.elements.pairCode?.focus();
+  pairState.textContent = "Pairing code copied in Hub. Paste it here, then choose Pair with Hub.";
+  setStatus("Finish pairing", "warning");
+  return true;
+}
+
 function applyFirstRunHandoff(incomingHandoff = null) {
   const urlHandoff = incomingHandoff || firstRunHandoffFromUrl();
   const storedRunId = window.localStorage.getItem(FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY) || "";
@@ -2171,7 +2287,9 @@ async function initFirstRunDeepLinkHandoff() {
   });
   try {
     const { getCurrent, onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
-    const startHandoff = firstRunHandoffFromDeepLinks(await getCurrent());
+    const currentUrls = await getCurrent();
+    applyPairingIntentFromDeepLinks(currentUrls);
+    const startHandoff = firstRunHandoffFromDeepLinks(currentUrls);
     if (startHandoff.runId) {
       applyFirstRunHandoff(startHandoff);
       await reconcileCurrentHandoff().catch((error) => {
@@ -2180,6 +2298,7 @@ async function initFirstRunDeepLinkHandoff() {
       appendLog(`Received Hub first-run handoff for run ${startHandoff.runId}.`);
     }
     await onOpenUrl((urls) => {
+      applyPairingIntentFromDeepLinks(urls);
       const handoff = firstRunHandoffFromDeepLinks(urls);
       if (!handoff.runId) {
         return;
@@ -2717,6 +2836,41 @@ runtimePlanButton?.addEventListener("click", () => {
   });
 });
 
+runtimeTools?.addEventListener("toggle", () => {
+  if (runtimeTools.open && !runtimeCatalogPayload) {
+    refreshRuntimeCatalog().catch((error) => {
+      if (runtimeCatalogStatus) runtimeCatalogStatus.textContent = "Could not load the signed runtime catalog. The managed fallback and custom binary options remain available.";
+      appendLog(`Could not refresh signed runtime catalog: ${error.message || error}`);
+    });
+  }
+});
+
+runtimeCatalogRefreshButton?.addEventListener("click", () => {
+  refreshRuntimeCatalog().catch((error) => {
+    if (runtimeCatalogStatus) runtimeCatalogStatus.textContent = "Could not refresh the signed runtime catalog. Check your connection and retry.";
+    appendLog(`Could not refresh signed runtime catalog: ${error.message || error}`);
+  });
+});
+
+runtimeCatalogInstallButton?.addEventListener("click", () => {
+  installSelectedCatalogRuntime()
+    .then(() => setStatus("Reviewed runtime ready", "good"))
+    .catch((error) => {
+      setStatus("Runtime install failed", "error");
+      appendLog(`Could not install reviewed runtime: ${error.message || error}`);
+    })
+    .finally(() => {
+      if (runtimeCatalogInstallButton) runtimeCatalogInstallButton.disabled = false;
+    });
+});
+
+runtimeBrowseExistingButton?.addEventListener("click", () => {
+  browseExistingRuntime().catch((error) => {
+    setStatus("Runtime selection failed", "error");
+    appendLog(`Could not choose a custom llama.cpp binary: ${error.message || error}`);
+  });
+});
+
 runtimeInstallManagedButton?.addEventListener("click", () => {
   installManagedRuntime()
     .catch((error) => {
@@ -2768,6 +2922,13 @@ runtimeRemoveSelectedButton?.addEventListener("click", () => {
 });
 
 runtimeSelectExistingButton?.addEventListener("click", () => {
+  const runtimePath = readFirstRunRuntimePath();
+  if (!runtimePath) {
+    llamaRuntimeReadiness = "Choose or paste the path to llama-cli before selecting a custom runtime.";
+    renderLocalReadinessChecklist();
+    firstRunRuntimePathInput?.focus();
+    return;
+  }
   llamaRuntimeReadiness = "Looking for an installed llama.cpp runtime...";
   renderLocalReadinessChecklist();
   loadTauriInvoke()
@@ -2778,8 +2939,8 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
         return null;
       }
       return invoke("select_existing_llama_cpp_runtime", {
-        runtimePath: readFirstRunRuntimePath(),
-        runtimeId: runtimeIdInput?.value.trim() || null,
+        runtimePath,
+        runtimeId: null,
       });
     })
     .then((selection) => {
@@ -2800,12 +2961,23 @@ runtimeSelectExistingButton?.addEventListener("click", () => {
 });
 
 refreshModelCacheButton?.addEventListener("click", () => {
+  modelCachePage = 0;
   refreshModelCache().catch((error) => {
     if (modelCacheStatus) {
       modelCacheStatus.textContent = "Could not inspect cached models.";
     }
     appendLog(`Could not inspect model cache: ${error.message || error}`);
   });
+});
+
+modelCachePreviousButton?.addEventListener("click", () => {
+  modelCachePage = Math.max(0, modelCachePage - 1);
+  renderModelCache(modelCachePayload);
+});
+
+modelCacheNextButton?.addEventListener("click", () => {
+  modelCachePage += 1;
+  renderModelCache(modelCachePayload);
 });
 
 clearModelCacheButton?.addEventListener("click", () => {

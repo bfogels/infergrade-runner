@@ -8,6 +8,7 @@ use infergrade_runner_engine::{
     llama_cpp_runtime_status as engine_llama_cpp_runtime_status, native_first_run_bundle_payload,
     normalize_api_url, pairing_error_detail, pairing_status_payload, preferred_execution_mode,
     profile_string, redact_listener_text, redact_worker_response,
+    refresh_default_runtime_catalog as engine_refresh_default_runtime_catalog,
     remove_selected_llama_cpp_runtime as engine_remove_selected_llama_cpp_runtime,
     reset_pairing_state,
     run_native_first_run_with_events as engine_run_native_first_run_with_events,
@@ -786,6 +787,20 @@ async fn install_required_runtime_catalog_target(
 }
 
 #[tauri::command]
+async fn refresh_desktop_runtime_catalog() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut payload = engine_refresh_default_runtime_catalog(None)?;
+        payload["platform"] = json!({
+            "system": env::consts::OS,
+            "arch": env::consts::ARCH,
+        });
+        Ok(payload)
+    })
+    .await
+    .map_err(|error| format!("runtime catalog refresh task failed: {error}"))?
+}
+
+#[tauri::command]
 fn remove_selected_llama_cpp_runtime(remove_managed_files: Option<bool>) -> Result<Value, String> {
     engine_remove_selected_llama_cpp_runtime(remove_managed_files.unwrap_or(true))
 }
@@ -1363,6 +1378,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(ListenerProcess::default())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1381,6 +1397,7 @@ pub fn run() {
             reconcile_hub_run_handoff,
             install_managed_llama_cpp_runtime,
             install_required_runtime_catalog_target,
+            refresh_desktop_runtime_catalog,
             remove_selected_llama_cpp_runtime,
             select_existing_llama_cpp_runtime,
             desktop_model_cache_status,

@@ -272,6 +272,11 @@
                   <strong>Cached models</strong>
                   <span data-model-cache-status>Checking local model cache...</span>
                   <ul class="cache-list" data-model-cache-list aria-label="Cached model artifacts"></ul>
+                  <div class="cache-pagination" data-model-cache-pagination hidden>
+                    <button type="button" class="button-secondary compact-button" data-model-cache-previous>Previous</button>
+                    <span data-model-cache-page>Page 1 of 1</span>
+                    <button type="button" class="button-secondary compact-button" data-model-cache-next>Next</button>
+                  </div>
                   <div class="button-row compact-actions">
                     <button type="button" class="button-secondary" data-refresh-model-cache>Refresh cache</button>
                     <button type="button" class="button-secondary" data-clear-model-cache>Clear cached models</button>
@@ -287,13 +292,42 @@
                   <span class="mini-chevron" aria-hidden="true"></span>
                 </summary>
                 <div class="inline-tools-body">
-                  <label>
-                    <span>Managed runtime ID</span>
-                    <input name="runtimeId" type="text" autocomplete="off" placeholder="Use Runner-pinned default" />
-                  </label>
-                  <div class="button-row compact-actions">
-                    <button type="button" data-runtime-install-managed>Use managed runtime</button>
-                    <button type="button" class="button-secondary" data-runtime-select-existing>Select existing llama.cpp</button>
+                  <p class="hint runtime-choice-intro">Use a managed build for the simplest setup. Choose a signed reviewed build for newer or specialized models. Power users can select a complete local llama.cpp build.</p>
+                  <div class="runtime-choice-grid">
+                    <section class="runtime-choice-card">
+                      <strong>Managed fallback</strong>
+                      <label>
+                        <span>Packaged runtime</span>
+                        <select name="runtimeId"><option value="">Runner-pinned default</option></select>
+                      </label>
+                      <button type="button" data-runtime-install-managed>Install and use</button>
+                    </section>
+                    <section class="runtime-choice-card">
+                      <strong>Signed runtime catalog</strong>
+                      <span class="hint" data-runtime-catalog-status>Open Runtime options to load reviewed builds.</span>
+                      <label>
+                        <span>Reviewed build</span>
+                        <select name="runtimeCatalogTarget" disabled><option value="">Load catalog first</option></select>
+                      </label>
+                      <div class="button-row compact-actions">
+                        <button type="button" data-runtime-catalog-install disabled>Install selected build</button>
+                        <button type="button" class="button-secondary" data-runtime-catalog-refresh>Refresh</button>
+                      </div>
+                    </section>
+                    <section class="runtime-choice-card">
+                      <strong>Custom llama.cpp build</strong>
+                      <span class="hint">Select <code>llama-cli</code>. Runner checks sibling binaries and records the executable digest.</span>
+                      <label>
+                        <span>llama-cli path</span>
+                        <input name="firstRunRuntimePath" type="text" autocomplete="off" placeholder="/path/to/llama-cli" />
+                      </label>
+                      <div class="button-row compact-actions">
+                        <button type="button" class="button-secondary" data-runtime-browse-existing>Choose file</button>
+                        <button type="button" data-runtime-select-existing>Use this binary</button>
+                      </div>
+                    </section>
+                  </div>
+                  <div class="button-row compact-actions runtime-maintenance-actions">
                     <button type="button" class="button-secondary" data-runtime-plan>Inspect plan</button>
                     <button type="button" class="button-secondary" data-runtime-reinstall-managed>Replace with managed</button>
                     <button type="button" class="button-secondary" data-runtime-remove-selected>Remove selected runtime</button>

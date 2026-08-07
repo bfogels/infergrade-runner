@@ -169,6 +169,16 @@ export function firstRunHandoffFromDeepLink(value, onRejected = () => {}) {
   return firstRunHandoffFromParams(parsed.searchParams, onRejected);
 }
 
+export function isPairingIntentDeepLink(value) {
+  if (!value || typeof value !== "string") return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "infergrade-runner:" && parsed.hostname === "open" && parsed.searchParams.get("intent") === "pair";
+  } catch (_error) {
+    return false;
+  }
+}
+
 export function userSafeUpdateFailure(_message = "") {
   return "Update status is unavailable. You can still pair and start the Runner.";
 }
