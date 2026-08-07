@@ -213,6 +213,49 @@ def check_docs_honesty(root: Path) -> CheckResult:
     return CheckResult("release_docs_honesty", "pass", "release docs separate local checks from public trust gates")
 
 
+def check_public_identity_hygiene(root: Path) -> CheckResult:
+    """Reject the retired project identity and personal security contact."""
+    retired_brand = ("quant" + "bench").encode("utf-8")
+    personal_contact = ("brianf888" + "@gmail.com").encode("utf-8")
+    expected_contact = "infergrade@brianfogelson.com"
+    security_path = root / "SECURITY.md"
+    if not security_path.is_file() or expected_contact not in security_path.read_text(encoding="utf-8"):
+        return CheckResult(
+            "public_identity_hygiene",
+            "fail",
+            f"SECURITY.md must direct reports to {expected_contact}",
+        )
+    try:
+        tracked_paths = run_git(root, "ls-files", "-z").split("\0")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return CheckResult("public_identity_hygiene", "fail", "tracked-file inventory unavailable")
+    findings: list[str] = []
+    for relative in tracked_paths:
+        if not relative:
+            continue
+        path_bytes = relative.lower().encode("utf-8")
+        if retired_brand in path_bytes:
+            findings.append(relative)
+            continue
+        path = root / relative
+        if not path.is_file():
+            continue
+        content = path.read_bytes().lower()
+        if retired_brand in content or personal_contact in content:
+            findings.append(relative)
+    if findings:
+        return CheckResult(
+            "public_identity_hygiene",
+            "fail",
+            "retired identity or personal contact found in: " + ", ".join(sorted(findings)),
+        )
+    return CheckResult(
+        "public_identity_hygiene",
+        "pass",
+        f"retired identity absent and security reports route to {expected_contact}",
+    )
+
+
 def local_checks(root: Path) -> list[CheckResult]:
     return [
         check_git_repository_state(root),
@@ -221,6 +264,7 @@ def local_checks(root: Path) -> list[CheckResult]:
         check_untrusted_workflow_triggers(root),
         check_secret_filenames(root),
         check_docs_honesty(root),
+        check_public_identity_hygiene(root),
         CheckResult(
             "github_settings",
             "manual",

@@ -6,7 +6,7 @@ InferGrade Runner executes benchmark workloads on user machines and emits result
 
 Do not open a public issue for suspected vulnerabilities or leaked secrets.
 
-Email Brian Fogelson at <brianf888@gmail.com> with:
+Email the InferGrade security contact at <infergrade@brianfogelson.com> with:
 
 - a short description of the issue
 - affected component or path, if known

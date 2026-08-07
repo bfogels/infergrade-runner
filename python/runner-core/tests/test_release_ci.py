@@ -10,6 +10,7 @@ from pathlib import Path
 
 from scripts.sync_versions import sync_versions
 from scripts.check_public_release_readiness import (
+    check_public_identity_hygiene,
     check_secret_filenames,
     main as check_public_release_readiness,
 )
@@ -1538,6 +1539,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("pass\trequired_files\t", output)
         self.assertIn("pass\tdesktop_release_workflow\t", output)
         self.assertIn("pass\tsecret_filename_scan\t", output)
+        self.assertIn("pass\tpublic_identity_hygiene\t", output)
         self.assertIn("manual\tgithub_settings\t", output)
         self.assertIn("manual\tsigning_credentials\t", output)
         self.assertNotIn("release_signing_notarization=pass", output)
@@ -1584,6 +1586,49 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertEqual("manual", checks["github_settings"]["status"])
         self.assertEqual("manual", checks["signing_credentials"]["status"])
         self.assertEqual("pass", checks["desktop_release_workflow"]["status"])
+        self.assertEqual("pass", checks["public_identity_hygiene"]["status"])
+
+    def test_public_identity_hygiene_rejects_retired_brand_and_personal_contact(self):
+        retired_brand = "quant" + "bench"
+        personal_contact = "brianf888" + "@gmail.com"
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.check_call(["git", "init"], cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            (root / "SECURITY.md").write_text(
+                "Report privately to infergrade@brianfogelson.com.\n",
+                encoding="utf-8",
+            )
+            subprocess.check_call(["git", "add", "SECURITY.md"], cwd=root)
+            self.assertEqual("pass", check_public_identity_hygiene(root).status)
+
+            legacy_content_path = root / "notes.txt"
+            legacy_content_path.write_text(
+                f"Retired project name: {retired_brand}\n",
+                encoding="utf-8",
+            )
+            subprocess.check_call(["git", "add", legacy_content_path.name], cwd=root)
+            result = check_public_identity_hygiene(root)
+            self.assertEqual("fail", result.status)
+            self.assertIn(legacy_content_path.name, result.detail)
+            subprocess.check_call(["git", "reset", legacy_content_path.name], cwd=root, stdout=subprocess.DEVNULL)
+            legacy_content_path.unlink()
+
+            legacy_path = root / (retired_brand + ".txt")
+            legacy_path.write_text("retired compatibility surface\n", encoding="utf-8")
+            subprocess.check_call(["git", "add", legacy_path.name], cwd=root)
+            result = check_public_identity_hygiene(root)
+            self.assertEqual("fail", result.status)
+            self.assertIn(legacy_path.name, result.detail)
+
+            subprocess.check_call(["git", "reset", legacy_path.name], cwd=root, stdout=subprocess.DEVNULL)
+            legacy_path.unlink()
+            (root / "SECURITY.md").write_text(
+                f"Report privately to {personal_contact}.\n",
+                encoding="utf-8",
+            )
+            result = check_public_identity_hygiene(root)
+            self.assertEqual("fail", result.status)
+            self.assertIn("SECURITY.md", result.detail)
 
     def test_public_release_readiness_fails_for_suspicious_local_secret_filenames(self):
         with TemporaryDirectory() as tmp:
