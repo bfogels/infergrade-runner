@@ -507,6 +507,21 @@ test("desktop update and local platform states begin honestly", () => {
   assert.ok(js.includes("displayCacheArtifactName"));
 });
 
+test("completed Hub work remains visible with a result action after the listener returns idle", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+
+  assert.ok(html.includes("data-assignment-panel"));
+  assert.ok(js.includes("let recentCompletion = null"));
+  assert.ok(js.includes("function renderRecentCompletion"));
+  assert.ok(js.includes('assignmentKicker.textContent = "Completed and uploaded"'));
+  assert.ok(js.includes('assignmentOpenHubButton.textContent = completion.resultId ? "Open evidence" : "Open run"'));
+  assert.ok(js.includes('assignmentOpenHubButton.textContent = "Open in Hub"'));
+  assert.ok(js.includes('hubUrl.searchParams.set("result", currentAssignmentResultId)'));
+  assert.ok(css.includes('.assignment-panel[data-state="completed"]'));
+});
+
 test("tauri commands prepare the platform sidecar before startup", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const prepareScript = readFileSync(new URL("../scripts/prepare-sidecar.mjs", import.meta.url), "utf8");

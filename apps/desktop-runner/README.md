@@ -6,6 +6,10 @@ The Hub remains the model selection, benchmark planning, recommendation, and res
 
 The desktop happy path is now native-first for macOS Apple Silicon: Docker will not be required for the first local benchmark, and the app can run a local GGUF through a Runner-pinned managed fallback, an exact build from the signed runtime catalog, or a selected existing `llama-cli` binary. Downloads are explicit and checksum-verified; signed catalog metadata authenticates InferGrade's build assertion, not an upstream artifact signature. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
 
+## macOS Installation Location
+
+Install the signed release as `/Applications/InferGrade Runner.app`. This is the normal macOS location, matches the DMG's install flow, gives Hub handoffs and Finder one canonical app to open, and avoids accidentally launching an older duplicate. `~/Applications` is only a non-admin fallback when the user cannot write to `/Applications`; do not keep copies in both locations. Replacing an installed release should preserve pairing and Runner state because those live in Keychain and the user's application-support directories, not inside the app bundle.
+
 ## What It Includes
 
 - Tauri 2 desktop shell with a vanilla JavaScript frontend

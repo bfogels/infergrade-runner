@@ -7,6 +7,15 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.57 (contract 0.3.29)
+
+- Keeps a completed Hub assignment visible in Desktop Runner with its observed
+  duration, uploaded bundle, and direct evidence action instead of immediately
+  collapsing back to an idle state.
+- Carries the published result identity through the Runner worker event while
+  remaining compatible with older Hub responses that expose only the run.
+- Defines `/Applications/InferGrade Runner.app` as the canonical macOS install
+  location so a stale duplicate cannot share pairing state with the current app.
 - Removes the final pre-rebrand Python compatibility namespace and replaces the
   maintainer's personal security-reporting address with the InferGrade contact.
 

@@ -135,6 +135,7 @@ const assignmentProgressBar = document.querySelector("[data-assignment-progress-
 const assignmentCheck = document.querySelector("[data-assignment-check]");
 const assignmentStartListeningButton = document.querySelector("[data-assignment-start-listening]");
 const assignmentInstallRuntimeButton = document.querySelector("[data-assignment-install-runtime]");
+const assignmentOpenHubButton = document.querySelector("[data-assignment-panel] [data-open-hub]");
 
 let childProcess = null;
 let logLines = [];
@@ -165,7 +166,9 @@ let assignmentStartedAt = null;
 let assignmentClockTimer = null;
 let currentAssignmentRemaining = "";
 let currentAssignmentRunId = "";
+let currentAssignmentResultId = "";
 let currentAssignmentPhase = "idle";
+let recentCompletion = null;
 let pendingRequiredRuntime = null;
 let currentHandoffRunId = "";
 let currentHandoffWorkerId = "";
@@ -236,8 +239,12 @@ function hubWebUrl(target = "home") {
     if (target === "setup") {
       hubUrl.searchParams.set("tab", "setup");
     } else if (target === "assignment") {
-      hubUrl.searchParams.set("tab", "runs");
-      if (currentAssignmentRunId) {
+      if (currentAssignmentResultId) {
+        hubUrl.searchParams.set("result", currentAssignmentResultId);
+      } else {
+        hubUrl.searchParams.set("tab", "runs");
+      }
+      if (currentAssignmentRunId && !currentAssignmentResultId) {
         hubUrl.searchParams.set("run_id", currentAssignmentRunId);
       }
     }
@@ -247,7 +254,9 @@ function hubWebUrl(target = "home") {
       return "https://infergrade.com/?tab=setup";
     }
     if (target === "assignment") {
-      return currentAssignmentRunId
+      return currentAssignmentResultId
+        ? `https://infergrade.com/?result=${encodeURIComponent(currentAssignmentResultId)}`
+        : currentAssignmentRunId
         ? `https://infergrade.com/?tab=runs&run_id=${encodeURIComponent(currentAssignmentRunId)}`
         : "https://infergrade.com/?tab=runs";
     }
@@ -420,10 +429,15 @@ function renderAssignmentIdle() {
   if (!assignmentPanel) {
     return;
   }
+  if (recentCompletion) {
+    renderRecentCompletion();
+    return;
+  }
   assignmentPanel.dataset.state = "idle";
   assignmentStartedAt = null;
   currentAssignmentRemaining = "";
   currentAssignmentRunId = "";
+  currentAssignmentResultId = "";
   currentAssignmentPhase = "idle";
   stopAssignmentClock();
   if (assignmentKicker) {
@@ -444,6 +458,51 @@ function renderAssignmentIdle() {
   if (assignmentInstallRuntimeButton) {
     assignmentInstallRuntimeButton.hidden = true;
   }
+  if (assignmentOpenHubButton) {
+    assignmentOpenHubButton.textContent = "Open in Hub";
+  }
+}
+
+function completionDurationLabel(completion = {}) {
+  const seconds = Number(completion?.lifecycleTiming?.worker_wall_seconds);
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return "Completed";
+  }
+  if (seconds < 60) {
+    return `Completed in ${Math.max(1, Math.round(seconds))}s`;
+  }
+  return `Completed in ${(seconds / 60).toFixed(seconds < 600 ? 1 : 0)}m`;
+}
+
+function renderRecentCompletion() {
+  if (!assignmentPanel || !recentCompletion) {
+    return;
+  }
+  const completion = recentCompletion;
+  assignmentPanel.dataset.state = "completed";
+  currentAssignmentRunId = completion.runId;
+  currentAssignmentResultId = completion.resultId;
+  currentAssignmentPhase = "Complete";
+  currentAssignmentRemaining = "";
+  stopAssignmentClock();
+  if (assignmentKicker) assignmentKicker.textContent = "Completed and uploaded";
+  if (assignmentTitle) assignmentTitle.textContent = completion.title;
+  if (assignmentDescription) {
+    assignmentDescription.textContent = completion.resultId
+      ? "Your result is ready to inspect and share in Hub."
+      : "The run is complete in Hub. Open it to inspect publication and evidence status.";
+  }
+  if (assignmentProgressWrap) assignmentProgressWrap.hidden = false;
+  if (assignmentPhase) assignmentPhase.textContent = "Complete";
+  if (assignmentTime) assignmentTime.textContent = completionDurationLabel(completion);
+  if (assignmentProgressBar) assignmentProgressBar.style.width = "100%";
+  if (assignmentCheck) {
+    assignmentCheck.hidden = !completion.bundleId;
+    assignmentCheck.textContent = completion.bundleId ? `Uploaded bundle: ${completion.bundleId}` : "";
+  }
+  if (assignmentStartListeningButton) assignmentStartListeningButton.hidden = true;
+  if (assignmentInstallRuntimeButton) assignmentInstallRuntimeButton.hidden = true;
+  if (assignmentOpenHubButton) assignmentOpenHubButton.textContent = completion.resultId ? "Open evidence" : "Open run";
 }
 
 function renderAssignmentActive({
@@ -461,6 +520,10 @@ function renderAssignmentActive({
     return;
   }
   const nextRunId = runId || currentAssignmentRunId;
+  if (phase !== "Complete" && nextRunId && recentCompletion) {
+    recentCompletion = null;
+    currentAssignmentResultId = "";
+  }
   const clock = assignmentClockTransition({
     previousStartedAt: assignmentStartedAt,
     previousRunId: currentAssignmentRunId,
@@ -504,6 +567,9 @@ function renderAssignmentActive({
   }
   if (assignmentInstallRuntimeButton) {
     assignmentInstallRuntimeButton.hidden = !pendingRequiredRuntime;
+  }
+  if (assignmentOpenHubButton && phase !== "Complete") {
+    assignmentOpenHubButton.textContent = "Open in Hub";
   }
   if (assignmentCheck) {
     assignmentCheck.hidden = !checkName;
@@ -1683,6 +1749,16 @@ function renderAssignmentFromListenerEvent(payload = {}) {
   if (phase === "Needs attention") {
     setStatus("Needs attention", "error");
   } else if (phase === "Complete") {
+    const publishedResultIds = Array.isArray(payload.published_result_ids) ? payload.published_result_ids : [];
+    recentCompletion = {
+      runId,
+      resultId: String(payload.result_id || publishedResultIds[0] || "").trim(),
+      bundleId: String(payload.bundle_id || payload.check_name || "").trim(),
+      title: redactSecrets(payload.title || assignmentTitleFromRunId(runId)),
+      lifecycleTiming: payload.lifecycle_timing || {},
+    };
+    currentAssignmentResultId = recentCompletion.resultId;
+    if (assignmentOpenHubButton) assignmentOpenHubButton.textContent = recentCompletion.resultId ? "Open evidence" : "Open run";
     if (shouldClearCompletedHandoff({ phase, runId, handoffRunId: currentFirstRunUploadRunId() })) {
       clearFirstRunHandoff({ renderAssignment: false });
     }
