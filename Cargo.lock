@@ -1739,7 +1739,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade-runner-cli"
-version = "0.3.56"
+version = "0.3.57"
 dependencies = [
  "infergrade_runner_engine",
  "serde_json",
@@ -1748,7 +1748,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_desktop_runner"
-version = "0.3.56"
+version = "0.3.57"
 dependencies = [
  "infergrade_runner_engine",
  "keyring",
@@ -1765,7 +1765,7 @@ dependencies = [
 
 [[package]]
 name = "infergrade_runner_engine"
-version = "0.3.56"
+version = "0.3.57"
 dependencies = [
  "ed25519-dalek",
  "flate2",
