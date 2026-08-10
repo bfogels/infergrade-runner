@@ -371,6 +371,9 @@ def execute_run_job(
             progress=100,
             lifecycle_timing=_lifecycle_timing(),
             check_name=result.get("bundle_id"),
+            bundle_id=result.get("bundle_id"),
+            result_id=completed.get("result_id"),
+            published_result_ids=(completed.get("publication") or {}).get("published_result_ids") or [],
         )
         _runner_heartbeat("listening", current_run_id=None, message="Runner is listening for the next run.")
         return {
