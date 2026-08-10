@@ -11,6 +11,8 @@ The current release lane is intentionally staged by platform:
 5. retain unsigned Windows packages as short-lived workflow artifacts unless an operator explicitly publishes a clearly named unsigned technical preview
 6. use Tauri updater signing for macOS app-update integrity
 
+The canonical end-user macOS install path is `/Applications/InferGrade Runner.app`. Use `~/Applications` only as an explicit non-admin fallback, and never leave both copies installed: deep links, Finder, and manual launches can otherwise select different versions while sharing the same Keychain pairing and local state.
+
 ## Local Build Lane
 
 From the Runner repo root:

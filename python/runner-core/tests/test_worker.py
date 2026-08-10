@@ -188,7 +188,14 @@ class WorkerTests(unittest.TestCase):
                                         )[1],
                                     ):
                                         with mock.patch("infergrade.worker.upload_run_bundle", return_value={"stored": True}) as upload_mock:
-                                            with mock.patch("infergrade.worker.complete_run_job", return_value={"run": {"run_id": "run_example", "status": "completed"}}) as complete_mock:
+                                            with mock.patch(
+                                                "infergrade.worker.complete_run_job",
+                                                return_value={
+                                                    "run": {"run_id": "run_example", "status": "completed"},
+                                                    "result_id": "qb_result_example",
+                                                    "publication": {"published_result_ids": ["qb_result_example"]},
+                                                },
+                                            ) as complete_mock:
                                                 with mock.patch("infergrade.worker.heartbeat_run_job") as heartbeat_mock:
                                                     result = run_worker_once(
                                                         api_url="http://localhost:8000",
@@ -263,6 +270,14 @@ class WorkerTests(unittest.TestCase):
         self.assertFalse(
             any(event.get("preflight", {}).get("stage") == "complete" for event in structured)
         )
+        completed_event = next(
+            event
+            for event in structured
+            if event["type"] == "assignment_update" and event["phase"] == "Complete"
+        )
+        self.assertEqual(completed_event["bundle_id"], "qb_bundle")
+        self.assertEqual(completed_event["result_id"], "qb_result_example")
+        self.assertEqual(completed_event["published_result_ids"], ["qb_result_example"])
 
     def test_desktop_progress_projection_keeps_claim_bound_preflight_stages_explicit(self):
         artifact_checking = _desktop_progress_projection("artifact_resolution", "Resolving model artifact...")
