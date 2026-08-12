@@ -144,6 +144,25 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
             "version_smoke": {"status": status},
         }
 
+    def model_canary_receipt(self, tag="b10100"):
+        return {
+            "receipt_version": 1,
+            "candidate_only": True,
+            "canary_id": "legacy_llama_tiny_generation_v1",
+            "status": "passed",
+            "proof_scope": "legacy_llama_model_load_and_generation",
+            "model_compatibility": "legacy_control_only",
+            "claim_boundary": "Does not prove recent architectures.",
+            "runtime": {"release": tag},
+            "model": {
+                "repository": "ggml-org/tiny-llamas",
+                "revision": "pinned-revision",
+                "expected_sha256": "b" * 64,
+                "downloaded_sha256": "b" * 64,
+            },
+            "execution": {"status": "passed"},
+        }
+
     def test_candidate_archive_receipts_remain_distinct_from_model_compatibility(self):
         latest = {
             "tag_name": "b10100",
@@ -170,6 +189,29 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
         )
         markdown = self.module.render_markdown(report)
         self.assertIn("It does not prove GGUF or benchmark compatibility", markdown)
+
+    def test_legacy_model_canary_is_visible_without_proving_recent_architectures(self):
+        latest = {"tag_name": "b10100"}
+        report = self.module.build_report(
+            self.policy,
+            latest_release=latest,
+            model_canary_receipts=[self.model_canary_receipt()],
+        )
+        coverage = report["candidate_archive_coverage"]
+        self.assertTrue(coverage["legacy_control_model_canary_passed"])
+        self.assertFalse(coverage["recent_architecture_model_canary_passed"])
+        self.assertFalse(coverage["model_compatibility_verified"])
+        markdown = self.module.render_markdown(report)
+        self.assertIn("legacy control catches broad load/generation regressions", markdown)
+        self.assertIn("Recent architectures and benchmark protocols remain separate gates", markdown)
+
+        wrong_release = self.model_canary_receipt(tag="b10099")
+        with self.assertRaisesRegex(ValueError, "runtime release does not match"):
+            self.module.build_report(
+                self.policy,
+                latest_release=latest,
+                model_canary_receipts=[wrong_release],
+            )
 
     def test_candidate_archive_receipts_reject_release_or_digest_mismatch(self):
         latest = {"tag_name": "b10100"}

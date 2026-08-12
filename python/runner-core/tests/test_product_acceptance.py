@@ -31,7 +31,7 @@ class ProductAcceptanceTests(unittest.TestCase):
         self.assertEqual(lanes["windows_nvidia_execution"]["status"], "manual_required")
         self.assertEqual(lanes["linux_nvidia_execution"]["status"], "manual_required")
         self.assertEqual(lanes["specialized_runtime_model_canaries"]["status"], "manual_required")
-        self.assertIn("archive and version receipts alone", lanes["specialized_runtime_model_canaries"]["evidence"])
+        self.assertIn("synthetic legacy-control receipts", lanes["specialized_runtime_model_canaries"]["evidence"])
 
     def test_skip_commands_writes_a_truthful_evidence_artifact(self):
         with tempfile.TemporaryDirectory() as tmp:

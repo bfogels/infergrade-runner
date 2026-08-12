@@ -1,10 +1,12 @@
 import importlib.util
 import io
 import pathlib
+import shutil
 import tarfile
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -84,6 +86,35 @@ class LlamaCppReleaseAssetTests(unittest.TestCase):
             )
         self.assertEqual(len(members), 3)
         self.assertEqual(set(located), {"llama-cli", "llama-server", "llama-perplexity"})
+
+    def test_can_retain_verified_runtime_for_same_job_model_canary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            source_archive = root / "source.tar.gz"
+            with tarfile.open(source_archive, "w:gz") as bundle:
+                for name in ("bin/llama-cli", "bin/llama-server", "bin/llama-perplexity"):
+                    payload = name.encode("utf-8")
+                    info = tarfile.TarInfo(name)
+                    info.size = len(payload)
+                    info.mode = 0o755
+                    bundle.addfile(info, io.BytesIO(payload))
+            retained = root / "retained"
+            output = root / "receipt.json"
+
+            def fake_download(_url, destination, _size):
+                shutil.copyfile(source_archive, destination)
+                return "a" * 64
+
+            with mock.patch.object(self.module, "download_asset", side_effect=fake_download):
+                receipt = self.module.verify(
+                    self.release(),
+                    "macos-arm64",
+                    output,
+                    False,
+                    retained_runtime_dir=retained,
+                )
+            self.assertTrue(receipt["runtime_materialized_for_canary"])
+            self.assertTrue((retained / "bin" / "llama-cli").is_file())
 
 
 if __name__ == "__main__":

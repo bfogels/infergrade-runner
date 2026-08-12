@@ -52,9 +52,13 @@ SOURCE_INVARIANTS = [
         "path": ".github/workflows/llama-cpp-runtime-intake.yml",
         "needles": [
             'cron: "17 9 * * *"',
+            'cron: "47 9 * * 0"',
             "Verify all official candidate archives once",
             "Restore archive receipts for this exact release and verifier",
-            "--archive-receipt runtime-intake/archive-receipts/macos-arm64.json",
+            "Run tiny legacy model-load canary",
+            "verify_llama_cpp_model_canary.py",
+            "runtime-intake/archive-receipts/macos-arm64.json",
+            "receipt_args+=(--archive-receipt",
             "--run-version-smoke",
         ],
         "forbidden": [
@@ -111,7 +115,7 @@ MANUAL_LANES = [
     {
         "id": "specialized_runtime_model_canaries",
         "status": "manual_required",
-        "evidence": "Load and run the exact recent-architecture canaries with the selected immutable runtime; archive and version receipts alone do not satisfy this lane.",
+        "evidence": "Load and run the exact recent-architecture canaries with the selected immutable runtime; archive, version, and synthetic legacy-control receipts do not satisfy this lane.",
     },
     {
         "id": "windows_nvidia_execution",
