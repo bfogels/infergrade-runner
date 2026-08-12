@@ -190,7 +190,11 @@ def build_report(
             "legacy_control_model_canary_passed": any(
                 item["canary_id"] == "legacy_llama_tiny_generation_v1" for item in canary_rows
             ),
-            "recent_architecture_model_canary_passed": False,
+            "recent_architecture_model_canary_passed": any(
+                item["proof_scope"] == "recent_architecture_model_load_and_generation"
+                and item["model_compatibility"] == "exact_model_artifact_only"
+                for item in canary_rows
+            ),
         },
     }
 
