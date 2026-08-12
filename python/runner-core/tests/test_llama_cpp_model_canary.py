@@ -57,6 +57,18 @@ class LlamaCppModelCanaryTests(unittest.TestCase):
         self.assertIn("--no-warmup", command)
         self.assertIn("2", command)
 
+    def test_located_runtime_binary_is_absolute_for_changed_working_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = pathlib.Path(tmp) / "runtime"
+            runtime.mkdir()
+            binary = runtime / "llama-cli"
+            binary.write_text("placeholder", encoding="utf-8")
+
+            located = self.module.locate_llama_cli(pathlib.Path(tmp) / "runtime")
+
+        self.assertTrue(located.is_absolute())
+        self.assertEqual(located, binary.resolve())
+
     def test_receipt_keeps_legacy_canary_below_recent_architecture_proof(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

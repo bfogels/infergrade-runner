@@ -53,7 +53,7 @@ def locate_llama_cli(runtime_dir: pathlib.Path) -> pathlib.Path:
     matches = [item for item in runtime_dir.rglob("llama-cli") if item.is_file()]
     if len(matches) != 1:
         raise ValueError(f"runtime directory must contain exactly one llama-cli; found {len(matches)}")
-    binary = matches[0]
+    binary = matches[0].resolve()
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
     return binary
 
