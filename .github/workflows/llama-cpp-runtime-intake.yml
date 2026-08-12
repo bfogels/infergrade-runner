@@ -61,7 +61,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: runtime-intake/archive-receipts
-          key: llama-cpp-archive-v2-${{ steps.upstream.outputs.tag }}-${{ hashFiles('scripts/verify_llama_cpp_release_asset.py', 'scripts/verify_llama_cpp_model_canary.py') }}
+          key: llama-cpp-archive-v3-${{ steps.upstream.outputs.tag }}-${{ hashFiles('scripts/verify_llama_cpp_release_asset.py', 'scripts/verify_llama_cpp_model_canary.py', 'runtime/llama_cpp_release_policy.json') }}
 
       - name: Verify all official candidate archives once
         if: (github.event_name == 'workflow_dispatch' || github.event.schedule == '47 9 * * 0') && steps.archive-cache.outputs.cache-hit != 'true'
@@ -91,6 +91,15 @@ jobs:
             --archive-receipt runtime-intake/archive-receipts/ubuntu-x64.json \
             --output runtime-intake/archive-receipts/legacy-control.json
 
+      - name: Run exact MiniCPM5 recent-architecture canary
+        if: (github.event_name == 'workflow_dispatch' || github.event.schedule == '47 9 * * 0') && steps.archive-cache.outputs.cache-hit != 'true'
+        run: |
+          python3 scripts/verify_llama_cpp_model_canary.py \
+            --runtime-dir runtime-intake/ubuntu-runtime \
+            --archive-receipt runtime-intake/archive-receipts/ubuntu-x64.json \
+            --canary-id minicpm5_tokenizer \
+            --output runtime-intake/archive-receipts/minicpm5-tokenizer.json
+
       - name: Validate pins and build evidence-scoped intake report
         shell: bash
         run: |
@@ -103,9 +112,13 @@ jobs:
               receipt_args+=(--archive-receipt "${receipt}")
             fi
           done
-          if [[ -f runtime-intake/archive-receipts/legacy-control.json ]]; then
-            receipt_args+=(--model-canary-receipt runtime-intake/archive-receipts/legacy-control.json)
-          fi
+          for receipt in \
+            runtime-intake/archive-receipts/legacy-control.json \
+            runtime-intake/archive-receipts/minicpm5-tokenizer.json; do
+            if [[ -f "${receipt}" ]]; then
+              receipt_args+=(--model-canary-receipt "${receipt}")
+            fi
+          done
           python3 scripts/check_llama_cpp_runtime_policy.py \
             --latest-release-json runtime-intake/latest-release.json \
             "${receipt_args[@]}" \

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a tiny pinned GGUF load/generation canary against one verified llama.cpp runtime."""
+"""Run a pinned GGUF load/generation canary against one verified llama.cpp runtime."""
 
 import argparse
 import hashlib
@@ -22,9 +22,9 @@ MODEL_REVISION = "def3e2dd70df35ecbf6403ea347de4c5977220c1"
 MODEL_FILENAME = "stories260K.gguf"
 MODEL_SHA256 = "047bf46455a544931cff6fef14d7910154c56afbc23ab1c5e56a72e69912c04b"
 MODEL_SIZE_BYTES = 1185376
-MODEL_URL = (
-    f"https://huggingface.co/{MODEL_REPOSITORY}/resolve/{MODEL_REVISION}/{MODEL_FILENAME}"
-)
+DEFAULT_POLICY = pathlib.Path(__file__).resolve().parents[1] / "runtime" / "llama_cpp_release_policy.json"
+LEGACY_CANARY_ID = "legacy_llama_tiny_generation_v1"
+RECENT_CANARY_IDS = {"minicpm5_tokenizer"}
 
 
 def load_json(path: pathlib.Path) -> Dict[str, Any]:
@@ -32,6 +32,65 @@ def load_json(path: pathlib.Path) -> Dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{path}: expected a JSON object")
     return value
+
+
+def model_spec(canary_id: str, policy_path: pathlib.Path = DEFAULT_POLICY) -> Dict[str, Any]:
+    if canary_id == LEGACY_CANARY_ID:
+        return {
+            "canary_id": LEGACY_CANARY_ID,
+            "family": "Synthetic legacy llama",
+            "repository": MODEL_REPOSITORY,
+            "revision": MODEL_REVISION,
+            "filename": MODEL_FILENAME,
+            "sha256": MODEL_SHA256,
+            "size_bytes": MODEL_SIZE_BYTES,
+            "timeout_seconds": 60,
+            "proof_scope": "legacy_llama_model_load_and_generation",
+            "model_compatibility": "legacy_control_only",
+            "claim_boundary": (
+                "This tiny synthetic llama-architecture canary proves one GGUF load and generation path only. "
+                "It does not prove recent architectures, chat templates, benchmark behavior, performance, or support promotion."
+            ),
+        }
+    if canary_id not in RECENT_CANARY_IDS:
+        raise ValueError(f"unsupported automated model canary: {canary_id}")
+    policy = load_json(policy_path)
+    row = next(
+        (item for item in policy.get("model_canaries", []) if item.get("id") == canary_id),
+        None,
+    )
+    if not isinstance(row, dict):
+        raise ValueError(f"model canary is missing from runtime policy: {canary_id}")
+    artifact = str(row.get("artifact") or "")
+    if not artifact.startswith("hf://") or "/" not in artifact[5:]:
+        raise ValueError(f"{canary_id}: policy artifact must be a pinned Hugging Face file")
+    repository, filename = artifact[5:].rsplit("/", 1)
+    revision = str(row.get("revision") or "")
+    sha256 = str(row.get("sha256") or "")
+    size_bytes = int(row.get("size_bytes") or 0)
+    if len(revision) != 40 or any(character not in "0123456789abcdef" for character in revision):
+        raise ValueError(f"{canary_id}: policy revision must be an exact commit")
+    if len(sha256) != 64 or any(character not in "0123456789abcdef" for character in sha256):
+        raise ValueError(f"{canary_id}: policy SHA-256 is invalid")
+    if size_bytes <= 0 or size_bytes > 1024 * 1024 * 1024:
+        raise ValueError(f"{canary_id}: automated canary must be positive and at most 1 GiB")
+    return {
+        "canary_id": canary_id,
+        "family": str(row.get("family") or canary_id),
+        "repository": repository,
+        "revision": revision,
+        "filename": filename,
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "timeout_seconds": 180,
+        "proof_scope": "recent_architecture_model_load_and_generation",
+        "model_compatibility": "exact_model_artifact_only",
+        "claim_boundary": (
+            f"This canary proves only {row.get('family') or canary_id} load and short generation for the exact "
+            "pinned artifact on this candidate runtime and CI platform. It does not prove chat-template behavior, "
+            "benchmark correctness, performance, another artifact, another platform, or support promotion."
+        ),
+    }
 
 
 def validate_archive_receipt(receipt: Dict[str, Any]) -> None:
@@ -49,24 +108,30 @@ def validate_archive_receipt(receipt: Dict[str, Any]) -> None:
         raise ValueError("model canary requires a digest-verified runtime archive")
 
 
-def locate_llama_cli(runtime_dir: pathlib.Path) -> pathlib.Path:
-    matches = [item for item in runtime_dir.rglob("llama-cli") if item.is_file()]
+def locate_generation_binary(runtime_dir: pathlib.Path) -> pathlib.Path:
+    matches = [item for item in runtime_dir.rglob("llama-completion") if item.is_file()]
     if len(matches) != 1:
-        raise ValueError(f"runtime directory must contain exactly one llama-cli; found {len(matches)}")
+        raise ValueError(
+            f"runtime directory must contain exactly one llama-completion; found {len(matches)}"
+        )
     binary = matches[0].resolve()
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
     return binary
 
 
-def download_model(destination: pathlib.Path) -> str:
-    request = urllib.request.Request(MODEL_URL, headers={"User-Agent": "InferGrade-Runtime-Canary/1"})
+def download_model(destination: pathlib.Path, spec: Dict[str, Any]) -> str:
+    url = (
+        f"https://huggingface.co/{spec['repository']}/resolve/"
+        f"{spec['revision']}/{spec['filename']}"
+    )
+    request = urllib.request.Request(url, headers={"User-Agent": "InferGrade-Runtime-Canary/1"})
     configured_ca = os.environ.get("SSL_CERT_FILE")
     ca_candidates = [configured_ca, "/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt"]
     ca_file = next((item for item in ca_candidates if item and pathlib.Path(item).is_file()), None)
     context = ssl.create_default_context(cafile=ca_file) if ca_file else ssl.create_default_context()
     digest = hashlib.sha256()
     observed = 0
-    with urllib.request.urlopen(request, timeout=60, context=context) as response, destination.open(
+    with urllib.request.urlopen(request, timeout=120, context=context) as response, destination.open(
         "wb"
     ) as handle:
         while True:
@@ -74,16 +139,16 @@ def download_model(destination: pathlib.Path) -> str:
             if not chunk:
                 break
             observed += len(chunk)
-            if observed > MODEL_SIZE_BYTES:
+            if observed > spec["size_bytes"]:
                 raise ValueError("model canary download exceeded the pinned size")
             digest.update(chunk)
             handle.write(chunk)
-    if observed != MODEL_SIZE_BYTES:
+    if observed != spec["size_bytes"]:
         raise ValueError(
-            f"model canary size mismatch: expected {MODEL_SIZE_BYTES}, observed {observed}"
+            f"model canary size mismatch: expected {spec['size_bytes']}, observed {observed}"
         )
     observed_digest = digest.hexdigest()
-    if observed_digest != MODEL_SHA256:
+    if observed_digest != spec["sha256"]:
         raise ValueError("model canary digest does not match the pinned Hugging Face artifact")
     return observed_digest
 
@@ -100,23 +165,23 @@ def canary_command(binary: pathlib.Path, model: pathlib.Path) -> List[str]:
         "--seed",
         "1",
         "--no-display-prompt",
-        "--no-conversation",
-        "--single-turn",
-        "--simple-io",
+        "-no-cnv",
         "--no-warmup",
+        "--no-perf",
         "-t",
         "2",
     ]
 
 
-def run_canary(binary: pathlib.Path, model: pathlib.Path) -> Dict[str, Any]:
+def run_canary(binary: pathlib.Path, model: pathlib.Path, timeout_seconds: int = 60) -> Dict[str, Any]:
     started = time.monotonic()
     completed = subprocess.run(
         canary_command(binary, model),
         cwd=binary.parent,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=timeout_seconds,
         check=False,
     )
     elapsed = round(time.monotonic() - started, 3)
@@ -124,10 +189,10 @@ def run_canary(binary: pathlib.Path, model: pathlib.Path) -> Dict[str, Any]:
     if completed.returncode != 0:
         detail = "\n".join(part.strip() for part in (completed.stdout, completed.stderr) if part.strip())
         raise ValueError(
-            f"legacy model canary failed with exit {completed.returncode}: {detail[-500:]}"
+            f"model canary failed with exit {completed.returncode}: {detail[-500:]}"
         )
     if not generated:
-        raise ValueError("legacy model canary produced no generated text")
+        raise ValueError("model canary produced no generated text")
     return {
         "status": "passed",
         "elapsed_seconds": elapsed,
@@ -140,36 +205,38 @@ def verify(
     runtime_dir: pathlib.Path,
     archive_receipt: Dict[str, Any],
     output: pathlib.Path,
+    canary_id: str = LEGACY_CANARY_ID,
+    policy_path: pathlib.Path = DEFAULT_POLICY,
 ) -> Dict[str, Any]:
     validate_archive_receipt(archive_receipt)
-    binary = locate_llama_cli(runtime_dir)
+    spec = model_spec(canary_id, policy_path)
+    binary = locate_generation_binary(runtime_dir)
     with tempfile.TemporaryDirectory(prefix="infergrade-llama-model-canary-") as tmp:
-        model_path = pathlib.Path(tmp) / MODEL_FILENAME
-        downloaded_digest = download_model(model_path)
-        execution = run_canary(binary, model_path)
+        model_path = pathlib.Path(tmp) / spec["filename"]
+        downloaded_digest = download_model(model_path, spec)
+        execution = run_canary(binary, model_path, spec["timeout_seconds"])
     receipt = {
         "receipt_version": 1,
         "candidate_only": True,
-        "canary_id": "legacy_llama_tiny_generation_v1",
+        "canary_id": spec["canary_id"],
         "status": "passed",
-        "proof_scope": "legacy_llama_model_load_and_generation",
-        "model_compatibility": "legacy_control_only",
-        "claim_boundary": (
-            "This tiny synthetic llama-architecture canary proves one GGUF load and generation path only. "
-            "It does not prove recent architectures, chat templates, benchmark behavior, performance, or support promotion."
-        ),
+        "proof_scope": spec["proof_scope"],
+        "model_compatibility": spec["model_compatibility"],
+        "claim_boundary": spec["claim_boundary"],
         "runtime": {
             "release": archive_receipt.get("upstream", {}).get("release"),
             "platform": archive_receipt.get("platform"),
             "archive_sha256": archive_receipt.get("artifact", {}).get("downloaded_sha256"),
             "version_smoke": archive_receipt.get("version_smoke", {}).get("status"),
+            "generation_binary": binary.name,
         },
         "model": {
-            "repository": MODEL_REPOSITORY,
-            "revision": MODEL_REVISION,
-            "filename": MODEL_FILENAME,
-            "size_bytes": MODEL_SIZE_BYTES,
-            "expected_sha256": MODEL_SHA256,
+            "family": spec["family"],
+            "repository": spec["repository"],
+            "revision": spec["revision"],
+            "filename": spec["filename"],
+            "size_bytes": spec["size_bytes"],
+            "expected_sha256": spec["sha256"],
             "downloaded_sha256": downloaded_digest,
         },
         "execution": execution,
@@ -183,6 +250,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-dir", type=pathlib.Path, required=True)
     parser.add_argument("--archive-receipt", type=pathlib.Path, required=True)
+    parser.add_argument("--canary-id", default=LEGACY_CANARY_ID)
+    parser.add_argument("--policy", type=pathlib.Path, default=DEFAULT_POLICY)
     parser.add_argument("--output", type=pathlib.Path, required=True)
     return parser.parse_args(argv)
 
@@ -190,7 +259,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     try:
-        receipt = verify(args.runtime_dir, load_json(args.archive_receipt), args.output)
+        receipt = verify(
+            args.runtime_dir,
+            load_json(args.archive_receipt),
+            args.output,
+            canary_id=args.canary_id,
+            policy_path=args.policy,
+        )
     except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError, urllib.error.URLError) as exc:
         print(f"llama.cpp model canary failed: {exc}", file=sys.stderr)
         return 1

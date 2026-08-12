@@ -5,6 +5,7 @@ import shutil
 import tarfile
 import tempfile
 import unittest
+import urllib.error
 import zipfile
 from unittest import mock
 
@@ -44,6 +45,7 @@ class LlamaCppReleaseAssetTests(unittest.TestCase):
         self.assertEqual(name, "llama-b10375-bin-macos-arm64.tar.gz")
         self.assertEqual(asset["size"], 123)
         self.assertIn("llama-cli", required)
+        self.assertIn("llama-completion", required)
 
     def test_rejects_non_llama_release_tags(self):
         with self.assertRaisesRegex(ValueError, "bNNNN"):
@@ -75,24 +77,38 @@ class LlamaCppReleaseAssetTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             archive = root / "tools.tar.gz"
             with tarfile.open(archive, "w:gz") as bundle:
-                for name in ("bin/llama-cli", "bin/llama-server", "bin/llama-perplexity"):
+                for name in (
+                    "bin/llama-cli",
+                    "bin/llama-completion",
+                    "bin/llama-server",
+                    "bin/llama-perplexity",
+                ):
                     payload = name.encode("utf-8")
                     info = tarfile.TarInfo(name)
                     info.size = len(payload)
                     bundle.addfile(info, io.BytesIO(payload))
             members = self.module.extract_archive(archive, root / "out")
             located = self.module.locate_required(
-                root / "out", ["llama-cli", "llama-server", "llama-perplexity"]
+                root / "out",
+                ["llama-cli", "llama-completion", "llama-server", "llama-perplexity"],
             )
-        self.assertEqual(len(members), 3)
-        self.assertEqual(set(located), {"llama-cli", "llama-server", "llama-perplexity"})
+        self.assertEqual(len(members), 4)
+        self.assertEqual(
+            set(located),
+            {"llama-cli", "llama-completion", "llama-server", "llama-perplexity"},
+        )
 
     def test_can_retain_verified_runtime_for_same_job_model_canary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             source_archive = root / "source.tar.gz"
             with tarfile.open(source_archive, "w:gz") as bundle:
-                for name in ("bin/llama-cli", "bin/llama-server", "bin/llama-perplexity"):
+                for name in (
+                    "bin/llama-cli",
+                    "bin/llama-completion",
+                    "bin/llama-server",
+                    "bin/llama-perplexity",
+                ):
                     payload = name.encode("utf-8")
                     info = tarfile.TarInfo(name)
                     info.size = len(payload)
@@ -115,6 +131,70 @@ class LlamaCppReleaseAssetTests(unittest.TestCase):
                 )
             self.assertTrue(receipt["runtime_materialized_for_canary"])
             self.assertTrue((retained / "bin" / "llama-cli").is_file())
+
+    def test_retries_transient_download_errors_and_removes_partial_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = pathlib.Path(tmp) / "runtime.tar.gz"
+            attempts = 0
+
+            def flaky_download(_url, path, _size):
+                nonlocal attempts
+                attempts += 1
+                if attempts < 3:
+                    path.write_bytes(b"partial")
+                    raise ConnectionResetError("connection closed")
+                self.assertFalse(path.exists())
+                path.write_bytes(b"complete")
+                return "digest"
+
+            with mock.patch.object(
+                self.module,
+                "_download_asset_once",
+                side_effect=flaky_download,
+            ):
+                with mock.patch.object(self.module.time, "sleep") as sleep:
+                    digest = self.module.download_asset(
+                        "https://example.invalid/runtime",
+                        destination,
+                        8,
+                    )
+
+        self.assertEqual(digest, "digest")
+        self.assertEqual(attempts, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2])
+
+    def test_does_not_retry_integrity_failures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = pathlib.Path(tmp) / "runtime.tar.gz"
+            with mock.patch.object(
+                self.module,
+                "_download_asset_once",
+                side_effect=ValueError("download size mismatch"),
+            ) as download:
+                with self.assertRaisesRegex(ValueError, "size mismatch"):
+                    self.module.download_asset("https://example.invalid/runtime", destination, 8)
+
+        download.assert_called_once()
+
+    def test_does_not_retry_permanent_http_errors(self):
+        error = urllib.error.HTTPError(
+            "https://example.invalid/runtime",
+            404,
+            "not found",
+            {},
+            None,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = pathlib.Path(tmp) / "runtime.tar.gz"
+            with mock.patch.object(
+                self.module,
+                "_download_asset_once",
+                side_effect=error,
+            ) as download:
+                with self.assertRaises(urllib.error.HTTPError):
+                    self.module.download_asset("https://example.invalid/runtime", destination, 8)
+
+        download.assert_called_once()
 
 
 if __name__ == "__main__":

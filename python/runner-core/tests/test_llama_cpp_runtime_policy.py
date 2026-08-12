@@ -163,6 +163,23 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
             "execution": {"status": "passed"},
         }
 
+    def recent_model_canary_receipt(self, tag="b10100"):
+        receipt = self.model_canary_receipt(tag=tag)
+        receipt.update(
+            {
+                "canary_id": "minicpm5_tokenizer",
+                "proof_scope": "recent_architecture_model_load_and_generation",
+                "model_compatibility": "exact_model_artifact_only",
+            }
+        )
+        receipt["model"].update(
+            {
+                "repository": "openbmb/MiniCPM5-1B-GGUF",
+                "revision": "87007042419d30c1d8f38ef065424ee33870831e",
+            }
+        )
+        return receipt
+
     def test_candidate_archive_receipts_remain_distinct_from_model_compatibility(self):
         latest = {
             "tag_name": "b10100",
@@ -212,6 +229,20 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
                 latest_release=latest,
                 model_canary_receipts=[wrong_release],
             )
+
+    def test_exact_recent_canary_is_visible_without_claiming_broad_compatibility(self):
+        report = self.module.build_report(
+            self.policy,
+            latest_release={"tag_name": "b10100"},
+            model_canary_receipts=[
+                self.model_canary_receipt(),
+                self.recent_model_canary_receipt(),
+            ],
+        )
+        coverage = report["candidate_archive_coverage"]
+        self.assertTrue(coverage["legacy_control_model_canary_passed"])
+        self.assertTrue(coverage["recent_architecture_model_canary_passed"])
+        self.assertFalse(coverage["model_compatibility_verified"])
 
     def test_candidate_archive_receipts_reject_release_or_digest_mismatch(self):
         latest = {"tag_name": "b10100"}

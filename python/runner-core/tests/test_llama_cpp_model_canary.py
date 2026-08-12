@@ -51,20 +51,31 @@ class LlamaCppModelCanaryTests(unittest.TestCase):
         self.assertIn("--seed", command)
         self.assertIn("1", command)
         self.assertIn("--no-display-prompt", command)
-        self.assertIn("--no-conversation", command)
-        self.assertIn("--single-turn", command)
-        self.assertIn("--simple-io", command)
+        self.assertIn("-no-cnv", command)
         self.assertIn("--no-warmup", command)
+        self.assertIn("--no-perf", command)
         self.assertIn("2", command)
+
+    def test_recent_canary_comes_from_exact_bounded_policy_artifact(self):
+        spec = self.module.model_spec("minicpm5_tokenizer")
+        self.assertEqual(spec["repository"], "openbmb/MiniCPM5-1B-GGUF")
+        self.assertEqual(spec["filename"], "MiniCPM5-1B-Q4_K_M.gguf")
+        self.assertEqual(spec["size_bytes"], 688065920)
+        self.assertEqual(spec["model_compatibility"], "exact_model_artifact_only")
+        self.assertLessEqual(spec["size_bytes"], 1024 * 1024 * 1024)
+
+    def test_recent_canary_rejects_unapproved_policy_id(self):
+        with self.assertRaisesRegex(ValueError, "unsupported automated model canary"):
+            self.module.model_spec("gemma4_consumer")
 
     def test_located_runtime_binary_is_absolute_for_changed_working_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime = pathlib.Path(tmp) / "runtime"
             runtime.mkdir()
-            binary = runtime / "llama-cli"
+            binary = runtime / "llama-completion"
             binary.write_text("placeholder", encoding="utf-8")
 
-            located = self.module.locate_llama_cli(pathlib.Path(tmp) / "runtime")
+            located = self.module.locate_generation_binary(pathlib.Path(tmp) / "runtime")
 
         self.assertTrue(located.is_absolute())
         self.assertEqual(located, binary.resolve())
@@ -74,13 +85,13 @@ class LlamaCppModelCanaryTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             runtime = root / "runtime"
             runtime.mkdir()
-            binary = runtime / "llama-cli"
+            binary = runtime / "llama-completion"
             binary.write_text("placeholder", encoding="utf-8")
             output = root / "receipt.json"
 
-            def fake_download(destination):
+            def fake_download(destination, spec):
                 destination.write_bytes(b"model")
-                return self.module.MODEL_SHA256
+                return spec["sha256"]
 
             with mock.patch.object(self.module, "download_model", side_effect=fake_download), mock.patch.object(
                 self.module,
@@ -99,6 +110,41 @@ class LlamaCppModelCanaryTests(unittest.TestCase):
         self.assertIn("does not prove recent architectures", receipt["claim_boundary"])
         self.assertNotIn("runtime_dir", receipt)
         self.assertNotIn("binary_path", receipt["runtime"])
+        self.assertEqual(receipt["runtime"]["generation_binary"], "llama-completion")
+
+    def test_recent_receipt_stays_exact_artifact_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            (runtime / "llama-completion").write_text("placeholder", encoding="utf-8")
+            output = root / "receipt.json"
+
+            def fake_download(destination, spec):
+                destination.write_bytes(b"model")
+                return spec["sha256"]
+
+            with mock.patch.object(self.module, "download_model", side_effect=fake_download), mock.patch.object(
+                self.module,
+                "run_canary",
+                return_value={
+                    "status": "passed",
+                    "elapsed_seconds": 0.2,
+                    "generated_output_chars": 8,
+                    "generated_output_sha256": "d" * 64,
+                },
+            ):
+                receipt = self.module.verify(
+                    runtime,
+                    self.archive_receipt(),
+                    output,
+                    canary_id="minicpm5_tokenizer",
+                )
+
+        self.assertEqual(receipt["canary_id"], "minicpm5_tokenizer")
+        self.assertEqual(receipt["model_compatibility"], "exact_model_artifact_only")
+        self.assertEqual(receipt["model"]["size_bytes"], 688065920)
+        self.assertIn("exact pinned artifact", receipt["claim_boundary"])
 
 
 if __name__ == "__main__":

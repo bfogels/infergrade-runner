@@ -56,6 +56,7 @@ SOURCE_INVARIANTS = [
             "Verify all official candidate archives once",
             "Restore archive receipts for this exact release and verifier",
             "Run tiny legacy model-load canary",
+            "Run exact MiniCPM5 recent-architecture canary",
             "verify_llama_cpp_model_canary.py",
             "runtime-intake/archive-receipts/macos-arm64.json",
             "receipt_args+=(--archive-receipt",
