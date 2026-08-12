@@ -168,7 +168,10 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(html.includes("data-runtime-llama-status"));
   assert.ok(html.includes("Model preflight"));
   assert.ok(html.includes("data-model-preflight-status"));
-  assert.ok(html.includes("Check before benchmark"));
+  assert.ok(html.includes("Make ready"));
+  assert.ok(html.includes("Automatic (recommended)"));
+  assert.ok(html.includes('class="runtime-power-options"'));
+  assert.ok(html.includes('class="assignment-stages"'));
   assert.ok(html.includes("data-runtime-install-managed"));
   assert.ok(html.includes("data-runtime-reinstall-managed"));
   assert.ok(html.includes("data-runtime-remove-selected"));
@@ -212,7 +215,7 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(js.includes("SHA-256 verified"));
   assert.ok(js.includes("no independent signature"));
   assert.ok(js.includes("Retry install, remove the selected runtime, or select an existing llama.cpp binary."));
-  assert.ok(html.includes("Replace with managed"));
+  assert.ok(html.includes("Use selected build"));
   assert.ok(js.includes("Replacing the selected llama.cpp runtime with the managed runtime. Local binaries are not deleted."));
   assert.equal(js.includes("executeSidecar(runtimeCommandArgs([\"--select-existing\"])"), false);
   assert.ok(rust.includes("fn llama_cpp_runtime_plan"));

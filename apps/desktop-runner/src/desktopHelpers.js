@@ -538,3 +538,22 @@ export function userSafeStartFailure(message = "") {
   }
   return "Pairing is saved. Runner could not start automatically; inspect Logs, then start listening again.";
 }
+
+export function assignmentProgressStage({ phase = "", checkName = "", progress = 0, waitingForListener = false } = {}) {
+  if (waitingForListener) return "";
+  const normalizedPhase = String(phase || "").toLowerCase();
+  const normalizedCheck = String(checkName || "").toLowerCase();
+  if (normalizedPhase === "complete") return "complete";
+  if (
+    normalizedPhase.includes("retry")
+    || normalizedCheck.includes("runtime")
+    || normalizedCheck.includes("llama.cpp")
+    || normalizedCheck.includes("sha")
+    || normalizedCheck.includes("verify")
+    || normalizedCheck.includes("artifact identity")
+  ) return "verify";
+  if (normalizedPhase.includes("upload") || normalizedPhase.includes("publish") || Number(progress) >= 90) return "publish";
+  if (normalizedCheck.includes("model load") || normalizedCheck.includes("loading") || normalizedPhase.includes("load")) return "load";
+  if (normalizedPhase.includes("running") || normalizedCheck.includes("benchmark") || normalizedCheck.includes("suite")) return "benchmark";
+  return "download";
+}

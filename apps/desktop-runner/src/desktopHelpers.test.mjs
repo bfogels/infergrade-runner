@@ -6,6 +6,7 @@ import {
   assignmentEventRecovery,
   assignmentFailureRecovery,
   assignmentPreflightPresentation,
+  assignmentProgressStage,
   assignmentTitleFromRunId,
   desktopReadinessPresentation,
   hubAuthenticationFailure,
@@ -24,6 +25,16 @@ import {
   userSafeUpdateFailure,
   userSafeTokenFailure,
 } from "./desktopHelpers.js";
+
+test("maps assignment progress to stable user-facing stages", () => {
+  assert.equal(assignmentProgressStage({ waitingForListener: true }), "");
+  assert.equal(assignmentProgressStage({ phase: "Running", checkName: "artifact identity" }), "verify");
+  assert.equal(assignmentProgressStage({ phase: "Running", checkName: "llama.cpp readiness check" }), "verify");
+  assert.equal(assignmentProgressStage({ phase: "Running", checkName: "model load" }), "load");
+  assert.equal(assignmentProgressStage({ phase: "Running", checkName: "assistant suite" }), "benchmark");
+  assert.equal(assignmentProgressStage({ phase: "Uploading", progress: 94 }), "publish");
+  assert.equal(assignmentProgressStage({ phase: "Complete", progress: 100 }), "complete");
+});
 
 test("accepts only the non-secret pairing intent deep link", () => {
   assert.equal(isPairingIntentDeepLink("infergrade-runner://open?intent=pair"), true);
