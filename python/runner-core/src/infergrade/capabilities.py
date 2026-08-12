@@ -327,6 +327,9 @@ def _case_benchmark_protocol_identity(
         "container_repo_digests": sorted(container_runtime.get("container_repo_digests") or []),
         "runner_version": __version__ if spec.execution_mode == "native" else None,
     }
+    output_shape_policy_id = _output_shape_policy_id(spec)
+    if output_shape_policy_id:
+        scorer_identity["output_shape_policy_id"] = output_shape_policy_id
     generation_identity = {
         "generation_max_tokens": spec.generation_max_tokens,
         "benchmark_kind": spec.benchmark_kind,
@@ -621,6 +624,77 @@ def _multiple_choice_output_shape_gate(
     }
 
 
+def _visible_response_output_shape_gate(
+    spec: CapabilityBenchmarkSpec,
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Quarantine IFEval only when missing visible responses are systemic.
+
+    An isolated empty response remains a strict wrong answer. A run where most
+    responses contain no scorer-visible text is instead evidence of a broken
+    model/template/runtime completion path and must not become a capability
+    score.
+    """
+    if spec.benchmark_id != "ifeval":
+        return {"status": "not_applicable", "policy_id": "visible_response_output_shape_gate_v1"}
+    evaluated_count = len(predictions)
+    empty_response_count = len(
+        [item for item in predictions if not str(item.get("response") or "").strip()]
+    )
+    empty_response_rate = (
+        round(empty_response_count / float(evaluated_count), 6) if evaluated_count else 0.0
+    )
+    token_limit_count = len(
+        [
+            item
+            for item in predictions
+            if isinstance(item.get("output_tokens"), int)
+            and item.get("output_tokens") >= spec.generation_max_tokens
+        ]
+    )
+    blocked = bool(
+        evaluated_count and empty_response_rate > _DOMINANT_MALFORMED_OUTPUT_RATE
+    )
+    reason_codes = ["dominant_empty_visible_response"] if blocked else []
+    if blocked and token_limit_count:
+        reason_codes.append("answer_budget_exhaustion_observed")
+    return {
+        "status": "blocked" if blocked else "passed",
+        "policy_id": "visible_response_output_shape_gate_v1",
+        "threshold": {
+            "metric": "empty_visible_response_rate",
+            "operator": ">",
+            "value": _DOMINANT_MALFORMED_OUTPUT_RATE,
+        },
+        "evaluated_count": evaluated_count,
+        "empty_visible_response_count": empty_response_count,
+        "empty_visible_response_rate": empty_response_rate,
+        "answer_budget_exhaustion_count": token_limit_count,
+        "reason_codes": reason_codes,
+        "strict_primary_metric": dict(summary.get("primary_metric") or {}),
+    }
+
+
+def _output_shape_policy_id(spec: CapabilityBenchmarkSpec) -> Optional[str]:
+    if spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}:
+        return "multiple_choice_output_shape_gate_v2"
+    if spec.benchmark_id == "ifeval":
+        return "visible_response_output_shape_gate_v1"
+    return None
+
+
+def _benchmark_output_shape_gate(
+    spec: CapabilityBenchmarkSpec,
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    gate = _multiple_choice_output_shape_gate(spec, predictions, summary)
+    if gate["status"] != "not_applicable":
+        return gate
+    return _visible_response_output_shape_gate(spec, predictions, summary)
+
+
 # Compatibility alias for downstream tests and integrations that referenced the
 # original MMLU-specific helper before the policy became benchmark-agnostic.
 _mmlu_output_shape_gate = _multiple_choice_output_shape_gate
@@ -862,7 +936,7 @@ def execute_capability_suite(
             summary["unscored_generation_failure_severity"] = unscored_failure_severity
             summary["completed_cases"] = len(cases) - failure_count
             summary["total_cases"] = len(cases)
-            output_shape_gate = _multiple_choice_output_shape_gate(spec, predictions, summary)
+            output_shape_gate = _benchmark_output_shape_gate(spec, predictions, summary)
             if output_shape_gate["status"] != "not_applicable":
                 summary["output_shape_gate"] = output_shape_gate
             protocol_identity = _case_benchmark_protocol_identity(
@@ -2539,6 +2613,14 @@ def _generate_predictions(
                     status = "failed"
                     error = normalization["error"]
                     generation_failure_kind = "model_output"
+            if (
+                spec.benchmark_id == "ifeval"
+                and status == "completed"
+                and not str(text or "").strip()
+            ):
+                status = "failed"
+                error = "Model produced no visible response."
+                generation_failure_kind = "model_output"
             performance = _task_performance_fields(generated)
         except Exception as exc:
             text = ""
