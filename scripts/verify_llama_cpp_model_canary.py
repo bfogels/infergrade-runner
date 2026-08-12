@@ -167,6 +167,8 @@ def canary_command(binary: pathlib.Path, model: pathlib.Path) -> List[str]:
         "--single-turn",
         "--simple-io",
         "--no-warmup",
+        "--no-perf",
+        "--log-disable",
         "-t",
         "2",
     ]

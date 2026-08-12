@@ -55,6 +55,8 @@ class LlamaCppModelCanaryTests(unittest.TestCase):
         self.assertIn("--single-turn", command)
         self.assertIn("--simple-io", command)
         self.assertIn("--no-warmup", command)
+        self.assertIn("--no-perf", command)
+        self.assertIn("--log-disable", command)
         self.assertIn("2", command)
 
     def test_recent_canary_comes_from_exact_bounded_policy_artifact(self):
