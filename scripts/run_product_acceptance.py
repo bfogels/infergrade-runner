@@ -28,6 +28,8 @@ SOURCE_INVARIANTS = [
             "inspectRuntimePlan({ reconcileStale: true })",
             "installRequiredCatalogRuntime",
             'invoke("install_required_runtime_catalog_target"',
+            'invoke("resume_hub_run"',
+            "Runtime installed · Hub run requeued",
             'phase: "Ready to retry"',
         ],
     },

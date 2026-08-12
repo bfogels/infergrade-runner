@@ -442,6 +442,7 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(html.includes("data-assignment-progress-bar"));
   assert.ok(html.includes("data-assignment-start-listening"));
   assert.ok(html.includes("data-assignment-install-runtime"));
+  assert.ok(html.includes("Install runtime and retry"));
   assert.ok(js.includes("assignmentTitleFromRunId"));
   assert.ok(js.includes("waitingForListener: !childProcess"));
   assert.ok(js.includes('assignmentTime.textContent = "Not started"'));
@@ -456,6 +457,11 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("Handoff received"));
   assert.ok(js.includes("Start listening to claim this run"));
   assert.ok(js.includes("install_required_runtime_catalog_target"));
+  assert.ok(js.includes('invoke("resume_hub_run"'));
+  assert.ok(js.includes("Runtime installed · Hub run requeued"));
+  assert.ok(js.includes("The required runtime is installed, but Hub could not requeue the run."));
+  assert.ok(rust.includes("async fn resume_hub_run"));
+  assert.ok(rust.includes('format!("/v1/runs/{run_id}/resume")'));
   assert.ok(helpers.includes("Specialized runtime required"));
   assert.ok(helpers.includes("Choose reviewed artifact in Hub"));
   assert.ok(rust.includes("engine_install_active_runtime_catalog_target"));
