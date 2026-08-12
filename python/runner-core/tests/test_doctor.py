@@ -305,8 +305,14 @@ class DoctorTests(unittest.TestCase):
         self.assertIn(checks["llama_cli_native"]["details"]["version_status"], ("detected", "unknown"))
 
     @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.selected_llama_cpp_runtime")
     @mock.patch("infergrade.doctor.shutil.which")
-    def test_doctor_reports_custom_native_llama_paths(self, which_mock, capture_environment_mock):
+    def test_doctor_reports_custom_native_llama_paths(
+        self,
+        which_mock,
+        selected_runtime_mock,
+        capture_environment_mock,
+    ):
         capture_environment_mock.return_value = {
             "environment_class": "local_workstation",
             "hardware_class": "apple_silicon",
@@ -314,6 +320,10 @@ class DoctorTests(unittest.TestCase):
             "accelerator_type": "gpu",
             "accelerator_count": 1,
             "hardware_id": "hw_test",
+        }
+        selected_runtime_mock.return_value = {
+            "runtime_id": "llama-cpp-older-managed-runtime",
+            "version_label": "older managed runtime",
         }
         which_mock.side_effect = lambda name: name if name in ("/custom/llama-cli", "/custom/llama-server") else None
         request = RunRequest(
@@ -331,6 +341,9 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(checks["llama_cli_native"]["details"]["source"], "custom_path")
         self.assertEqual(checks["llama_cli_native"]["details"]["requested"], "/custom/llama-cli")
         self.assertEqual(checks["llama_server_native"]["details"]["source"], "custom_path")
+        self.assertNotIn("managed_runtime", checks["llama_cli_native"]["details"])
+        self.assertNotIn("managed_runtime", checks["llama_server_native"]["details"])
+        selected_runtime_mock.assert_not_called()
 
     @mock.patch("infergrade.doctor.windows_cuda_preflight")
     @mock.patch("infergrade.doctor.capture_environment")

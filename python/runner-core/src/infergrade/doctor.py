@@ -301,43 +301,48 @@ def _backend_compatibility_checks(request: RunRequest) -> List[Dict[str, Any]]:
 
 
 def _llama_native_binary_check(check_id: str, explicit_path: Optional[str], env_name: str, default_binary: str, label: str) -> Dict[str, Any]:
-    managed_selection = selected_llama_cpp_runtime()
+    environment_path = os.environ.get(env_name)
+    operator_override = bool(explicit_path or environment_path)
+    managed_selection = None if operator_override else selected_llama_cpp_runtime()
     binary_kind = "cli" if "cli" in check_id else "server"
-    managed_path = managed_llama_cpp_binary_path(binary_kind) if not explicit_path and not os.environ.get(env_name) else None
-    requested = explicit_path or os.environ.get(env_name) or managed_path or default_binary
+    managed_path = managed_llama_cpp_binary_path(binary_kind) if not operator_override else None
+    requested = explicit_path or environment_path or managed_path or default_binary
     path = shutil.which(requested)
     install_hint = "brew install llama.cpp" if platform.system().lower() == "darwin" else None
-    source = "custom_path" if explicit_path else ("environment_path" if os.environ.get(env_name) else ("managed_runtime" if managed_path else "system_path"))
+    source = "custom_path" if explicit_path else ("environment_path" if environment_path else ("managed_runtime" if managed_path else "system_path"))
+    managed_details = {"managed_runtime": managed_selection} if source == "managed_runtime" else {}
     if not path:
+        details = {
+            "requested": requested,
+            "path": None,
+            "source": source,
+            "env_var": env_name,
+            "suggested_install": install_hint,
+            "managed_install_suggestion": "Run `infergrade install-runtime --runtime llama.cpp` to inspect the pinned managed runtime plan.",
+        }
+        details.update(managed_details)
         return _check(
             check_id,
             "error",
             "%s is required for local_native llama.cpp runs." % label,
-            {
-                "requested": requested,
-                "path": None,
-                "source": source,
-                "managed_runtime": managed_selection,
-                "env_var": env_name,
-                "suggested_install": install_hint,
-                "managed_install_suggestion": "Run `infergrade install-runtime --runtime llama.cpp` to inspect the pinned managed runtime plan.",
-            },
+            details,
         )
     version = _binary_version(path)
+    details = {
+        "requested": requested,
+        "path": path,
+        "version": version,
+        "version_status": "detected" if version else "unknown",
+        "source": source,
+        "env_var": env_name,
+        "suggested_install": install_hint,
+    }
+    details.update(managed_details)
     return _check(
         check_id,
         "ok",
         "%s is available." % label,
-        {
-            "requested": requested,
-            "path": path,
-            "version": version,
-            "version_status": "detected" if version else "unknown",
-            "source": source,
-            "managed_runtime": managed_selection,
-            "env_var": env_name,
-            "suggested_install": install_hint,
-        },
+        details,
     )
 
 
