@@ -723,6 +723,12 @@ fn hub_run_handoff_summary(run_id: &str, body: &Value) -> Value {
     })
 }
 
+fn hub_run_resume_summary(run_id: &str, body: &Value) -> Value {
+    let mut summary = hub_run_handoff_summary(run_id, body);
+    summary["resume_requested"] = Value::Bool(true);
+    summary
+}
+
 #[tauri::command]
 async fn reconcile_hub_run_handoff(api_url: String, run_id: String) -> Result<Value, String> {
     let run_id =
@@ -741,6 +747,26 @@ async fn reconcile_hub_run_handoff(api_url: String, run_id: String) -> Result<Va
         .await
         .map_err(|error| error.message().to_string())?;
     Ok(hub_run_handoff_summary(run_id, &response.body))
+}
+
+#[tauri::command]
+async fn resume_hub_run(api_url: String, run_id: String) -> Result<Value, String> {
+    let run_id =
+        validate_hub_path_id(&run_id, "run_id").map_err(|error| error.message().to_string())?;
+    let token = load_runner_token_value()?
+        .ok_or_else(|| "Pair with Hub before retrying an assigned run.".to_string())?;
+    let request = build_hub_json_request(
+        HubMethod::Post,
+        &api_url,
+        &format!("/v1/runs/{run_id}/resume"),
+        Some(json!({})),
+        Some(&token),
+    )
+    .map_err(|error| error.message().to_string())?;
+    let response = execute_hub_json_request(&request)
+        .await
+        .map_err(|error| error.message().to_string())?;
+    Ok(hub_run_resume_summary(run_id, &response.body))
 }
 
 #[tauri::command]
@@ -1395,6 +1421,7 @@ pub fn run() {
             reset_runner_pairing,
             llama_cpp_runtime_plan,
             reconcile_hub_run_handoff,
+            resume_hub_run,
             install_managed_llama_cpp_runtime,
             install_required_runtime_catalog_target,
             refresh_desktop_runtime_catalog,
@@ -2430,5 +2457,13 @@ mod tests {
             .as_str()
             .unwrap_or("")
             .contains("after claim and before benchmark scoring"));
+
+        let resumed = hub_run_resume_summary(
+            "run_requeued",
+            &json!({"run": {"status": "awaiting_execution"}}),
+        );
+        assert_eq!(resumed["resume_requested"], true);
+        assert_eq!(resumed["status"], "awaiting_execution");
+        assert_eq!(resumed["terminal"], false);
     }
 }

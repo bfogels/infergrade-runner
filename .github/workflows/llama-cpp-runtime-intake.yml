@@ -10,6 +10,7 @@ on:
         type: boolean
   schedule:
     - cron: "17 9 * * *"
+    - cron: "47 9 * * 0"
 
 permissions:
   contents: read
@@ -46,10 +47,68 @@ jobs:
             https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
             > runtime-intake/latest-release.json
 
-      - name: Validate pins and build advisory intake report
+      - name: Read inspected release tag
+        id: upstream
+        shell: bash
         run: |
+          tag="$(python3 -c 'import json; print(json.load(open("runtime-intake/latest-release.json", encoding="utf-8"))["tag_name"])')"
+          [[ "${tag}" =~ ^b[0-9]+$ ]]
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore archive receipts for this exact release and verifier
+        id: archive-cache
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '47 9 * * 0'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: runtime-intake/archive-receipts
+          key: llama-cpp-archive-v2-${{ steps.upstream.outputs.tag }}-${{ hashFiles('scripts/verify_llama_cpp_release_asset.py', 'scripts/verify_llama_cpp_model_canary.py') }}
+
+      - name: Verify all official candidate archives once
+        if: (github.event_name == 'workflow_dispatch' || github.event.schedule == '47 9 * * 0') && steps.archive-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p runtime-intake/archive-receipts
+          python3 scripts/verify_llama_cpp_release_asset.py \
+            --release-json runtime-intake/latest-release.json \
+            --platform macos-arm64 \
+            --output runtime-intake/archive-receipts/macos-arm64.json
+          python3 scripts/verify_llama_cpp_release_asset.py \
+            --release-json runtime-intake/latest-release.json \
+            --platform ubuntu-x64 \
+            --run-version-smoke \
+            --retain-runtime-dir runtime-intake/ubuntu-runtime \
+            --output runtime-intake/archive-receipts/ubuntu-x64.json
+          python3 scripts/verify_llama_cpp_release_asset.py \
+            --release-json runtime-intake/latest-release.json \
+            --platform windows-cpu-x64 \
+            --output runtime-intake/archive-receipts/windows-cpu-x64.json
+
+      - name: Run tiny legacy model-load canary
+        if: (github.event_name == 'workflow_dispatch' || github.event.schedule == '47 9 * * 0') && steps.archive-cache.outputs.cache-hit != 'true'
+        run: |
+          python3 scripts/verify_llama_cpp_model_canary.py \
+            --runtime-dir runtime-intake/ubuntu-runtime \
+            --archive-receipt runtime-intake/archive-receipts/ubuntu-x64.json \
+            --output runtime-intake/archive-receipts/legacy-control.json
+
+      - name: Validate pins and build evidence-scoped intake report
+        shell: bash
+        run: |
+          receipt_args=()
+          for receipt in \
+            runtime-intake/archive-receipts/macos-arm64.json \
+            runtime-intake/archive-receipts/ubuntu-x64.json \
+            runtime-intake/archive-receipts/windows-cpu-x64.json; do
+            if [[ -f "${receipt}" ]]; then
+              receipt_args+=(--archive-receipt "${receipt}")
+            fi
+          done
+          if [[ -f runtime-intake/archive-receipts/legacy-control.json ]]; then
+            receipt_args+=(--model-canary-receipt runtime-intake/archive-receipts/legacy-control.json)
+          fi
           python3 scripts/check_llama_cpp_runtime_policy.py \
             --latest-release-json runtime-intake/latest-release.json \
+            "${receipt_args[@]}" \
             --report-json runtime-intake/report.json \
             --report-markdown runtime-intake/report.md
           cat runtime-intake/report.md >> "${GITHUB_STEP_SUMMARY}"
@@ -58,7 +117,11 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: llama-cpp-runtime-intake-${{ github.run_id }}
-          path: runtime-intake/
+          path: |
+            runtime-intake/latest-release.json
+            runtime-intake/report.json
+            runtime-intake/report.md
+            runtime-intake/archive-receipts/
           retention-days: 14
 
   verify-candidate-assets:

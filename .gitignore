@@ -16,6 +16,7 @@ data/
 memory/reference_runs/
 apps/desktop-runner/src-tauri/gen/
 target/
+artifacts/product-acceptance/
 apps/desktop-runner/src-tauri/target/
 apps/desktop-runner/src-tauri/binaries/infergrade-sidecar-*
 apps/desktop-runner/src-tauri/desktop-python/*

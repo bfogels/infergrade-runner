@@ -594,6 +594,7 @@ function renderAssignmentActive({
   }
   if (assignmentInstallRuntimeButton) {
     assignmentInstallRuntimeButton.hidden = !pendingRequiredRuntime;
+    assignmentInstallRuntimeButton.textContent = pendingRequiredRuntime ? "Install runtime and retry" : "Install required runtime";
   }
   if (assignmentOpenHubButton && phase !== "Complete") {
     assignmentOpenHubButton.textContent = phase === "Ready to retry" ? "Retry in Hub" : "Open in Hub";
@@ -2239,16 +2240,52 @@ async function installRequiredCatalogRuntime() {
   llamaRuntimeReadiness = managedRuntimeInstallSummary(result);
   llamaRuntimeAvailable = true;
   renderLocalReadinessChecklist();
+  const runId = currentAssignmentRunId || currentFirstRunUploadRunId();
+  let resumed = null;
+  let resumeError = "";
+  if (runId) {
+    try {
+      resumed = await invoke("resume_hub_run", {
+        apiUrl: readApiUrl(),
+        runId,
+      });
+    } catch (error) {
+      resumeError = redactSecrets(String(error?.message || error || "Hub retry failed"));
+    }
+  }
+  if (resumed?.resume_requested) {
+    renderAssignmentActive({
+      title: assignmentTitleFromRunId(runId),
+      phase: childProcess ? "Ready to claim" : "Ready to start",
+      description: childProcess
+        ? "The reviewed runtime is installed and this run is requeued. Runner will claim it and repeat exact model preflight."
+        : "The reviewed runtime is installed and this run is requeued. Start listening to continue.",
+      progress: 10,
+      checkName: "Runtime installed · Hub run requeued",
+      runId,
+      waitingForListener: !childProcess,
+    });
+    setStatus("Runtime ready · run requeued", "good");
+    appendLog(`Installed required signed-catalog runtime and requeued Hub run ${runId}.`);
+    return { runtime: result, resume: resumed };
+  }
   renderAssignmentActive({
-    title: assignmentTitleFromRunId(currentAssignmentRunId),
+    title: assignmentTitleFromRunId(runId),
     phase: "Ready to retry",
-    description: "The required runtime is installed. Retry this benchmark from Hub; Runner will bind it automatically for this model.",
+    description: resumeError
+      ? "The required runtime is installed, but Hub could not requeue the run. Retry it from Hub; Runner will bind this runtime automatically."
+      : "The required runtime is installed. Retry this benchmark from Hub; Runner will bind it automatically for this model.",
     progress: 100,
     checkName: "Specialized runtime ready",
-    runId: currentAssignmentRunId,
+    runId,
   });
-  appendLog(`Installed required signed-catalog runtime: ${JSON.stringify(result)}`);
-  return result;
+  if (resumeError) {
+    setStatus("Runtime ready · retry in Hub", "warning");
+    appendLog(`Installed required signed-catalog runtime, but Hub retry failed: ${resumeError}`);
+  } else {
+    appendLog(`Installed required signed-catalog runtime: ${JSON.stringify(result)}`);
+  }
+  return { runtime: result, resume: null, resumeError };
 }
 
 async function removeSelectedRuntime() {

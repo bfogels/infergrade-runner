@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_POLICY = ROOT / "runtime" / "llama_cpp_release_policy.json"
+EXPECTED_ARCHIVE_PLATFORMS = {"macos-arm64", "ubuntu-x64", "windows-cpu-x64"}
 
 
 def _parse_timestamp(value: str) -> dt.datetime:
@@ -130,6 +131,8 @@ def build_report(
     policy: Dict[str, Any],
     latest_release: Optional[Dict[str, Any]] = None,
     now: Optional[dt.datetime] = None,
+    archive_receipts: Optional[List[Dict[str, Any]]] = None,
+    model_canary_receipts: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     now_utc = (now or dt.datetime.now(dt.timezone.utc)).astimezone(dt.timezone.utc)
     review_after_days = int(policy["intake"]["stable_pin_review_after_days"])
@@ -152,6 +155,8 @@ def build_report(
                 "matches_latest_release": pin["kind"] == "release_tag" and pin["value"] == latest_tag,
             }
         )
+    receipt_rows = validate_candidate_archive_receipts(latest_release, archive_receipts or [])
+    canary_rows = validate_model_canary_receipts(latest_release, model_canary_receipts or [])
     return {
         "report_version": 1,
         "generated_at": now_utc.isoformat().replace("+00:00", "Z"),
@@ -169,7 +174,119 @@ def build_report(
         "compatibility_gates": list(policy["compatibility_gates"]),
         "model_canaries": list(policy["model_canaries"]),
         "claim_boundary": policy["intake"]["claim_boundary"],
+        "candidate_archive_receipts": receipt_rows,
+        "candidate_model_canaries": canary_rows,
+        "candidate_archive_coverage": {
+            "expected_platforms": sorted(EXPECTED_ARCHIVE_PLATFORMS),
+            "verified_platforms": sorted(item["platform"] for item in receipt_rows),
+            "all_expected_archives_verified": {
+                item["platform"] for item in receipt_rows
+            }
+            == EXPECTED_ARCHIVE_PLATFORMS,
+            "native_version_smoke_platforms": sorted(
+                item["platform"] for item in receipt_rows if item["version_smoke"] == "passed"
+            ),
+            "model_compatibility_verified": False,
+            "legacy_control_model_canary_passed": any(
+                item["canary_id"] == "legacy_llama_tiny_generation_v1" for item in canary_rows
+            ),
+            "recent_architecture_model_canary_passed": False,
+        },
     }
+
+
+def validate_candidate_archive_receipts(
+    latest_release: Optional[Dict[str, Any]], receipts: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Validate candidate receipts without inflating them into compatibility proof."""
+    if not receipts:
+        return []
+    latest_tag = str((latest_release or {}).get("tag_name") or "")
+    if not latest_tag:
+        raise ValueError("archive receipts require latest-release metadata")
+    rows: List[Dict[str, Any]] = []
+    seen_platforms = set()
+    for receipt in receipts:
+        if receipt.get("receipt_version") != 1 or receipt.get("candidate_only") is not True:
+            raise ValueError("archive receipt must be a version-1 candidate-only receipt")
+        upstream = receipt.get("upstream")
+        if not isinstance(upstream, dict) or upstream.get("release") != latest_tag:
+            raise ValueError("archive receipt release does not match the inspected upstream release")
+        platform = str(receipt.get("platform") or "")
+        if platform not in EXPECTED_ARCHIVE_PLATFORMS:
+            raise ValueError(f"archive receipt has unsupported platform: {platform!r}")
+        if platform in seen_platforms:
+            raise ValueError(f"archive receipt platform is duplicated: {platform}")
+        seen_platforms.add(platform)
+        artifact = receipt.get("artifact")
+        if not isinstance(artifact, dict):
+            raise ValueError(f"{platform}: archive receipt artifact is missing")
+        expected = str(artifact.get("github_asset_sha256") or "")
+        observed = str(artifact.get("downloaded_sha256") or "")
+        if len(expected) != 64 or any(character not in "0123456789abcdef" for character in expected):
+            raise ValueError(f"{platform}: archive receipt digest is invalid")
+        if observed != expected:
+            raise ValueError(f"{platform}: downloaded digest does not match GitHub metadata")
+        version_smoke = receipt.get("version_smoke")
+        status = str(version_smoke.get("status") if isinstance(version_smoke, dict) else "")
+        if status not in {"not_run", "passed"}:
+            raise ValueError(f"{platform}: version smoke must be not_run or passed")
+        rows.append(
+            {
+                "platform": platform,
+                "asset": str(artifact.get("name") or ""),
+                "size_bytes": int(artifact.get("size_bytes") or 0),
+                "sha256": expected,
+                "version_smoke": status,
+                "proof_scope": "native_version_smoke" if status == "passed" else "archive_only",
+                "model_compatibility": "not_run",
+            }
+        )
+    return sorted(rows, key=lambda item: item["platform"])
+
+
+def validate_model_canary_receipts(
+    latest_release: Optional[Dict[str, Any]], receipts: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    if not receipts:
+        return []
+    latest_tag = str((latest_release or {}).get("tag_name") or "")
+    if not latest_tag:
+        raise ValueError("model canary receipts require latest-release metadata")
+    rows: List[Dict[str, Any]] = []
+    seen_ids = set()
+    for receipt in receipts:
+        canary_id = str(receipt.get("canary_id") or "")
+        if receipt.get("receipt_version") != 1 or receipt.get("candidate_only") is not True:
+            raise ValueError("model canary receipt must be a version-1 candidate-only receipt")
+        if not canary_id or canary_id in seen_ids:
+            raise ValueError(f"model canary id is missing or duplicated: {canary_id!r}")
+        seen_ids.add(canary_id)
+        runtime = receipt.get("runtime")
+        if not isinstance(runtime, dict) or runtime.get("release") != latest_tag:
+            raise ValueError("model canary runtime release does not match the inspected upstream release")
+        if receipt.get("status") != "passed":
+            raise ValueError(f"{canary_id}: model canary status must be passed")
+        model = receipt.get("model")
+        if not isinstance(model, dict) or model.get("expected_sha256") != model.get(
+            "downloaded_sha256"
+        ):
+            raise ValueError(f"{canary_id}: model digest does not match")
+        execution = receipt.get("execution")
+        if not isinstance(execution, dict) or execution.get("status") != "passed":
+            raise ValueError(f"{canary_id}: model execution did not pass")
+        rows.append(
+            {
+                "canary_id": canary_id,
+                "status": "passed",
+                "proof_scope": str(receipt.get("proof_scope") or ""),
+                "model_compatibility": str(receipt.get("model_compatibility") or ""),
+                "model_repository": str(model.get("repository") or ""),
+                "model_revision": str(model.get("revision") or ""),
+                "claim_boundary": str(receipt.get("claim_boundary") or ""),
+            }
+        )
+    return sorted(rows, key=lambda item: item["canary_id"])
 
 
 def render_markdown(report: Dict[str, Any]) -> str:
@@ -190,6 +307,50 @@ def render_markdown(report: Dict[str, Any]) -> str:
             f"| {pin['id']} | {pin['channel']} | `{pin['value']}` | {pin['age_days']} days | "
             f"{'yes' if pin['review_due'] else 'no'} |"
         )
+    receipts = report.get("candidate_archive_receipts") or []
+    if receipts:
+        lines.extend(
+            [
+                "",
+                "## Candidate archive proof",
+                "",
+                "| Platform | Asset | Proof | Model load |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        for receipt in receipts:
+            lines.append(
+                f"| {receipt['platform']} | `{receipt['asset']}` | "
+                f"{receipt['proof_scope'].replace('_', ' ')} | not run |"
+            )
+        lines.extend(
+            [
+                "",
+                "> Archive proof verifies identity, bounded extraction, and expected tools. It does not prove GGUF or benchmark compatibility.",
+            ]
+        )
+    canaries = report.get("candidate_model_canaries") or []
+    if canaries:
+        lines.extend(
+            [
+                "",
+                "## Model canaries",
+                "",
+                "| Canary | Result | Scope |",
+                "| --- | --- | --- |",
+            ]
+        )
+        for canary in canaries:
+            lines.append(
+                f"| {canary['canary_id']} | {canary['status']} | "
+                f"{canary['model_compatibility'].replace('_', ' ')} |"
+            )
+        lines.extend(
+            [
+                "",
+                "> The automated legacy control catches broad load/generation regressions. Recent architectures and benchmark protocols remain separate gates.",
+            ]
+        )
     lines.extend(["", f"> {report['claim_boundary']}", ""])
     return "\n".join(lines)
 
@@ -204,6 +365,20 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--report-json", type=pathlib.Path)
     parser.add_argument("--report-markdown", type=pathlib.Path)
+    parser.add_argument(
+        "--archive-receipt",
+        action="append",
+        type=pathlib.Path,
+        default=[],
+        help="Candidate archive receipt to attach to the advisory report. Repeat per platform.",
+    )
+    parser.add_argument(
+        "--model-canary-receipt",
+        action="append",
+        type=pathlib.Path,
+        default=[],
+        help="Model canary receipt to attach to the advisory report. Repeat per canary.",
+    )
     parser.add_argument(
         "--require-current",
         action="store_true",
@@ -223,7 +398,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     latest = load_json(args.latest_release_json) if args.latest_release_json else None
-    report = build_report(policy, latest_release=latest)
+    receipts = [load_json(path) for path in args.archive_receipt]
+    canary_receipts = [load_json(path) for path in args.model_canary_receipt]
+    report = build_report(
+        policy,
+        latest_release=latest,
+        archive_receipts=receipts,
+        model_canary_receipts=canary_receipts,
+    )
     json_text = json.dumps(report, indent=2, sort_keys=True) + "\n"
     markdown = render_markdown(report)
     if args.report_json:

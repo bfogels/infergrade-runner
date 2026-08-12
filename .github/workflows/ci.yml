@@ -40,6 +40,11 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
@@ -66,6 +71,23 @@ jobs:
 
       - name: Run Python test suite
         run: ./scripts/test_all.sh
+
+      - name: Run desktop web contract tests
+        run: |
+          npm --prefix apps/desktop-runner ci
+          npm --prefix apps/desktop-runner run check
+
+      - name: Capture autonomous acceptance evidence
+        run: python3 scripts/run_product_acceptance.py --skip-commands
+
+      - name: Upload autonomous acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runner-product-acceptance-${{ github.sha }}-${{ github.run_attempt }}
+          path: artifacts/product-acceptance/latest.json
+          if-no-files-found: error
+          retention-days: 14
 
   rust:
     name: Rust workspace (build, test, clippy, fmt)

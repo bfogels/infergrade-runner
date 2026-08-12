@@ -202,6 +202,7 @@ def verify(
     platform: str,
     output: pathlib.Path,
     run_smoke: bool,
+    retained_runtime_dir: Optional[pathlib.Path] = None,
 ) -> Dict[str, Any]:
     asset_name, asset, required = release_asset(release, platform)
     with tempfile.TemporaryDirectory(prefix="infergrade-llama-candidate-") as tmp:
@@ -215,6 +216,11 @@ def verify(
         members = extract_archive(archive, extracted)
         located = locate_required(extracted, required)
         smoke = run_version_smoke(located[required[0]]) if run_smoke else {"status": "not_run"}
+        if retained_runtime_dir:
+            if retained_runtime_dir.exists():
+                raise ValueError("retained runtime directory already exists")
+            retained_runtime_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(extracted, retained_runtime_dir)
     receipt = {
         "receipt_version": 1,
         "candidate_only": True,
@@ -236,6 +242,7 @@ def verify(
             "required_member_paths": {name: str(path.relative_to(extracted)) for name, path in located.items()},
         },
         "version_smoke": smoke,
+        "runtime_materialized_for_canary": retained_runtime_dir is not None,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -248,13 +255,24 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--platform", choices=sorted(PLATFORMS), required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--run-version-smoke", action="store_true")
+    parser.add_argument(
+        "--retain-runtime-dir",
+        type=pathlib.Path,
+        help="Retain the verified extracted runtime for a same-job model canary.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     try:
-        receipt = verify(load_json(args.release_json), args.platform, args.output, args.run_version_smoke)
+        receipt = verify(
+            load_json(args.release_json),
+            args.platform,
+            args.output,
+            args.run_version_smoke,
+            retained_runtime_dir=args.retain_runtime_dir,
+        )
     except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
         print(f"llama.cpp candidate verification failed: {exc}", file=sys.stderr)
         return 1
