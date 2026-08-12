@@ -2,6 +2,12 @@ name: llama.cpp Runtime Intake
 
 on:
   workflow_dispatch:
+    inputs:
+      verify_candidate_assets:
+        description: Verify official CPU archives on macOS, Linux, and Windows
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "17 9 * * *"
 
@@ -54,3 +60,51 @@ jobs:
           name: llama-cpp-runtime-intake-${{ github.run_id }}
           path: runtime-intake/
           retention-days: 14
+
+  verify-candidate-assets:
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_candidate_assets
+    needs: inspect
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: macos-arm64
+          - os: ubuntu-latest
+            platform: ubuntu-x64
+          - os: windows-latest
+            platform: windows-cpu-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Download inspected release metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: llama-cpp-runtime-intake-${{ github.run_id }}
+          path: runtime-intake/
+
+      - name: Verify candidate archive and version
+        shell: bash
+        run: |
+          python3 scripts/verify_llama_cpp_release_asset.py \
+            --release-json runtime-intake/latest-release.json \
+            --platform "${{ matrix.platform }}" \
+            --run-version-smoke \
+            --output "runtime-intake/${{ matrix.platform }}-candidate-receipt.json"
+
+      - name: Upload candidate receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: llama-cpp-candidate-${{ matrix.platform }}-${{ github.run_id }}
+          path: runtime-intake/${{ matrix.platform }}-candidate-receipt.json
+          retention-days: 30
