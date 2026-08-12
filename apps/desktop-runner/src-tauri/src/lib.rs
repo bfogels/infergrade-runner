@@ -766,7 +766,7 @@ async fn resume_hub_run(api_url: String, run_id: String) -> Result<Value, String
     let response = execute_hub_json_request(&request)
         .await
         .map_err(|error| error.message().to_string())?;
-    Ok(hub_run_resume_summary(&run_id, &response.body))
+    Ok(hub_run_resume_summary(run_id, &response.body))
 }
 
 #[tauri::command]
