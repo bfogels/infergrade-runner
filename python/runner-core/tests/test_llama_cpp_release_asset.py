@@ -44,6 +44,7 @@ class LlamaCppReleaseAssetTests(unittest.TestCase):
         self.assertEqual(name, "llama-b10375-bin-macos-arm64.tar.gz")
         self.assertEqual(asset["size"], 123)
         self.assertIn("llama-cli", required)
+        self.assertIn("llama-completion", required)
 
     def test_rejects_non_llama_release_tags(self):
         with self.assertRaisesRegex(ValueError, "bNNNN"):
@@ -75,24 +76,38 @@ class LlamaCppReleaseAssetTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             archive = root / "tools.tar.gz"
             with tarfile.open(archive, "w:gz") as bundle:
-                for name in ("bin/llama-cli", "bin/llama-server", "bin/llama-perplexity"):
+                for name in (
+                    "bin/llama-cli",
+                    "bin/llama-completion",
+                    "bin/llama-server",
+                    "bin/llama-perplexity",
+                ):
                     payload = name.encode("utf-8")
                     info = tarfile.TarInfo(name)
                     info.size = len(payload)
                     bundle.addfile(info, io.BytesIO(payload))
             members = self.module.extract_archive(archive, root / "out")
             located = self.module.locate_required(
-                root / "out", ["llama-cli", "llama-server", "llama-perplexity"]
+                root / "out",
+                ["llama-cli", "llama-completion", "llama-server", "llama-perplexity"],
             )
-        self.assertEqual(len(members), 3)
-        self.assertEqual(set(located), {"llama-cli", "llama-server", "llama-perplexity"})
+        self.assertEqual(len(members), 4)
+        self.assertEqual(
+            set(located),
+            {"llama-cli", "llama-completion", "llama-server", "llama-perplexity"},
+        )
 
     def test_can_retain_verified_runtime_for_same_job_model_canary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             source_archive = root / "source.tar.gz"
             with tarfile.open(source_archive, "w:gz") as bundle:
-                for name in ("bin/llama-cli", "bin/llama-server", "bin/llama-perplexity"):
+                for name in (
+                    "bin/llama-cli",
+                    "bin/llama-completion",
+                    "bin/llama-server",
+                    "bin/llama-perplexity",
+                ):
                     payload = name.encode("utf-8")
                     info = tarfile.TarInfo(name)
                     info.size = len(payload)

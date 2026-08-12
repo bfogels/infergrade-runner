@@ -108,10 +108,12 @@ def validate_archive_receipt(receipt: Dict[str, Any]) -> None:
         raise ValueError("model canary requires a digest-verified runtime archive")
 
 
-def locate_llama_cli(runtime_dir: pathlib.Path) -> pathlib.Path:
-    matches = [item for item in runtime_dir.rglob("llama-cli") if item.is_file()]
+def locate_generation_binary(runtime_dir: pathlib.Path) -> pathlib.Path:
+    matches = [item for item in runtime_dir.rglob("llama-completion") if item.is_file()]
     if len(matches) != 1:
-        raise ValueError(f"runtime directory must contain exactly one llama-cli; found {len(matches)}")
+        raise ValueError(
+            f"runtime directory must contain exactly one llama-completion; found {len(matches)}"
+        )
     binary = matches[0].resolve()
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
     return binary
@@ -163,12 +165,9 @@ def canary_command(binary: pathlib.Path, model: pathlib.Path) -> List[str]:
         "--seed",
         "1",
         "--no-display-prompt",
-        "--no-conversation",
-        "--single-turn",
-        "--simple-io",
+        "-no-cnv",
         "--no-warmup",
         "--no-perf",
-        "--log-disable",
         "-t",
         "2",
     ]
@@ -179,6 +178,7 @@ def run_canary(binary: pathlib.Path, model: pathlib.Path, timeout_seconds: int =
     completed = subprocess.run(
         canary_command(binary, model),
         cwd=binary.parent,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=timeout_seconds,
@@ -210,7 +210,7 @@ def verify(
 ) -> Dict[str, Any]:
     validate_archive_receipt(archive_receipt)
     spec = model_spec(canary_id, policy_path)
-    binary = locate_llama_cli(runtime_dir)
+    binary = locate_generation_binary(runtime_dir)
     with tempfile.TemporaryDirectory(prefix="infergrade-llama-model-canary-") as tmp:
         model_path = pathlib.Path(tmp) / spec["filename"]
         downloaded_digest = download_model(model_path, spec)
@@ -228,6 +228,7 @@ def verify(
             "platform": archive_receipt.get("platform"),
             "archive_sha256": archive_receipt.get("artifact", {}).get("downloaded_sha256"),
             "version_smoke": archive_receipt.get("version_smoke", {}).get("status"),
+            "generation_binary": binary.name,
         },
         "model": {
             "family": spec["family"],

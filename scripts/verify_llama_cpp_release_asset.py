@@ -31,15 +31,20 @@ MAX_MEMBERS = 1000
 PLATFORMS = {
     "macos-arm64": {
         "asset": "llama-{tag}-bin-macos-arm64.tar.gz",
-        "executables": ["llama-cli", "llama-server", "llama-perplexity"],
+        "executables": ["llama-cli", "llama-completion", "llama-server", "llama-perplexity"],
     },
     "ubuntu-x64": {
         "asset": "llama-{tag}-bin-ubuntu-x64.tar.gz",
-        "executables": ["llama-cli", "llama-server", "llama-perplexity"],
+        "executables": ["llama-cli", "llama-completion", "llama-server", "llama-perplexity"],
     },
     "windows-cpu-x64": {
         "asset": "llama-{tag}-bin-win-cpu-x64.zip",
-        "executables": ["llama-cli.exe", "llama-server.exe", "llama-perplexity.exe"],
+        "executables": [
+            "llama-cli.exe",
+            "llama-completion.exe",
+            "llama-server.exe",
+            "llama-perplexity.exe",
+        ],
     },
 }
 

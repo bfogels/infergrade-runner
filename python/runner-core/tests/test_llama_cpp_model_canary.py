@@ -51,12 +51,9 @@ class LlamaCppModelCanaryTests(unittest.TestCase):
         self.assertIn("--seed", command)
         self.assertIn("1", command)
         self.assertIn("--no-display-prompt", command)
-        self.assertIn("--no-conversation", command)
-        self.assertIn("--single-turn", command)
-        self.assertIn("--simple-io", command)
+        self.assertIn("-no-cnv", command)
         self.assertIn("--no-warmup", command)
         self.assertIn("--no-perf", command)
-        self.assertIn("--log-disable", command)
         self.assertIn("2", command)
 
     def test_recent_canary_comes_from_exact_bounded_policy_artifact(self):
@@ -75,10 +72,10 @@ class LlamaCppModelCanaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime = pathlib.Path(tmp) / "runtime"
             runtime.mkdir()
-            binary = runtime / "llama-cli"
+            binary = runtime / "llama-completion"
             binary.write_text("placeholder", encoding="utf-8")
 
-            located = self.module.locate_llama_cli(pathlib.Path(tmp) / "runtime")
+            located = self.module.locate_generation_binary(pathlib.Path(tmp) / "runtime")
 
         self.assertTrue(located.is_absolute())
         self.assertEqual(located, binary.resolve())
@@ -88,7 +85,7 @@ class LlamaCppModelCanaryTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             runtime = root / "runtime"
             runtime.mkdir()
-            binary = runtime / "llama-cli"
+            binary = runtime / "llama-completion"
             binary.write_text("placeholder", encoding="utf-8")
             output = root / "receipt.json"
 
@@ -113,13 +110,14 @@ class LlamaCppModelCanaryTests(unittest.TestCase):
         self.assertIn("does not prove recent architectures", receipt["claim_boundary"])
         self.assertNotIn("runtime_dir", receipt)
         self.assertNotIn("binary_path", receipt["runtime"])
+        self.assertEqual(receipt["runtime"]["generation_binary"], "llama-completion")
 
     def test_recent_receipt_stays_exact_artifact_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             runtime = root / "runtime"
             runtime.mkdir()
-            (runtime / "llama-cli").write_text("placeholder", encoding="utf-8")
+            (runtime / "llama-completion").write_text("placeholder", encoding="utf-8")
             output = root / "receipt.json"
 
             def fake_download(destination, spec):
