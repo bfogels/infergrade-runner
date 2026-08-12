@@ -103,14 +103,20 @@ def _download_asset_once(url: str, destination: pathlib.Path, expected_size: int
     return digest.hexdigest()
 
 
+def _retryable_download_error(error: BaseException) -> bool:
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in {408, 429} or 500 <= error.code <= 599
+    return isinstance(error, (ConnectionError, TimeoutError, urllib.error.URLError))
+
+
 def download_asset(url: str, destination: pathlib.Path, expected_size: int) -> str:
     attempts = 3
     for attempt in range(1, attempts + 1):
         try:
             return _download_asset_once(url, destination, expected_size)
-        except (ConnectionError, TimeoutError, urllib.error.URLError):
+        except (ConnectionError, TimeoutError, urllib.error.URLError) as exc:
             destination.unlink(missing_ok=True)
-            if attempt == attempts:
+            if attempt == attempts or not _retryable_download_error(exc):
                 raise
             time.sleep(attempt)
     raise AssertionError("unreachable")

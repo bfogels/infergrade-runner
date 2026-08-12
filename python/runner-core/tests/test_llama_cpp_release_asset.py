@@ -5,6 +5,7 @@ import shutil
 import tarfile
 import tempfile
 import unittest
+import urllib.error
 import zipfile
 from unittest import mock
 
@@ -171,6 +172,26 @@ class LlamaCppReleaseAssetTests(unittest.TestCase):
                 side_effect=ValueError("download size mismatch"),
             ) as download:
                 with self.assertRaisesRegex(ValueError, "size mismatch"):
+                    self.module.download_asset("https://example.invalid/runtime", destination, 8)
+
+        download.assert_called_once()
+
+    def test_does_not_retry_permanent_http_errors(self):
+        error = urllib.error.HTTPError(
+            "https://example.invalid/runtime",
+            404,
+            "not found",
+            {},
+            None,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = pathlib.Path(tmp) / "runtime.tar.gz"
+            with mock.patch.object(
+                self.module,
+                "_download_asset_once",
+                side_effect=error,
+            ) as download:
+                with self.assertRaises(urllib.error.HTTPError):
                     self.module.download_asset("https://example.invalid/runtime", destination, 8)
 
         download.assert_called_once()
