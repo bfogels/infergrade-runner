@@ -5,6 +5,7 @@ import {
   assignmentEventRecovery,
   assignmentFailureRecovery,
   assignmentPreflightPresentation,
+  assignmentProgressStage,
   assignmentTitleFromRunId,
   desktopReadinessPresentation,
   displayCacheArtifactName,
@@ -132,6 +133,7 @@ const assignmentProgressWrap = document.querySelector("[data-assignment-progress
 const assignmentPhase = document.querySelector("[data-assignment-phase]");
 const assignmentTime = document.querySelector("[data-assignment-time]");
 const assignmentProgressBar = document.querySelector("[data-assignment-progress-bar]");
+const assignmentStages = [...document.querySelectorAll("[data-assignment-stage]")];
 const assignmentCheck = document.querySelector("[data-assignment-check]");
 const assignmentStartListeningButton = document.querySelector("[data-assignment-start-listening]");
 const assignmentInstallRuntimeButton = document.querySelector("[data-assignment-install-runtime]");
@@ -424,6 +426,28 @@ function formatBytes(value = 0) {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
+const ASSIGNMENT_STAGE_ORDER = ["download", "verify", "load", "benchmark", "publish", "complete"];
+
+function renderAssignmentStages({ phase = "", checkName = "", progress = 0, waitingForListener = false } = {}) {
+  if (!assignmentStages.length) return;
+  const currentId = assignmentProgressStage({ phase, checkName, progress, waitingForListener });
+  const currentIndex = ASSIGNMENT_STAGE_ORDER.indexOf(currentId);
+  const isComplete = String(phase || "").toLowerCase() === "complete";
+  const isBlocked = String(phase || "").toLowerCase() === "needs attention";
+  assignmentStages.forEach((item) => {
+    const itemIndex = ASSIGNMENT_STAGE_ORDER.indexOf(item.dataset.assignmentStage || "");
+    const stateName = !currentId
+      ? "pending"
+      : isComplete || itemIndex < currentIndex
+        ? "complete"
+        : itemIndex === currentIndex
+          ? isBlocked ? "blocked" : "current"
+          : "pending";
+    item.dataset.state = stateName;
+    item.setAttribute("aria-current", stateName === "current" || stateName === "blocked" ? "step" : "false");
+  });
+}
+
 function renderAssignmentIdle() {
   pendingRequiredRuntime = null;
   if (!assignmentPanel) {
@@ -452,6 +476,7 @@ function renderAssignmentIdle() {
   if (assignmentProgressWrap) {
     assignmentProgressWrap.hidden = true;
   }
+  renderAssignmentStages();
   if (assignmentStartListeningButton) {
     assignmentStartListeningButton.hidden = true;
   }
@@ -496,6 +521,7 @@ function renderRecentCompletion() {
   if (assignmentPhase) assignmentPhase.textContent = "Complete";
   if (assignmentTime) assignmentTime.textContent = completionDurationLabel(completion);
   if (assignmentProgressBar) assignmentProgressBar.style.width = "100%";
+  renderAssignmentStages({ phase: "Complete", progress: 100 });
   if (assignmentCheck) {
     assignmentCheck.hidden = !completion.bundleId;
     assignmentCheck.textContent = completion.bundleId ? `Uploaded bundle: ${completion.bundleId}` : "";
@@ -562,6 +588,7 @@ function renderAssignmentActive({
     const boundedProgress = Math.max(0, Math.min(100, Number(progress) || 0));
     assignmentProgressBar.style.width = `${boundedProgress}%`;
   }
+  renderAssignmentStages({ phase, checkName, progress, waitingForListener });
   if (assignmentStartListeningButton) {
     assignmentStartListeningButton.hidden = !waitingForListener;
   }
@@ -569,7 +596,7 @@ function renderAssignmentActive({
     assignmentInstallRuntimeButton.hidden = !pendingRequiredRuntime;
   }
   if (assignmentOpenHubButton && phase !== "Complete") {
-    assignmentOpenHubButton.textContent = "Open in Hub";
+    assignmentOpenHubButton.textContent = phase === "Ready to retry" ? "Retry in Hub" : "Open in Hub";
   }
   if (assignmentCheck) {
     assignmentCheck.hidden = !checkName;
@@ -1272,7 +1299,12 @@ async function runReadinessCheck() {
     }
     await checkRunnerStartupSelfTest({ required: true });
     await checkDesktopReadiness({ required: true });
-    const runtimePlan = await inspectRuntimePlan({ reconcileStale: true });
+    let runtimePlan = await inspectRuntimePlan({ reconcileStale: true });
+    if (runtimePlan?.native_runtime_status !== "available") {
+      appendLog("Make ready is installing the Runner-pinned managed runtime after the readiness check found no usable selection.");
+      await installManagedRuntime();
+      runtimePlan = await inspectRuntimePlan({ reconcileStale: true });
+    }
     await verifyHubConnection();
     pairingAuthFailure = null;
     const handoff = await reconcileCurrentHandoff({ preserveTerminalNotice: true });
@@ -1305,6 +1337,7 @@ async function runReadinessCheck() {
     if (readinessCheckButton) {
       readinessCheckButton.disabled = false;
     }
+    setRuntimeActionDisabled(false);
     renderLocalReadinessChecklist();
   }
 }
