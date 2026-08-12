@@ -345,6 +345,78 @@ class DoctorTests(unittest.TestCase):
         self.assertNotIn("managed_runtime", checks["llama_server_native"]["details"])
         selected_runtime_mock.assert_not_called()
 
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.capability_images_for_request")
+    @mock.patch("infergrade.doctor.shutil.which")
+    @mock.patch("infergrade.doctor.subprocess.run")
+    def test_local_native_doctor_requires_docker_for_container_capability_benchmark(
+        self,
+        run_mock,
+        which_mock,
+        capability_images_mock,
+        capture_environment_mock,
+    ):
+        capture_environment_mock.return_value = {
+            "environment_class": "local_workstation",
+            "hardware_class": "apple_silicon",
+            "accelerator_api": "metal",
+            "accelerator_type": "gpu",
+            "accelerator_count": 1,
+            "hardware_id": "hw_test",
+        }
+        capability_images_mock.return_value = [
+            {
+                "benchmark_id": "ifeval",
+                "display_name": "IFEval",
+                "image": "ghcr.io/bfogels/infergrade-ifeval:0.3.57",
+            }
+        ]
+        which_mock.side_effect = lambda name: (
+            name
+            if name in ("docker", "/custom/llama-cli", "/custom/llama-server")
+            else None
+        )
+        run_mock.return_value = mock.Mock(
+            returncode=1,
+            stdout="",
+            stderr="Cannot connect to the Docker daemon",
+        )
+        artifact = os.path.join(self.tempdir.name, "model.gguf")
+        with open(artifact, "wb") as handle:
+            handle.write(b"gguf")
+        request = RunRequest(
+            model="openbmb/MiniCPM5-1B",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["ifeval"],
+            quant_artifact=artifact,
+            execution_mode="local_native",
+            llama_cpp_cli_path="/custom/llama-cli",
+            llama_cpp_server_path="/custom/llama-server",
+            simulate=False,
+        )
+
+        report = run_doctor(request=request)
+
+        checks = {item["id"]: item for item in report["checks"]}
+        self.assertFalse(report["ok"])
+        self.assertEqual(checks["docker_cli"]["status"], "ok")
+        self.assertEqual(checks["docker_daemon"]["status"], "error")
+        self.assertEqual(
+            checks["docker_daemon"]["message"],
+            "Docker is not running, but the selected benchmark requires it.",
+        )
+        self.assertEqual(
+            checks["docker_daemon"]["details"]["required_by_benchmark_ids"],
+            ["ifeval"],
+        )
+        self.assertNotIn("capability_image_ifeval", checks)
+        run_mock.assert_called_once_with(
+            ["docker", "info"],
+            capture_output=True,
+            text=True,
+        )
+
     @mock.patch("infergrade.doctor.windows_cuda_preflight")
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.shutil.which")

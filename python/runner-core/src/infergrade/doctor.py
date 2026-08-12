@@ -216,12 +216,18 @@ def _request_checks(request: RunRequest) -> List[Dict[str, Any]]:
     ]
     checks.extend(_execution_mode_guidance_checks(request, environment))
     checks.extend(_backend_compatibility_checks(request))
-    if request.execution_mode in ("local_container", "cloud_container"):
+    backend_uses_container = request.execution_mode in ("local_container", "cloud_container")
+    capability_images = capability_images_for_request(request)
+    if backend_uses_container or capability_images:
         checks.append(_binary_check("docker", "docker_cli", "Docker CLI is available."))
         if checks[-1]["status"] == "ok":
-            checks.append(_docker_daemon_check())
-            checks.append(_backend_image_check(request))
-            checks.extend(_capability_image_checks(request))
+            required_by = [item["benchmark_id"] for item in capability_images]
+            daemon_check = _docker_daemon_check(required_by=required_by)
+            checks.append(daemon_check)
+            if daemon_check["status"] == "ok":
+                if backend_uses_container:
+                    checks.append(_backend_image_check(request))
+                checks.extend(_capability_image_checks(request))
     if request.execution_mode == "local_native":
         checks.extend(_native_runtime_checks(request, environment))
     if _uses_remote_artifact(request):
@@ -497,14 +503,21 @@ def _binary_check(binary_name: str, check_id: str, success_message: str, severit
     return _check(check_id, "ok", success_message, {"path": path})
 
 
-def _docker_daemon_check() -> Dict[str, Any]:
+def _docker_daemon_check(required_by: Optional[List[str]] = None) -> Dict[str, Any]:
     completed = subprocess.run(["docker", "info"], capture_output=True, text=True)
     if completed.returncode != 0:
+        details = {"stderr": (completed.stderr or completed.stdout or "").strip()}
+        if required_by:
+            details["required_by_benchmark_ids"] = list(required_by)
         return _check(
             "docker_daemon",
             "error",
-            "Docker daemon is not reachable.",
-            {"stderr": (completed.stderr or completed.stdout or "").strip()},
+            (
+                "Docker is not running, but the selected benchmark requires it."
+                if required_by
+                else "Docker daemon is not reachable."
+            ),
+            details,
         )
     return _check(
         "docker_daemon",
