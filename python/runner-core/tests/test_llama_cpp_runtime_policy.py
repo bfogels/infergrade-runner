@@ -124,6 +124,71 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
             exit_code = self.module.main(["--latest-release-json", str(latest_path), "--require-current"])
         self.assertEqual(exit_code, 2)
 
+    def archive_receipt(self, platform="macos-arm64", status="not_run", tag="b10100"):
+        suffix = {
+            "macos-arm64": "macos-arm64.tar.gz",
+            "ubuntu-x64": "ubuntu-x64.tar.gz",
+            "windows-cpu-x64": "win-cpu-x64.zip",
+        }[platform]
+        return {
+            "receipt_version": 1,
+            "candidate_only": True,
+            "upstream": {"repository": "ggml-org/llama.cpp", "release": tag},
+            "platform": platform,
+            "artifact": {
+                "name": f"llama-{tag}-bin-{suffix}",
+                "size_bytes": 123,
+                "github_asset_sha256": "a" * 64,
+                "downloaded_sha256": "a" * 64,
+            },
+            "version_smoke": {"status": status},
+        }
+
+    def test_candidate_archive_receipts_remain_distinct_from_model_compatibility(self):
+        latest = {
+            "tag_name": "b10100",
+            "published_at": "2026-07-15T05:29:11Z",
+            "html_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b10100",
+        }
+        receipts = [
+            self.archive_receipt("macos-arm64"),
+            self.archive_receipt("ubuntu-x64", status="passed"),
+            self.archive_receipt("windows-cpu-x64"),
+        ]
+        report = self.module.build_report(
+            self.policy,
+            latest_release=latest,
+            archive_receipts=receipts,
+        )
+        coverage = report["candidate_archive_coverage"]
+        self.assertTrue(coverage["all_expected_archives_verified"])
+        self.assertEqual(coverage["native_version_smoke_platforms"], ["ubuntu-x64"])
+        self.assertFalse(coverage["model_compatibility_verified"])
+        self.assertEqual(
+            {item["proof_scope"] for item in report["candidate_archive_receipts"]},
+            {"archive_only", "native_version_smoke"},
+        )
+        markdown = self.module.render_markdown(report)
+        self.assertIn("It does not prove GGUF or benchmark compatibility", markdown)
+
+    def test_candidate_archive_receipts_reject_release_or_digest_mismatch(self):
+        latest = {"tag_name": "b10100"}
+        wrong_release = self.archive_receipt(tag="b10099")
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            self.module.build_report(
+                self.policy,
+                latest_release=latest,
+                archive_receipts=[wrong_release],
+            )
+        wrong_digest = self.archive_receipt()
+        wrong_digest["artifact"]["downloaded_sha256"] = "b" * 64
+        with self.assertRaisesRegex(ValueError, "downloaded digest"):
+            self.module.build_report(
+                self.policy,
+                latest_release=latest,
+                archive_receipts=[wrong_digest],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

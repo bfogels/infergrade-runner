@@ -46,10 +46,47 @@ jobs:
             https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
             > runtime-intake/latest-release.json
 
-      - name: Validate pins and build advisory intake report
+      - name: Read inspected release tag
+        id: upstream
+        shell: bash
+        run: |
+          tag="$(python3 -c 'import json; print(json.load(open("runtime-intake/latest-release.json", encoding="utf-8"))["tag_name"])')"
+          [[ "${tag}" =~ ^b[0-9]+$ ]]
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore archive receipts for this exact release and verifier
+        id: archive-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: runtime-intake/archive-receipts
+          key: llama-cpp-archive-v1-${{ steps.upstream.outputs.tag }}-${{ hashFiles('scripts/verify_llama_cpp_release_asset.py') }}
+
+      - name: Verify all official candidate archives once
+        if: steps.archive-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p runtime-intake/archive-receipts
+          python3 scripts/verify_llama_cpp_release_asset.py \
+            --release-json runtime-intake/latest-release.json \
+            --platform macos-arm64 \
+            --output runtime-intake/archive-receipts/macos-arm64.json
+          python3 scripts/verify_llama_cpp_release_asset.py \
+            --release-json runtime-intake/latest-release.json \
+            --platform ubuntu-x64 \
+            --run-version-smoke \
+            --output runtime-intake/archive-receipts/ubuntu-x64.json
+          python3 scripts/verify_llama_cpp_release_asset.py \
+            --release-json runtime-intake/latest-release.json \
+            --platform windows-cpu-x64 \
+            --output runtime-intake/archive-receipts/windows-cpu-x64.json
+
+      - name: Validate pins and build evidence-scoped intake report
         run: |
           python3 scripts/check_llama_cpp_runtime_policy.py \
             --latest-release-json runtime-intake/latest-release.json \
+            --archive-receipt runtime-intake/archive-receipts/macos-arm64.json \
+            --archive-receipt runtime-intake/archive-receipts/ubuntu-x64.json \
+            --archive-receipt runtime-intake/archive-receipts/windows-cpu-x64.json \
             --report-json runtime-intake/report.json \
             --report-markdown runtime-intake/report.md
           cat runtime-intake/report.md >> "${GITHUB_STEP_SUMMARY}"

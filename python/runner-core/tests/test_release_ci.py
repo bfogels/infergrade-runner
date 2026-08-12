@@ -447,6 +447,12 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("actions/upload-artifact@", workflow)
         self.assertIn("verify_candidate_assets:", workflow)
         self.assertIn("scripts/verify_llama_cpp_release_asset.py", workflow)
+        self.assertIn("Restore archive receipts for this exact release and verifier", workflow)
+        self.assertIn("Verify all official candidate archives once", workflow)
+        self.assertIn("steps.archive-cache.outputs.cache-hit != 'true'", workflow)
+        self.assertIn("--archive-receipt runtime-intake/archive-receipts/macos-arm64.json", workflow)
+        self.assertIn("--archive-receipt runtime-intake/archive-receipts/ubuntu-x64.json", workflow)
+        self.assertIn("--archive-receipt runtime-intake/archive-receipts/windows-cpu-x64.json", workflow)
         self.assertIn("platform: macos-arm64", workflow)
         self.assertIn("platform: ubuntu-x64", workflow)
         self.assertIn("platform: windows-cpu-x64", workflow)
@@ -454,6 +460,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertNotIn("contents: write", workflow)
         self.assertNotIn("pull-requests: write", workflow)
         self.assertNotIn("issues: write", workflow)
+        self.assertNotIn("model_compatibility_verified: true", workflow)
 
     def test_runtime_catalog_workflows_keep_online_role_authority_separate(self):
         release = (ROOT / ".github" / "workflows" / "runtime-catalog-release.yml").read_text(
