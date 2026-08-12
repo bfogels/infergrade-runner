@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -74,7 +75,7 @@ def release_asset(release: Dict[str, Any], platform: str) -> Tuple[str, Dict[str
     return expected_name, asset, list(spec["executables"])
 
 
-def download_asset(url: str, destination: pathlib.Path, expected_size: int) -> str:
+def _download_asset_once(url: str, destination: pathlib.Path, expected_size: int) -> str:
     request = urllib.request.Request(url, headers={"User-Agent": "InferGrade-Runtime-Intake/1"})
     configured_ca = os.environ.get("SSL_CERT_FILE")
     ca_candidates = [configured_ca, "/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt"]
@@ -95,6 +96,19 @@ def download_asset(url: str, destination: pathlib.Path, expected_size: int) -> s
     if observed != expected_size:
         raise ValueError(f"download size mismatch: expected {expected_size}, observed {observed}")
     return digest.hexdigest()
+
+
+def download_asset(url: str, destination: pathlib.Path, expected_size: int) -> str:
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            return _download_asset_once(url, destination, expected_size)
+        except (ConnectionError, TimeoutError, urllib.error.URLError):
+            destination.unlink(missing_ok=True)
+            if attempt == attempts:
+                raise
+            time.sleep(attempt)
+    raise AssertionError("unreachable")
 
 
 def _safe_member_path(destination: pathlib.Path, name: str) -> pathlib.Path:

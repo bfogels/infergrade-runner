@@ -116,6 +116,50 @@ class LlamaCppReleaseAssetTests(unittest.TestCase):
             self.assertTrue(receipt["runtime_materialized_for_canary"])
             self.assertTrue((retained / "bin" / "llama-cli").is_file())
 
+    def test_retries_transient_download_errors_and_removes_partial_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = pathlib.Path(tmp) / "runtime.tar.gz"
+            attempts = 0
+
+            def flaky_download(_url, path, _size):
+                nonlocal attempts
+                attempts += 1
+                if attempts < 3:
+                    path.write_bytes(b"partial")
+                    raise ConnectionResetError("connection closed")
+                self.assertFalse(path.exists())
+                path.write_bytes(b"complete")
+                return "digest"
+
+            with mock.patch.object(
+                self.module,
+                "_download_asset_once",
+                side_effect=flaky_download,
+            ):
+                with mock.patch.object(self.module.time, "sleep") as sleep:
+                    digest = self.module.download_asset(
+                        "https://example.invalid/runtime",
+                        destination,
+                        8,
+                    )
+
+        self.assertEqual(digest, "digest")
+        self.assertEqual(attempts, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2])
+
+    def test_does_not_retry_integrity_failures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = pathlib.Path(tmp) / "runtime.tar.gz"
+            with mock.patch.object(
+                self.module,
+                "_download_asset_once",
+                side_effect=ValueError("download size mismatch"),
+            ) as download:
+                with self.assertRaisesRegex(ValueError, "size mismatch"):
+                    self.module.download_asset("https://example.invalid/runtime", destination, 8)
+
+        download.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
