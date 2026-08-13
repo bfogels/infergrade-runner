@@ -207,13 +207,27 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(coding_anchor["use_case"], "agentic_coding")
         self.assertEqual(
             coding_anchor["benchmark_check_ids"],
-            ["interactive_chat_v1", "evalplus_humaneval", "evalplus_mbpp"],
+            [
+                "interactive_chat_v1",
+                "repository_edit_smoke_v1",
+                "evalplus_humaneval",
+                "evalplus_mbpp",
+            ],
         )
         self.assertEqual(reasoning_anchor["use_case"], "reasoning")
         self.assertEqual(
             reasoning_anchor["benchmark_check_ids"],
-            ["reasoning_exact_answer_v1", "mmlu_pro_reference_v1"],
+            [
+                "reasoning_exact_answer_v1",
+                "mmlu_pro_reference_v1",
+                "gpqa_diamond_reference_v1",
+            ],
         )
+        checks = {item["check_id"]: item for item in load_capability_catalog()["checks"]}
+        self.assertEqual(checks["repository_edit_smoke_v1"]["primary_score_weight"], 0.0)
+        self.assertEqual(checks["repository_edit_smoke_v1"]["score_role"], "diagnostic_only")
+        self.assertEqual(checks["gpqa_diamond_reference_v1"]["primary_score_weight"], 0.0)
+        self.assertEqual(checks["gpqa_diamond_reference_v1"]["score_role"], "diagnostic_only")
         self.assertTrue(coding_anchor["calibration_campaign_eligible"])
         self.assertTrue(reasoning_anchor["calibration_campaign_eligible"])
         historical = next(
