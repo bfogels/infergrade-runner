@@ -63,7 +63,6 @@ def extract_calibration_observations(
     benchmark_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     observations: List[Dict[str, Any]] = []
-    seen = set()
     for document in documents:
         source = str(document.get("_source") or "")
         if document.get("artifact_kind") == "capability_run":
@@ -93,10 +92,6 @@ def extract_calibration_observations(
         if not version or score is None or score_ready is not True:
             continue
         observation_id = str(document.get("result_id") or document.get("bundle_id") or source)
-        key = (observation_id, version)
-        if key in seen:
-            continue
-        seen.add(key)
         family = _nested(document, "ontology", "model_family", "family_name") or document.get("model_family")
         scale = _nested(document, "ontology", "model_family", "parameter_scale") or document.get("parameter_scale")
         checkpoint_name = _nested(document, "ontology", "checkpoint", "checkpoint_name") or document.get("checkpoint_name")
@@ -118,19 +113,72 @@ def extract_calibration_observations(
                 "source": source,
             }
         )
-    deduplicated: List[Dict[str, Any]] = []
-    seen_observations = set()
+    deduplicated_by_key: Dict[Any, Dict[str, Any]] = {}
+    key_order = []
     for item in observations:
         key = (item.get("score_version"), _observation_scope(str(item.get("source") or "")) or item.get("observation_id"))
-        if key in seen_observations:
+        existing = deduplicated_by_key.get(key)
+        if existing is None:
+            key_order.append(key)
+            deduplicated_by_key[key] = item
             continue
-        seen_observations.add(key)
-        deduplicated.append(item)
+        conflicts = sorted(set(
+            list(existing.get("integrity_conflicts") or [])
+            + list(item.get("integrity_conflicts") or [])
+            + _duplicate_integrity_conflicts(existing, item)
+        ))
+        if _observation_detail_rank(item) > _observation_detail_rank(existing):
+            # A bundle can contain a compact capability_summary and a richer
+            # normalized Result for the same score version. Keep one corpus
+            # observation while preserving component and exact setup detail.
+            existing = item
+        if conflicts:
+            existing = dict(existing, integrity_conflicts=conflicts)
+        deduplicated_by_key[key] = existing
+    deduplicated = [deduplicated_by_key[key] for key in key_order]
     if score_version:
         return [item for item in deduplicated if item.get("score_version") == score_version]
     if benchmark_id:
         return [item for item in deduplicated if item.get("benchmark_id") == benchmark_id]
     return deduplicated
+
+
+def _observation_detail_rank(observation: Dict[str, Any]) -> tuple:
+    """Prefer richer duplicate views without changing corpus cardinality."""
+    return (
+        len(list(observation.get("components") or [])),
+        len(list(observation.get("model_identities") or [])),
+        int(bool(observation.get("quantization_scheme"))),
+        int(str(observation.get("model_family") or "unknown") != "unknown"),
+        int(str(observation.get("parameter_band") or "unknown") != "unknown"),
+    )
+
+
+def _duplicate_integrity_conflicts(left: Dict[str, Any], right: Dict[str, Any]) -> List[str]:
+    """Identify contradictory claims from two views of one bundle score."""
+    conflicts = []
+    left_score = _number(left.get("score"))
+    right_score = _number(right.get("score"))
+    if left_score is not None and right_score is not None and not math.isclose(
+        left_score, right_score, rel_tol=0.0, abs_tol=1e-9
+    ):
+        conflicts.append("composite_score_mismatch")
+    left_components = {
+        str(item.get("benchmark_id")): float(item["score"])
+        for item in list(left.get("components") or [])
+        if item.get("benchmark_id") and _number(item.get("score")) is not None
+    }
+    right_components = {
+        str(item.get("benchmark_id")): float(item["score"])
+        for item in list(right.get("components") or [])
+        if item.get("benchmark_id") and _number(item.get("score")) is not None
+    }
+    for component_id in sorted(set(left_components).intersection(right_components)):
+        if not math.isclose(
+            left_components[component_id], right_components[component_id], rel_tol=0.0, abs_tol=1e-9
+        ):
+            conflicts.append("component_score_mismatch:%s" % component_id)
+    return conflicts
 
 
 def _surface_observation(surface: Dict[str, Any], document: Dict[str, Any], source: str) -> Optional[Dict[str, Any]]:
@@ -189,8 +237,10 @@ def audit_capability_observations(
     catalog: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     matching = [item for item in observations if item.get("score_version") == score_version and _number(item.get("score")) is not None]
+    integrity_conflicts = [item for item in matching if item.get("integrity_conflicts")]
+    eligible = [item for item in matching if not item.get("integrity_conflicts")]
     minimum_task_count = int((policy or {}).get("minimum_task_count") or 0)
-    selected = [item for item in matching if int(item.get("task_count") or 0) >= minimum_task_count]
+    selected = [item for item in eligible if int(item.get("task_count") or 0) >= minimum_task_count]
     current_targets = [
         item
         for item in list((catalog or {}).get("coverage_expansion_priorities") or [])
@@ -218,7 +268,8 @@ def audit_capability_observations(
     distinct_scores = len(set(round(value, 6) for value in scores))
     metrics = {
         "observation_count": count,
-        "excluded_below_minimum_task_count": len(matching) - len(selected),
+        "integrity_conflict_count": len(integrity_conflicts),
+        "excluded_below_minimum_task_count": len(eligible) - len(selected),
         "model_family_count": len([name for name in families if name != "unknown"]),
         "parameter_band_count": len([name for name in bands if name != "unknown"]),
         "distinct_score_count": distinct_scores,
@@ -243,6 +294,8 @@ def audit_capability_observations(
     if component_metrics:
         metrics["headline_components"] = component_metrics
     blockers = []
+    if integrity_conflicts:
+        blockers.append("duplicate_observation_integrity_conflict")
     _minimum_gate(blockers, metrics, effective_policy, "observation_count", "minimum_observations")
     _minimum_gate(blockers, metrics, effective_policy, "model_family_count", "minimum_model_families")
     _minimum_gate(blockers, metrics, effective_policy, "parameter_band_count", "minimum_parameter_bands")
@@ -301,7 +354,11 @@ def audit_capability_observations(
         ):
             blockers.append("insufficient_headline_component_headroom:%s" % component_id)
     insufficient = any(item.startswith("insufficient_") for item in blockers)
-    status = "insufficient_calibration" if insufficient else ("saturation_or_concentration_risk" if blockers else "calibrated_headroom")
+    status = (
+        "evidence_integrity_risk"
+        if integrity_conflicts
+        else ("insufficient_calibration" if insufficient else ("saturation_or_concentration_risk" if blockers else "calibrated_headroom"))
+    )
     return {
         "artifact_kind": "capability_calibration_audit",
         "artifact_spec_version": "0.1.0",

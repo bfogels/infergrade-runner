@@ -280,6 +280,151 @@ class CapabilityCalibrationTests(unittest.TestCase):
 
         self.assertEqual([item["score"] for item in observations], [0.25, 0.5])
 
+    def test_bundle_dedup_prefers_result_with_component_and_setup_detail(self):
+        documents = [
+            {
+                "_source": "/tmp/bundle/artifacts/capability/capability_summary.json",
+                "artifact_kind": "capability_summary",
+                "bundle_id": "bundle-1",
+                "surfaces": [
+                    {
+                        "surface": "local_reasoning_capability",
+                        "score_version": "local_reasoning_score_v2",
+                        "score_raw_attainment": 0.64,
+                        "score_ready": True,
+                    }
+                ],
+            },
+            {
+                "_source": "/tmp/bundle/results/result.json",
+                "result_id": "result-1",
+                "model_id": "Qwen/Qwen3.5-9B",
+                "model_family": "Qwen3.5",
+                "parameter_scale": "9B",
+                "quantization_scheme": "q4_k_m",
+                "capability_score_version": "local_reasoning_score_v2",
+                "capability_score": 0.64,
+                "capability_score_ready": True,
+                "capability_component_reports": [
+                    {
+                        "benchmark_id": "reasoning_exact_answer_v1",
+                        "component_score": 1.0,
+                        "status": "completed",
+                    }
+                ],
+            },
+        ]
+
+        observations = extract_calibration_observations(
+            documents,
+            score_version="local_reasoning_score_v2",
+        )
+
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0]["observation_id"], "result-1")
+        self.assertEqual(observations[0]["quantization_scheme"], "q4_k_m")
+        self.assertEqual(
+            observations[0]["components"],
+            [{"benchmark_id": "reasoning_exact_answer_v1", "score": 1.0}],
+        )
+
+    def test_bundle_dedup_is_order_independent(self):
+        summary = {
+            "_source": "/tmp/bundle/artifacts/capability/capability_summary.json",
+            "artifact_kind": "capability_summary",
+            "bundle_id": "bundle-1",
+            "surfaces": [{
+                "surface": "local_assistant_capability",
+                "score_version": "local_assistant_score_v4",
+                "score_raw_attainment": 0.5,
+                "score_ready": True,
+            }],
+        }
+        result = {
+            "_source": "/tmp/bundle/results/result.json",
+            "result_id": "result-1",
+            "capability_score_version": "local_assistant_score_v4",
+            "capability_score": 0.5,
+            "capability_score_ready": True,
+            "capability_component_reports": [{
+                "benchmark_id": "ifeval",
+                "component_score": 0.5,
+                "status": "completed",
+            }],
+        }
+
+        forward = extract_calibration_observations([summary, result])
+        reverse = extract_calibration_observations([result, summary])
+
+        self.assertEqual(forward, reverse)
+
+    def test_bundle_dedup_marks_conflicting_composite_scores_and_excludes_them(self):
+        documents = [
+            {
+                "_source": "/tmp/bundle/artifacts/capability/capability_summary.json",
+                "artifact_kind": "capability_summary",
+                "bundle_id": "bundle-1",
+                "surfaces": [{
+                    "surface": "local_assistant_capability",
+                    "score_version": "local_assistant_score_v4",
+                    "score_raw_attainment": 0.5,
+                    "score_ready": True,
+                }],
+            },
+            {
+                "_source": "/tmp/bundle/results/result.json",
+                "result_id": "result-1",
+                "capability_score_version": "local_assistant_score_v4",
+                "capability_score": 0.6,
+                "capability_score_ready": True,
+                "capability_component_reports": [{
+                    "benchmark_id": "ifeval",
+                    "component_score": 0.5,
+                    "status": "completed",
+                }],
+            },
+        ]
+
+        observations = extract_calibration_observations(documents)
+        report = audit_capability_observations(observations, "local_assistant_score_v4")
+
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0]["integrity_conflicts"], ["composite_score_mismatch"])
+        self.assertEqual(report["status"], "evidence_integrity_risk")
+        self.assertFalse(report["headline_ready"])
+        self.assertEqual(report["metrics"]["integrity_conflict_count"], 1)
+        self.assertEqual(report["metrics"]["observation_count"], 0)
+        self.assertIn("duplicate_observation_integrity_conflict", report["blockers"])
+
+    def test_bundle_dedup_marks_conflicting_component_scores(self):
+        result = {
+            "_source": "/tmp/bundle/results/result.json",
+            "result_id": "result-1",
+            "capability_score_version": "local_assistant_score_v4",
+            "capability_score": 0.5,
+            "capability_score_ready": True,
+            "capability_component_reports": [{
+                "benchmark_id": "ifeval",
+                "component_score": 0.5,
+                "status": "completed",
+            }],
+        }
+        second_view = dict(result)
+        second_view["_source"] = "/tmp/bundle/artifacts/normalized_result.json"
+        second_view["capability_component_reports"] = [{
+            "benchmark_id": "ifeval",
+            "component_score": 0.75,
+            "status": "completed",
+        }]
+
+        observations = extract_calibration_observations([result, second_view])
+
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(
+            observations[0]["integrity_conflicts"],
+            ["component_score_mismatch:ifeval"],
+        )
+
     def test_extracts_flat_normalized_result_brief(self):
         observations = extract_calibration_observations([{
             "result_id": "brief-1",
