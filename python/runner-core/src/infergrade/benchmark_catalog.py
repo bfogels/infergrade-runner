@@ -143,6 +143,8 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         for item in list(payload.get("planned_benchmark_candidates") or [])
         if item.get("check_id")
     }
+    for check_id in sorted(declared_check_ids & planned_check_ids):
+        failures.append(f"{check_id}: benchmark cannot be both a declared check and planned candidate")
     for check_id in sorted(declared_check_ids | planned_check_ids):
         status = status_by_check.get(check_id)
         if not status:
@@ -174,6 +176,36 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
             failures.append(f"{check_id}: scoring_policy_id is not declared")
         if not isinstance(status.get("promotion_blockers"), list) or not status.get("promotion_blockers"):
             failures.append(f"{check_id}: promotion_blockers must be a non-empty list")
+        maturity = str(status.get("maturity") or "")
+        runnable_status = str(status.get("runnable_status") or "")
+        if planned_candidate:
+            if runnable_status != "not_runnable":
+                failures.append(
+                    f"{check_id}: planned candidate must remain not_runnable until moved into checks"
+                )
+            if maturity.endswith("_runnable"):
+                failures.append(
+                    f"{check_id}: planned candidate cannot declare runnable maturity"
+                )
+        if declared_check and runnable_status.startswith("runnable_"):
+            if "not_implemented" in str(status.get("harness_status") or ""):
+                failures.append(
+                    f"{check_id}: runnable check requires an implemented harness"
+                )
+            if str(status.get("expected_duration_token_volume_status") or "") == "unknown":
+                failures.append(
+                    f"{check_id}: runnable check requires bounded duration and token-volume status"
+                )
+        if declared_check and maturity.endswith("_runnable"):
+            if not runnable_status.startswith("runnable_"):
+                failures.append(
+                    f"{check_id}: runnable maturity requires runnable_status"
+                )
+            revision_status = str(status.get("fixture_or_dataset_revision_status") or "")
+            if "pinned" not in revision_status:
+                failures.append(
+                    f"{check_id}: runnable reference or gold maturity requires a pinned fixture or dataset"
+                )
     extra_status_ids = sorted(set(status_by_check) - (declared_check_ids | planned_check_ids))
     for check_id in extra_status_ids:
         failures.append(f"{check_id}: status matrix entry has no matching check or planned candidate")

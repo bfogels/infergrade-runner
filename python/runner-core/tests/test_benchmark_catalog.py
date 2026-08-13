@@ -301,6 +301,75 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertTrue(any("multiturn_chat_memory_v1" in item and "is not declared" in item for item in failures))
         self.assertTrue(any("gpqa_diamond_reference_v1" in item and "does not match check" in item for item in failures))
 
+    def test_catalog_legitimacy_validation_blocks_catalog_only_planned_promotion(self):
+        mutated = deepcopy(load_capability_catalog())
+        statuses = {item["check_id"]: item for item in mutated["benchmark_status_matrix"]}
+        statuses["bfcl_local_reference_v1"]["runnable_status"] = "runnable_intentional_reference"
+        statuses["bfcl_local_reference_v1"]["maturity"] = "reference_runnable"
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "bfcl_local_reference_v1: planned candidate must remain not_runnable until moved into checks",
+            failures,
+        )
+        self.assertIn(
+            "bfcl_local_reference_v1: planned candidate cannot declare runnable maturity",
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_requires_implemented_bounded_runnable_lane(self):
+        mutated = deepcopy(load_capability_catalog())
+        statuses = {item["check_id"]: item for item in mutated["benchmark_status_matrix"]}
+        status = statuses["repository_edit_smoke_v1"]
+        status["harness_status"] = "not_implemented"
+        status["expected_duration_token_volume_status"] = "unknown"
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "repository_edit_smoke_v1: runnable check requires an implemented harness",
+            failures,
+        )
+        self.assertIn(
+            "repository_edit_smoke_v1: runnable check requires bounded duration and token-volume status",
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_requires_pinned_runnable_reference(self):
+        mutated = deepcopy(load_capability_catalog())
+        statuses = {item["check_id"]: item for item in mutated["benchmark_status_matrix"]}
+        status = statuses["mmlu_pro_reference_v1"]
+        status["runnable_status"] = "not_runnable"
+        status["fixture_or_dataset_revision_status"] = "dataset_revision_needed"
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "mmlu_pro_reference_v1: runnable maturity requires runnable_status",
+            failures,
+        )
+        self.assertIn(
+            "mmlu_pro_reference_v1: runnable reference or gold maturity requires a pinned fixture or dataset",
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_rejects_planned_and_runnable_overlap(self):
+        mutated = deepcopy(load_capability_catalog())
+        mutated["planned_benchmark_candidates"].append(
+            {
+                "check_id": "repository_edit_smoke_v1",
+                "planned_score_policy_id": "repo_edit_task_success_v1",
+            }
+        )
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "repository_edit_smoke_v1: benchmark cannot be both a declared check and planned candidate",
+            failures,
+        )
+
     def test_catalog_legitimacy_validation_rejects_unknown_coverage_generation_preset(self):
         mutated = deepcopy(load_capability_catalog())
         priority = next(
