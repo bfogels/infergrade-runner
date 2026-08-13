@@ -101,6 +101,14 @@ The audit deliberately reports `scoped_claim_coverage_ready` separately from `br
 
 This is a catalog-structure audit, not empirical validation. `scripts/audit_capability_calibration.py` remains the result-corpus gate for cross-family distribution, repeats, failure quality, component ceiling rates, and score headroom. A surface needs both kinds of evidence before broader claims are credible; passing either audit never substitutes for the other.
 
+For a claim-readiness decision, run both gates through the fail-closed join:
+
+```bash
+PYTHONPATH=python/runner-core/src python3 scripts/audit_benchmark_readiness.py /path/to/result-bundles --fail-scoped-ready
+```
+
+`scripts/audit_benchmark_readiness.py` reports separate scoped-claim and broad-surface blockers for every task surface. Scoped readiness requires the catalog's narrow facets plus an empirically diverse, non-saturated score distribution. Broad readiness additionally requires the broader priority facets, a runnable refreshable facet, and no known headline or diagnostic saturation risk. Missing or unreadable result evidence remains unready; the audit never curves, caps, or rescales raw attainment. Use `--fail-broad-ready` only for a workflow that is intentionally gating a broad-surface claim, because the current catalog is expected to fail that stronger gate.
+
 The gap choices are grounded in the scope of the candidate benchmarks rather than their popularity. [LiveCodeBench](https://arxiv.org/abs/2403.07974) adds continuously collected coding problems and broader execution modes beyond static function-generation sets. [SWE-bench](https://arxiv.org/abs/2310.06770) uses real repository issues that can require multi-file changes. [GPQA](https://arxiv.org/abs/2311.12022) supplies a harder expert-science diagnostic, while [MMLU-Pro](https://arxiv.org/abs/2406.01574) remains the harder broad multi-domain headline component. [IFEval](https://arxiv.org/abs/2311.07911) remains a verifiable instruction-following component, not a proxy for tool use, preference quality, or long-context task reasoning.
 
 ## Optional Local Judge Boundary
