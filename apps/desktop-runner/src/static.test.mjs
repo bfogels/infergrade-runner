@@ -462,6 +462,7 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("Repair runtime and retry"));
   assert.ok(js.includes("Runtime repaired · Hub run requeued"));
   assert.ok(js.includes("catalogRuntimeRepairRequirement"));
+  assert.ok(js.includes('mockAssignment === "runtime-repair"'));
   assert.ok(js.includes("The required runtime is installed, but Hub could not requeue the run."));
   assert.ok(rust.includes("async fn resume_hub_run"));
   assert.ok(rust.includes('format!("/v1/runs/{run_id}/resume")'));

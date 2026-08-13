@@ -735,7 +735,7 @@ function applyPreviewStateFromUrl() {
     return;
   }
   previewStateApplied = true;
-  if (mockState === "ready" || mockAssignment === "active") {
+  if (mockState === "ready" || ["active", "runtime-repair"].includes(mockAssignment)) {
     savedTokenAvailable = true;
     runnerProfileAvailable = true;
     childProcess = { preview: true };
@@ -781,6 +781,16 @@ function applyPreviewStateFromUrl() {
       checkName: "llama.cpp readiness check",
       remaining: "about 6 min remaining",
       runId: "run_preview_assignment",
+    });
+  } else if (mockAssignment === "runtime-repair") {
+    pendingManagedRuntimeRepair = true;
+    renderAssignmentActive({
+      title: "Qwen3.5-4B · benchmark evidence run",
+      phase: "Needs attention",
+      description: "The saved llama.cpp executable is unavailable. Repair the runtime here, then Runner will retry this benchmark.",
+      progress: 100,
+      checkName: "Saved runtime needs repair",
+      runId: "run_preview_runtime_repair",
     });
   } else if (mockAssignment === "paused") {
     currentHandoffRunId = "run_qwen3_5_9b_complete_the_missing_benchmark_evidence_preview";
