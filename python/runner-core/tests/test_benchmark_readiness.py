@@ -159,6 +159,88 @@ class BenchmarkReadinessTests(unittest.TestCase):
         self.assertEqual(check["suite_ceiling_fraction"], 1.0)
         self.assertEqual(check["headroom_to_suite_ceiling"], 0.0)
 
+    def test_representative_outcome_slice_saturation_blocks_priority_facet(self):
+        catalog = _structurally_broad_catalog_with_stateful_diagnostic()
+        documents = _stateful_component_documents(saturated_slice="noop")
+
+        report = audit_benchmark_readiness(documents, catalog)
+
+        assistant = _surface(report, "local_assistant_capability")
+        check = _facet(assistant, "stateful_tool_use")["checks"][0]
+        self.assertEqual(check["status"], "saturation_risk")
+        self.assertFalse(check["ready"])
+        self.assertIn("required_slice_saturation_risk:noop", check["blockers"])
+        self.assertEqual(check["suite_ceiling_fraction"], 0.0)
+        self.assertEqual(
+            check["required_slice_metrics"]["noop"]["suite_ceiling_fraction"],
+            1.0,
+        )
+        self.assertEqual(
+            check["required_slice_metrics"]["noop"]["headroom_to_suite_ceiling"],
+            0.0,
+        )
+
+    def test_one_perfect_outcome_observation_is_insufficient_not_saturated(self):
+        catalog = _structurally_broad_catalog_with_stateful_diagnostic()
+
+        report = audit_benchmark_readiness(
+            _stateful_component_documents(saturated_slice="noop")[:1],
+            catalog,
+        )
+
+        assistant = _surface(report, "local_assistant_capability")
+        check = _facet(assistant, "stateful_tool_use")["checks"][0]
+        self.assertEqual(check["status"], "insufficient_evidence")
+        self.assertNotIn(
+            "corpus:priority_facet_saturation_risk:stateful_tool_use",
+            assistant["broad_surface_blockers"],
+        )
+        self.assertEqual(
+            check["required_slice_metrics"]["noop"]["status"],
+            "insufficient_evidence",
+        )
+
+    def test_representative_non_saturated_outcome_slices_clear_gate(self):
+        catalog = _structurally_broad_catalog_with_stateful_diagnostic()
+
+        report = audit_benchmark_readiness(
+            _stateful_component_documents(),
+            catalog,
+        )
+
+        check = _facet(
+            _surface(report, "local_assistant_capability"),
+            "stateful_tool_use",
+        )["checks"][0]
+        self.assertEqual(check["status"], "ready")
+        self.assertTrue(check["ready"])
+        self.assertEqual(
+            set(check["required_slice_metrics"]),
+            {"success", "blocked", "noop"},
+        )
+        self.assertTrue(
+            all(item["ready"] for item in check["required_slice_metrics"].values())
+        )
+
+    def test_underfilled_outcome_slice_cannot_clear_gate(self):
+        catalog = _structurally_broad_catalog_with_stateful_diagnostic()
+        documents = _stateful_component_documents()
+        for document in documents:
+            document["summary"]["variant_metrics"]["noop"]["total_count"] = 3
+
+        report = audit_benchmark_readiness(documents, catalog)
+
+        check = _facet(
+            _surface(report, "local_assistant_capability"),
+            "stateful_tool_use",
+        )["checks"][0]
+        self.assertEqual(check["status"], "insufficient_evidence")
+        self.assertIn("required_slice_unobserved:noop", check["blockers"])
+        self.assertEqual(
+            check["required_slice_metrics"]["noop"]["observation_count"],
+            0,
+        )
+
     def test_self_asserted_evidence_groups_do_not_count_as_independent_repeats(self):
         catalog = _structurally_broad_catalog_with_assistant_diagnostic()
         documents = _calibrated_documents(catalog)
@@ -363,6 +445,26 @@ def _structurally_broad_catalog_with_assistant_diagnostic():
     return catalog
 
 
+def _structurally_broad_catalog_with_stateful_diagnostic():
+    catalog = _structurally_broad_catalog()
+    checks = {item["check_id"]: item for item in catalog["checks"]}
+    assistant = next(
+        item
+        for item in catalog["surface_score_policies"]
+        if item["surface_id"] == "local_assistant_capability"
+    )
+    representativeness = assistant["representativeness_policy"]
+    representativeness["priority_facets"].append("stateful_tool_use")
+    representativeness["supporting_check_ids"].append(
+        "stateful_tool_loop_diagnostic_v1"
+    )
+    checks["stateful_tool_loop_diagnostic_v1"]["discrimination_status"] = (
+        "calibrated_headroom"
+    )
+    checks["stateful_tool_loop_diagnostic_v1"].pop("saturation_evidence", None)
+    return catalog
+
+
 def _add_component_observations(documents, surface_id, check_id, score=None):
     for index, document in enumerate(documents):
         details = document["capability"]["capability_score_details"]
@@ -407,6 +509,29 @@ def _standalone_component_documents(surface_id, check_id, fixture_revision="fixt
         }
         for index in range(20)
     ]
+
+
+def _stateful_component_documents(saturated_slice=None):
+    documents = _standalone_component_documents(
+        "local_assistant_capability",
+        "stateful_tool_loop_diagnostic_v1",
+    )
+    base_scores = {
+        "success": (0.5, 0.625, 0.75, 0.875),
+        "blocked": (0.375, 0.5, 0.625, 0.75),
+        "noop": (0.25, 0.375, 0.5, 0.625),
+    }
+    for index, document in enumerate(documents):
+        document["tasks"] = [{} for _ in range(24)]
+        document["summary"]["variant_metrics"] = {}
+        for slice_id, scores in base_scores.items():
+            score = 1.0 if slice_id == saturated_slice else scores[index % len(scores)]
+            document["summary"]["variant_metrics"][slice_id] = {
+                "correct_count": round(score * 8),
+                "total_count": 8,
+                "trajectory_success_rate": score,
+            }
+    return documents
 
 
 def _calibrated_documents(catalog, saturated=False):

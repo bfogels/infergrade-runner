@@ -116,6 +116,46 @@ class BenchmarkAdequacyTests(unittest.TestCase):
             failures,
         )
 
+    def test_empirical_saturation_slice_policy_is_fail_closed(self):
+        catalog = deepcopy(load_capability_catalog())
+        stateful = next(
+            item
+            for item in catalog["checks"]
+            if item["check_id"] == "stateful_tool_loop_diagnostic_v1"
+        )
+        stateful["empirical_saturation_slice_policy"]["breakdown_field"] = (
+            "undeclared_metrics"
+        )
+        stateful["empirical_saturation_slice_policy"]["required_slices"] = [
+            "noop",
+            "noop",
+        ]
+        stateful["empirical_saturation_slice_policy"]["minimum_cases_per_slice"] = 0
+        stateful["higher_is_better"] = False
+
+        failures = validate_benchmark_adequacy_metadata(catalog)
+
+        self.assertIn(
+            "stateful_tool_loop_diagnostic_v1: empirical saturation slice "
+            "breakdown_field must be declared in score_breakdown_fields",
+            failures,
+        )
+        self.assertIn(
+            "stateful_tool_loop_diagnostic_v1: empirical saturation required_slices "
+            "must be unique",
+            failures,
+        )
+        self.assertIn(
+            "stateful_tool_loop_diagnostic_v1: empirical saturation "
+            "minimum_cases_per_slice must be a positive integer",
+            failures,
+        )
+        self.assertIn(
+            "stateful_tool_loop_diagnostic_v1: empirical saturation slices require "
+            "higher_is_better true",
+            failures,
+        )
+
     def test_static_metadata_never_claims_empirical_headroom(self):
         report = audit_benchmark_adequacy(load_capability_catalog())
 
