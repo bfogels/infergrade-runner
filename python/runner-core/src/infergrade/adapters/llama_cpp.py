@@ -39,7 +39,7 @@ _EVAL_TIME_RE = re.compile(r"eval time\s*=\s*([0-9.]+)\s*ms", re.IGNORECASE)
 _EVAL_TOKENS_RE = re.compile(r"eval time\s*=\s*[0-9.]+\s*ms\s*/\s*([0-9.]+)\s*runs?", re.IGNORECASE)
 _EVAL_TPS_RE = re.compile(r"\(\s*[0-9.]+\s*ms per token,\s*([0-9.]+)\s*tokens per second\)", re.IGNORECASE)
 _INFERGRADE_CONTEXT_BUCKET_RE = re.compile(
-    r"InferGrade nominal context bucket:\s*(4096|8192|16384)\s+tokens\.",
+    r"\AInferGrade nominal context bucket:\s*(4096|8192|16384|32768|65536|131072)\s+tokens\.",
     re.IGNORECASE,
 )
 

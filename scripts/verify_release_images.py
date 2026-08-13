@@ -19,6 +19,7 @@ IMAGE_NAMES = (
     "infergrade-evalplus",
     "infergrade-mmlu-pro",
     "infergrade-gpqa",
+    "infergrade-longbench-v2",
     "infergrade-bfcl",
     "infergrade-repository-edit",
 )
@@ -27,6 +28,7 @@ MULTIARCH_IMAGE_NAMES = {
     "infergrade-evalplus",
     "infergrade-mmlu-pro",
     "infergrade-gpqa",
+    "infergrade-longbench-v2",
     "infergrade-bfcl",
     "infergrade-repository-edit",
 }

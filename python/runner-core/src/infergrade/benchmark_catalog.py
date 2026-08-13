@@ -32,6 +32,7 @@ SUPPORTED_COVERAGE_GENERATION_PRESETS = {
 DIRECT_ANSWER_PROTOCOL_CHECK_IDS = {
     "mmlu_pro_reference_v1",
     "gpqa_diamond_reference_v1",
+    "longbench_v2_local_reference_v1",
 }
 
 

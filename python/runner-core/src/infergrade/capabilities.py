@@ -82,6 +82,10 @@ DEFAULT_CAPABILITY_IMAGES = {
     "gpqa_diamond_reference_v1": env_value(
         "INFERGRADE_GPQA_IMAGE", _released_capability_image("infergrade-gpqa")
     ),
+    "longbench_v2_local_reference_v1": env_value(
+        "INFERGRADE_LONGBENCH_V2_IMAGE",
+        _released_capability_image("infergrade-longbench-v2"),
+    ),
     "bfcl_local_reference_v1": env_value(
         "INFERGRADE_BFCL_IMAGE", _released_capability_image("infergrade-bfcl")
     ),
@@ -89,6 +93,11 @@ DEFAULT_CAPABILITY_IMAGES = {
         "INFERGRADE_REPOSITORY_EDIT_IMAGE",
         _released_capability_image("infergrade-repository-edit"),
     ),
+}
+MULTIPLE_CHOICE_REFERENCE_IDS = {
+    "mmlu_pro_reference_v1",
+    "gpqa_diamond_reference_v1",
+    "longbench_v2_local_reference_v1",
 }
 
 _LISTENER_RUNS_DIR = "/app/runs"
@@ -191,6 +200,17 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=64,
         container_image=DEFAULT_CAPABILITY_IMAGES["gpqa_diamond_reference_v1"],
         case_limits={"canary": 25, "standard": 100, "gold": 198},
+    ),
+    "longbench_v2_local_reference_v1": CapabilityBenchmarkSpec(
+        benchmark_id="longbench_v2_local_reference_v1",
+        display_name="LongBench v2 local reference",
+        benchmark_kind="long_context_multiple_choice",
+        primary_metric_name="accuracy",
+        generation_max_tokens=64,
+        container_image=DEFAULT_CAPABILITY_IMAGES[
+            "longbench_v2_local_reference_v1"
+        ],
+        case_limits={"canary": 6, "standard": 12, "gold": 23},
     ),
     "bfcl_local_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="bfcl_local_reference_v1",
@@ -573,8 +593,7 @@ def _multiple_choice_output_shape_gate(
     one answer label despite a diverse reference distribution. That is evidence
     of a broken response protocol, not a trustworthy capability measurement.
     """
-    supported = {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
-    if spec.benchmark_id not in supported:
+    if spec.benchmark_id not in MULTIPLE_CHOICE_REFERENCE_IDS:
         return {"status": "not_applicable", "policy_id": "multiple_choice_output_shape_gate_v2"}
     metrics = dict(summary.get("metrics") or {})
     case_results = list(summary.get("case_results") or [])
@@ -823,7 +842,7 @@ def _stateful_tool_loop_output_shape_gate(
 
 
 def _output_shape_policy_id(spec: CapabilityBenchmarkSpec) -> Optional[str]:
-    if spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}:
+    if spec.benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS:
         return "multiple_choice_output_shape_gate_v2"
     if spec.benchmark_id == "ifeval":
         return "visible_response_output_shape_gate_v1"
@@ -901,7 +920,7 @@ def _component_report_for_benchmark(
         "generation_failure_severity": benchmark_result.get("generation_failure_severity"),
     }
     metrics = benchmark_result.get("metrics") or {}
-    if benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"} and isinstance(metrics, dict):
+    if benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS and isinstance(metrics, dict):
         malformed_output_count = metrics.get("malformed_output_count", metrics.get("invalid_count"))
         if isinstance(malformed_output_count, int) and not isinstance(malformed_output_count, bool):
             report["malformed_output_count"] = malformed_output_count
@@ -1186,6 +1205,7 @@ def execute_capability_suite(
             elif spec.benchmark_id in {
                 "mmlu_pro_reference_v1",
                 "gpqa_diamond_reference_v1",
+                "longbench_v2_local_reference_v1",
                 "bfcl_local_reference_v1",
             }:
                 capability_run_path = _write_multiple_choice_capability_run_artifact(
@@ -1999,6 +2019,23 @@ def _write_multiple_choice_capability_run_artifact(
                 "category": result.get("category") or case.get("category"),
                 **(
                     {
+                        "sub_domain": result.get("sub_domain")
+                        or case.get("sub_domain"),
+                        "difficulty": result.get("difficulty")
+                        or case.get("difficulty"),
+                        "length": result.get("length") or case.get("length"),
+                        "context_word_count": result.get("context_word_count")
+                        or case.get("context_word_count"),
+                        "nominal_context_bucket_tokens": result.get(
+                            "nominal_context_bucket_tokens"
+                        )
+                        or case.get("nominal_context_bucket_tokens"),
+                    }
+                    if spec.benchmark_id == "longbench_v2_local_reference_v1"
+                    else {}
+                ),
+                **(
+                    {
                         "function_selection_correct": result.get("function_selection_correct"),
                         "format_valid": not malformed if generation_status == "completed" else None,
                         "format_violation": "malformed_output" if generation_status == "completed" and malformed else None,
@@ -2112,6 +2149,19 @@ def _write_multiple_choice_capability_run_artifact(
             "not_comparable_count": len([task for task in tasks if task["state"] == "not_comparable"]),
             **_artifact_summary_performance(summary.get("task_performance")),
             "category_metrics": dict(summary.get("category_metrics") or {}),
+            **(
+                {
+                    "difficulty_metrics": dict(
+                        summary.get("difficulty_metrics") or {}
+                    ),
+                    "length_metrics": dict(summary.get("length_metrics") or {}),
+                    "context_bucket_metrics": dict(
+                        summary.get("context_bucket_metrics") or {}
+                    ),
+                }
+                if spec.benchmark_id == "longbench_v2_local_reference_v1"
+                else {}
+            ),
             "malformed_output_count": metrics.get("malformed_output_count", metrics.get("invalid_count")),
             "output_shape_gate": dict(summary.get("output_shape_gate") or {}),
         },
@@ -2697,13 +2747,23 @@ def _reasoning_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
 
 
 def _multiple_choice_artifact_claim_boundary(benchmark_id: str, state: str) -> Dict[str, List[str]]:
-    label = "GPQA Diamond" if benchmark_id == "gpqa_diamond_reference_v1" else "MMLU-Pro"
+    label = {
+        "gpqa_diamond_reference_v1": "GPQA Diamond",
+        "longbench_v2_local_reference_v1": "LongBench v2-derived short-context",
+    }.get(benchmark_id, "MMLU-Pro")
     unsupported = [
         "This is not a global intelligence score.",
         "This is not public leaderboard evidence.",
         "This is not gold evidence.",
         "Sampled %s reference evidence does not prove broad real-world assistant quality by itself." % label,
     ]
+    if benchmark_id == "longbench_v2_local_reference_v1":
+        unsupported.extend(
+            [
+                "This is not an official LongBench v2 score.",
+                "This short-context subset does not measure the upstream medium or long strata, maximum-context support, or general long-context capability.",
+            ]
+        )
     if state == "scored":
         supported = [
             "This setup completed the pinned %s sampled reference protocol recorded in this artifact." % label,
@@ -3014,7 +3074,7 @@ def _case_checkpoint_fingerprint(
                 "container_args": list(spec.container_args),
                 "generation_protocol": (
                     "multiple_choice_letter_grammar_v1"
-                    if spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
+                    if spec.benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS
                     else (
                         "unified_diff_only_v1"
                         if spec.benchmark_id == "repository_edit_smoke_v1"
@@ -3140,7 +3200,7 @@ def _mmlu_completion_has_answer_shape(value: Any) -> bool:
 
 
 def _direct_answer_recovery_reason(spec: CapabilityBenchmarkSpec, generated: Dict[str, Any]) -> Optional[str]:
-    if spec.benchmark_id not in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"} or generated.get("status", "completed") != "completed":
+    if spec.benchmark_id not in MULTIPLE_CHOICE_REFERENCE_IDS or generated.get("status", "completed") != "completed":
         return None
     text = str(generated.get("text") or "")
     if _mmlu_completion_has_answer_shape(text):
@@ -3182,7 +3242,7 @@ def _generate_predictions(
         _initialize_case_checkpoint(checkpoint_path, checkpoint_fingerprint, spec, total_cases)
         completed_checkpoint = {}
     adaptive_max_tokens = spec.generation_max_tokens
-    protocol_canary_complete = spec.benchmark_id not in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
+    protocol_canary_complete = spec.benchmark_id not in MULTIPLE_CHOICE_REFERENCE_IDS
     for index, case in enumerate(cases, start=1):
         case_id = case.get("case_id") or case.get("task_id") or stable_hash(case, length=12)
         checkpoint_prediction = completed_checkpoint.get(str(case_id))
@@ -3315,7 +3375,7 @@ def _generate_predictions(
         _append_case_checkpoint(checkpoint_path, record)
         predictions.append(record)
         if (
-            spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
+            spec.benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS
             and record.get("direct_answer_protocol_recovery", {}).get("status") == "failed"
         ):
             # One failed, model-specific protocol canary is sufficient to

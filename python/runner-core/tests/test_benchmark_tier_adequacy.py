@@ -11,7 +11,7 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
 
         self.assertTrue(report["ready"])
         self.assertEqual(report["status"], "ready")
-        self.assertEqual(report["varying_tier_benchmark_count"], 13)
+        self.assertEqual(report["varying_tier_benchmark_count"], 14)
         self.assertEqual(report["errors"], [])
         self.assertTrue(all(item["ready"] for item in report["benchmarks"]))
 

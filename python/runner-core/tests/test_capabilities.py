@@ -19,6 +19,7 @@ from infergrade.capabilities import (
     _generation_prompt_for_case,
     _host_mount_path,
     _multiple_choice_artifact_claim_boundary,
+    _multiple_choice_output_shape_gate,
     _normalize_evalplus_completion,
     _native_benchmark_cases,
     _repository_edit_output_shape_gate,
@@ -816,6 +817,45 @@ class CapabilityTests(unittest.TestCase):
 
         self.assertEqual([item["benchmark_id"] for item in images], ["gpqa_diamond_reference_v1"])
         self.assertEqual(images[0]["image"], "ghcr.io/bfogels/infergrade-gpqa:%s" % __version__)
+
+    def test_capability_images_include_longbench_v2_reference_when_selected(self):
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["longbench_v2_local_reference_v1"],
+        )
+        images = capability_images_for_request(request)
+
+        self.assertEqual([item["benchmark_id"] for item in images], ["longbench_v2_local_reference_v1"])
+        self.assertEqual(images[0]["image"], "ghcr.io/bfogels/infergrade-longbench-v2:%s" % __version__)
+        self.assertEqual(
+            CAPABILITY_BENCHMARKS["longbench_v2_local_reference_v1"].case_limits,
+            {"canary": 6, "standard": 12, "gold": 23},
+        )
+
+    def test_longbench_v2_malformed_output_gate_and_claim_boundary_are_narrow(self):
+        spec = CAPABILITY_BENCHMARKS["longbench_v2_local_reference_v1"]
+        gate = _multiple_choice_output_shape_gate(
+            spec,
+            [{"generation_status": "completed"} for _ in range(12)],
+            {
+                "metrics": {"total_count": 12, "malformed_output_count": 7},
+                "case_results": [
+                    {"predicted": None if index < 7 else "A"}
+                    for index in range(12)
+                ],
+            },
+        )
+        boundary = _multiple_choice_artifact_claim_boundary(
+            "longbench_v2_local_reference_v1", "scored"
+        )
+
+        self.assertEqual(gate["status"], "blocked")
+        self.assertIn("dominant_malformed_output", gate["reason_codes"])
+        unsupported = " ".join(boundary["unsupported_claims"])
+        self.assertIn("not an official LongBench v2 score", unsupported)
+        self.assertIn("medium or long strata", unsupported)
 
     def test_capability_images_include_bfcl_reference_when_selected(self):
         request = RunRequest(
