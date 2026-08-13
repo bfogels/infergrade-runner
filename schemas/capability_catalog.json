@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-13-tier-sampling-representativeness",
+  "catalog_version": "2026-08-13-tier-representativeness-audit",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -630,6 +630,21 @@
       "calibration_campaign_eligible": false
     }
   ],
+  "tier_sampling_policies": {
+    "ifeval": {"strategy": "coverage_balanced_hash_rank", "stratification_fields": ["instruction_id"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 541}},
+    "evalplus_humaneval": {"strategy": "global_hash_rank", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 20, "standard": 164, "gold": 164}},
+    "evalplus_mbpp": {"strategy": "global_hash_rank", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 378}},
+    "multiturn_chat_memory_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 3, "standard": 5, "gold": 5}},
+    "assistant_compositional_instruction_v2": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 4, "standard": 24, "gold": 24}},
+    "coding_static_repair_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 2, "standard": 3, "gold": 3}},
+    "reasoning_exact_answer_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 2, "standard": 3, "gold": 3}},
+    "mmlu_pro_reference_v1": {"strategy": "stratum_round_robin_hash_rank", "stratification_fields": ["category"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 300}},
+    "gpqa_diamond_reference_v1": {"strategy": "stratum_round_robin_hash_rank", "stratification_fields": ["domain"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 198}},
+    "bfcl_local_reference_v1": {"strategy": "stratum_round_robin_hash_rank", "stratification_fields": ["category"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 11, "standard": 55, "gold": 110}},
+    "stateful_tool_loop_diagnostic_v1": {"strategy": "balanced_tier_blocks", "stratification_fields": ["category", "variant"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 8, "standard": 16, "gold": 24}},
+    "repository_edit_smoke_v1": {"strategy": "pinned_semantic_order", "stratification_fields": ["category"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 2, "standard": 6, "gold": 8}},
+    "context_retrieval_reference_v1": {"strategy": "balanced_tier_blocks", "stratification_fields": ["context_bucket_tokens", "key_position"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 1, "standard": 3, "gold": 6}}
+  },
   "benchmark_maturity_levels": [
     {
       "maturity": "planned",

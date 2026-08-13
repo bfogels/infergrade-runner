@@ -22,6 +22,7 @@ from infergrade.capabilities import (
     _normalize_evalplus_completion,
     _native_benchmark_cases,
     _repository_edit_output_shape_gate,
+    _selected_fixture_revision,
     _run_capability_container,
     _structured_tool_use_output_shape_gate,
     _write_multiple_choice_capability_run_artifact,
@@ -978,6 +979,31 @@ class CapabilityTests(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertNotEqual(first, larger)
 
+    def test_native_fixture_identity_separates_exact_tier_subsets(self):
+        cases = [
+            {"task_id": "stateful_tool_loop_diagnostic_v1/case-%d" % index}
+            for index in range(24)
+        ]
+
+        canary = _selected_fixture_revision(
+            "stateful_tool_loop_diagnostic_v1",
+            "2026-08-stateful-tool-loop-v1",
+            cases[:8],
+        )
+        standard = _selected_fixture_revision(
+            "stateful_tool_loop_diagnostic_v1",
+            "2026-08-stateful-tool-loop-v1",
+            cases[:16],
+        )
+        alternate = _selected_fixture_revision(
+            "stateful_tool_loop_diagnostic_v1",
+            "2026-08-stateful-tool-loop-v1",
+            cases[8:16],
+        )
+
+        self.assertNotEqual(canary, standard)
+        self.assertNotEqual(canary, alternate)
+
     def test_capability_images_include_repository_edit_diagnostic_when_selected(self):
         request = RunRequest(
             model="fixture/model",
@@ -1085,6 +1111,15 @@ class CapabilityTests(unittest.TestCase):
             artifact = json.load(handle)
         self.assertEqual(artifact["evidence"]["surface"], "local_coding_capability")
         self.assertEqual(artifact["protocol"]["scorer_type"], "unit_test")
+        self.assertTrue(
+            artifact["protocol"]["fixture_revision"].startswith(
+                "repository_edit_smoke_v1_selection_"
+            )
+        )
+        self.assertEqual(
+            artifact["protocol"]["source_fixture_revision"],
+            "2026-08-repository-edit-v1",
+        )
         self.assertEqual(artifact["summary"]["score"], 1.0)
         self.assertEqual(
             artifact["subject"]["runtime"]["sandbox_policy"]["policy_version"],
