@@ -476,6 +476,22 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("--bin materialize-runtime-candidate", workflow)
         self.assertIn("--receipt-output", workflow)
         self.assertIn("Upload immutable materialization receipt", workflow)
+        self.assertIn("summarize-candidate-evidence:", workflow)
+        self.assertIn("needs: [inspect, verify-candidate-assets]", workflow)
+        self.assertIn("Build candidate evidence ladder", workflow)
+        self.assertIn('archive_args+=(--archive-receipt "${receipt}")', workflow)
+        self.assertIn(
+            'materialization_args+=(--materialization-receipt "${receipt}")',
+            workflow,
+        )
+        self.assertIn('canary_args+=(--model-canary-receipt "${receipt}")', workflow)
+        self.assertIn(
+            'qualification_args+=(--benchmark-qualification "${qualification}")',
+            workflow,
+        )
+        self.assertIn("candidate-evidence-ladder.json", workflow)
+        self.assertIn("candidate-evidence-ladder.md", workflow)
+        self.assertIn("Upload candidate evidence ladder", workflow)
         self.assertIn("matrix.platform != 'windows-cpu-x64'", workflow)
         self.assertNotIn("contents: write", workflow)
         self.assertNotIn("pull-requests: write", workflow)
