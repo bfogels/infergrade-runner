@@ -903,6 +903,30 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertTrue(_uses_native_chat_template_server(request))
         self.assertFalse(_uses_native_direct_answer_server(request))
 
+    def test_recent_template_required_families_use_chat_for_default_capability(self):
+        families = (
+            ("Qwen/Qwen3.6-27B", "qwen36"),
+            ("google/gemma-4-E4B-it", "gemma4"),
+            ("mistralai/Ministral-3-8B-Instruct-2512", "mistral3"),
+        )
+        for model, architecture in families:
+            with self.subTest(architecture=architecture):
+                request = RunRequest(
+                    model=model,
+                    quant_artifact=self.model_path,
+                    backend="llama.cpp",
+                    tier="canary",
+                    execution_mode="local_native",
+                    simulate=False,
+                    generation_preset="deterministic_v1",
+                    ontology_hints={"architecture": architecture},
+                )
+                messages, transform = _prepare_llama_server_chat(request, "Follow this instruction.")
+                self.assertEqual(messages, [{"role": "user", "content": "Follow this instruction."}])
+                self.assertEqual(transform["policy_id"], "deterministic_v1")
+                self.assertTrue(_uses_native_chat_template_server(request))
+                self.assertFalse(_uses_native_direct_answer_server(request))
+
     @mock.patch.object(LlamaCppAdapter, "_generate_native_server_text")
     @mock.patch.object(LlamaCppAdapter, "_require_local_gguf_artifact", return_value="/models/qwen35.gguf")
     @mock.patch.object(LlamaCppAdapter, "_ensure_backend_model_compatibility")
