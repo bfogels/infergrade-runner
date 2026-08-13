@@ -2603,9 +2603,12 @@ class CapabilityTests(unittest.TestCase):
             with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
                 execute_capability_suite(_FakeAdapter(), request, progress_callback=events.append)
         event_types = [event["event"] for event in events]
+        self.assertIn("benchmark_preparing", event_types)
         self.assertIn("benchmark_started", event_types)
         self.assertIn("case_progress", event_types)
         self.assertIn("benchmark_completed", event_types)
+        preparing = next(event for event in events if event["event"] == "benchmark_preparing")
+        self.assertIn("benchmark image and cases", preparing["message"])
 
     def test_execute_capability_suite_scores_supported_assistant_lane(self):
         def fake_prepare(spec, benchmark_dir, tier):
