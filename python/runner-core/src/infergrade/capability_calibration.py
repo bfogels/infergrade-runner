@@ -24,6 +24,7 @@ DEFAULT_POLICY = {
     "maximum_suite_ceiling_fraction": 0.2,
     "maximum_largest_family_fraction": 0.4,
 }
+TRUSTED_EVIDENCE_GROUP_PROVENANCE = "trusted_corpus_operator_v1"
 
 
 def load_json_documents(paths: Iterable[str]) -> List[Dict[str, Any]]:
@@ -109,6 +110,7 @@ def extract_calibration_observations(
                     or document.get("quantization_scheme")
                     or ""
                 ).lower(),
+                **_evidence_group_observation(document),
                 "components": _component_score_observations(document, capability),
                 "source": source,
             }
@@ -148,6 +150,7 @@ def _observation_detail_rank(observation: Dict[str, Any]) -> tuple:
     return (
         len(list(observation.get("components") or [])),
         len(list(observation.get("model_identities") or [])),
+        int(observation.get("evidence_group_verified") is True),
         int(bool(observation.get("quantization_scheme"))),
         int(str(observation.get("model_family") or "unknown") != "unknown"),
         int(str(observation.get("parameter_band") or "unknown") != "unknown"),
@@ -163,6 +166,10 @@ def _duplicate_integrity_conflicts(left: Dict[str, Any], right: Dict[str, Any]) 
         left_score, right_score, rel_tol=0.0, abs_tol=1e-9
     ):
         conflicts.append("composite_score_mismatch")
+    left_group = str(left.get("evidence_group_id") or "") if left.get("evidence_group_verified") is True else ""
+    right_group = str(right.get("evidence_group_id") or "") if right.get("evidence_group_verified") is True else ""
+    if left_group and right_group and left_group != right_group:
+        conflicts.append("evidence_group_mismatch")
     left_components = {
         str(item.get("benchmark_id")): float(item["score"])
         for item in list(left.get("components") or [])
@@ -203,6 +210,7 @@ def _surface_observation(surface: Dict[str, Any], document: Dict[str, Any], sour
         "parameter_band": _parameter_band(subject_model),
         "model_identities": sorted(_model_identities(subject_model)),
         "quantization_scheme": "",
+        **_evidence_group_observation(document),
         "source": source,
     }
 
@@ -226,6 +234,7 @@ def _component_observation(document: Dict[str, Any], source: str) -> Optional[Di
         "parameter_band": _parameter_band(subject_model),
         "model_identities": sorted(_model_identities(subject_model)),
         "quantization_scheme": "",
+        **_evidence_group_observation(document),
         "source": source,
     }
 
@@ -263,6 +272,23 @@ def audit_capability_observations(
     largest_family_count = max(families.values()) if families else 0
     setup_counts = Counter(_observation_setup_key(item) for item in selected)
     replicated_setup_count = sum(1 for setup_count in setup_counts.values() if setup_count >= 2)
+    setup_evidence_groups: Dict[Any, set] = {}
+    for item in selected:
+        evidence_group_id = (
+            str(item.get("evidence_group_id") or "").strip()
+            if item.get("evidence_group_verified") is True
+            else ""
+        )
+        if evidence_group_id:
+            setup_evidence_groups.setdefault(_observation_setup_key(item), set()).add(evidence_group_id)
+    independently_replicated_setup_count = sum(
+        1 for groups in setup_evidence_groups.values() if len(groups) >= 2
+    )
+    evidence_group_count = len({
+        group_id
+        for groups in setup_evidence_groups.values()
+        for group_id in groups
+    })
     largest_setup_count = max(setup_counts.values()) if setup_counts else 0
     current_generation_count = sum(1 for item in selected if item.get("current_generation"))
     distinct_scores = len(set(round(value, 6) for value in scores))
@@ -275,6 +301,14 @@ def audit_capability_observations(
         "distinct_score_count": distinct_scores,
         "unique_setup_count": len(setup_counts),
         "replicated_setup_count": replicated_setup_count,
+        "independently_replicated_setup_count": independently_replicated_setup_count,
+        "evidence_group_count": evidence_group_count,
+        "ungrouped_observation_count": sum(
+            1 for item in selected if item.get("evidence_group_verified") is not True
+        ),
+        "rejected_evidence_group_claim_count": sum(
+            1 for item in selected if item.get("evidence_group_claim_rejected") is True
+        ),
         "current_generation_count": current_generation_count,
         "current_generation_fraction": round(current_generation_count / float(count), 6) if count else None,
         "minimum": min(scores) if scores else None,
@@ -304,6 +338,14 @@ def audit_capability_observations(
         _minimum_gate(blockers, metrics, effective_policy, "unique_setup_count", "minimum_unique_setups")
     if "minimum_replicated_setups" in effective_policy:
         _minimum_gate(blockers, metrics, effective_policy, "replicated_setup_count", "minimum_replicated_setups")
+    if "minimum_independently_replicated_setups" in effective_policy:
+        _minimum_gate(
+            blockers,
+            metrics,
+            effective_policy,
+            "independently_replicated_setup_count",
+            "minimum_independently_replicated_setups",
+        )
     if (
         "minimum_current_generation_fraction" in effective_policy
         and metrics["current_generation_fraction"] is not None
@@ -368,7 +410,12 @@ def audit_capability_observations(
         "policy": effective_policy,
         "metrics": metrics,
         "blockers": blockers,
-        "interpretation": "This audit evaluates corpus diversity and headroom. It never rescales, curves, or caps raw benchmark attainment.",
+        "interpretation": (
+            "This audit evaluates corpus diversity and headroom. Independent repeats require distinct, "
+            "evidence_group_id values bearing trusted_corpus_operator_v1 provenance; missing or untrusted "
+            "provenance never counts as independence. It never rescales, curves, or caps raw benchmark "
+            "attainment."
+        ),
     }
 
 
@@ -481,6 +528,20 @@ def _number(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) and 0.0 <= number <= 1.0 else None
+
+
+def _evidence_group_observation(document: Dict[str, Any]) -> Dict[str, Any]:
+    """Accept grouping only when a trusted corpus operator assigned it."""
+    claimed = str(document.get("evidence_group_id") or "").strip()
+    verified = bool(
+        claimed
+        and document.get("evidence_group_provenance") == TRUSTED_EVIDENCE_GROUP_PROVENANCE
+    )
+    return {
+        "evidence_group_id": claimed if verified else "",
+        "evidence_group_verified": verified,
+        "evidence_group_claim_rejected": bool(claimed and not verified),
+    }
 
 
 def _nested(payload: Dict[str, Any], *path: str) -> Any:
