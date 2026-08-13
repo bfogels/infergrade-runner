@@ -259,7 +259,7 @@ def _priority_check_metrics(
         for component in list(observation.get("components") or []):
             if (
                 component.get("benchmark_id") != check_id
-                or _number(component.get("score")) is None
+                or _attainment_score(component.get("score")) is None
             ):
                 continue
             cohort_id = "composite:%s" % observation.get("score_version")
@@ -270,7 +270,7 @@ def _priority_check_metrics(
         if (
             observation.get("benchmark_id") != check_id
             or observation.get("surface_id") != surface_id
-            or _number(observation.get("score")) is None
+            or _attainment_score(observation.get("score")) is None
         ):
             continue
         cohort_id = "standalone:%s" % observation.get("score_version")
@@ -462,3 +462,10 @@ def _number(value: Any) -> Optional[float]:
     if isinstance(value, (int, float)) and math.isfinite(float(value)):
         return float(value)
     return None
+
+
+def _attainment_score(value: Any) -> Optional[float]:
+    number = _number(value)
+    if number is None or not 0.0 <= number <= 1.0:
+        return None
+    return number

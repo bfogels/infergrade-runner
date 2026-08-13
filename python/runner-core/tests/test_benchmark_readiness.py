@@ -279,6 +279,23 @@ class BenchmarkReadinessTests(unittest.TestCase):
         self.assertEqual(check["observation_count"], 0)
         self.assertEqual(check["evidence_cohorts"], [])
 
+    def test_out_of_range_standalone_scores_cannot_establish_headroom(self):
+        catalog = _structurally_broad_catalog_with_assistant_diagnostic()
+        documents = _standalone_component_documents(
+            "local_assistant_capability",
+            "multiturn_chat_memory_v1",
+        )
+        for document in documents:
+            document["summary"]["score"] = -0.1
+
+        report = audit_benchmark_readiness(documents, catalog)
+
+        assistant = _surface(report, "local_assistant_capability")
+        check = _facet(assistant, "multi_turn_state_retention")["checks"][0]
+        self.assertFalse(check["ready"])
+        self.assertEqual(check["status"], "unobserved")
+        self.assertEqual(check["observation_count"], 0)
+
     def test_surface_filter_keeps_readiness_scope_explicit(self):
         catalog = _structurally_broad_catalog()
 
