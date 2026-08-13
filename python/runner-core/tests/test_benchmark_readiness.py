@@ -154,6 +154,28 @@ class BenchmarkReadinessTests(unittest.TestCase):
         self.assertEqual(check["suite_ceiling_fraction"], 1.0)
         self.assertEqual(check["headroom_to_suite_ceiling"], 0.0)
 
+    def test_self_asserted_evidence_groups_do_not_count_as_independent_repeats(self):
+        catalog = _structurally_broad_catalog_with_assistant_diagnostic()
+        documents = _calibrated_documents(catalog)
+        _add_component_observations(
+            documents,
+            "local_assistant_capability",
+            "multiturn_chat_memory_v1",
+        )
+        for document in documents:
+            if document["capability"]["capability_score_details"]["surface_id"] == (
+                "local_assistant_capability"
+            ):
+                document["evidence_group_provenance"] = "self_asserted"
+
+        report = audit_benchmark_readiness(documents, catalog)
+
+        assistant = _surface(report, "local_assistant_capability")
+        check = _facet(assistant, "multi_turn_state_retention")["checks"][0]
+        self.assertFalse(assistant["broad_surface_ready"])
+        self.assertEqual(check["independently_replicated_setup_count"], 0)
+        self.assertIn("insufficient_independently_replicated_setups", check["blockers"])
+
     def test_surface_filter_keeps_readiness_scope_explicit(self):
         catalog = _structurally_broad_catalog()
 
