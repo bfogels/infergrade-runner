@@ -182,6 +182,42 @@ class CapabilitySummaryTests(unittest.TestCase):
         self.assertEqual(coding["confidence_label"], "sampled_reference")
         self.assertEqual(summary["capability_artifacts"][0]["confidence_label"], "sampled_reference")
 
+    def test_summary_preserves_per_benchmark_score_uncertainty(self):
+        uncertainty = {
+            "policy_id": "binomial_score_uncertainty_v1",
+            "method": "wilson_score_interval",
+            "confidence_level": 0.95,
+            "lower_bound": 0.300642,
+            "upper_bound": 0.954413,
+            "success_count": 3,
+            "observation_count": 4,
+            "observation_unit": "task",
+            "population": "scored_completed_outcomes",
+            "excluded_unscored_count": 0,
+            "interpretation": "Sampling uncertainty for scored completed outcomes only.",
+        }
+        execution = self._execution(
+            {
+                "reasoning_exact_answer_v1": self._write_capability_run(
+                    "reasoning_exact_answer_v1",
+                    surface="local_reasoning_capability",
+                    state="scored",
+                    score=0.75,
+                    task_states=["scored"] * 4,
+                    score_uncertainty=uncertainty,
+                )
+            }
+        )
+
+        summary = build_capability_summary_artifact(
+            self._request(), execution, self.tempdir
+        )
+
+        self.assertEqual(validate_capability_summary_artifact(summary), [])
+        self.assertEqual(
+            summary["capability_artifacts"][0]["score_uncertainty"], uncertainty
+        )
+
     def test_composite_confidence_uses_weakest_score_contributing_evidence(self):
         execution = self._execution(
             {
@@ -378,6 +414,7 @@ class CapabilitySummaryTests(unittest.TestCase):
         confidence_label="thin_local_sample",
         repetitions=1,
         task_metrics=None,
+        score_uncertainty=None,
     ):
         benchmark_dir = os.path.join(self.tempdir, "artifacts", "capability", benchmark_id)
         path = os.path.join(benchmark_dir, "capability_run.json")
@@ -425,6 +462,11 @@ class CapabilitySummaryTests(unittest.TestCase):
             "summary": {
                 "state": state,
                 "score": score,
+                **(
+                    {"score_uncertainty": score_uncertainty}
+                    if score_uncertainty
+                    else {}
+                ),
                 "score_dimension": "fixture",
                 "failed_count": len([item for item in task_states if item == "failed"]),
                 "partial_count": 1 if state == "partial" else 0,

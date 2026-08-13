@@ -287,6 +287,7 @@ def evaluate(dataset: str, output_dir: str) -> None:
             "pass_at_1_plus": _rounded_metric_or_zero(results, "plus", "pass@1"),
             "passed_count": len([item for item in case_results if item.get("passed")]),
             "failed_count": len([item for item in case_results if not item.get("passed")]),
+            "total_count": len(case_results),
         },
         "case_results": case_results,
         "artifacts": {

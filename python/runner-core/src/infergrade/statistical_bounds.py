@@ -2,15 +2,15 @@
 
 import math
 from statistics import NormalDist
-from typing import Optional
+from typing import Optional, Tuple
 
 
-def wilson_score_upper_bound(
+def wilson_score_interval(
     success_count: int,
     observation_count: int,
     confidence_level: float,
-) -> Optional[float]:
-    """Return the upper endpoint of a two-sided Wilson score interval."""
+) -> Optional[Tuple[float, float]]:
+    """Return a two-sided Wilson interval for a binomial proportion."""
     if (
         isinstance(success_count, bool)
         or isinstance(observation_count, bool)
@@ -46,4 +46,18 @@ def wilson_score_upper_bound(
         )
         / denominator
     )
-    return min(1.0, center + radius)
+    return max(0.0, center - radius), min(1.0, center + radius)
+
+
+def wilson_score_upper_bound(
+    success_count: int,
+    observation_count: int,
+    confidence_level: float,
+) -> Optional[float]:
+    """Return the upper endpoint of a two-sided Wilson score interval."""
+    interval = wilson_score_interval(
+        success_count,
+        observation_count,
+        confidence_level,
+    )
+    return interval[1] if interval is not None else None

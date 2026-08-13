@@ -176,6 +176,7 @@
         "confidence_explanation": { "type": ["string", "null"] },
         "path": { "type": "string", "minLength": 1 },
         "score": { "type": ["number", "null"] },
+        "score_uncertainty": { "$ref": "capability_run.schema.json#/$defs/binomial_score_uncertainty" },
         "task_count": { "type": "integer", "minimum": 0 },
         "failure_count": { "type": "integer", "minimum": 0 },
         "repeatability": { "$ref": "#/$defs/repeatability_summary" },

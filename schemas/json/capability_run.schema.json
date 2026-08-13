@@ -104,6 +104,7 @@
       "properties": {
         "state": { "enum": ["scored", "partial", "failed", "skipped", "not_yet_benchmarked", "not_comparable"] },
         "score": { "type": ["number", "null"] },
+        "score_uncertainty": { "$ref": "#/$defs/binomial_score_uncertainty" },
         "score_dimension": { "type": ["string", "null"] },
         "passed_count": { "type": ["integer", "null"], "minimum": 0 },
         "failed_count": { "type": ["integer", "null"], "minimum": 0 },
@@ -204,6 +205,36 @@
     }
   },
   "$defs": {
+    "binomial_score_uncertainty": {
+      "type": "object",
+      "required": [
+        "policy_id",
+        "method",
+        "confidence_level",
+        "lower_bound",
+        "upper_bound",
+        "success_count",
+        "observation_count",
+        "observation_unit",
+        "population",
+        "excluded_unscored_count",
+        "interpretation"
+      ],
+      "properties": {
+        "policy_id": { "const": "binomial_score_uncertainty_v1" },
+        "method": { "const": "wilson_score_interval" },
+        "confidence_level": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+        "lower_bound": { "type": "number", "minimum": 0, "maximum": 1 },
+        "upper_bound": { "type": "number", "minimum": 0, "maximum": 1 },
+        "success_count": { "type": "integer", "minimum": 0 },
+        "observation_count": { "type": "integer", "minimum": 1 },
+        "observation_unit": { "type": "string", "minLength": 1 },
+        "population": { "const": "scored_completed_outcomes" },
+        "excluded_unscored_count": { "type": "integer", "minimum": 0 },
+        "interpretation": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
     "repeatability_summary": {
       "type": "object",
       "properties": {
