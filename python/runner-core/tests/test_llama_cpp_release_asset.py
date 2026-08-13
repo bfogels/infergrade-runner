@@ -115,6 +115,7 @@ class LlamaCppReleaseAssetTests(unittest.TestCase):
                     info.mode = 0o755
                     bundle.addfile(info, io.BytesIO(payload))
             retained = root / "retained"
+            retained_archive = root / "retained.tar.gz"
             output = root / "receipt.json"
 
             def fake_download(_url, destination, _size):
@@ -128,9 +129,52 @@ class LlamaCppReleaseAssetTests(unittest.TestCase):
                     output,
                     False,
                     retained_runtime_dir=retained,
+                    retained_archive=retained_archive,
                 )
             self.assertTrue(receipt["runtime_materialized_for_canary"])
+            self.assertTrue(receipt["verified_archive_retained_for_same_job"])
             self.assertTrue((retained / "bin" / "llama-cli").is_file())
+            self.assertEqual(retained_archive.read_bytes(), source_archive.read_bytes())
+            self.assertIn("/releases/download/b10375/", receipt["artifact"]["download_url"])
+
+    def test_does_not_retain_archive_when_version_smoke_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            source_archive = root / "source.tar.gz"
+            with tarfile.open(source_archive, "w:gz") as bundle:
+                for name in (
+                    "bin/llama-cli",
+                    "bin/llama-completion",
+                    "bin/llama-server",
+                    "bin/llama-perplexity",
+                ):
+                    payload = name.encode("utf-8")
+                    info = tarfile.TarInfo(name)
+                    info.size = len(payload)
+                    info.mode = 0o755
+                    bundle.addfile(info, io.BytesIO(payload))
+            retained_archive = root / "retained.tar.gz"
+
+            def fake_download(_url, destination, _size):
+                shutil.copyfile(source_archive, destination)
+                return "a" * 64
+
+            with mock.patch.object(self.module, "download_asset", side_effect=fake_download):
+                with mock.patch.object(
+                    self.module,
+                    "run_version_smoke",
+                    side_effect=ValueError("version smoke failed"),
+                ):
+                    with self.assertRaisesRegex(ValueError, "version smoke failed"):
+                        self.module.verify(
+                            self.release(),
+                            "macos-arm64",
+                            root / "receipt.json",
+                            True,
+                            retained_archive=retained_archive,
+                        )
+
+            self.assertFalse(retained_archive.exists())
 
     def test_retries_transient_download_errors_and_removes_partial_file(self):
         with tempfile.TemporaryDirectory() as tmp:
