@@ -256,11 +256,19 @@ def audit_capability_observations(
         if item.get("calibration_campaign_eligible") is True
         and item.get("model_freshness") in {"current_generation", "recent_generation"}
     ]
+    headroom_challenge_targets = [
+        item for item in current_targets
+        if item.get("headroom_challenge_eligible") is True
+    ]
     selected = [dict(item) for item in selected]
     for observation in selected:
         observation["current_generation"] = any(
             _observation_matches_priority_target(observation, priority)
             for priority in current_targets
+        )
+        observation["headroom_challenge"] = any(
+            _observation_matches_priority_target(observation, priority)
+            for priority in headroom_challenge_targets
         )
     scores = [float(item["score"]) for item in selected]
     families = Counter(str(item.get("model_family") or "unknown") for item in selected)
@@ -291,6 +299,27 @@ def audit_capability_observations(
     })
     largest_setup_count = max(setup_counts.values()) if setup_counts else 0
     current_generation_count = sum(1 for item in selected if item.get("current_generation"))
+    headroom_challenge_observations = [
+        item for item in selected if item.get("headroom_challenge")
+    ]
+    headroom_challenge_families = {
+        str(item.get("model_family") or "unknown")
+        for item in headroom_challenge_observations
+    } - {"unknown"}
+    headroom_challenge_setup_groups: Dict[Any, set] = {}
+    for item in headroom_challenge_observations:
+        evidence_group_id = (
+            str(item.get("evidence_group_id") or "").strip()
+            if item.get("evidence_group_verified") is True
+            else ""
+        )
+        if evidence_group_id:
+            headroom_challenge_setup_groups.setdefault(
+                _observation_setup_key(item), set()
+            ).add(evidence_group_id)
+    headroom_challenge_independently_replicated_setup_count = sum(
+        1 for groups in headroom_challenge_setup_groups.values() if len(groups) >= 2
+    )
     distinct_scores = len(set(round(value, 6) for value in scores))
     metrics = {
         "observation_count": count,
@@ -311,6 +340,11 @@ def audit_capability_observations(
         ),
         "current_generation_count": current_generation_count,
         "current_generation_fraction": round(current_generation_count / float(count), 6) if count else None,
+        "headroom_challenge_observation_count": len(headroom_challenge_observations),
+        "headroom_challenge_model_family_count": len(headroom_challenge_families),
+        "headroom_challenge_independently_replicated_setup_count": (
+            headroom_challenge_independently_replicated_setup_count
+        ),
         "minimum": min(scores) if scores else None,
         "median": median(scores) if scores else None,
         "mean": mean(scores) if scores else None,
@@ -352,6 +386,16 @@ def audit_capability_observations(
         and metrics["current_generation_fraction"] < float(effective_policy["minimum_current_generation_fraction"])
     ):
         blockers.append("insufficient_current_generation_fraction")
+    for metric, threshold in (
+        ("headroom_challenge_observation_count", "minimum_headroom_challenge_observations"),
+        ("headroom_challenge_model_family_count", "minimum_headroom_challenge_model_families"),
+        (
+            "headroom_challenge_independently_replicated_setup_count",
+            "minimum_headroom_challenge_independently_replicated_setups",
+        ),
+    ):
+        if threshold in effective_policy:
+            _minimum_gate(blockers, metrics, effective_policy, metric, threshold)
     suite_ceiling_blocked = (
         metrics["suite_ceiling_fraction"] is not None
         and metrics["suite_ceiling_fraction"] > float(effective_policy["maximum_suite_ceiling_fraction"])
@@ -443,8 +487,9 @@ def audit_capability_observations(
         "interpretation": (
             "This audit evaluates corpus diversity and headroom. Independent repeats require distinct, "
             "evidence_group_id values bearing trusted_corpus_operator_v1 provenance; missing or untrusted "
-            "provenance never counts as independence. It never rescales, curves, or caps raw benchmark "
-            "attainment."
+            "provenance never counts as independence. Headroom-challenge membership comes only from an "
+            "explicit current or recent Runner campaign target; it is a suite stress role, not a general "
+            "capability or frontier claim. The audit never rescales, curves, or caps raw benchmark attainment."
         ),
     }
 

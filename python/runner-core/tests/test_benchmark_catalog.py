@@ -96,6 +96,14 @@ class BenchmarkCatalogTests(unittest.TestCase):
             2,
         )
         self.assertEqual(calibration_policy["minimum_current_generation_fraction"], 0.75)
+        self.assertEqual(calibration_policy["minimum_headroom_challenge_observations"], 2)
+        self.assertEqual(calibration_policy["minimum_headroom_challenge_model_families"], 1)
+        self.assertEqual(
+            calibration_policy[
+                "minimum_headroom_challenge_independently_replicated_setups"
+            ],
+            1,
+        )
         self.assertEqual(calibration_policy["maximum_single_setup_fraction"], 0.25)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_coverage_fraction"], 0.5)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_scored_components"], 2)
@@ -122,6 +130,16 @@ class BenchmarkCatalogTests(unittest.TestCase):
                 2,
             )
             self.assertEqual(task_policy["calibration_policy"]["minimum_current_generation_fraction"], 0.75)
+            self.assertEqual(
+                task_policy["calibration_policy"]["minimum_headroom_challenge_observations"],
+                2,
+            )
+            self.assertEqual(
+                task_policy["calibration_policy"][
+                    "minimum_headroom_challenge_independently_replicated_setups"
+                ],
+                1,
+            )
             self.assertEqual(task_policy["calibration_policy"]["maximum_suite_ceiling_fraction"], 0.2)
             self.assertEqual(task_policy["calibration_policy"]["maximum_single_setup_fraction"], 0.25)
         self.assertEqual(
@@ -204,6 +222,9 @@ class BenchmarkCatalogTests(unittest.TestCase):
         )
         self.assertEqual(qwen36["model_freshness"], "current_generation")
         self.assertEqual(qwen36["campaign_availability"], "blocked_pending_canary")
+        self.assertTrue(qwen36["headroom_challenge_eligible"])
+        self.assertIn("stress", qwen36["headroom_challenge_rationale"])
+        self.assertEqual(qwen36["target_observations"], 2)
         self.assertIn("24gb", qwen36["blocked_reason"])
         coding_anchor = next(
             item for item in priorities
@@ -413,6 +434,35 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn(
             "apple_silicon_qwen3_8b_assistant_repeat: unsupported coverage generation_preset_id "
             "'typo_direct_answer_v1'",
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_rejects_unrepeatable_headroom_challenge(self):
+        mutated = deepcopy(load_capability_catalog())
+        priority = next(
+            item
+            for item in mutated["coverage_expansion_priorities"]
+            if item.get("headroom_challenge_eligible") is True
+        )
+        priority["model_freshness"] = "historical_control"
+        priority["target_observations"] = 1
+        priority["headroom_challenge_rationale"] = ""
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "%s: headroom challenge must be current or recent generation"
+            % priority["priority_id"],
+            failures,
+        )
+        self.assertIn(
+            "%s: headroom challenge requires at least two target observations"
+            % priority["priority_id"],
+            failures,
+        )
+        self.assertIn(
+            "%s: headroom challenge rationale must be non-empty"
+            % priority["priority_id"],
             failures,
         )
 

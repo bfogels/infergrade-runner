@@ -140,6 +140,11 @@ def _calibrated_documents(catalog, saturated=False):
             if float(checks[check_id].get("primary_score_weight") or 0.0) > 0.0
         ]
         score_policy["calibration_policy"]["minimum_current_generation_fraction"] = 0.0
+        score_policy["calibration_policy"]["minimum_headroom_challenge_observations"] = 0
+        score_policy["calibration_policy"]["minimum_headroom_challenge_model_families"] = 0
+        score_policy["calibration_policy"][
+            "minimum_headroom_challenge_independently_replicated_setups"
+        ] = 0
         for index in range(20):
             score = 1.0 if saturated else 0.2 + index / 100.0
             documents.append(
