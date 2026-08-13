@@ -223,6 +223,16 @@ def _component_observation(document: Dict[str, Any], source: str) -> Optional[Di
     if not benchmark_id or score is None or summary.get("state") != "scored":
         return None
     subject_model = str(_nested(document, "subject", "model", "model") or "")
+    family = (
+        _nested(document, "subject", "model", "model_family")
+        or document.get("model_family")
+        or _family_name(subject_model)
+    )
+    parameter_scale = (
+        _nested(document, "subject", "model", "parameter_scale")
+        or document.get("parameter_scale")
+        or subject_model
+    )
     return {
         "observation_id": str(document.get("capability_run_id") or source),
         "score_version": "benchmark:%s:%s" % (benchmark_id, protocol.get("fixture_revision") or "unknown"),
@@ -230,10 +240,14 @@ def _component_observation(document: Dict[str, Any], source: str) -> Optional[Di
         "surface_id": _nested(document, "evidence", "surface"),
         "score": score,
         "task_count": len(list(document.get("tasks") or [])),
-        "model_family": _family_name(subject_model),
-        "parameter_band": _parameter_band(subject_model),
+        "model_family": str(family or "unknown"),
+        "parameter_band": _parameter_band(parameter_scale),
         "model_identities": sorted(_model_identities(subject_model)),
-        "quantization_scheme": "",
+        "quantization_scheme": str(
+            _nested(document, "subject", "model", "quantization_scheme")
+            or document.get("quantization_scheme")
+            or ""
+        ).lower(),
         **_evidence_group_observation(document),
         "source": source,
     }

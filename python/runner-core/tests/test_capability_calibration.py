@@ -950,12 +950,18 @@ class CapabilityCalibrationTests(unittest.TestCase):
                 "tasks": [{} for _ in range(24)],
                 "subject": {"model": {"model": "Qwen/Qwen3.5-9B"}},
                 "evidence": {"surface": "local_assistant_capability"},
+                "model_family": "Qwen3.5",
+                "parameter_scale": "9B",
+                "quantization_scheme": "q4_k_m",
             }],
             benchmark_id="assistant_compositional_instruction_v2",
         )
 
         self.assertEqual(observations[0]["benchmark_id"], "assistant_compositional_instruction_v2")
         self.assertEqual(observations[0]["task_count"], 24)
+        self.assertEqual(observations[0]["model_family"], "Qwen3.5")
+        self.assertEqual(observations[0]["parameter_band"], "8b_to_under_20b")
+        self.assertEqual(observations[0]["quantization_scheme"], "q4_k_m")
         self.assertEqual(observations[0]["score_version"], "benchmark:assistant_compositional_instruction_v2:2026-07-assistant-compositional-v2")
 
 

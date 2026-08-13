@@ -92,7 +92,7 @@ def audit_benchmark_readiness(
     broad_ready = bool(surfaces) and all(item["broad_surface_ready"] for item in surfaces)
     return {
         "artifact_kind": "benchmark_readiness_audit",
-        "artifact_spec_version": "0.2.0",
+        "artifact_spec_version": "0.3.0",
         "catalog_version": payload.get("catalog_version"),
         "catalog_metadata_valid": metadata_valid,
         "catalog_metadata_errors": metadata_errors,
@@ -112,8 +112,9 @@ def audit_benchmark_readiness(
         "interpretation": (
             "Readiness requires Runner catalog coverage, an empirical score distribution with the required "
             "diversity and headroom, and representative observations for every priority capability facet. "
-            "A facet counts only when at least one supporting check independently clears its observation, "
-            "model-family, parameter-band, repeat, and headroom gates. Missing result evidence fails closed. "
+            "A facet counts only when one protocol-identity cohort for a supporting check independently "
+            "clears its observation, model-family, parameter-band, repeat, and headroom gates. Missing "
+            "result evidence fails closed. "
             "Raw benchmark attainment is never curved, capped, or rescaled by this audit."
         ),
     }
@@ -170,12 +171,19 @@ def _audit_priority_facet_evidence(
 ) -> Dict[str, Any]:
     """Require one empirically adequate supporting check for every priority facet."""
     score_version = str(structural.get("score_version") or "")
-    eligible = [
+    composite_observations = [
         observation
         for observation in observations
         if observation.get("score_version") == score_version
         and not observation.get("integrity_conflicts")
     ]
+    standalone_observations = [
+        observation
+        for observation in observations
+        if observation.get("benchmark_id")
+        and not observation.get("integrity_conflicts")
+    ]
+    surface_id = str(structural.get("surface_id") or "")
     checks = check_index(catalog)
     supporting_ids = set(structural.get("headline_check_ids") or []) | set(
         structural.get("diagnostic_check_ids") or []
@@ -190,7 +198,13 @@ def _audit_priority_facet_evidence(
             if facet in set((checks.get(check_id) or {}).get("capability_facets") or [])
         )
         check_metrics = [
-            _priority_check_metrics(check_id, eligible, policy)
+            _priority_check_metrics(
+                check_id,
+                surface_id,
+                composite_observations,
+                standalone_observations,
+                policy,
+            )
             for check_id in facet_check_ids
         ]
         ready = any(item["ready"] for item in check_metrics)
@@ -224,36 +238,86 @@ def _audit_priority_facet_evidence(
         "facets": facets,
         "blockers": blockers,
         "claim_boundary": (
-            "Facet evidence is counted only from completed component reports in score-ready result "
-            "observations without integrity conflicts. Catalog support or a healthy composite score "
-            "distribution alone does not establish empirical facet coverage."
+            "Facet evidence is counted from completed component reports in score-ready results and "
+            "scored standalone capability-run artifacts on the same declared surface. Duplicate views "
+            "are conservatively collapsed. Standalone evidence never enters composite-score calibration. "
+            "Catalog support or a healthy composite distribution alone does not establish empirical "
+            "facet coverage."
         ),
     }
 
 
 def _priority_check_metrics(
     check_id: str,
-    observations: List[Dict[str, Any]],
+    surface_id: str,
+    composite_observations: List[Dict[str, Any]],
+    standalone_observations: List[Dict[str, Any]],
     policy: Dict[str, Any],
 ) -> Dict[str, Any]:
-    rows = [
-        (observation, float(component["score"]))
-        for observation in observations
-        for component in list(observation.get("components") or [])
-        if component.get("benchmark_id") == check_id
-        and _number(component.get("score")) is not None
+    cohort_rows: Dict[str, List[tuple]] = {}
+    for observation in composite_observations:
+        for component in list(observation.get("components") or []):
+            if (
+                component.get("benchmark_id") != check_id
+                or _attainment_score(component.get("score")) is None
+            ):
+                continue
+            cohort_id = "composite:%s" % observation.get("score_version")
+            cohort_rows.setdefault(cohort_id, []).append(
+                (observation, float(component["score"]), "score_ready_composite")
+            )
+    for observation in standalone_observations:
+        if (
+            observation.get("benchmark_id") != check_id
+            or observation.get("surface_id") != surface_id
+            or _attainment_score(observation.get("score")) is None
+        ):
+            continue
+        cohort_id = "standalone:%s" % observation.get("score_version")
+        cohort_rows.setdefault(cohort_id, []).append(
+            (observation, float(observation["score"]), "standalone_capability_run")
+        )
+    cohorts = [
+        _priority_cohort_metrics(cohort_id, rows, policy)
+        for cohort_id, rows in sorted(cohort_rows.items())
     ]
-    scores = [score for _, score in rows]
+    selected = max(cohorts, key=_priority_cohort_rank) if cohorts else _priority_cohort_metrics(
+        "none",
+        [],
+        policy,
+    )
+    return {
+        "check_id": check_id,
+        **{key: value for key, value in selected.items() if key != "cohort_id"},
+        "selected_evidence_cohort": (
+            selected["cohort_id"] if selected["cohort_id"] != "none" else None
+        ),
+        "evidence_cohorts": cohorts,
+        "unpooled_alternate_observation_count": sum(
+            int(item.get("observation_count") or 0)
+            for item in cohorts
+            if item["cohort_id"] != selected["cohort_id"]
+        ),
+    }
+
+
+def _priority_cohort_metrics(
+    cohort_id: str,
+    raw_rows: List[tuple],
+    policy: Dict[str, Any],
+) -> Dict[str, Any]:
+    rows = _deduplicate_priority_check_rows(raw_rows)
+    scores = [score for _, score, _ in rows]
     families = {
         str(observation.get("model_family") or "unknown")
-        for observation, _ in rows
+        for observation, _, _ in rows
     } - {"unknown"}
     bands = {
         str(observation.get("parameter_band") or "unknown")
-        for observation, _ in rows
+        for observation, _, _ in rows
     } - {"unknown"}
     setup_groups: Dict[Any, set] = {}
-    for observation, _ in rows:
+    for observation, _, _ in rows:
         group_id = (
             str(observation.get("evidence_group_id") or "").strip()
             if observation.get("evidence_group_verified") is True
@@ -304,10 +368,17 @@ def _priority_check_metrics(
         else "ready"
     )
     return {
-        "check_id": check_id,
+        "cohort_id": cohort_id,
         "status": status,
         "ready": not blockers,
         "observation_count": len(scores),
+        "score_ready_composite_observation_count": sum(
+            1 for _, _, source_kind in rows if source_kind == "score_ready_composite"
+        ),
+        "standalone_capability_run_observation_count": sum(
+            1 for _, _, source_kind in rows if source_kind == "standalone_capability_run"
+        ),
+        "duplicate_view_count": len(raw_rows) - len(rows),
         "model_family_count": len(families),
         "parameter_band_count": len(bands),
         "independently_replicated_setup_count": independent_setups,
@@ -315,6 +386,67 @@ def _priority_check_metrics(
         "headroom_to_suite_ceiling": headroom,
         "blockers": blockers,
     }
+
+
+def _priority_cohort_rank(cohort: Dict[str, Any]) -> tuple:
+    return (
+        int(cohort.get("ready") is True),
+        int(cohort.get("observation_count") or 0),
+        int(cohort.get("model_family_count") or 0),
+        int(cohort.get("parameter_band_count") or 0),
+        int(cohort.get("independently_replicated_setup_count") or 0),
+        float(cohort.get("headroom_to_suite_ceiling") or 0.0),
+        int(str(cohort.get("cohort_id") or "").startswith("composite:")),
+    )
+
+
+def _deduplicate_priority_check_rows(rows: List[tuple]) -> List[tuple]:
+    """Collapse duplicate artifact views without inventing independent repeats."""
+    grouped: Dict[Any, List[tuple]] = {}
+    order = []
+    for row in rows:
+        observation, score, _ = row
+        identities = tuple(sorted(set(observation.get("model_identities") or [])))
+        if not identities:
+            identities = (str(observation.get("model_family") or "unknown"),)
+        key = (identities, round(float(score), 9))
+        if key not in grouped:
+            order.append(key)
+            grouped[key] = []
+        grouped[key].append(row)
+    deduplicated = []
+    for key in order:
+        candidates = grouped[key]
+        verified_by_group = {}
+        unverified = []
+        for row in candidates:
+            observation = row[0]
+            group_id = (
+                str(observation.get("evidence_group_id") or "").strip()
+                if observation.get("evidence_group_verified") is True
+                else ""
+            )
+            if group_id:
+                current = verified_by_group.get(group_id)
+                if current is None or _priority_row_rank(row) > _priority_row_rank(current):
+                    verified_by_group[group_id] = row
+            else:
+                unverified.append(row)
+        if verified_by_group:
+            deduplicated.extend(verified_by_group.values())
+        elif unverified:
+            deduplicated.append(max(unverified, key=_priority_row_rank))
+    return deduplicated
+
+
+def _priority_row_rank(row: tuple) -> tuple:
+    observation, _, source_kind = row
+    return (
+        int(source_kind == "score_ready_composite"),
+        int(bool(observation.get("quantization_scheme"))),
+        int(str(observation.get("parameter_band") or "unknown") != "unknown"),
+        int(str(observation.get("model_family") or "unknown") != "unknown"),
+    )
 
 
 def _observation_setup_key(observation: Dict[str, Any]) -> tuple:
@@ -330,3 +462,10 @@ def _number(value: Any) -> Optional[float]:
     if isinstance(value, (int, float)) and math.isfinite(float(value)):
         return float(value)
     return None
+
+
+def _attainment_score(value: Any) -> Optional[float]:
+    number = _number(value)
+    if number is None or not 0.0 <= number <= 1.0:
+        return None
+    return number
