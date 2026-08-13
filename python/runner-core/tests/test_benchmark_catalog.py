@@ -66,6 +66,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertNotIn("coding_static_repair_v1", planned_ids)
         self.assertNotIn("reasoning_exact_answer_v1", planned_ids)
         self.assertNotIn("mmlu_pro_reference_v1", planned_ids)
+        self.assertIn("bfcl_local_reference_v1", planned_ids)
+        self.assertIn("longbench_v2_reference_v1", planned_ids)
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
             self.assertIn(check["evidence_lane_id"], {"smoke", "decision", "reference", "gold"})
@@ -107,6 +109,18 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.assertEqual(task_policy["calibration_policy"]["minimum_current_generation_fraction"], 0.75)
             self.assertEqual(task_policy["calibration_policy"]["maximum_suite_ceiling_fraction"], 0.2)
             self.assertEqual(task_policy["calibration_policy"]["maximum_single_setup_fraction"], 0.25)
+        self.assertEqual(
+            score_policies["local_assistant_capability"]["representativeness_policy"]["scoped_claim_facets"],
+            ["verifiable_instruction_following", "compositional_rule_execution"],
+        )
+        self.assertIn(
+            "repository_edit_smoke_v1",
+            score_policies["local_coding_capability"]["representativeness_policy"]["supporting_check_ids"],
+        )
+        self.assertIn(
+            "longbench_v2_reference_v1",
+            score_policies["local_reasoning_capability"]["representativeness_policy"]["planned_check_ids"],
+        )
 
     def test_coverage_expansion_priorities_are_ordered_and_answer_loop_scoped(self):
         priorities = coverage_expansion_priorities()
