@@ -22,6 +22,8 @@ from infergrade.capabilities import (
     _native_benchmark_cases,
     _repository_edit_output_shape_gate,
     _run_capability_container,
+    _structured_tool_use_output_shape_gate,
+    _write_multiple_choice_capability_run_artifact,
     _write_repository_edit_capability_run_artifact,
     capability_images_for_request,
     execute_capability_suite,
@@ -812,6 +814,121 @@ class CapabilityTests(unittest.TestCase):
 
         self.assertEqual([item["benchmark_id"] for item in images], ["gpqa_diamond_reference_v1"])
         self.assertEqual(images[0]["image"], "ghcr.io/bfogels/infergrade-gpqa:%s" % __version__)
+
+    def test_capability_images_include_bfcl_reference_when_selected(self):
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["bfcl_local_reference_v1"],
+        )
+        images = capability_images_for_request(request)
+
+        self.assertEqual([item["benchmark_id"] for item in images], ["bfcl_local_reference_v1"])
+        self.assertEqual(images[0]["image"], "ghcr.io/bfogels/infergrade-bfcl:%s" % __version__)
+
+    def test_bfcl_dominant_malformed_output_is_quarantined(self):
+        spec = CAPABILITY_BENCHMARKS["bfcl_local_reference_v1"]
+        gate = _structured_tool_use_output_shape_gate(
+            spec,
+            [{"generation_status": "completed"} for _ in range(5)],
+            {
+                "primary_metric": {"name": "accuracy", "value": 0.2},
+                "metrics": {"total_count": 5, "malformed_output_count": 3},
+            },
+        )
+
+        self.assertEqual(gate["status"], "blocked")
+        self.assertEqual(gate["malformed_output_rate"], 0.6)
+        self.assertEqual(gate["reason_codes"], ["dominant_malformed_structured_tool_output"])
+
+    def test_bfcl_capability_artifact_preserves_local_claim_and_privacy_boundaries(self):
+        spec = CAPABILITY_BENCHMARKS["bfcl_local_reference_v1"]
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=["bfcl_local_reference_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        cases = [
+            {
+                "case_id": "bfcl_v4/simple_1",
+                "task_id": "bfcl_v4/simple_1",
+                "category": "simple_python",
+                "ground_truth": [{"private.tool": {"secret_argument": ["fixture-secret"]}}],
+            }
+        ]
+        predictions = [
+            {
+                "task_id": "bfcl_v4/simple_1",
+                "generation_status": "completed",
+                "completion": '[{"name":"private.tool","arguments":{"secret_argument":"fixture-secret"}}]',
+            }
+        ]
+        summary = {
+            "status": "completed",
+            "primary_metric": {"name": "accuracy", "value": 1.0},
+            "metrics": {
+                "accuracy": 1.0,
+                "correct_count": 1,
+                "total_count": 1,
+                "malformed_output_count": 0,
+            },
+            "case_results": [
+                {
+                    "case_id": "bfcl_v4/simple_1",
+                    "task_id": "bfcl_v4/simple_1",
+                    "category": "simple_python",
+                    "correct": True,
+                    "function_selection_correct": True,
+                    "malformed": False,
+                    "error_type": None,
+                }
+            ],
+            "category_metrics": {"simple_python": {"accuracy": 1.0, "correct_count": 1, "total_count": 1}},
+            "scoring_policy": "infergrade_bfcl_structured_call_accuracy_v1",
+            "container_runtime": {
+                "container_image": "infergrade-bfcl:local",
+                "container_image_id": "sha256:bfcl",
+                "container_repo_digests": [],
+            },
+        }
+        with open(os.path.join(self.tempdir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "dataset_revision": "fixture-revision",
+                    "snapshot_sha256": "fixture-snapshot-sha",
+                    "sample_policy": "category_round_robin_v1",
+                    "category_count": 1,
+                },
+                handle,
+            )
+
+        path = _write_multiple_choice_capability_run_artifact(
+            request,
+            spec,
+            self.tempdir,
+            cases,
+            predictions,
+            summary,
+        )
+        with open(path, encoding="utf-8") as handle:
+            artifact = json.load(handle)
+
+        self.assertEqual(artifact["protocol"]["scorer_type"], "json_schema")
+        self.assertEqual(artifact["protocol"]["fixture_revision"], "fixture-snapshot-sha")
+        self.assertEqual(artifact["evidence"]["surface"], "local_assistant_capability")
+        self.assertEqual(artifact["tasks"][0]["score"], 1.0)
+        self.assertNotIn("expected", artifact["tasks"][0])
+        self.assertNotIn("predicted", artifact["tasks"][0])
+        self.assertNotIn("fixture-secret", json.dumps(artifact))
+        self.assertIn(
+            "This is not an official BFCL V4 leaderboard score.",
+            artifact["claim_boundary"]["unsupported_claims"],
+        )
 
     def test_capability_images_include_repository_edit_diagnostic_when_selected(self):
         request = RunRequest(

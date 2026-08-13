@@ -19,6 +19,7 @@ IMAGE_NAMES = (
     "infergrade-evalplus",
     "infergrade-mmlu-pro",
     "infergrade-gpqa",
+    "infergrade-bfcl",
     "infergrade-repository-edit",
 )
 MULTIARCH_IMAGE_NAMES = {
@@ -26,6 +27,7 @@ MULTIARCH_IMAGE_NAMES = {
     "infergrade-evalplus",
     "infergrade-mmlu-pro",
     "infergrade-gpqa",
+    "infergrade-bfcl",
     "infergrade-repository-edit",
 }
 INDEX_ACCEPT = ", ".join(

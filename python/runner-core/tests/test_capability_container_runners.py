@@ -563,6 +563,156 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertIn("54611cde22c74cca43dd78732198de6abe971398", dockerfile)
         self.assertIn("build_snapshot.py", dockerfile)
 
+    def test_bfcl_prepare_round_robins_categories_and_preserves_claim_boundary(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-bfcl", "runner.py")
+        module = _load_module("bfcl_runner_prepare_test_module", module_path)
+        rows = []
+        for index in range(3):
+            for category in ("multiple", "parallel", "irrelevance"):
+                rows.append(
+                    {
+                        "id": "%s_%d" % (category, index),
+                        "category": category,
+                        "question": [[{"role": "user", "content": "fixture request"}]],
+                        "function": [{"name": "fixture.call", "parameters": {"type": "dict", "properties": {}}}],
+                        "ground_truth": None if category == "irrelevance" else [{"fixture.call": {}}],
+                    }
+                )
+        metadata = {
+            "upstream_revision": "fixture-revision",
+            "upstream_version": "BFCL_v4",
+            "snapshot_sha256": "fixture-sha",
+        }
+        with tempfile.TemporaryDirectory() as tempdir:
+            data_path = os.path.join(tempdir, "snapshot.jsonl")
+            metadata_path = os.path.join(tempdir, "snapshot_metadata.json")
+            with open(data_path, "w", encoding="utf-8") as handle:
+                for row in rows:
+                    handle.write(json.dumps(row) + "\n")
+            with open(metadata_path, "w", encoding="utf-8") as handle:
+                json.dump(metadata, handle)
+            with mock.patch.object(module, "DEFAULT_METADATA_PATH", metadata_path):
+                module.prepare(tempdir, limit=3, data_path=data_path)
+            with open(os.path.join(tempdir, "cases.jsonl"), encoding="utf-8") as handle:
+                cases = [json.loads(line) for line in handle]
+            with open(os.path.join(tempdir, "benchmark_metadata.json"), encoding="utf-8") as handle:
+                benchmark_metadata = json.load(handle)
+
+        self.assertEqual({case["category"] for case in cases}, {"multiple", "parallel", "irrelevance"})
+        self.assertTrue(all("Return only a JSON array" in case["prompt"] for case in cases))
+        self.assertIn("official BFCL V4 leaderboard score", benchmark_metadata["claim_boundary"]["cannot_claim"])
+        self.assertEqual(benchmark_metadata["prompt_format"], "infergrade_json_tool_calls_v1")
+
+    def test_bfcl_strict_scorer_handles_optional_parallel_and_relevance_cases(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-bfcl", "runner.py")
+        module = _load_module("bfcl_runner_scorer_test_module", module_path)
+        parallel_case = {
+            "case_id": "bfcl_v4/parallel_1",
+            "task_id": "bfcl_v4/parallel_1",
+            "category": "parallel",
+            "function": [{"name": "music.play"}],
+            "ground_truth": [
+                {"music.play": {"artist": ["Taylor Swift"], "duration": [20], "shuffle": ["", True]}},
+                {"music.play": {"artist": ["Maroon 5"], "duration": [15], "shuffle": ["", True]}},
+            ],
+        }
+        calls = (
+            '[{"name":"music.play","arguments":{"artist":"Maroon 5","duration":15}},'
+            '{"name":"music.play","arguments":{"artist":"taylor   swift","duration":20,"shuffle":true}}]'
+        )
+        self.assertTrue(module._score_case(parallel_case, calls)["correct"])
+        self.assertFalse(module._score_case(parallel_case, calls.replace("20", "21"))["correct"])
+        self.assertTrue(module._score_case(parallel_case, "```json\n%s\n```" % calls)["malformed"])
+        self.assertTrue(
+            module._score_case(
+                {**parallel_case, "category": "irrelevance", "ground_truth": None},
+                "[] [end of text]",
+            )["correct"]
+        )
+        self.assertFalse(
+            module._score_case(
+                {**parallel_case, "category": "live_relevance", "ground_truth": None},
+                "[]",
+            )["correct"]
+        )
+        self.assertTrue(
+            module._score_case(
+                {**parallel_case, "category": "live_relevance", "ground_truth": None},
+                '[{"name":"music.play","arguments":{}}]',
+            )["correct"]
+        )
+
+    def test_bfcl_evaluate_reports_selection_argument_and_malformed_signals(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-bfcl", "runner.py")
+        module = _load_module("bfcl_runner_evaluate_test_module", module_path)
+        cases = [
+            {
+                "case_id": "bfcl_v4/simple_1",
+                "task_id": "bfcl_v4/simple_1",
+                "category": "simple_python",
+                "function": [{"name": "weather.get"}],
+                "ground_truth": [{"weather.get": {"city": ["Boston"]}}],
+            },
+            {
+                "case_id": "bfcl_v4/simple_2",
+                "task_id": "bfcl_v4/simple_2",
+                "category": "simple_python",
+                "function": [{"name": "weather.get"}],
+                "ground_truth": [{"weather.get": {"city": ["Boston"]}}],
+            },
+            {
+                "case_id": "bfcl_v4/irrelevance_1",
+                "task_id": "bfcl_v4/irrelevance_1",
+                "category": "irrelevance",
+                "function": [{"name": "weather.get"}],
+                "ground_truth": None,
+            },
+        ]
+        predictions = [
+            {"task_id": "bfcl_v4/simple_1", "completion": '[{"name":"weather.get","arguments":{"city":"Boston"}}]'},
+            {"task_id": "bfcl_v4/simple_2", "completion": '[{"name":"weather.get","arguments":{"city":"Chicago"}}]'},
+            {"task_id": "bfcl_v4/irrelevance_1", "completion": "not-json"},
+        ]
+        with tempfile.TemporaryDirectory() as tempdir:
+            for filename, rows in (("cases.jsonl", cases), ("predictions.jsonl", predictions)):
+                with open(os.path.join(tempdir, filename), "w", encoding="utf-8") as handle:
+                    for row in rows:
+                        handle.write(json.dumps(row) + "\n")
+            module.evaluate(tempdir)
+            with open(os.path.join(tempdir, "summary.json"), encoding="utf-8") as handle:
+                summary = json.load(handle)
+
+        self.assertEqual(summary["primary_metric"], {"name": "accuracy", "value": 0.333333})
+        self.assertEqual(summary["metrics"]["function_selection_accuracy"], 0.666667)
+        self.assertEqual(summary["metrics"]["malformed_output_count"], 1)
+        self.assertEqual(summary["case_results"][1]["error_type"], "argument_mismatch")
+        self.assertIn("official BFCL V4 leaderboard score", summary["claim_boundary"]["cannot_claim"])
+
+    def test_bfcl_snapshot_builder_pins_upstream_files_and_license(self):
+        dockerfile_path = os.path.join(ROOT_DIR, "containers", "capability-bfcl", "Dockerfile")
+        build_script_path = os.path.join(ROOT_DIR, "containers", "capability-bfcl", "build_snapshot.py")
+        license_path = os.path.join(ROOT_DIR, "containers", "capability-bfcl", "LICENSE.upstream")
+        with open(dockerfile_path, encoding="utf-8") as handle:
+            dockerfile = handle.read()
+        with open(build_script_path, encoding="utf-8") as handle:
+            build_script = handle.read()
+        with open(license_path, encoding="utf-8") as handle:
+            license_notice = handle.read()
+
+        revision = "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
+        self.assertIn(revision, dockerfile)
+        self.assertIn(revision, build_script)
+        self.assertIn("source_file_sha256", build_script)
+        self.assertIn("c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4", build_script)
+        self.assertIn("Apache License 2.0", license_notice)
+        self.assertIn("not official BFCL leaderboard scores", " ".join(license_notice.split()))
+
+        build_module = _load_module("bfcl_snapshot_builder_test_module", build_script_path)
+        with tempfile.TemporaryDirectory() as tempdir:
+            with mock.patch.dict(os.environ, {"BFCL_UPSTREAM_REVISION": "drifted"}, clear=False):
+                with self.assertRaisesRegex(ValueError, "hash-verified source manifest"):
+                    build_module.build(__import__("pathlib").Path(tempdir))
+
     def test_gpqa_diamond_prepare_and_strict_scoring(self):
         module_path = os.path.join(ROOT_DIR, "containers", "capability-gpqa", "runner.py")
         module = _load_module("gpqa_runner_test_module", module_path)

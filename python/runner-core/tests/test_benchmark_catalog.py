@@ -62,11 +62,12 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("coding_static_repair_v1", check_ids)
         self.assertIn("reasoning_exact_answer_v1", check_ids)
         self.assertIn("mmlu_pro_reference_v1", check_ids)
+        self.assertIn("bfcl_local_reference_v1", check_ids)
         self.assertNotIn("multiturn_chat_memory_v1", planned_ids)
         self.assertNotIn("coding_static_repair_v1", planned_ids)
         self.assertNotIn("reasoning_exact_answer_v1", planned_ids)
         self.assertNotIn("mmlu_pro_reference_v1", planned_ids)
-        self.assertIn("bfcl_local_reference_v1", planned_ids)
+        self.assertNotIn("bfcl_local_reference_v1", planned_ids)
         self.assertIn("longbench_v2_reference_v1", planned_ids)
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
@@ -385,17 +386,17 @@ class BenchmarkCatalogTests(unittest.TestCase):
     def test_catalog_legitimacy_validation_blocks_catalog_only_planned_promotion(self):
         mutated = deepcopy(load_capability_catalog())
         statuses = {item["check_id"]: item for item in mutated["benchmark_status_matrix"]}
-        statuses["bfcl_local_reference_v1"]["runnable_status"] = "runnable_intentional_reference"
-        statuses["bfcl_local_reference_v1"]["maturity"] = "reference_runnable"
+        statuses["longbench_v2_reference_v1"]["runnable_status"] = "runnable_intentional_reference"
+        statuses["longbench_v2_reference_v1"]["maturity"] = "reference_runnable"
 
         failures = validate_benchmark_legitimacy_metadata(mutated)
 
         self.assertIn(
-            "bfcl_local_reference_v1: planned candidate must remain not_runnable until moved into checks",
+            "longbench_v2_reference_v1: planned candidate must remain not_runnable until moved into checks",
             failures,
         )
         self.assertIn(
-            "bfcl_local_reference_v1: planned candidate cannot declare runnable maturity",
+            "longbench_v2_reference_v1: planned candidate cannot declare runnable maturity",
             failures,
         )
 

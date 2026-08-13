@@ -33,13 +33,15 @@ class BenchmarkAdequacyTests(unittest.TestCase):
             assistant["empirical_priority_facet_policy"]["minimum_observations"],
             8,
         )
-        self.assertIn("tool_use", assistant["planned_only_priority_facets"])
+        self.assertIn("assistant_preference_quality", assistant["planned_only_priority_facets"])
+        self.assertIn("tool_use", assistant["diagnostic_facets_covered"])
+        self.assertIn("tool_use", assistant["freshness"]["runnable_refreshable_facets"])
         self.assertIn("long_context_task_reasoning", assistant["planned_only_priority_facets"])
         self.assertEqual(
             assistant["known_diagnostic_saturation_risks"],
             ["multiturn_chat_memory_v1"],
         )
-        self.assertFalse(assistant["freshness"]["ready"])
+        self.assertTrue(assistant["freshness"]["ready"])
 
         coding = by_surface["local_coding_capability"]
         self.assertIn("repository_code_editing", coding["diagnostic_facets_covered"])
