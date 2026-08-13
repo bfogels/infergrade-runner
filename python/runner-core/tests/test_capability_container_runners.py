@@ -1031,6 +1031,175 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertIn("677ac38dc799b0bbe61816f1d0c245bb93f01dd535a71ecfde6fa619d3eb86db", build_script)
         self.assertIn("Apache-2.0", license_text)
 
+    def test_livecodebench_selection_balances_platform_difficulty_and_month(self):
+        container_dir = os.path.join(ROOT_DIR, "containers", "capability-livecodebench")
+        builder = _load_module(
+            "livecodebench_builder_selection_test_module",
+            os.path.join(container_dir, "build_snapshot.py"),
+        )
+        rows = []
+        for platform in builder.PLATFORMS:
+            for difficulty in builder.DIFFICULTIES:
+                for month in ("2025-04", "2025-03", "2025-02", "2025-01"):
+                    for item_index in range(2):
+                        rows.append(
+                            {
+                                "question_id": "%s-%s-%s-%d" % (
+                                    platform,
+                                    difficulty,
+                                    month,
+                                    item_index,
+                                ),
+                                "platform": platform,
+                                "difficulty": difficulty,
+                                "contest_date": "%s-01T00:00:00" % month,
+                            }
+                        )
+
+        forward = builder._selection_order(rows)
+        reverse = builder._selection_order(list(reversed(rows)))
+
+        self.assertEqual(
+            [row["question_id"] for row in forward],
+            [row["question_id"] for row in reverse],
+        )
+        self.assertEqual(len(forward), 48)
+        for block_index in range(4):
+            block = forward[block_index * 6 : (block_index + 1) * 6]
+            self.assertEqual(
+                {(row["platform"], row["difficulty"]) for row in block},
+                {
+                    (platform, difficulty)
+                    for platform in builder.PLATFORMS
+                    for difficulty in builder.DIFFICULTIES
+                },
+            )
+            self.assertEqual(
+                {row["contest_date"][:7] for row in block},
+                {("2025-04", "2025-03", "2025-02", "2025-01")[block_index]},
+            )
+
+    def test_livecodebench_private_test_decoder_rejects_pickle_globals(self):
+        container_dir = os.path.join(ROOT_DIR, "containers", "capability-livecodebench")
+        builder = _load_module(
+            "livecodebench_builder_pickle_test_module",
+            os.path.join(container_dir, "build_snapshot.py"),
+        )
+        pickle_module = __import__("pickle")
+        encoded = __import__("base64").b64encode(
+            __import__("zlib").compress(pickle_module.dumps(os.system))
+        ).decode("ascii")
+
+        with self.assertRaisesRegex(ValueError, "decoded safely"):
+            builder._private_tests(encoded)
+
+    def test_livecodebench_prepare_hides_tests_and_sandbox_scores_both_interfaces(self):
+        container_dir = os.path.join(ROOT_DIR, "containers", "capability-livecodebench")
+        runner = _load_module(
+            "livecodebench_runner_sandbox_test_module",
+            os.path.join(container_dir, "runner.py"),
+        )
+        rows = []
+        for index in range(48):
+            rows.append(
+                {
+                    "question_id": "fixture-%02d" % index,
+                    "question_title": "Fixture %d" % index,
+                    "question_content": "Double the input.",
+                    "platform": "atcoder" if index % 2 == 0 else "leetcode",
+                    "contest_id": "fixture",
+                    "contest_date": "2025-%02d-01T00:00:00" % (1 + index % 4),
+                    "difficulty": ("easy", "medium", "hard")[index % 3],
+                    "starter_code": "",
+                    "function_name": None,
+                    "tests": [
+                        {
+                            "input": "3\n",
+                            "output": "fixture-hidden-output",
+                            "testtype": "stdin",
+                        }
+                    ],
+                }
+            )
+        source_metadata = {
+            "dataset": "fixture/livecodebench",
+            "dataset_file": "fixture.jsonl",
+            "dataset_revision": "fixture-revision",
+            "dataset_sha256": "fixture-source-sha",
+            "upstream_code_revision": "fixture-code-revision",
+            "dataset_license_status": "blocked_pending_upstream_metadata_review",
+            "snapshot_sha256": "fixture-snapshot-sha",
+        }
+        with tempfile.TemporaryDirectory() as tempdir:
+            with mock.patch.object(
+                runner, "_verified_snapshot", return_value=(rows, source_metadata)
+            ):
+                runner.prepare(tempdir, limit=6)
+            cases_text = __import__("pathlib").Path(tempdir, "cases.jsonl").read_text(
+                encoding="utf-8"
+            )
+            metadata_text = __import__("pathlib").Path(
+                tempdir, "benchmark_metadata.json"
+            ).read_text(encoding="utf-8")
+        self.assertNotIn("fixture-hidden-output", cases_text)
+        self.assertNotIn("fixture-hidden-output", metadata_text)
+        self.assertNotIn('"tests"', cases_text)
+
+        with mock.patch.object(runner, "_drop_and_limit_child", lambda: None):
+            stdin_result = runner._run_test(
+                "print(int(input()) * 2)\n",
+                {"function_name": None},
+                {"input": "3\n", "output": "6", "testtype": "stdin"},
+                2.0,
+            )
+            functional_result = runner._run_test(
+                "class Solution:\n    def add(self, values: List[int]):\n        return sum(values)\n",
+                {"function_name": "add"},
+                {"input": "[2, 3]", "output": "5", "testtype": "functional"},
+                2.0,
+            )
+        self.assertEqual(stdin_result, {"status": "ok", "result": "6\n"})
+        self.assertEqual(functional_result, {"status": "ok", "result": 5})
+
+    def test_livecodebench_source_identity_is_pinned_but_release_wiring_is_blocked(self):
+        container_dir = os.path.join(ROOT_DIR, "containers", "capability-livecodebench")
+        dockerfile = __import__("pathlib").Path(container_dir, "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        build_script = __import__("pathlib").Path(
+            container_dir, "build_snapshot.py"
+        ).read_text(encoding="utf-8")
+        notice = __import__("pathlib").Path(
+            container_dir, "SOURCE-NOTICE.txt"
+        ).read_text(encoding="utf-8")
+        self.assertIn("0fe84c3912ea0c4d4a78037083943e8f0c4dd505", dockerfile)
+        self.assertIn("bb4c364f71921c4495a6ad15abe1a927350b720009f4933e2e71f8af0f6fd1f5", dockerfile)
+        self.assertIn("caafbae85c53215efdeb6299e22a6fb46aca158d94b124fbf73212b312cd0f5c", build_script)
+        self.assertIn("ff6f7d15528d110e1bb6846336dcc312feba11395202672eddb3df7c7bbc69e0", build_script)
+        self.assertIn("must not be published", notice)
+        for relative_path in (
+            ".github/workflows/publish-containers.yml",
+            "scripts/build_release_images.sh",
+            "scripts/export_release_images.sh",
+            "scripts/verify_release_images.py",
+        ):
+            text = __import__("pathlib").Path(ROOT_DIR, relative_path).read_text(
+                encoding="utf-8"
+            )
+            self.assertNotIn("infergrade-livecodebench", text)
+
+    def test_livecodebench_timeout_cleanup_fails_explicitly_without_kill_capability(self):
+        module_path = os.path.join(
+            ROOT_DIR, "containers", "capability-livecodebench", "runner.py"
+        )
+        runner = _load_module(
+            "livecodebench_runner_kill_capability_test_module", module_path
+        )
+        process = types.SimpleNamespace(pid=1234)
+        with mock.patch.object(runner.os, "killpg", side_effect=PermissionError()):
+            with self.assertRaisesRegex(RuntimeError, "CAP_KILL"):
+                runner._kill_process_group(process)
+
     def test_repository_edit_prepare_hides_tests_and_scores_a_valid_patch(self):
         module_path = os.path.join(ROOT_DIR, "containers", "capability-repo-edit", "runner.py")
         module = _load_module("repository_edit_runner_test_module", module_path)

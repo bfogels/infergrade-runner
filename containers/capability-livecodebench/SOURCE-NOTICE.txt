@@ -1,0 +1,9 @@
+InferGrade LiveCodeBench v6 local-reference source notice
+
+Source dataset: livecodebench/code_generation_lite, test6.jsonl
+Pinned dataset revision: 0fe84c3912ea0c4d4a78037083943e8f0c4dd505
+Pinned upstream code revision: 28fef95ea8c9f7a547c8329f2cd3d32b92c1fa24
+
+The Hugging Face dataset card and dataset loader currently provide inconsistent
+license metadata. This image must not be published or included in an InferGrade
+release until a maintainer completes and records the source-license review.

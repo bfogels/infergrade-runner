@@ -85,7 +85,7 @@ The first reference-runnable lanes are:
 
 Important candidates that are not yet promoted:
 
-- `livecodebench_reference_v1`: planned, non-runnable until task-window and sandbox controls exist.
+- `livecodebench_reference_v1`: implementation-ready but non-runnable. The v6 task window, deterministic 48-task snapshot, scorer, hidden-test boundary, and unprivileged subprocess controls are implemented; source-license review and a separately verified protocol image still block selection.
 - `swebench_verified_gold_v1`: gold candidate only, non-runnable until maintainer-reviewed gold controls exist.
 
 `gpqa_diamond_reference_v1` and `context_retrieval_reference_v1` are

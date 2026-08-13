@@ -999,16 +999,17 @@
       "maturity": "planned",
       "runnable_status": "not_runnable",
       "default_inclusion_status": "not_default",
-      "fixture_or_dataset_revision_status": "task_window_pin_needed",
-      "harness_status": "not_implemented",
+      "fixture_or_dataset_revision_status": "pinned_livecodebench_v6_dataset_file_sha256_and_48_case_snapshot",
+      "harness_status": "container_harness_implemented_release_blocked_on_source_license_review",
       "scoring_policy_id": "code_task_pass_rate_v1",
-      "sample_policy": "Future pinned task-window pass@1 generation mode before broader LiveCodeBench modes.",
-      "expected_duration_token_volume_status": "unknown",
-      "sandbox_requirement": "sandbox_required_for_generated_code_execution",
-      "claim_boundary": "Future coding reference candidate; not SWE-bench, not repo-edit proof, and not a default local lane.",
+      "sample_policy": "Forty-eight LiveCodeBench v6 tasks balanced across AtCoder and LeetCode, easy/medium/hard labels, and January-April 2025 month blocks; canary runs six and standard runs eighteen.",
+      "expected_duration_token_volume_status": "bounded but not yet observed: 6 to 48 generations and 208 to 1895 selected execution tests with 6-second per-test and 30-second per-task timeouts",
+      "sandbox_requirement": "offline read-only root supervisor with only SETUID, SETGID, and KILL for irreversible nobody subprocess execution and timeout cleanup; generated children clear those capabilities, hidden inputs are passed one at a time, and expected outputs remain in the root scorer",
+      "claim_boundary": "Pinned LiveCodeBench v6-derived local Python pass@1 candidate only; not an official leaderboard, pass@10, SWE-bench, repository-edit, general software-engineering, or post-April-2025 contamination-free claim.",
       "promotion_blockers": [
-        "Pin task window and upstream version.",
-        "Implement sandbox, timeout, and failure-state preservation."
+        "Resolve and record the inconsistent upstream dataset-license metadata before publishing a protocol image.",
+        "Publish and independently verify the exact protocol image before making the check selectable.",
+        "Collect cross-family duration, failure, repeatability, discrimination, and ceiling-rate evidence before any stronger product role."
       ]
     },
     {
@@ -2490,9 +2491,9 @@
     {
       "check_id": "livecodebench_reference_v1",
       "display_name": "LiveCodeBench reference",
-      "value": "Adds contemporary coding task coverage beyond static HumanEval+/MBPP+ style checks.",
-      "cost": "large token volume plus sandboxed execution; needs task-set pinning",
-      "implementation_risk": "high",
+      "value": "Adds temporally newer execution-tested coding tasks beyond static HumanEval+/MBPP+ style checks.",
+      "cost": "6 to 48 generations plus 208 to 1895 sandboxed tests; observed local duration is still pending",
+      "implementation_risk": "medium",
       "suite_placement": "coding_code_editing/reference",
       "primary_use_case": "agentic_coding",
       "benchmark_tier": "reference",
@@ -2501,11 +2502,11 @@
       "capability_facets": [
         "contemporary_code_generation"
       ],
-      "temporal_scope": "rolling_window",
+      "temporal_scope": "static_pinned",
       "planned_score_policy_id": "code_task_pass_rate_v1",
       "local_feasibility": "reference_only",
-      "why_not_default": "Needs pinned task windows and robust local sandboxing before it can support reproducible local comparisons.",
-      "status": "planned"
+      "why_not_default": "The pinned scorer is implemented, but upstream license metadata must be resolved and the protocol image verified before the lane can become selectable.",
+      "status": "implementation_ready_blocked"
     },
     {
       "check_id": "swebench_verified_gold_v1",
