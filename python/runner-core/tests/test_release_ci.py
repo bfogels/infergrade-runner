@@ -238,6 +238,7 @@ class ReleaseCiTests(unittest.TestCase):
             "INFERGRADE_EVALPLUS_IMAGE",
             "INFERGRADE_MMLU_PRO_IMAGE",
             "INFERGRADE_GPQA_IMAGE",
+            "INFERGRADE_LONGBENCH_V2_IMAGE",
             "INFERGRADE_BFCL_IMAGE",
             "INFERGRADE_REPOSITORY_EDIT_IMAGE",
         ):
@@ -257,6 +258,7 @@ class ReleaseCiTests(unittest.TestCase):
             "infergrade-evalplus",
             "infergrade-mmlu-pro",
             "infergrade-gpqa",
+            "infergrade-longbench-v2",
             "infergrade-bfcl",
             "infergrade-repository-edit",
         ):

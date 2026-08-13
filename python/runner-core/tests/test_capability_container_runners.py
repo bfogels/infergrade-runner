@@ -934,6 +934,103 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertIn("dataset/gpqa_diamond.csv", build_script)
         self.assertIn("Creative Commons Attribution 4.0", license_text)
 
+    def test_longbench_v2_prepares_balanced_tiers_and_scores_slice_metrics(self):
+        container_dir = os.path.join(ROOT_DIR, "containers", "capability-longbench-v2")
+        runner = _load_module("longbench_v2_runner_test_module", os.path.join(container_dir, "runner.py"))
+        builder = _load_module("longbench_v2_builder_test_module", os.path.join(container_dir, "build_snapshot.py"))
+        grouped = {}
+        for domain in builder.DOMAINS:
+            for difficulty in builder.DIFFICULTIES:
+                grouped[(domain, difficulty)] = [
+                    {
+                        "_id": "%s-%s-%d" % (domain, difficulty, index),
+                        "domain": domain,
+                        "sub_domain": "fixture",
+                        "difficulty": difficulty,
+                        "length": "short",
+                        "context": "fixture context " * (20 + index),
+                        "question": "Which fixture answer is correct?",
+                        "choice_A": "alpha",
+                        "choice_B": "beta",
+                        "choice_C": "gamma",
+                        "choice_D": "delta",
+                        "answer": "B",
+                    }
+                    for index in range(2)
+                ]
+        grouped[("Long Structured Data Understanding", "easy")] = grouped[
+            ("Long Structured Data Understanding", "easy")
+        ][:1]
+        rows = builder._selection_order(grouped)
+        with tempfile.TemporaryDirectory() as tempdir:
+            snapshot_path = os.path.join(tempdir, "snapshot.jsonl")
+            with open(snapshot_path, "w", encoding="utf-8") as handle:
+                for row in rows:
+                    handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+            selection_sha = runner._selection_digest(rows)
+            with open(snapshot_path, "rb") as handle:
+                snapshot_sha = __import__("hashlib").sha256(handle.read()).hexdigest()
+            metadata_path = os.path.join(tempdir, "snapshot_metadata.json")
+            with open(metadata_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "dataset": "fixture/LongBench-v2",
+                        "dataset_revision": "fixture-revision",
+                        "dataset_sha256": "fixture-source-sha",
+                        "dataset_license": "Apache-2.0",
+                        "selection_sha256": selection_sha,
+                        "snapshot_sha256": snapshot_sha,
+                    },
+                    handle,
+                )
+            runner.EXPECTED_SELECTION_SHA256 = selection_sha
+            runner.EXPECTED_SNAPSHOT_SHA256 = snapshot_sha
+            for limit, expected_domains, expected_strata in ((6, 6, 6), (12, 6, 12), (23, 6, 12)):
+                output_dir = os.path.join(tempdir, "tier-%d" % limit)
+                os.makedirs(output_dir)
+                runner.prepare(output_dir, limit=limit, data_path=snapshot_path, metadata_path=metadata_path)
+                with open(os.path.join(output_dir, "cases.jsonl"), encoding="utf-8") as handle:
+                    cases = [json.loads(line) for line in handle]
+                self.assertEqual(len(cases), limit)
+                self.assertEqual(len({case["category"] for case in cases}), expected_domains)
+                self.assertEqual(
+                    len({(case["category"], case["difficulty"]) for case in cases}),
+                    expected_strata,
+                )
+            predictions = []
+            for index, case in enumerate(cases[:12]):
+                completion = "B" if index == 0 else ("not an answer" if index == 1 else "A")
+                predictions.append({"task_id": case["task_id"], "completion": completion})
+            output_dir = os.path.join(tempdir, "tier-12")
+            with open(os.path.join(output_dir, "predictions.jsonl"), "w", encoding="utf-8") as handle:
+                for prediction in predictions:
+                    handle.write(json.dumps(prediction) + "\n")
+            runner.evaluate(output_dir)
+            with open(os.path.join(output_dir, "summary.json"), encoding="utf-8") as handle:
+                summary = json.load(handle)
+        self.assertEqual(summary["metrics"]["total_count"], 12)
+        self.assertEqual(summary["metrics"]["correct_count"], 1)
+        self.assertEqual(summary["metrics"]["malformed_output_count"], 1)
+        self.assertEqual(set(summary["category_metrics"]), set(builder.DOMAINS))
+        self.assertEqual(set(summary["difficulty_metrics"]), {"easy", "hard"})
+        self.assertEqual(set(summary["length_metrics"]), {"short"})
+        self.assertEqual(set(summary["context_bucket_metrics"]), {"16384"})
+        self.assertIn("official LongBench v2 leaderboard score", summary["claim_boundary"]["cannot_claim"])
+
+    def test_longbench_v2_snapshot_identity_and_license_are_pinned(self):
+        container_dir = os.path.join(ROOT_DIR, "containers", "capability-longbench-v2")
+        with open(os.path.join(container_dir, "Dockerfile"), encoding="utf-8") as handle:
+            dockerfile = handle.read()
+        with open(os.path.join(container_dir, "build_snapshot.py"), encoding="utf-8") as handle:
+            build_script = handle.read()
+        with open(os.path.join(container_dir, "LICENSE.dataset"), encoding="utf-8") as handle:
+            license_text = handle.read()
+        self.assertIn("2b48e494f2c7a2f0af81aae178e05c7e1dde0fe9", dockerfile)
+        self.assertIn("15d61c22d92c96900b3c4948b6aeea218d3214b676a65df48e7b8555604c7fe2", dockerfile)
+        self.assertIn("1a5f48517a31dc80083700955b92d9524cba2d863448209956e2cf1b423079a3", build_script)
+        self.assertIn("677ac38dc799b0bbe61816f1d0c245bb93f01dd535a71ecfde6fa619d3eb86db", build_script)
+        self.assertIn("Apache-2.0", license_text)
+
     def test_repository_edit_prepare_hides_tests_and_scores_a_valid_patch(self):
         module_path = os.path.join(ROOT_DIR, "containers", "capability-repo-edit", "runner.py")
         module = _load_module("repository_edit_runner_test_module", module_path)

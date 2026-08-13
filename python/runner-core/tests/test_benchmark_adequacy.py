@@ -37,7 +37,6 @@ class BenchmarkAdequacyTests(unittest.TestCase):
         self.assertIn("tool_use", assistant["diagnostic_facets_covered"])
         self.assertIn("stateful_tool_use", assistant["diagnostic_facets_covered"])
         self.assertIn("tool_use", assistant["freshness"]["runnable_refreshable_facets"])
-        self.assertIn("long_context_task_reasoning", assistant["planned_only_priority_facets"])
         self.assertEqual(
             assistant["known_diagnostic_saturation_risks"],
             ["multiturn_chat_memory_v1"],
@@ -51,6 +50,8 @@ class BenchmarkAdequacyTests(unittest.TestCase):
 
         reasoning = by_surface["local_reasoning_capability"]
         self.assertIn("expert_scientific_reasoning", reasoning["diagnostic_facets_covered"])
+        self.assertIn("long_context_task_reasoning", reasoning["diagnostic_facets_covered"])
+        self.assertNotIn("long_context_task_reasoning", reasoning["planned_only_priority_facets"])
         self.assertIn("reasoning_exact_answer_v1", reasoning["known_headline_saturation_risks"])
 
     def test_missing_scoped_facet_fails_only_structural_claim_coverage(self):

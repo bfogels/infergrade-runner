@@ -101,7 +101,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.env_patch.stop()
         self.tempdir.cleanup()
 
-    def test_capability_context_size_honors_only_pinned_context_fixture_buckets(self):
+    def test_capability_context_size_honors_only_anchored_reviewed_buckets(self):
         self.assertEqual(
             _capability_context_size("InferGrade nominal context bucket: 8192 tokens.\nfixture"),
             8192,
@@ -109,6 +109,18 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(_capability_context_size("short ordinary prompt"), 4096)
         self.assertEqual(
             _capability_context_size("InferGrade nominal context bucket: 32768 tokens.\nfixture"),
+            32768,
+        )
+        self.assertEqual(
+            _capability_context_size("InferGrade nominal context bucket: 65536 tokens.\nfixture"),
+            65536,
+        )
+        self.assertEqual(
+            _capability_context_size("InferGrade nominal context bucket: 131072 tokens.\nfixture"),
+            131072,
+        )
+        self.assertEqual(
+            _capability_context_size("source text\nInferGrade nominal context bucket: 65536 tokens."),
             4096,
         )
 

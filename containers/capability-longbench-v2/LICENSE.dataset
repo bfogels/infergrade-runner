@@ -1,0 +1,8 @@
+The LongBench v2 snapshot is derived from zai-org/LongBench-v2 at the exact
+revision and SHA-256 recorded in snapshot_metadata.json.
+
+The Hugging Face dataset repository declares the dataset under Apache-2.0:
+https://huggingface.co/datasets/zai-org/LongBench-v2
+
+InferGrade selects a bounded local subset and reports it as an InferGrade
+LongBench v2-derived reference. It is not an official leaderboard result.

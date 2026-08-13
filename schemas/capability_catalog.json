@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-13-ceiling-confidence-bounds",
+  "catalog_version": "2026-08-13-longbench-v2-local-reference",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -101,8 +101,7 @@
           "stateful_tool_loop_diagnostic_v1"
         ],
         "planned_check_ids": [
-          "arena_hard_local_reference_v1",
-          "longbench_v2_reference_v1"
+          "arena_hard_local_reference_v1"
         ],
         "minimum_refreshable_priority_facets": 1,
         "empirical_priority_facet_policy": {
@@ -246,11 +245,10 @@
         "supporting_check_ids": [
           "mmlu_pro_reference_v1",
           "gpqa_diamond_reference_v1",
-          "reasoning_exact_answer_v1"
+          "reasoning_exact_answer_v1",
+          "longbench_v2_local_reference_v1"
         ],
-        "planned_check_ids": [
-          "longbench_v2_reference_v1"
-        ],
+        "planned_check_ids": [],
         "minimum_refreshable_priority_facets": 1,
         "empirical_priority_facet_policy": {
           "policy_id": "priority_facet_evidence_gate_v2",
@@ -646,6 +644,7 @@
     "reasoning_exact_answer_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 2, "standard": 3, "gold": 3}},
     "mmlu_pro_reference_v1": {"strategy": "stratum_round_robin_hash_rank", "stratification_fields": ["category"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 300}},
     "gpqa_diamond_reference_v1": {"strategy": "stratum_round_robin_hash_rank", "stratification_fields": ["domain"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 198}},
+    "longbench_v2_local_reference_v1": {"strategy": "balanced_tier_blocks", "stratification_fields": ["domain", "difficulty", "length"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 6, "standard": 12, "gold": 23}},
     "bfcl_local_reference_v1": {"strategy": "stratum_round_robin_hash_rank", "stratification_fields": ["category"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 11, "standard": 55, "gold": 110}},
     "stateful_tool_loop_diagnostic_v1": {"strategy": "balanced_tier_blocks", "stratification_fields": ["category", "variant"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 8, "standard": 16, "gold": 24}},
     "repository_edit_smoke_v1": {"strategy": "pinned_semantic_order", "stratification_fields": ["category"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 2, "standard": 6, "gold": 8}},
@@ -1073,23 +1072,24 @@
       ]
     },
     {
-      "check_id": "longbench_v2_reference_v1",
+      "check_id": "longbench_v2_local_reference_v1",
       "surface_id": "local_reasoning_capability",
       "evidence_lane_id": "reference",
-      "maturity": "planned",
-      "runnable_status": "not_runnable",
-      "default_inclusion_status": "not_default",
-      "fixture_or_dataset_revision_status": "task_subset_and_judge_policy_pin_needed",
-      "harness_status": "not_implemented",
-      "scoring_policy_id": "long_context_task_accuracy_v1",
-      "sample_policy": "Future pinned locally feasible LongBench v2 subset across realistic long-context task categories.",
-      "expected_duration_token_volume_status": "unknown",
-      "sandbox_requirement": "memory_fit_gate_and_explicit_judge_policy_required",
-      "claim_boundary": "Future long-context task-reasoning reference candidate; not maximum-context support, broad reasoning, or a default laptop lane.",
+      "maturity": "reference_runnable",
+      "runnable_status": "runnable_intentional_reference",
+      "default_inclusion_status": "not_default_diagnostic",
+      "fixture_or_dataset_revision_status": "pinned_dataset_revision_sha256_and_23_case_context_bounded_short_snapshot",
+      "harness_status": "container_harness_implemented",
+      "scoring_policy_id": "longbench_v2_exact_answer_letter_accuracy_v1",
+      "generation_constraint_id": "longbench_v2_choice_a_d_grammar_v1",
+      "sample_policy": "Twenty-three hash-ranked, context-bounded short-stratum cases: up to two per domain and difficulty stratum; canary spans all six domains and standard spans all twelve strata. The gold tier has one structured-data easy case because the only second upstream row exceeds the reviewed 131072-token estimate ceiling.",
+      "expected_duration_token_volume_status": "estimated large; 6 to 23 contexts in reviewed 16K to 131K nominal context buckets",
+      "sandbox_requirement": "offline_read_only_container_for_prepare and scoring; generation allocates reviewed nominal context buckets and preserves per-case failures when the runtime or model cannot fit them",
+      "claim_boundary": "Pinned LongBench v2-derived short-context local reference only; not an official leaderboard, medium/long context, maximum-context, or general long-context capability claim.",
       "promotion_blockers": [
-        "Pin a locally feasible task subset and upstream revision.",
-        "Define explicit judge identity, scoring, and non-comparable failure policy.",
-        "Prove memory-fit gating, resumability, duration, and headroom on current large local models."
+        "Collect cross-family distributions and independently replicated observations.",
+        "Observe duration, actual prompt-token counts, memory-fit failures, resumability, and malformed-output behavior on supported local runtimes.",
+        "Demonstrate headroom on current large local models before any stronger product claim."
       ]
     }
   ],
@@ -1122,6 +1122,12 @@
       "score_policy_id": "exact_multiple_choice_letter_accuracy_v4",
       "display_name": "Strict answer-letter accuracy with empty-think normalization",
       "description": "Use strict answer-letter accuracy after removing only a leading empty thinking wrapper and trailing runtime terminal markers. Completed malformed answers score incorrect; generation failures remain unscored execution failures.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "longbench_v2_exact_answer_letter_accuracy_v1",
+      "display_name": "LongBench v2 strict answer-letter accuracy",
+      "description": "Score the pinned LongBench v2-derived short-context subset by deterministic A/B/C/D answer-letter accuracy. Completed malformed answers score incorrect; generation failures remain unscored execution failures.",
       "score_method": "primary_metric_value_v1"
     },
     {
@@ -1454,6 +1460,22 @@
       "token_volume_band": "large",
       "resumability_boundary": "benchmark",
       "execution_pattern": "native_context_retrieval"
+    },
+    {
+      "group_id": "long_context_reasoning_reference",
+      "display_name": "Long-context reasoning reference",
+      "description": "Run a pinned LongBench v2-derived short-context subset across six realistic task domains.",
+      "evidence_kind": "capability",
+      "surface_id": "local_reasoning_capability",
+      "default_check_ids": [
+        "longbench_v2_local_reference_v1"
+      ],
+      "effort_hint": "deep",
+      "suite_scope": "reference",
+      "expected_duration_band": "45-120 min",
+      "token_volume_band": "large",
+      "resumability_boundary": "case",
+      "execution_pattern": "long_context_multiple_choice_reference"
     },
     {
       "group_id": "reasoning_exact_answer",
@@ -1921,6 +1943,60 @@
       "dataset_revision": "56686c06f5e19865c153de0fdb11be3890014df7",
       "dataset_sha256": "461ae7329f15a3e35f8184d2dac24b990f34fdf12f366ca4062d8e6638cd08dc",
       "dataset_license": "CC-BY-4.0"
+    },
+    {
+      "check_id": "longbench_v2_local_reference_v1",
+      "display_name": "LongBench v2 local reference",
+      "description": "Pinned short-context LongBench v2-derived multiple-choice reference across six realistic task domains and both difficulty labels.",
+      "capability_facets": [
+        "long_context_task_reasoning"
+      ],
+      "temporal_scope": "static_pinned",
+      "evidence_kind": "capability",
+      "group_id": "long_context_reasoning_reference",
+      "surface_id": "local_reasoning_capability",
+      "runner_target": "longbench_v2_local_reference_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "reference",
+      "evidence_lane_id": "reference",
+      "effort_level": "deep",
+      "expected_duration_band": "45-120 min",
+      "token_volume_band": "large",
+      "resumability_boundary": "case",
+      "execution_pattern": "long_context_multiple_choice_reference",
+      "selection_guidance": "Adds deterministic task-reasoning evidence beyond key retrieval while limiting the first local lane to the upstream short length stratum.",
+      "score_dimension": "long_context_task_reasoning",
+      "primary_score_metric": "accuracy",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "score_role": "diagnostic_only",
+      "discrimination_status": "pending_distribution_audit",
+      "calibration_policy": {
+        "policy_id": "capability_headroom_gate_v1",
+        "minimum_task_count": 12
+      },
+      "higher_is_better": true,
+      "score_policy_id": "longbench_v2_exact_answer_letter_accuracy_v1",
+      "score_breakdown_fields": [
+        "correct_count",
+        "total_count",
+        "invalid_count",
+        "malformed_output_count",
+        "category_metrics",
+        "difficulty_metrics",
+        "length_metrics",
+        "context_bucket_metrics"
+      ],
+      "source": "https://huggingface.co/datasets/zai-org/LongBench-v2",
+      "source_code": "https://github.com/THUDM/LongBench",
+      "dataset_revision": "2b48e494f2c7a2f0af81aae178e05c7e1dde0fe9",
+      "dataset_sha256": "15d61c22d92c96900b3c4948b6aeea218d3214b676a65df48e7b8555604c7fe2",
+      "selection_sha256": "1a5f48517a31dc80083700955b92d9524cba2d863448209956e2cf1b423079a3",
+      "snapshot_sha256": "677ac38dc799b0bbe61816f1d0c245bb93f01dd535a71ecfde6fa619d3eb86db",
+      "dataset_license": "Apache-2.0"
     },
     {
       "check_id": "context_retrieval_reference_v1",
@@ -2449,26 +2525,6 @@
       "planned_score_policy_id": "repository_issue_resolution_v1",
       "local_feasibility": "curated_reference_first",
       "why_not_default": "Operationally expensive enough that it should start as maintainer-reviewed gold evidence, not a default laptop run.",
-      "status": "planned"
-    },
-    {
-      "check_id": "longbench_v2_reference_v1",
-      "display_name": "LongBench v2 task-reasoning reference",
-      "value": "Adds realistic long-context task reasoning beyond deterministic key retrieval.",
-      "cost": "large context and token volume with substantial memory-fit constraints on consumer hardware",
-      "implementation_risk": "high",
-      "suite_placement": "reasoning/reference",
-      "primary_use_case": "general_assistant",
-      "benchmark_tier": "reference",
-      "evidence_lane_id": "reference",
-      "score_dimension": "long_context_task_reasoning",
-      "capability_facets": [
-        "long_context_task_reasoning"
-      ],
-      "temporal_scope": "static_pinned",
-      "planned_score_policy_id": "long_context_task_accuracy_v1",
-      "local_feasibility": "reference_only",
-      "why_not_default": "Needs pinned task sampling, memory-fit gating, long-duration recovery, and a judge policy that does not hide scorer identity.",
       "status": "planned"
     }
   ],

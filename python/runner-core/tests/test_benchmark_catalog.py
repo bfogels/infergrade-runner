@@ -64,13 +64,15 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("mmlu_pro_reference_v1", check_ids)
         self.assertIn("bfcl_local_reference_v1", check_ids)
         self.assertIn("stateful_tool_loop_diagnostic_v1", check_ids)
+        self.assertIn("longbench_v2_local_reference_v1", check_ids)
         self.assertNotIn("multiturn_chat_memory_v1", planned_ids)
         self.assertNotIn("coding_static_repair_v1", planned_ids)
         self.assertNotIn("reasoning_exact_answer_v1", planned_ids)
         self.assertNotIn("mmlu_pro_reference_v1", planned_ids)
         self.assertNotIn("bfcl_local_reference_v1", planned_ids)
         self.assertNotIn("stateful_tool_loop_diagnostic_v1", planned_ids)
-        self.assertIn("longbench_v2_reference_v1", planned_ids)
+        self.assertNotIn("longbench_v2_reference_v1", planned_ids)
+        self.assertNotIn("longbench_v2_local_reference_v1", planned_ids)
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
             self.assertIn(check["evidence_lane_id"], {"smoke", "decision", "reference", "gold"})
@@ -174,8 +176,12 @@ class BenchmarkCatalogTests(unittest.TestCase):
             score_policies["local_coding_capability"]["representativeness_policy"]["supporting_check_ids"],
         )
         self.assertIn(
-            "longbench_v2_reference_v1",
+            "longbench_v2_local_reference_v1",
+            score_policies["local_reasoning_capability"]["representativeness_policy"]["supporting_check_ids"],
+        )
+        self.assertEqual(
             score_policies["local_reasoning_capability"]["representativeness_policy"]["planned_check_ids"],
+            [],
         )
 
     def test_coverage_expansion_priorities_are_ordered_and_answer_loop_scoped(self):
@@ -362,6 +368,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(statuses["swebench_verified_gold_v1"]["runnable_status"], "not_runnable")
         self.assertIn("not runnable", statuses["swebench_verified_gold_v1"]["claim_boundary"])
         self.assertEqual(statuses["repository_edit_smoke_v1"]["maturity"], "thin_local_sample")
+        self.assertEqual(statuses["longbench_v2_local_reference_v1"]["maturity"], "reference_runnable")
+        self.assertIn("not an official leaderboard", statuses["longbench_v2_local_reference_v1"]["claim_boundary"])
         self.assertEqual(
             statuses["repository_edit_smoke_v1"]["runnable_status"],
             "runnable_intentional_diagnostic",
@@ -394,17 +402,17 @@ class BenchmarkCatalogTests(unittest.TestCase):
     def test_catalog_legitimacy_validation_blocks_catalog_only_planned_promotion(self):
         mutated = deepcopy(load_capability_catalog())
         statuses = {item["check_id"]: item for item in mutated["benchmark_status_matrix"]}
-        statuses["longbench_v2_reference_v1"]["runnable_status"] = "runnable_intentional_reference"
-        statuses["longbench_v2_reference_v1"]["maturity"] = "reference_runnable"
+        statuses["livecodebench_reference_v1"]["runnable_status"] = "runnable_intentional_reference"
+        statuses["livecodebench_reference_v1"]["maturity"] = "reference_runnable"
 
         failures = validate_benchmark_legitimacy_metadata(mutated)
 
         self.assertIn(
-            "longbench_v2_reference_v1: planned candidate must remain not_runnable until moved into checks",
+            "livecodebench_reference_v1: planned candidate must remain not_runnable until moved into checks",
             failures,
         )
         self.assertIn(
-            "longbench_v2_reference_v1: planned candidate cannot declare runnable maturity",
+            "livecodebench_reference_v1: planned candidate cannot declare runnable maturity",
             failures,
         )
 
