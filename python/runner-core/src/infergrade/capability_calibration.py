@@ -375,6 +375,9 @@ def audit_capability_observations(
     minimum_component_observations = effective_policy.get("minimum_headline_component_observations")
     minimum_component_families = effective_policy.get("minimum_headline_component_model_families")
     minimum_component_bands = effective_policy.get("minimum_headline_component_parameter_bands")
+    minimum_component_independent_setups = effective_policy.get(
+        "minimum_headline_component_independently_replicated_setups"
+    )
     maximum_component_ceiling_fraction = effective_policy.get("maximum_headline_component_ceiling_fraction")
     for component_id, component in component_metrics.items():
         component_insufficient = False
@@ -395,6 +398,16 @@ def audit_capability_observations(
             and component["parameter_band_count"] < int(minimum_component_bands)
         ):
             blockers.append("insufficient_headline_component_parameter_bands:%s" % component_id)
+            component_insufficient = True
+        if (
+            minimum_component_independent_setups is not None
+            and component["independently_replicated_setup_count"]
+            < int(minimum_component_independent_setups)
+        ):
+            blockers.append(
+                "insufficient_headline_component_independently_replicated_setups:%s"
+                % component_id
+            )
             component_insufficient = True
         if component_insufficient:
             continue
@@ -516,6 +529,25 @@ def _headline_component_metrics(
             str(observation.get("parameter_band") or "unknown")
             for observation, _ in component_rows
         } - {"unknown"}
+        setup_evidence_groups: Dict[Any, set] = {}
+        for observation, _ in component_rows:
+            evidence_group_id = (
+                str(observation.get("evidence_group_id") or "").strip()
+                if observation.get("evidence_group_verified") is True
+                else ""
+            )
+            if evidence_group_id:
+                setup_evidence_groups.setdefault(
+                    _observation_setup_key(observation), set()
+                ).add(evidence_group_id)
+        independently_replicated_setup_count = sum(
+            1 for groups in setup_evidence_groups.values() if len(groups) >= 2
+        )
+        evidence_group_count = len({
+            group_id
+            for groups in setup_evidence_groups.values()
+            for group_id in groups
+        })
         ceiling_count = sum(1 for score in scores if math.isclose(score, 1.0, abs_tol=1e-9))
         near_ceiling_count = sum(1 for score in scores if score >= near_ceiling_threshold)
         maximum = max(scores) if scores else None
@@ -523,6 +555,13 @@ def _headline_component_metrics(
             "observation_count": len(scores),
             "model_family_count": len(families),
             "parameter_band_count": len(bands),
+            "independently_replicated_setup_count": independently_replicated_setup_count,
+            "evidence_group_count": evidence_group_count,
+            "ungrouped_observation_count": sum(
+                1
+                for observation, _ in component_rows
+                if observation.get("evidence_group_verified") is not True
+            ),
             "distinct_score_count": len(set(round(score, 6) for score in scores)),
             "minimum": min(scores) if scores else None,
             "median": median(scores) if scores else None,
