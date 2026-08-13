@@ -182,6 +182,65 @@ class CapabilityCalibrationTests(unittest.TestCase):
         self.assertTrue(challenged["headline_ready"])
         self.assertEqual(challenged["blockers"], [])
 
+    def test_headroom_challenge_requires_every_weighted_component(self):
+        catalog = load_capability_catalog()
+        policy = policy_for_score_version("local_coding_score_v2", catalog=catalog)
+        observations = [
+            {
+                "score_version": "local_coding_score_v2",
+                "surface_id": "local_coding_capability",
+                "score": 0.55 + index / 100.0,
+                "model_family": "Qwen3.6",
+                "parameter_band": "20b_to_under_40b",
+                "model_identities": ["qwen3627b"],
+                "quantization_scheme": "q3_k_m",
+                "evidence_group_id": "challenge-source-%d" % index,
+                "evidence_group_verified": True,
+                "components": [
+                    {"benchmark_id": "evalplus_humaneval", "score": 0.6},
+                    {"benchmark_id": "evalplus_mbpp", "score": 0.5},
+                ],
+            }
+            for index in range(2)
+        ]
+
+        partial = audit_capability_observations(
+            observations,
+            "local_coding_score_v2",
+            policy=policy,
+            catalog=catalog,
+        )
+
+        self.assertEqual(partial["metrics"]["headroom_challenge_candidate_observation_count"], 2)
+        self.assertEqual(partial["metrics"]["headroom_challenge_incomplete_observation_count"], 2)
+        self.assertEqual(partial["metrics"]["headroom_challenge_observation_count"], 0)
+        self.assertIn(
+            "insufficient_headroom_challenge_observation_count",
+            partial["blockers"],
+        )
+        for observation in observations:
+            observation["components"].append({
+                "benchmark_id": "coding_static_repair_v1",
+                "score": 0.4,
+            })
+        complete = audit_capability_observations(
+            observations,
+            "local_coding_score_v2",
+            policy=policy,
+            catalog=catalog,
+        )
+
+        self.assertEqual(complete["metrics"]["headroom_challenge_observation_count"], 2)
+        self.assertEqual(complete["metrics"]["headroom_challenge_incomplete_observation_count"], 0)
+        self.assertEqual(
+            complete["metrics"]["headroom_challenge_independently_replicated_setup_count"],
+            1,
+        )
+        self.assertFalse(any(
+            blocker.startswith("insufficient_headroom_challenge_")
+            for blocker in complete["blockers"]
+        ))
+
     def test_audit_blocks_near_ceiling_distribution_before_literal_saturation(self):
         catalog = load_capability_catalog()
         policy = policy_for_score_version("local_assistant_score_v4", catalog=catalog)

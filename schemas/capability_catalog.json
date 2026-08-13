@@ -483,7 +483,7 @@
       "target_quants": ["q3_k_m"],
       "use_case": "agentic_coding",
       "generation_preset_id": "deterministic_direct_answer_v1",
-      "benchmark_check_ids": ["interactive_chat_v1", "repository_edit_smoke_v1", "evalplus_humaneval", "evalplus_mbpp"],
+      "benchmark_check_ids": ["interactive_chat_v1", "coding_static_repair_v1", "repository_edit_smoke_v1", "evalplus_humaneval", "evalplus_mbpp"],
       "why": "Challenge the coding suite with the curated current 27B setup only after its 24 GB artifact, runtime, fit, and coding protocol path are qualified.",
       "what_it_would_change": "Tests coding-suite headroom against the same curated stress setup without treating model size or selection as a frontier-capability claim.",
       "status": "blocked_pending_24gb_artifact_runtime_task_protocol_canary",

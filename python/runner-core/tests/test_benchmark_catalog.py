@@ -262,6 +262,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(reasoning_challenge["campaign_availability"], "blocked_pending_canary")
         self.assertEqual(coding_challenge["target_observations"], 2)
         self.assertEqual(reasoning_challenge["target_observations"], 2)
+        self.assertIn("coding_static_repair_v1", coding_challenge["benchmark_check_ids"])
         self.assertEqual(
             reasoning_anchor["benchmark_check_ids"],
             [

@@ -299,8 +299,19 @@ def audit_capability_observations(
     })
     largest_setup_count = max(setup_counts.values()) if setup_counts else 0
     current_generation_count = sum(1 for item in selected if item.get("current_generation"))
-    headroom_challenge_observations = [
+    headroom_challenge_candidates = [
         item for item in selected if item.get("headroom_challenge")
+    ]
+    required_headline_component_ids = set(
+        _headline_component_ids(selected, score_version, catalog)
+    )
+    headroom_challenge_observations = [
+        item for item in headroom_challenge_candidates
+        if not required_headline_component_ids
+        or required_headline_component_ids.issubset({
+            str(component.get("benchmark_id") or "")
+            for component in list(item.get("components") or [])
+        })
     ]
     headroom_challenge_families = {
         str(item.get("model_family") or "unknown")
@@ -341,6 +352,10 @@ def audit_capability_observations(
         "current_generation_count": current_generation_count,
         "current_generation_fraction": round(current_generation_count / float(count), 6) if count else None,
         "headroom_challenge_observation_count": len(headroom_challenge_observations),
+        "headroom_challenge_candidate_observation_count": len(headroom_challenge_candidates),
+        "headroom_challenge_incomplete_observation_count": (
+            len(headroom_challenge_candidates) - len(headroom_challenge_observations)
+        ),
         "headroom_challenge_model_family_count": len(headroom_challenge_families),
         "headroom_challenge_independently_replicated_setup_count": (
             headroom_challenge_independently_replicated_setup_count
@@ -542,20 +557,7 @@ def _headline_component_metrics(
 ) -> Dict[str, Dict[str, Any]]:
     if not catalog or not observations:
         return {}
-    surface_ids = {str(item.get("surface_id") or "") for item in observations if item.get("surface_id")}
-    surface_ids.update(
-        str(surface_id)
-        for surface_id, surface_policy in surface_score_policy_index(catalog).items()
-        if surface_policy.get("score_version") == score_version
-    )
-    checks = check_index(catalog)
-    headline_ids = sorted(
-        check_id
-        for check_id, check in checks.items()
-        if check.get("surface_id") in surface_ids
-        and float(check.get("primary_score_weight") or 0.0) > 0.0
-        and check.get("score_role") != "diagnostic_only"
-    )
+    headline_ids = _headline_component_ids(observations, score_version, catalog)
     near_ceiling_threshold = float(policy.get("near_ceiling_threshold") or 0.9)
     metrics = {}
     for component_id in headline_ids:
@@ -619,6 +621,32 @@ def _headline_component_metrics(
             "near_ceiling_fraction": round(near_ceiling_count / float(len(scores)), 6) if scores else None,
         }
     return metrics
+
+
+def _headline_component_ids(
+    observations: List[Dict[str, Any]],
+    score_version: str,
+    catalog: Optional[Dict[str, Any]],
+) -> List[str]:
+    if not catalog:
+        return []
+    surface_ids = {
+        str(item.get("surface_id") or "")
+        for item in observations
+        if item.get("surface_id")
+    }
+    surface_ids.update(
+        str(surface_id)
+        for surface_id, surface_policy in surface_score_policy_index(catalog).items()
+        if surface_policy.get("score_version") == score_version
+    )
+    return sorted(
+        check_id
+        for check_id, check in check_index(catalog).items()
+        if check.get("surface_id") in surface_ids
+        and float(check.get("primary_score_weight") or 0.0) > 0.0
+        and check.get("score_role") != "diagnostic_only"
+    )
 
 
 def _minimum_gate(blockers: List[str], metrics: Dict[str, Any], policy: Dict[str, Any], metric: str, threshold: str) -> None:
