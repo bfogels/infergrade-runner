@@ -9,7 +9,7 @@ class BenchmarkReadinessTests(unittest.TestCase):
     def test_missing_corpus_evidence_fails_closed_even_when_scoped_facets_exist(self):
         report = audit_benchmark_readiness([], load_capability_catalog())
 
-        self.assertEqual(report["artifact_spec_version"], "0.3.0")
+        self.assertEqual(report["artifact_spec_version"], "0.4.0")
         self.assertFalse(report["scoped_claim_ready"])
         self.assertFalse(report["broad_surface_ready"])
         self.assertEqual(report["status"], "not_ready")
@@ -222,6 +222,73 @@ class BenchmarkReadinessTests(unittest.TestCase):
             all(item["ready"] for item in check["required_slice_metrics"].values())
         )
 
+    def test_undersized_standalone_runs_are_observed_but_cannot_clear_gate(self):
+        catalog = _structurally_broad_catalog_with_stateful_diagnostic()
+        documents = _stateful_component_documents()
+        for document in documents:
+            document["tasks"] = [{} for _ in range(8)]
+
+        report = audit_benchmark_readiness(documents, catalog)
+
+        assistant = _surface(report, "local_assistant_capability")
+        check = _facet(assistant, "stateful_tool_use")["checks"][0]
+        self.assertEqual(check["status"], "insufficient_evidence")
+        self.assertFalse(check["ready"])
+        self.assertEqual(check["minimum_task_count"], 16)
+        self.assertEqual(check["observation_count"], 0)
+        self.assertEqual(check["observed_evidence_count"], 20)
+        self.assertEqual(check["observed_standalone_capability_run_count"], 20)
+        self.assertEqual(
+            check["excluded_standalone_below_minimum_task_count"],
+            20,
+        )
+        self.assertEqual(check["maximum_observed_standalone_task_count"], 8)
+        self.assertEqual(
+            check["undersized_standalone_evidence_cohorts"],
+            [
+                {
+                    "evidence_cohort": (
+                        "standalone:benchmark:stateful_tool_loop_diagnostic_v1:fixture-v1"
+                    ),
+                    "observation_count": 20,
+                    "minimum_observed_task_count": 8,
+                    "maximum_observed_task_count": 8,
+                }
+            ],
+        )
+        self.assertIn("standalone_task_count_below_minimum", check["blockers"])
+        self.assertIn(
+            "corpus:priority_facet_evidence_insufficient:stateful_tool_use",
+            assistant["broad_surface_blockers"],
+        )
+        self.assertNotIn(
+            "corpus:priority_facet_unobserved:stateful_tool_use",
+            assistant["broad_surface_blockers"],
+        )
+
+    def test_exact_minimum_standalone_task_count_can_clear_gate(self):
+        catalog = _structurally_broad_catalog_with_stateful_diagnostic()
+        documents = _stateful_component_documents()
+        for document in documents:
+            document["tasks"] = [{} for _ in range(16)]
+
+        report = audit_benchmark_readiness(documents, catalog)
+
+        check = _facet(
+            _surface(report, "local_assistant_capability"),
+            "stateful_tool_use",
+        )["checks"][0]
+        self.assertEqual(check["status"], "ready")
+        self.assertTrue(check["ready"])
+        self.assertEqual(check["minimum_task_count"], 16)
+        self.assertEqual(check["observation_count"], 20)
+        self.assertEqual(
+            check["excluded_standalone_below_minimum_task_count"],
+            0,
+        )
+        self.assertEqual(check["maximum_observed_standalone_task_count"], 16)
+        self.assertEqual(check["undersized_standalone_evidence_cohorts"], [])
+
     def test_underfilled_outcome_slice_cannot_clear_gate(self):
         catalog = _structurally_broad_catalog_with_stateful_diagnostic()
         documents = _stateful_component_documents()
@@ -281,6 +348,8 @@ class BenchmarkReadinessTests(unittest.TestCase):
         self.assertEqual(check["score_ready_composite_observation_count"], 0)
         self.assertEqual(check["standalone_capability_run_observation_count"], 20)
         self.assertEqual(check["independently_replicated_setup_count"], 10)
+        self.assertEqual(check["minimum_task_count"], 0)
+        self.assertEqual(check["excluded_standalone_below_minimum_task_count"], 0)
 
     def test_standalone_diagnostic_runs_can_complete_broad_facet_evidence(self):
         catalog = _structurally_broad_catalog_with_assistant_diagnostic()

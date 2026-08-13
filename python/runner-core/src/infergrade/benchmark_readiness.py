@@ -92,7 +92,7 @@ def audit_benchmark_readiness(
     broad_ready = bool(surfaces) and all(item["broad_surface_ready"] for item in surfaces)
     return {
         "artifact_kind": "benchmark_readiness_audit",
-        "artifact_spec_version": "0.3.0",
+        "artifact_spec_version": "0.4.0",
         "catalog_version": payload.get("catalog_version"),
         "catalog_metadata_valid": metadata_valid,
         "catalog_metadata_errors": metadata_errors,
@@ -113,7 +113,8 @@ def audit_benchmark_readiness(
             "Readiness requires Runner catalog coverage, an empirical score distribution with the required "
             "diversity and headroom, and representative observations for every priority capability facet. "
             "A facet counts only when one protocol-identity cohort for a supporting check independently "
-            "clears its observation, model-family, parameter-band, repeat, and headroom gates. Missing "
+            "clears its observation, model-family, parameter-band, repeat, and headroom gates; standalone "
+            "evidence must also meet the check's declared minimum task count. Missing "
             "result evidence fails closed. "
             "Raw benchmark attainment is never curved, capped, or rescaled by this audit."
         ),
@@ -209,10 +210,12 @@ def _audit_priority_facet_evidence(
             for check_id in facet_check_ids
         ]
         ready = any(item["ready"] for item in check_metrics)
-        observation_count = sum(item["observation_count"] for item in check_metrics)
+        observed_evidence_count = sum(
+            item["observed_evidence_count"] for item in check_metrics
+        )
         if ready:
             status = "ready"
-        elif observation_count == 0:
+        elif observed_evidence_count == 0:
             status = "unobserved"
             blockers.append("priority_facet_unobserved:%s" % facet)
         elif any(
@@ -240,7 +243,8 @@ def _audit_priority_facet_evidence(
         "blockers": blockers,
         "claim_boundary": (
             "Facet evidence is counted from completed component reports in score-ready results and "
-            "scored standalone capability-run artifacts on the same declared surface. Duplicate views "
+            "scored standalone capability-run artifacts on the same declared surface. Undersized "
+            "standalone runs remain reported but cannot satisfy a facet's evidence gate. Duplicate views "
             "are conservatively collapsed. Standalone evidence never enters composite-score calibration. "
             "Catalog support or a healthy composite distribution alone does not establish empirical "
             "facet coverage."
@@ -262,6 +266,12 @@ def _priority_check_metrics(
         if isinstance(declared_slice_policy, dict)
         else {}
     )
+    calibration_policy = check.get("calibration_policy")
+    minimum_task_count = (
+        int((calibration_policy or {}).get("minimum_task_count") or 0)
+        if isinstance(calibration_policy, dict)
+        else 0
+    )
     cohort_rows: Dict[str, List[tuple]] = {}
     for observation in composite_observations:
         for component in list(observation.get("components") or []):
@@ -274,6 +284,9 @@ def _priority_check_metrics(
             cohort_rows.setdefault(cohort_id, []).append(
                 (observation, float(component["score"]), "score_ready_composite")
             )
+    matching_standalone = []
+    undersized_standalone = []
+    undersized_cohort_task_counts: Dict[str, List[int]] = {}
     for observation in standalone_observations:
         if (
             observation.get("benchmark_id") != check_id
@@ -281,7 +294,15 @@ def _priority_check_metrics(
             or _attainment_score(observation.get("score")) is None
         ):
             continue
+        matching_standalone.append(observation)
         cohort_id = "standalone:%s" % observation.get("score_version")
+        task_count = int(observation.get("task_count") or 0)
+        if task_count < minimum_task_count:
+            undersized_standalone.append(observation)
+            undersized_cohort_task_counts.setdefault(cohort_id, []).append(
+                task_count
+            )
+            continue
         cohort_rows.setdefault(cohort_id, []).append(
             (observation, float(observation["score"]), "standalone_capability_run")
         )
@@ -300,9 +321,53 @@ def _priority_check_metrics(
         policy,
         slice_policy,
     )
+    selected_metrics = {
+        key: value for key, value in selected.items() if key != "cohort_id"
+    }
+    composite_observation_count = sum(
+        1
+        for rows in cohort_rows.values()
+        for _, _, source_kind in rows
+        if source_kind == "score_ready_composite"
+    )
+    if (
+        not selected_metrics["observation_count"]
+        and undersized_standalone
+        and not composite_observation_count
+    ):
+        selected_metrics["status"] = "insufficient_evidence"
+        selected_metrics["ready"] = False
+        selected_metrics["blockers"] = ["standalone_task_count_below_minimum"]
     return {
         "check_id": check_id,
-        **{key: value for key, value in selected.items() if key != "cohort_id"},
+        **selected_metrics,
+        "minimum_task_count": minimum_task_count,
+        "observed_evidence_count": (
+            composite_observation_count + len(matching_standalone)
+        ),
+        "observed_standalone_capability_run_count": len(matching_standalone),
+        "excluded_standalone_below_minimum_task_count": len(
+            undersized_standalone
+        ),
+        "maximum_observed_standalone_task_count": (
+            max(
+                int(observation.get("task_count") or 0)
+                for observation in matching_standalone
+            )
+            if matching_standalone
+            else None
+        ),
+        "undersized_standalone_evidence_cohorts": [
+            {
+                "evidence_cohort": cohort_id,
+                "observation_count": len(task_counts),
+                "minimum_observed_task_count": min(task_counts),
+                "maximum_observed_task_count": max(task_counts),
+            }
+            for cohort_id, task_counts in sorted(
+                undersized_cohort_task_counts.items()
+            )
+        ],
         "selected_evidence_cohort": (
             selected["cohort_id"] if selected["cohort_id"] != "none" else None
         ),
