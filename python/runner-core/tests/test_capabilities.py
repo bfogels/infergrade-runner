@@ -11,6 +11,7 @@ sys.path.insert(0, "python/runner-core/src")
 from infergrade import __version__
 from infergrade.capabilities import (
     CAPABILITY_BENCHMARKS,
+    _capability_container_policy,
     _case_benchmark_protocol_identity,
     _generate_predictions,
     _generation_prompt_for_case,
@@ -1773,6 +1774,12 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(artifact["subject"]["runtime"]["container_image_id"], "sha256:scorer")
         self.assertEqual(artifact["subject"]["runtime"]["container_repo_digests"], ["ghcr.io/bfogels/infergrade-mmlu-pro@sha256:scorer"])
         self.assertEqual(execution.benchmark_results["mmlu_pro_reference_v1"]["container_runtime"]["container_image_id"], "sha256:scorer")
+        sandbox = execution.benchmark_results["mmlu_pro_reference_v1"]["container_runtime"]["sandbox_policy"]
+        self.assertEqual(sandbox["policy_version"], "capability_container_isolation_v1")
+        self.assertEqual(sandbox["network"], "none")
+        self.assertTrue(sandbox["read_only_root"])
+        self.assertEqual(sandbox["memory_limit"], "4g")
+        self.assertEqual(artifact["subject"]["runtime"]["sandbox_policy"], sandbox)
         self.assertEqual([task["score"] for task in artifact["tasks"]], [1.0, 0.0])
         self.assertIn("This is not public leaderboard evidence.", artifact["claim_boundary"]["unsupported_claims"])
 
@@ -2571,6 +2578,23 @@ class CapabilityTests(unittest.TestCase):
             "/Users/tester/infergrade-runner/runs/run_example/artifacts/capability/evalplus_humaneval:/work",
             command,
         )
+        self.assertIn("--network", command)
+        self.assertEqual(command[command.index("--network") + 1], "none")
+        self.assertIn("--cap-drop", command)
+        self.assertEqual(command[command.index("--cap-drop") + 1], "ALL")
+        self.assertEqual(
+            command[command.index("--user") + 1],
+            "%s:%s" % (getattr(os, "getuid", lambda: 0)(), getattr(os, "getgid", lambda: 0)()),
+        )
+        self.assertIn("no-new-privileges", command)
+        self.assertIn("--read-only", command)
+        self.assertIn("/tmp:rw,noexec,nosuid,nodev,size=512m", command)
+        self.assertEqual(command[command.index("--pids-limit") + 1], "256")
+        self.assertEqual(command[command.index("--memory") + 1], "4g")
+        self.assertEqual(command[command.index("--memory-swap") + 1], "4g")
+        policy = _capability_container_policy()
+        self.assertEqual(policy["container_user"], "host_uid_gid")
+        self.assertEqual(policy["container_user_id"], command[command.index("--user") + 1])
 
     def test_execute_capability_suite_reports_benchmark_progress(self):
         events = []
