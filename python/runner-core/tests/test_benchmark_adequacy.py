@@ -35,6 +35,7 @@ class BenchmarkAdequacyTests(unittest.TestCase):
         )
         self.assertIn("assistant_preference_quality", assistant["planned_only_priority_facets"])
         self.assertIn("tool_use", assistant["diagnostic_facets_covered"])
+        self.assertIn("stateful_tool_use", assistant["diagnostic_facets_covered"])
         self.assertIn("tool_use", assistant["freshness"]["runnable_refreshable_facets"])
         self.assertIn("long_context_task_reasoning", assistant["planned_only_priority_facets"])
         self.assertEqual(

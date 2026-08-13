@@ -70,6 +70,7 @@ The first thin local samples are:
 - `multiturn_chat_memory_v1`
 - `coding_static_repair_v1`
 - `repository_edit_smoke_v1` (intentional, zero-weight diagnostic pending a cross-family distribution audit)
+- `stateful_tool_loop_diagnostic_v1` (intentional, zero-weight synthetic stateful diagnostic pending a cross-family distribution audit)
 - `reasoning_exact_answer_v1`
 
 The first reference-runnable lanes are:
@@ -79,6 +80,7 @@ The first reference-runnable lanes are:
 - `evalplus_mbpp`
 - `gpqa_diamond_reference_v1`
 - `context_retrieval_reference_v1`
+- `bfcl_local_reference_v1`
 - `perplexity_reference_v1`
 
 Important candidates that are not yet promoted:
@@ -89,6 +91,8 @@ Important candidates that are not yet promoted:
 `gpqa_diamond_reference_v1` and `context_retrieval_reference_v1` are
 diagnostic-only reference lanes. They have zero headline capability weight and
 are not part of the default suites.
+
+`bfcl_local_reference_v1` and `stateful_tool_loop_diagnostic_v1` are complementary zero-weight tool-use diagnostics. The first is a pinned BFCL-derived single-turn structured-call reference; the second is a pinned synthetic multi-generation simulator loop. Neither supports native function-calling, broad agent-autonomy, or leaderboard claims, and neither is empirically ready without cross-family distributions and headroom audits.
 
 `perplexity_reference_v1` is reference-runnable only as same-family quant-fidelity evidence. Its comparability key includes model family, checkpoint, tokenizer id, corpus id/revision, and protocol id/parameters. It does not support cross-family model ranking, broad capability claims, gold evidence, or leaderboard claims.
 

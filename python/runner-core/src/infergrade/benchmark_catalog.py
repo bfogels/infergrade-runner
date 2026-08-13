@@ -21,6 +21,7 @@ FALLBACK_METADATA_ORDERING = {
         "25-60 min",
         "15-90 min",
         "45-120 min",
+        "90-180 min",
     ],
     "token_volume_band": ["tiny", "small", "medium", "large"],
 }
