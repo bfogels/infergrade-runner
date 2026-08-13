@@ -26,6 +26,7 @@ CAPABILITY_IMAGE_REPOSITORIES = {
     "infergrade-gpqa",
 }
 RUNNER_CORE_IMAGE = "infergrade-runner-core:local"
+_DOCKER_PULL_TIMEOUT_SECONDS = 1200
 
 
 def docker_image_exists(image: str) -> bool:
@@ -67,11 +68,7 @@ def install_image(
 
     if pull_if_missing:
         pulled_platform = None
-        completed = subprocess.run(
-            ["docker", "pull", image],
-            capture_output=True,
-            text=True,
-        )
+        completed = _pull_docker_image(["docker", "pull", image], image)
         message = (completed.stderr or completed.stdout or "").strip()
         if (
             completed.returncode != 0
@@ -79,10 +76,9 @@ def install_image(
             and known_repository in CAPABILITY_IMAGE_REPOSITORIES
             and _is_apple_silicon_host()
         ):
-            completed = subprocess.run(
+            completed = _pull_docker_image(
                 ["docker", "pull", "--platform", "linux/amd64", image],
-                capture_output=True,
-                text=True,
+                image,
             )
             pulled_platform = "linux/amd64"
             message = (completed.stderr or completed.stdout or "").strip()
@@ -106,6 +102,22 @@ def install_image(
         "Docker image %s is not available locally."
         % image
     )
+
+
+def _pull_docker_image(command: list[str], image: str) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=_DOCKER_PULL_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            "Docker did not finish downloading benchmark image %s within %d minutes. "
+            "Restart Docker Desktop, then retry this run; InferGrade will reuse the cached model artifact."
+            % (image, _DOCKER_PULL_TIMEOUT_SECONDS // 60)
+        ) from exc
 
 
 def install_known_images(image: Optional[str] = None, rebuild: bool = False) -> Dict[str, Dict[str, str]]:

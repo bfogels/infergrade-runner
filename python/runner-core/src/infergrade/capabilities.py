@@ -891,6 +891,20 @@ def execute_capability_suite(
             "total_wall_seconds": None,
         }
         try:
+            if progress_callback:
+                preparation = (
+                    "Preparing %s benchmark image and cases..."
+                    if spec.execution_mode == "container"
+                    else "Preparing %s benchmark cases..."
+                ) % spec.display_name
+                progress_callback(
+                    {
+                        "event": "benchmark_preparing",
+                        "benchmark_id": benchmark_id,
+                        "display_name": spec.display_name,
+                        "message": preparation,
+                    }
+                )
             phase_started = time.perf_counter()
             _prepare_benchmark_cases(spec, benchmark_dir, request.tier)
             phase_timings["fixture_preparation_seconds"] = round(time.perf_counter() - phase_started, 6)
