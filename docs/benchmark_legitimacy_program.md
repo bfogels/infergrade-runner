@@ -34,6 +34,8 @@ Every implemented check and every planned benchmark candidate must have a `bench
 
 Runner tests validate that this metadata exists. New benchmark checks should fail catalog tests until their legitimacy status is declared.
 
+The validator also enforces the promotion transition. An entry in `planned_benchmark_candidates` must remain `not_runnable` and cannot declare runnable maturity. Promotion moves the lane into `checks`; a runnable check must name an implemented harness and bounded duration/token-volume status, while `reference_runnable` and `gold_runnable` additionally require a pinned fixture or dataset. A benchmark cannot appear in both collections. These checks prevent a roadmap-only lane from becoming runnable through status-copy changes alone; they do not substitute for reviewing the harness or its evidence.
+
 ## Promotion Gates
 
 A `thin_local_sample` can be runnable when:
