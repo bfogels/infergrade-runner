@@ -39,6 +39,10 @@ class BenchmarkReadinessTests(unittest.TestCase):
             assistant["broad_surface_blockers"],
         )
         self.assertIn("corpus:priority_facet_unobserved:tool_use", assistant["broad_surface_blockers"])
+        self.assertIn(
+            "corpus:priority_facet_unobserved:stateful_tool_use",
+            assistant["broad_surface_blockers"],
+        )
 
     def test_structural_breadth_cannot_override_saturated_empirical_scores(self):
         catalog = _structurally_broad_catalog()

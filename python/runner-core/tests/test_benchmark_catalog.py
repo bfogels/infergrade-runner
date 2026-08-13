@@ -63,11 +63,13 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("reasoning_exact_answer_v1", check_ids)
         self.assertIn("mmlu_pro_reference_v1", check_ids)
         self.assertIn("bfcl_local_reference_v1", check_ids)
+        self.assertIn("stateful_tool_loop_diagnostic_v1", check_ids)
         self.assertNotIn("multiturn_chat_memory_v1", planned_ids)
         self.assertNotIn("coding_static_repair_v1", planned_ids)
         self.assertNotIn("reasoning_exact_answer_v1", planned_ids)
         self.assertNotIn("mmlu_pro_reference_v1", planned_ids)
         self.assertNotIn("bfcl_local_reference_v1", planned_ids)
+        self.assertNotIn("stateful_tool_loop_diagnostic_v1", planned_ids)
         self.assertIn("longbench_v2_reference_v1", planned_ids)
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})

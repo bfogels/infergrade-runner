@@ -20,7 +20,7 @@ InferGrade needs capability benchmarks that are:
 
 - `Multi-turn chat memory`
   - Why: low-cost assistant decision signal for retaining facts, corrections, and output constraints across a short transcript.
-  - InferGrade role: native local-friendly assistant decision check after IFEval.
+  - InferGrade role: zero-weight diagnostic after its five-case fixture empirically saturated; it no longer contributes headline assistant score weight.
 
 - `MMLU-Pro reference`
   - Why: recognized broad knowledge and reasoning benchmark with harder, more robust multiple-choice questions than legacy MMLU.
@@ -38,6 +38,11 @@ InferGrade needs capability benchmarks that are:
   - Why: structured function selection, arguments, parallel calls, and relevance abstention cover an assistant capability that instruction-following accuracy does not.
   - InferGrade role: zero-weight, intentionally selected reference diagnostic over a hash-ranked 110-case subset balanced across 11 BFCL V4 static and live single-turn categories. The upstream commit and every downloaded source file digest are pinned. Canary and standard samples round-robin across categories instead of taking a narrow prefix.
   - Claim boundary: InferGrade uses a strict runtime-neutral JSON call prompt and local deterministic scorer. The result is not an official BFCL V4 leaderboard score, does not prove native runtime function calling, and does not measure BFCL multi-turn, memory, web-search, or stateful agentic capability. Those require separately identified protocols.
+
+- `Stateful tool-loop diagnostic`
+  - Why: separate generations with executed intermediate state test opaque-token chaining, conditional action, guarded abstention, and idempotent completion that a single-turn call cannot measure.
+  - InferGrade role: zero-weight synthetic diagnostic over 24 pinned trajectories and eight domains, with deterministic side-effect-free local simulator results between turns.
+  - Claim boundary: the result is not native function-calling proof, real external-tool execution, long-horizon autonomy, BFCL/GAIA conformance, or leaderboard evidence. Cross-family discrimination and headroom are unproven.
 
 - `Context retrieval reference`
   - Why: local users need to know whether a setup can retrieve a pinned fact at the prompt lengths they intend to use.
@@ -251,6 +256,12 @@ The first local coding artifact path is `coding_static_repair_v1`: it emits a `c
 The scorer runs with no network, a read-only root filesystem, bounded memory and process counts, and no-new-privileges. Its root process retains only `SETUID` and `SETGID` so the generated-code subprocess can drop irreversibly to `nobody`; source and hidden tests are root-owned and read-only before generated code executes. The result records that exception as part of the sandbox policy. Dominant malformed-patch output is quarantined as a protocol mismatch, while a valid patch that fails hidden tests remains a real incorrect task.
 
 This benchmark has zero Capability protocol v3.1 weight and is not selected by default. It becomes eligible for score-weight consideration only after a cross-family distribution audit shows adequate observations, repeatability, manageable malformed/timeout rates, and component headroom. It is not SWE-bench, LiveCodeBench, autonomous-agent, arbitrary-repository, gold, or leaderboard evidence.
+
+`stateful_tool_loop_diagnostic_v1` is a distinct synthetic assistant diagnostic for behavior that single-turn structured-call checks cannot measure. It has twenty-four pinned cases across inventory, access control, service operations, budgeting, scheduling, data workflows, consent-aware communication, and release safety. Every eight-case tier increment spans all eight domains and mixes success, guarded-abstention, and idempotent already-complete outcomes, so even canary exercises action and no-action decisions rather than an easy success-only slice. Canary requires 19 separate model generations and gold requires 56 rather than treating a transcript as one answer.
+
+For each turn, Runner asks for one strict JSON call, verifies it against the current state, executes a deterministic side-effect-free local simulator result, and exposes only that executed call and result to the next generation. Success paths must carry opaque tokens, revisions, regions, channels, digests, or returned identifiers into the next operation and then close with an exact `finish` state. A canary tool result also contains an untrusted instruction string that must remain data instead of redirecting the next call. Wrong or malformed calls do not execute. The scorer reports complete-trajectory success, turn accuracy, malformed and wrong-call counts, simulator execution counts, and domain breakdowns; dominant malformed output is quarantined as a protocol mismatch.
+
+This diagnostic has zero Capability protocol v3.1 weight and must remain separately identified from `bfcl_local_reference_v1`. It does not prove native runtime function calling, arbitrary external tools, real side effects, web access, recovery from arbitrary tool errors, long-horizon autonomy, BFCL/GAIA conformance, or leaderboard standing. Cross-family distributions, independent repeats, and ceiling audits are required before considering a harder fixture or any score-role change.
 
 The first executable coding reference artifact path is `evalplus_humaneval`: when selected, it emits a validated `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, `samples.jsonl`, `benchmark_metadata.json`, `eval_results.json`, and `summary.json`. It preserves the pinned EvalPlus revision, sample policy, pass@1 base/plus scores, generated outputs, scoring outputs, and task-level classes such as `test_failed`, `timeout`, `malformed_output`, and `generation_failed` where available from generated outputs and EvalPlus status rows. A completion-normalization failure caused by the model remains in EvalPlus's denominator as an incorrect answer and is disclosed separately; a runtime or adapter generation failure remains missing evidence and degrades or suppresses the score. It remains experimental reference evidence, not gold evidence or a public leaderboard claim.
 

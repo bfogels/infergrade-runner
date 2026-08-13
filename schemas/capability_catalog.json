@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-13-bfcl-local-reference",
+  "catalog_version": "2026-08-13-stateful-tool-loop-diagnostic",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -18,7 +18,8 @@
       "15-45 min",
       "25-60 min",
       "15-90 min",
-      "45-120 min"
+      "45-120 min",
+      "90-180 min"
     ],
     "token_volume_band": [
       "tiny",
@@ -88,13 +89,15 @@
           "multi_turn_state_retention",
           "assistant_preference_quality",
           "tool_use",
+          "stateful_tool_use",
           "long_context_task_reasoning"
         ],
         "supporting_check_ids": [
           "ifeval",
           "assistant_compositional_instruction_v2",
           "multiturn_chat_memory_v1",
-          "bfcl_local_reference_v1"
+          "bfcl_local_reference_v1",
+          "stateful_tool_loop_diagnostic_v1"
         ],
         "planned_check_ids": [
           "arena_hard_local_reference_v1",
@@ -1029,6 +1032,26 @@
       ]
     },
     {
+      "check_id": "stateful_tool_loop_diagnostic_v1",
+      "surface_id": "local_assistant_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "thin_local_sample",
+      "runnable_status": "runnable_intentional_diagnostic",
+      "default_inclusion_status": "not_default_diagnostic",
+      "fixture_or_dataset_revision_status": "pinned_runner_fixture",
+      "harness_status": "native_multi_generation_tool_simulator_implemented",
+      "scoring_policy_id": "deterministic_stateful_tool_trajectory_v1",
+      "sample_policy": "Twenty-four pinned synthetic trajectories across eight domains; every 8-case tier increment spans all domains and mixes success, guarded-abstention, and idempotent no-op outcomes.",
+      "expected_duration_token_volume_status": "estimated medium; 19 to 56 generations",
+      "sandbox_requirement": "deterministic_local_side_effect_free_tool_simulator",
+      "claim_boundary": "Synthetic stateful local tool-loop diagnostic only; zero headline weight and not native function calling, external side-effect, long-horizon autonomy, BFCL, GAIA, or leaderboard evidence.",
+      "promotion_blockers": [
+        "Collect cross-family local distributions and independently replicated observations.",
+        "Demonstrate headroom below the configured saturation ceiling on current large local models.",
+        "Replace or expand trajectories if ceiling rates breach the headroom gate."
+      ]
+    },
+    {
       "check_id": "longbench_v2_reference_v1",
       "surface_id": "local_reasoning_capability",
       "evidence_lane_id": "reference",
@@ -1084,6 +1107,12 @@
       "score_policy_id": "infergrade_bfcl_structured_call_accuracy_v1",
       "display_name": "InferGrade BFCL-derived structured call accuracy",
       "description": "Score strict JSON tool-call arrays against pinned BFCL V4 function selection, argument alternatives, parallel calls, and relevance abstention. This local prompt/scorer contract is not an official BFCL protocol score.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "deterministic_stateful_tool_trajectory_v1",
+      "display_name": "Deterministic stateful tool trajectory success",
+      "description": "Score complete strict-JSON trajectories across separate model generations, executed deterministic simulator results, opaque-token chaining, guarded abstention, and exact finish states.",
       "score_method": "primary_metric_value_v1"
     },
     {
@@ -1339,6 +1368,23 @@
       "token_volume_band": "small",
       "resumability_boundary": "benchmark",
       "execution_pattern": "native_capability_structured_check"
+    },
+    {
+      "group_id": "tool_use_reference",
+      "display_name": "Tool-use diagnostics",
+      "description": "Run complementary single-turn BFCL-derived structured calls and synthetic stateful local tool-loop trajectories.",
+      "evidence_kind": "capability",
+      "surface_id": "local_assistant_capability",
+      "default_check_ids": [
+        "bfcl_local_reference_v1",
+        "stateful_tool_loop_diagnostic_v1"
+      ],
+      "effort_hint": "deep",
+      "suite_scope": "reference",
+      "expected_duration_band": "45-120 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "case",
+      "execution_pattern": "mixed_single_turn_and_stateful_tool_diagnostics"
     },
     {
       "group_id": "broad_reasoning_knowledge",
@@ -1709,6 +1755,53 @@
       "dataset_revision": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8",
       "dataset_sha256": "7c239c7ae1d0ef371a15f96ec9fc0f38e79c331c94adbf54d7f73c0614445562",
       "dataset_license": "Apache-2.0"
+    },
+    {
+      "check_id": "stateful_tool_loop_diagnostic_v1",
+      "display_name": "Stateful tool-loop diagnostic",
+      "description": "Pinned synthetic multi-generation diagnostic that executes deterministic local tool results between strict JSON calls and scores complete trajectories.",
+      "capability_facets": [
+        "stateful_tool_use"
+      ],
+      "temporal_scope": "static_pinned",
+      "evidence_kind": "capability",
+      "group_id": "tool_use_reference",
+      "surface_id": "local_assistant_capability",
+      "runner_target": "stateful_tool_loop_diagnostic_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "reference",
+      "evidence_lane_id": "reference",
+      "effort_level": "deep",
+      "expected_duration_band": "15-45 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "case",
+      "execution_pattern": "native_stateful_tool_loop",
+      "selection_guidance": "Adds a distinct stateful diagnostic after single-turn BFCL-derived calls: each case uses separate generations, deterministic executed results, opaque-token chaining, conditional abstention, and exact final state.",
+      "score_dimension": "stateful_tool_use",
+      "primary_score_metric": "trajectory_success_rate",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "score_role": "diagnostic_only",
+      "discrimination_status": "pending_distribution_audit",
+      "calibration_policy": {
+        "policy_id": "capability_headroom_gate_v1",
+        "minimum_task_count": 16
+      },
+      "higher_is_better": true,
+      "score_policy_id": "deterministic_stateful_tool_trajectory_v1",
+      "score_breakdown_fields": [
+        "correct_count",
+        "total_count",
+        "turn_accuracy",
+        "generated_turn_count",
+        "malformed_turn_count",
+        "wrong_call_count",
+        "tool_execution_count",
+        "category_metrics"
+      ]
     },
     {
       "check_id": "mmlu_pro_reference_v1",
@@ -2232,10 +2325,10 @@
     {
       "shortcut_id": "assistant_reference",
       "display_name": "Assistant reference",
-      "description": "Stronger assistant evidence with complete score-weighted assistant coverage plus sampled reasoning, structured tool-use, chat memory, deployment, and quant fidelity diagnostics.",
+      "description": "Stronger assistant evidence with complete score-weighted assistant coverage plus sampled reasoning, single-turn and stateful tool-use, chat memory, deployment, and quant fidelity diagnostics.",
       "suite_scope": "reference",
       "effort_level": "deep",
-      "expected_duration_band": "45-120 min",
+      "expected_duration_band": "90-180 min",
       "suite_ids": [
         "chat_instruction_following",
         "quant_fidelity"
@@ -2256,6 +2349,7 @@
         "assistant_compositional_instruction_v2",
         "mmlu_pro_reference_v1",
         "bfcl_local_reference_v1",
+        "stateful_tool_loop_diagnostic_v1",
         "interactive_chat_v1",
         "batch_generation_v1",
         "perplexity_reference_v1"

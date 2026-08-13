@@ -21,6 +21,15 @@ from infergrade.contracts import load_contract_manifest
 from infergrade.images import container_image_identity, install_image
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.progress import request_fingerprint
+from infergrade.stateful_tool_loop import (
+    FIXTURE_REVISION as STATEFUL_TOOL_LOOP_FIXTURE_REVISION,
+    SCORING_POLICY as STATEFUL_TOOL_LOOP_SCORING_POLICY,
+    benchmark_cases as stateful_tool_loop_cases,
+    build_turn_prompt as build_stateful_tool_loop_prompt,
+    executed_transcript_entry,
+    expected_call_matches,
+    parse_tool_call,
+)
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcnow_iso, write_json
 
 CAPABILITY_REGISTRY_VERSION = "2026-07-capability-protocol-3.1"
@@ -191,6 +200,15 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=384,
         container_image=DEFAULT_CAPABILITY_IMAGES["bfcl_local_reference_v1"],
         case_limits={"canary": 11, "standard": 55, "gold": 110},
+    ),
+    "stateful_tool_loop_diagnostic_v1": CapabilityBenchmarkSpec(
+        benchmark_id="stateful_tool_loop_diagnostic_v1",
+        display_name="Stateful tool-loop diagnostic",
+        benchmark_kind="stateful_tool_use",
+        primary_metric_name="trajectory_success_rate",
+        generation_max_tokens=192,
+        execution_mode="native",
+        case_limits={"canary": 8, "standard": 16, "gold": 24},
     ),
     "repository_edit_smoke_v1": CapabilityBenchmarkSpec(
         benchmark_id="repository_edit_smoke_v1",
@@ -772,6 +790,38 @@ def _structured_tool_use_output_shape_gate(
     }
 
 
+def _stateful_tool_loop_output_shape_gate(
+    spec: CapabilityBenchmarkSpec,
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    if spec.benchmark_id != "stateful_tool_loop_diagnostic_v1":
+        return {"status": "not_applicable", "policy_id": "stateful_tool_loop_output_shape_gate_v1"}
+    metrics = dict(summary.get("metrics") or {})
+    malformed_count = metrics.get("malformed_turn_count")
+    evaluated_count = metrics.get("generated_turn_count")
+    if not isinstance(malformed_count, int) or isinstance(malformed_count, bool):
+        malformed_count = 0
+    if not isinstance(evaluated_count, int) or isinstance(evaluated_count, bool):
+        evaluated_count = sum(len(list(item.get("trajectory") or [])) for item in predictions)
+    malformed_rate = round(malformed_count / float(evaluated_count), 6) if evaluated_count else 0.0
+    blocked = bool(evaluated_count and malformed_rate > _DOMINANT_MALFORMED_OUTPUT_RATE)
+    return {
+        "status": "blocked" if blocked else "passed",
+        "policy_id": "stateful_tool_loop_output_shape_gate_v1",
+        "threshold": {
+            "metric": "malformed_turn_rate",
+            "operator": ">",
+            "value": _DOMINANT_MALFORMED_OUTPUT_RATE,
+        },
+        "evaluated_count": evaluated_count,
+        "malformed_turn_count": malformed_count,
+        "malformed_turn_rate": malformed_rate,
+        "reason_codes": ["dominant_malformed_stateful_tool_output"] if blocked else [],
+        "strict_primary_metric": dict(summary.get("primary_metric") or {}),
+    }
+
+
 def _output_shape_policy_id(spec: CapabilityBenchmarkSpec) -> Optional[str]:
     if spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}:
         return "multiple_choice_output_shape_gate_v2"
@@ -781,6 +831,8 @@ def _output_shape_policy_id(spec: CapabilityBenchmarkSpec) -> Optional[str]:
         return "repository_edit_output_shape_gate_v1"
     if spec.benchmark_id == "bfcl_local_reference_v1":
         return "structured_tool_use_output_shape_gate_v1"
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return "stateful_tool_loop_output_shape_gate_v1"
     return None
 
 
@@ -798,7 +850,10 @@ def _benchmark_output_shape_gate(
     gate = _repository_edit_output_shape_gate(spec, predictions, summary)
     if gate["status"] != "not_applicable":
         return gate
-    return _structured_tool_use_output_shape_gate(spec, predictions, summary)
+    gate = _structured_tool_use_output_shape_gate(spec, predictions, summary)
+    if gate["status"] != "not_applicable":
+        return gate
+    return _stateful_tool_loop_output_shape_gate(spec, predictions, summary)
 
 
 # Compatibility alias for downstream tests and integrations that referenced the
@@ -1710,6 +1765,18 @@ def _write_native_capability_run_artifact(
                     if spec.benchmark_id == "context_retrieval_reference_v1"
                     else {}
                 ),
+                **(
+                    {
+                        "category": case_score.get("category") or case.get("category"),
+                        "format_valid": case_score.get("format_valid"),
+                        "format_violation": case_score.get("error_class"),
+                        "attempted_turn_count": case_score.get("attempted_turn_count"),
+                        "expected_turn_count": case_score.get("total_constraints"),
+                        "tool_execution_count": case_score.get("tool_execution_count"),
+                    }
+                    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
+                    else {}
+                ),
             }
         )
     artifact = {
@@ -1774,15 +1841,44 @@ def _write_native_capability_run_artifact(
             "state": summary_state,
             "score": score if summary_state in ("scored", "partial") else None,
             "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
-            "passed_count": summary.get("metrics", {}).get("passed_constraints"),
-            "failed_count": summary.get("generation_failure_count"),
-            "partial_count": summary.get("metrics", {}).get("malformed_output_count", 0),
+            "passed_count": (
+                summary.get("metrics", {}).get("correct_count")
+                if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
+                else summary.get("metrics", {}).get("passed_constraints")
+            ),
+            "failed_count": (
+                (
+                    int(summary.get("metrics", {}).get("total_count") or 0)
+                    - int(summary.get("metrics", {}).get("correct_count") or 0)
+                    + int(summary.get("generation_failure_count") or 0)
+                )
+                if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
+                else summary.get("generation_failure_count")
+            ),
+            "partial_count": (
+                0
+                if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
+                else summary.get("metrics", {}).get("malformed_output_count", 0)
+            ),
             "skipped_count": 0,
             "not_comparable_count": 0,
             **_artifact_summary_performance(summary.get("task_performance")),
             **(
                 {"context_bucket_metrics": dict(summary.get("metrics", {}).get("context_bucket_metrics") or {})}
                 if spec.benchmark_id == "context_retrieval_reference_v1"
+                else {}
+            ),
+            **(
+                {
+                    "turn_accuracy": summary.get("metrics", {}).get("turn_accuracy"),
+                    "generated_turn_count": summary.get("metrics", {}).get("generated_turn_count"),
+                    "malformed_turn_count": summary.get("metrics", {}).get("malformed_turn_count"),
+                    "wrong_call_count": summary.get("metrics", {}).get("wrong_call_count"),
+                    "tool_execution_count": summary.get("metrics", {}).get("tool_execution_count"),
+                    "category_metrics": dict(summary.get("metrics", {}).get("category_metrics") or {}),
+                    "output_shape_gate": dict(summary.get("output_shape_gate") or {}),
+                }
+                if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
                 else {}
             ),
         },
@@ -2333,6 +2429,8 @@ def _native_scorer_type(spec: CapabilityBenchmarkSpec) -> str:
         return "exact_match"
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return "exact_match"
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return "json_schema"
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -2347,6 +2445,8 @@ def _native_scoring_policy(spec: CapabilityBenchmarkSpec) -> str:
         return "deterministic_exact_answer_v1"
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return "deterministic_context_key_retrieval_v1"
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return STATEFUL_TOOL_LOOP_SCORING_POLICY
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -2361,6 +2461,8 @@ def _native_fixture_revision(spec: CapabilityBenchmarkSpec) -> str:
         return REASONING_EXACT_ANSWER_FIXTURE_REVISION
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return CONTEXT_RETRIEVAL_FIXTURE_REVISION
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return STATEFUL_TOOL_LOOP_FIXTURE_REVISION
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -2463,6 +2565,8 @@ def _native_artifact_claim_boundary(spec: CapabilityBenchmarkSpec, state: str) -
         return _reasoning_artifact_claim_boundary(state)
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return _context_retrieval_artifact_claim_boundary(state)
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return _stateful_tool_loop_artifact_claim_boundary(state)
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -2571,6 +2675,26 @@ def _structured_tool_use_artifact_claim_boundary(state: str) -> Dict[str, List[s
             "This does not prove native runtime function-calling support.",
             "This does not measure BFCL multi-turn, stateful agentic, web-search, or memory capability.",
             "This is not a global assistant-quality or agent-autonomy score.",
+        ],
+    }
+
+
+def _stateful_tool_loop_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    supported = [
+        "This setup attempted the pinned synthetic stateful tool-loop fixture recorded in this artifact.",
+        "The diagnostic executes deterministic local simulator results between model generations and scores exact multi-step trajectories.",
+    ]
+    if state not in {"scored", "partial"}:
+        supported = [
+            "This artifact records an attempted pinned synthetic stateful tool-loop diagnostic that was not fully comparable."
+        ]
+    return {
+        "supported_claims": supported,
+        "unsupported_claims": [
+            "This diagnostic carries zero Capability protocol v3.1 headline-score weight.",
+            "This does not prove native runtime function calling, arbitrary tool use, external side effects, web access, or long-horizon agent autonomy.",
+            "This is not an official BFCL, GAIA, SWE-bench, or public leaderboard result.",
+            "The synthetic fixture requires cross-family distribution and ceiling audits before any promotion.",
         ],
     }
 
@@ -3000,6 +3124,24 @@ def _generate_predictions(
                     }
                 )
             continue
+        if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+            record = _generate_stateful_tool_loop_prediction(adapter, request, spec, case)
+            _append_case_checkpoint(checkpoint_path, record)
+            predictions.append(record)
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "case_progress",
+                        "benchmark_id": spec.benchmark_id,
+                        "display_name": spec.display_name,
+                        "completed_cases": index,
+                        "total_cases": total_cases,
+                        "current_case": case_id,
+                        "message": "Capability benchmark %s %d/%d cases."
+                        % (spec.display_name, index, total_cases),
+                    }
+                )
+            continue
         generated: Dict[str, Any] = {}
         normalization = None
         generation_failure_kind = None
@@ -3111,6 +3253,105 @@ def _generate_predictions(
                 }
             )
     return predictions
+
+
+def _generate_stateful_tool_loop_prediction(
+    adapter,
+    request: RunRequest,
+    spec: CapabilityBenchmarkSpec,
+    case: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Run a real multi-generation loop with deterministic local tool execution."""
+    case_id = str(case.get("case_id") or case.get("task_id") or stable_hash(case, length=12))
+    transcript: List[Dict[str, Any]] = []
+    trajectory: List[Dict[str, Any]] = []
+    turn_performance: List[Dict[str, Any]] = []
+    generation_status = "completed"
+    generation_error = None
+    generation_failure_kind = None
+    last_response = ""
+    for turn_index, step in enumerate(list(case.get("steps") or []), start=1):
+        prompt = build_stateful_tool_loop_prompt(case, transcript)
+        try:
+            generated = adapter.generate_text(
+                request=request,
+                prompt=prompt,
+                max_tokens=spec.generation_max_tokens,
+            )
+        except Exception as exc:
+            generation_status = "failed"
+            generation_error = str(exc)
+            generation_failure_kind = "runtime"
+            break
+        turn_performance.append(_task_performance_fields(generated))
+        last_response = str(generated.get("text") or "")
+        if generated.get("status", "completed") != "completed":
+            generation_status = "failed"
+            generation_error = generated.get("error") or "Stateful tool-loop generation failed."
+            generation_failure_kind = "generation"
+            break
+        observed_call, parse_error = parse_tool_call(last_response)
+        expected_call = dict(step.get("expected_call") or {})
+        call_correct = parse_error is None and expected_call_matches(observed_call, expected_call)
+        tool_result = dict(step.get("tool_result") or {}) if step.get("tool_result") is not None else None
+        turn = {
+            "turn_index": turn_index,
+            "response": last_response,
+            "parsed_call": observed_call,
+            "format_valid": parse_error is None,
+            "parse_error": parse_error,
+            "call_correct": call_correct,
+            "tool_executed": False,
+        }
+        if call_correct and observed_call and observed_call.get("name") != "finish" and tool_result is not None:
+            turn["tool_executed"] = True
+            turn["tool_result"] = tool_result
+            transcript.append(executed_transcript_entry(observed_call, tool_result))
+        trajectory.append(turn)
+        if not call_correct or observed_call is None or observed_call.get("name") == "finish":
+            break
+    record = {
+        "case_id": case_id,
+        "benchmark_id": spec.benchmark_id,
+        "generation_status": generation_status,
+        "generation_error": generation_error,
+        "generation_preset_id": request.generation_preset,
+        "completion": last_response,
+        "trajectory": trajectory,
+        "attempted_turn_count": len(trajectory),
+        "expected_turn_count": len(list(case.get("steps") or [])),
+        "completed_trajectory": bool(
+            generation_status == "completed"
+            and len(trajectory) == len(list(case.get("steps") or []))
+            and trajectory
+            and all(item.get("call_correct") for item in trajectory)
+            and (trajectory[-1].get("parsed_call") or {}).get("name") == "finish"
+        ),
+        **_aggregate_stateful_turn_performance(turn_performance),
+    }
+    if generation_failure_kind:
+        record["generation_failure_kind"] = generation_failure_kind
+    return record
+
+
+def _aggregate_stateful_turn_performance(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    latencies = _numeric_values(rows, "latency_ms")
+    input_tokens = _integer_values(rows, "input_tokens")
+    output_tokens = _integer_values(rows, "output_tokens")
+    ttft = _numeric_values(rows, "time_to_first_token_ms")
+    sources = sorted({str(item.get("measurement_source")) for item in rows if item.get("measurement_source")})
+    return {
+        "latency_ms": round(sum(latencies), 6) if latencies else None,
+        "time_to_first_token_ms": _percentile_numeric(ttft, 0.5),
+        "tokens_per_second": None,
+        "input_tokens": sum(input_tokens) if input_tokens else None,
+        "output_tokens": sum(output_tokens) if output_tokens else None,
+        "measurement_source": (
+            "stateful_tool_loop_turn_aggregate_v1:%s" % "+".join(sources)
+            if sources
+            else None
+        ),
+    }
 
 
 def _generation_prompt_for_case(spec: CapabilityBenchmarkSpec, case: Dict[str, Any]) -> str:
@@ -3459,6 +3700,8 @@ def _prepare_native_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir
 
 
 def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str) -> Dict[str, Any]:
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return _evaluate_stateful_tool_loop_benchmark(spec, benchmark_dir)
     cases_by_id = {
         str(item.get("case_id") or item.get("task_id") or stable_hash(item, length=12)): item
         for item in _read_jsonl(os.path.join(benchmark_dir, "cases.jsonl"))
@@ -3686,6 +3929,118 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
     }
 
 
+def _evaluate_stateful_tool_loop_benchmark(
+    spec: CapabilityBenchmarkSpec,
+    benchmark_dir: str,
+) -> Dict[str, Any]:
+    cases = _read_jsonl(os.path.join(benchmark_dir, "cases.jsonl"))
+    cases_by_id = {
+        str(item.get("case_id") or item.get("task_id") or stable_hash(item, length=12)): item
+        for item in cases
+    }
+    predictions = _read_jsonl(os.path.join(benchmark_dir, "predictions.jsonl"))
+    case_results: List[Dict[str, Any]] = []
+    passed_turns = 0
+    total_expected_turns = 0
+    generated_turn_count = 0
+    malformed_turn_count = 0
+    wrong_call_count = 0
+    tool_execution_count = 0
+    for prediction in predictions:
+        case_id = str(prediction.get("case_id") or "")
+        case = cases_by_id.get(case_id) or {}
+        expected_turn_count = len(list(case.get("steps") or []))
+        trajectory = list(prediction.get("trajectory") or [])
+        total_expected_turns += expected_turn_count
+        generated_turn_count += len(trajectory)
+        malformed_turn_count += len([item for item in trajectory if not item.get("format_valid")])
+        wrong_call_count += len(
+            [item for item in trajectory if item.get("format_valid") and not item.get("call_correct")]
+        )
+        tool_execution_count += len([item for item in trajectory if item.get("tool_executed")])
+        correct_turns = len([item for item in trajectory if item.get("call_correct")])
+        passed_turns += correct_turns
+        if prediction.get("generation_status") != "completed":
+            case_results.append(
+                {
+                    "case_id": case_id,
+                    "category": case.get("category"),
+                    "variant": case.get("variant"),
+                    "state": "failed",
+                    "error_class": "generation_failed",
+                    "passed_constraints": correct_turns,
+                    "total_constraints": expected_turn_count,
+                    "score": None,
+                    "attempted_turn_count": len(trajectory),
+                }
+            )
+            continue
+        completed = bool(prediction.get("completed_trajectory"))
+        malformed = any(not item.get("format_valid") for item in trajectory)
+        case_results.append(
+            {
+                "case_id": case_id,
+                "category": case.get("category"),
+                "variant": case.get("variant"),
+                "state": "scored",
+                "error_class": (
+                    "malformed_output" if malformed else None if completed else "wrong_tool_call"
+                ),
+                "passed_constraints": correct_turns,
+                "total_constraints": expected_turn_count,
+                "score": 1.0 if completed else 0.0,
+                "attempted_turn_count": len(trajectory),
+                "tool_execution_count": len([item for item in trajectory if item.get("tool_executed")]),
+                "format_valid": not malformed,
+            }
+        )
+    scored_rows = [item for item in case_results if item.get("score") is not None]
+    correct_count = len([item for item in scored_rows if item.get("score") == 1.0])
+    trajectory_success_rate = (
+        round(correct_count / float(len(scored_rows)), 6) if scored_rows else None
+    )
+    category_metrics: Dict[str, Dict[str, Any]] = {}
+    for category in sorted({str(item.get("category")) for item in case_results if item.get("category")}):
+        category_rows = [item for item in case_results if item.get("category") == category]
+        category_scored = [item for item in category_rows if item.get("score") is not None]
+        category_correct = len([item for item in category_scored if item.get("score") == 1.0])
+        category_metrics[category] = {
+            "correct_count": category_correct,
+            "total_count": len(category_scored),
+            "trajectory_success_rate": (
+                round(category_correct / float(len(category_scored)), 6)
+                if category_scored
+                else None
+            ),
+        }
+    return {
+        "benchmark_id": spec.benchmark_id,
+        "display_name": spec.display_name,
+        "status": "completed",
+        "primary_metric": {"name": spec.primary_metric_name, "value": trajectory_success_rate},
+        "metrics": {
+            "trajectory_success_rate": trajectory_success_rate,
+            "correct_count": correct_count,
+            "total_count": len(scored_rows),
+            "passed_constraints": passed_turns,
+            "total_constraints": total_expected_turns,
+            "turn_accuracy": (
+                round(passed_turns / float(total_expected_turns), 6)
+                if total_expected_turns
+                else None
+            ),
+            "generated_turn_count": generated_turn_count,
+            "malformed_turn_count": malformed_turn_count,
+            "wrong_call_count": wrong_call_count,
+            "tool_execution_count": tool_execution_count,
+            "category_metrics": category_metrics,
+        },
+        "category_metrics": category_metrics,
+        "case_results": case_results,
+        "scoring_policy": STATEFUL_TOOL_LOOP_SCORING_POLICY,
+    }
+
+
 def _normalize_score_text(value: Any) -> str:
     return " ".join(str(value or "").lower().split())
 
@@ -3765,6 +4120,8 @@ def _native_benchmark_cases(spec: CapabilityBenchmarkSpec) -> List[Dict[str, Any
         return _reasoning_exact_answer_cases()
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return _context_retrieval_cases()
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return stateful_tool_loop_cases()
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
