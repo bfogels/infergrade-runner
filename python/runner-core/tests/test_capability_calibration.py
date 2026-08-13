@@ -35,6 +35,12 @@ class CapabilityCalibrationTests(unittest.TestCase):
             )
             self.assertEqual(policy["maximum_headline_component_ceiling_fraction"], 0.2)
             self.assertEqual(policy["minimum_headline_component_headroom"], 0.1)
+            self.assertEqual(policy["minimum_headroom_challenge_observations"], 2)
+            self.assertEqual(policy["minimum_headroom_challenge_model_families"], 1)
+            self.assertEqual(
+                policy["minimum_headroom_challenge_independently_replicated_setups"],
+                1,
+            )
 
     def test_audit_blocks_small_or_saturated_corpus_without_rescaling_scores(self):
         observations = [
@@ -63,6 +69,215 @@ class CapabilityCalibrationTests(unittest.TestCase):
         self.assertEqual(report["status"], "calibrated_headroom")
         self.assertTrue(report["headline_ready"])
         self.assertEqual(report["blockers"], [])
+
+    def test_curated_headroom_challenge_is_required_after_generic_diversity_passes(self):
+        policy = {
+            "minimum_observations": 20,
+            "minimum_model_families": 5,
+            "minimum_parameter_bands": 3,
+            "minimum_distinct_scores": 6,
+            "minimum_unique_setups": 8,
+            "minimum_replicated_setups": 4,
+            "minimum_independently_replicated_setups": 4,
+            "minimum_current_generation_fraction": 0.75,
+            "minimum_headroom_challenge_observations": 2,
+            "minimum_headroom_challenge_model_families": 1,
+            "minimum_headroom_challenge_independently_replicated_setups": 1,
+            "maximum_suite_ceiling_fraction": 0.2,
+            "minimum_suite_headroom": 0.1,
+            "maximum_largest_family_fraction": 0.4,
+            "maximum_single_setup_fraction": 0.25,
+        }
+        bands = ["under_3b", "3b_to_under_8b", "8b_to_under_20b"]
+        scale_by_band = {
+            "under_3b": "1B",
+            "3b_to_under_8b": "4B",
+            "8b_to_under_20b": "9B",
+        }
+        priorities = []
+        observations = []
+        for setup_index in range(10):
+            band = bands[setup_index % len(bands)]
+            model_id = "models/current-%d-%s" % (setup_index, scale_by_band[band])
+            priorities.append({
+                "model_id": model_id,
+                "parameter_scale": scale_by_band[band],
+                "target_quants": ["q4_k_m"],
+                "model_freshness": "current_generation",
+                "calibration_campaign_eligible": True,
+            })
+            for group_index in range(2):
+                observations.append({
+                    "score_version": "local_assistant_score_v4",
+                    "score": 0.2 + setup_index / 25.0 + group_index / 100.0,
+                    "model_family": "family-%d" % (setup_index % 5),
+                    "parameter_band": band,
+                    "model_identities": [
+                        "current%d%s" % (
+                            setup_index,
+                            scale_by_band[band].lower(),
+                        )
+                    ],
+                    "quantization_scheme": "q4_k_m",
+                    "evidence_group_id": "group-%d" % group_index,
+                    "evidence_group_verified": True,
+                })
+        priorities.append({
+            "model_id": "Qwen/Qwen3.6-27B",
+            "parameter_scale": "27B",
+            "target_quants": ["q3_k_m"],
+            "model_freshness": "current_generation",
+            "calibration_campaign_eligible": True,
+            "headroom_challenge_eligible": True,
+        })
+        catalog = {"coverage_expansion_priorities": priorities}
+
+        generic_only = audit_capability_observations(
+            observations,
+            "local_assistant_score_v4",
+            policy=policy,
+            catalog=catalog,
+        )
+
+        self.assertEqual(generic_only["metrics"]["model_family_count"], 5)
+        self.assertEqual(generic_only["metrics"]["parameter_band_count"], 3)
+        self.assertEqual(generic_only["metrics"]["current_generation_fraction"], 1.0)
+        self.assertEqual(generic_only["metrics"]["independently_replicated_setup_count"], 10)
+        self.assertEqual(generic_only["metrics"]["headroom_challenge_observation_count"], 0)
+        self.assertEqual(generic_only["metrics"]["headroom_challenge_model_family_count"], 0)
+        self.assertIn("insufficient_headroom_challenge_observation_count", generic_only["blockers"])
+        self.assertIn("insufficient_headroom_challenge_model_family_count", generic_only["blockers"])
+        self.assertIn(
+            "insufficient_headroom_challenge_independently_replicated_setup_count",
+            generic_only["blockers"],
+        )
+        self.assertEqual(len(generic_only["blockers"]), 3)
+
+        challenge = [
+            {
+                "score_version": "local_assistant_score_v4",
+                "score": 0.61 + index / 100.0,
+                "model_family": "Qwen3.6",
+                "parameter_band": "20b_to_under_40b",
+                "model_identities": ["qwen3627b"],
+                "quantization_scheme": "q3_k_m",
+                "evidence_group_id": "challenge-source-%d" % index,
+                "evidence_group_verified": True,
+            }
+            for index in range(2)
+        ]
+        challenged = audit_capability_observations(
+            observations + challenge,
+            "local_assistant_score_v4",
+            policy=policy,
+            catalog=catalog,
+        )
+
+        self.assertEqual(challenged["metrics"]["headroom_challenge_observation_count"], 2)
+        self.assertEqual(challenged["metrics"]["headroom_challenge_model_family_count"], 1)
+        self.assertEqual(
+            challenged["metrics"]["headroom_challenge_independently_replicated_setup_count"],
+            1,
+        )
+        self.assertTrue(challenged["headline_ready"])
+        self.assertEqual(challenged["blockers"], [])
+
+    def test_headroom_challenge_requires_every_weighted_component(self):
+        catalog = load_capability_catalog()
+        policy = policy_for_score_version("local_coding_score_v2", catalog=catalog)
+        observations = [
+            {
+                "score_version": "local_coding_score_v2",
+                "surface_id": "local_coding_capability",
+                "score": 0.55 + index / 100.0,
+                "model_family": "Qwen3.6",
+                "parameter_band": "20b_to_under_40b",
+                "model_identities": ["qwen3627b"],
+                "quantization_scheme": "q3_k_m",
+                "evidence_group_id": "challenge-source-%d" % index,
+                "evidence_group_verified": True,
+                "components": [
+                    {"benchmark_id": "evalplus_humaneval", "score": 0.6},
+                    {"benchmark_id": "evalplus_mbpp", "score": 0.5},
+                ],
+            }
+            for index in range(2)
+        ]
+
+        partial = audit_capability_observations(
+            observations,
+            "local_coding_score_v2",
+            policy=policy,
+            catalog=catalog,
+        )
+
+        self.assertEqual(partial["metrics"]["headroom_challenge_candidate_observation_count"], 2)
+        self.assertEqual(partial["metrics"]["headroom_challenge_incomplete_observation_count"], 2)
+        self.assertEqual(partial["metrics"]["headroom_challenge_observation_count"], 0)
+        self.assertIn(
+            "insufficient_headroom_challenge_observation_count",
+            partial["blockers"],
+        )
+        for observation in observations:
+            observation["components"].append({
+                "benchmark_id": "coding_static_repair_v1",
+                "score": 0.4,
+            })
+        complete = audit_capability_observations(
+            observations,
+            "local_coding_score_v2",
+            policy=policy,
+            catalog=catalog,
+        )
+
+        self.assertEqual(complete["metrics"]["headroom_challenge_observation_count"], 2)
+        self.assertEqual(complete["metrics"]["headroom_challenge_incomplete_observation_count"], 0)
+        self.assertEqual(
+            complete["metrics"]["headroom_challenge_independently_replicated_setup_count"],
+            1,
+        )
+        self.assertFalse(any(
+            blocker.startswith("insufficient_headroom_challenge_")
+            for blocker in complete["blockers"]
+        ))
+
+    def test_headroom_challenge_does_not_borrow_another_task_lane(self):
+        catalog = load_capability_catalog()
+        for priority in catalog["coverage_expansion_priorities"]:
+            if (
+                priority.get("headroom_challenge_eligible") is True
+                and priority.get("use_case") == "agentic_coding"
+            ):
+                priority["headroom_challenge_eligible"] = False
+        policy = policy_for_score_version("local_coding_score_v2", catalog=catalog)
+        observation = {
+            "score_version": "local_coding_score_v2",
+            "surface_id": "local_coding_capability",
+            "score": 0.55,
+            "model_family": "Qwen3.6",
+            "parameter_band": "20b_to_under_40b",
+            "model_identities": ["qwen3627b"],
+            "quantization_scheme": "q3_k_m",
+            "evidence_group_id": "coding-source",
+            "evidence_group_verified": True,
+            "components": [
+                {"benchmark_id": "coding_static_repair_v1", "score": 0.4},
+                {"benchmark_id": "evalplus_humaneval", "score": 0.6},
+                {"benchmark_id": "evalplus_mbpp", "score": 0.5},
+            ],
+        }
+
+        report = audit_capability_observations(
+            [observation],
+            "local_coding_score_v2",
+            policy=policy,
+            catalog=catalog,
+        )
+
+        self.assertEqual(
+            report["metrics"]["headroom_challenge_candidate_observation_count"],
+            0,
+        )
 
     def test_audit_blocks_near_ceiling_distribution_before_literal_saturation(self):
         catalog = load_capability_catalog()
@@ -191,6 +406,9 @@ class CapabilityCalibrationTests(unittest.TestCase):
         catalog = load_capability_catalog()
         policy = policy_for_score_version("local_reasoning_score_v2", catalog=catalog)
         policy.pop("minimum_current_generation_fraction")
+        policy.pop("minimum_headroom_challenge_observations")
+        policy.pop("minimum_headroom_challenge_model_families")
+        policy.pop("minimum_headroom_challenge_independently_replicated_setups")
         observations = []
         for index in range(20):
             observations.append({

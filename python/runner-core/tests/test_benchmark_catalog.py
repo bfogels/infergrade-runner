@@ -96,6 +96,14 @@ class BenchmarkCatalogTests(unittest.TestCase):
             2,
         )
         self.assertEqual(calibration_policy["minimum_current_generation_fraction"], 0.75)
+        self.assertEqual(calibration_policy["minimum_headroom_challenge_observations"], 2)
+        self.assertEqual(calibration_policy["minimum_headroom_challenge_model_families"], 1)
+        self.assertEqual(
+            calibration_policy[
+                "minimum_headroom_challenge_independently_replicated_setups"
+            ],
+            1,
+        )
         self.assertEqual(calibration_policy["maximum_single_setup_fraction"], 0.25)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_coverage_fraction"], 0.5)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_scored_components"], 2)
@@ -122,6 +130,16 @@ class BenchmarkCatalogTests(unittest.TestCase):
                 2,
             )
             self.assertEqual(task_policy["calibration_policy"]["minimum_current_generation_fraction"], 0.75)
+            self.assertEqual(
+                task_policy["calibration_policy"]["minimum_headroom_challenge_observations"],
+                2,
+            )
+            self.assertEqual(
+                task_policy["calibration_policy"][
+                    "minimum_headroom_challenge_independently_replicated_setups"
+                ],
+                1,
+            )
             self.assertEqual(task_policy["calibration_policy"]["maximum_suite_ceiling_fraction"], 0.2)
             self.assertEqual(task_policy["calibration_policy"]["maximum_single_setup_fraction"], 0.25)
         self.assertEqual(
@@ -204,6 +222,9 @@ class BenchmarkCatalogTests(unittest.TestCase):
         )
         self.assertEqual(qwen36["model_freshness"], "current_generation")
         self.assertEqual(qwen36["campaign_availability"], "blocked_pending_canary")
+        self.assertTrue(qwen36["headroom_challenge_eligible"])
+        self.assertIn("stress", qwen36["headroom_challenge_rationale"])
+        self.assertEqual(qwen36["target_observations"], 2)
         self.assertIn("24gb", qwen36["blocked_reason"])
         coding_anchor = next(
             item for item in priorities
@@ -212,6 +233,14 @@ class BenchmarkCatalogTests(unittest.TestCase):
         reasoning_anchor = next(
             item for item in priorities
             if item["priority_id"] == "apple_silicon_qwen35_9b_reasoning_anchor"
+        )
+        coding_challenge = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_qwen36_27b_coding_challenge"
+        )
+        reasoning_challenge = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_qwen36_27b_reasoning_challenge"
         )
         self.assertEqual(coding_anchor["model_id"], "Qwen/Qwen3.5-9B")
         self.assertEqual(coding_anchor["use_case"], "agentic_coding")
@@ -225,6 +254,15 @@ class BenchmarkCatalogTests(unittest.TestCase):
             ],
         )
         self.assertEqual(reasoning_anchor["use_case"], "reasoning")
+        self.assertEqual(coding_challenge["use_case"], "agentic_coding")
+        self.assertEqual(reasoning_challenge["use_case"], "reasoning")
+        self.assertTrue(coding_challenge["headroom_challenge_eligible"])
+        self.assertTrue(reasoning_challenge["headroom_challenge_eligible"])
+        self.assertEqual(coding_challenge["campaign_availability"], "blocked_pending_canary")
+        self.assertEqual(reasoning_challenge["campaign_availability"], "blocked_pending_canary")
+        self.assertEqual(coding_challenge["target_observations"], 2)
+        self.assertEqual(reasoning_challenge["target_observations"], 2)
+        self.assertIn("coding_static_repair_v1", coding_challenge["benchmark_check_ids"])
         self.assertEqual(
             reasoning_anchor["benchmark_check_ids"],
             [
@@ -413,6 +451,62 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn(
             "apple_silicon_qwen3_8b_assistant_repeat: unsupported coverage generation_preset_id "
             "'typo_direct_answer_v1'",
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_rejects_unrepeatable_headroom_challenge(self):
+        mutated = deepcopy(load_capability_catalog())
+        priority = next(
+            item
+            for item in mutated["coverage_expansion_priorities"]
+            if item.get("headroom_challenge_eligible") is True
+        )
+        priority["model_freshness"] = "historical_control"
+        priority["target_observations"] = 1
+        priority["headroom_challenge_rationale"] = ""
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "%s: headroom challenge must be current or recent generation"
+            % priority["priority_id"],
+            failures,
+        )
+        self.assertIn(
+            "%s: headroom challenge requires at least two target observations"
+            % priority["priority_id"],
+            failures,
+        )
+        self.assertIn(
+            "%s: headroom challenge rationale must be non-empty"
+            % priority["priority_id"],
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_requires_complete_challenger_per_surface(self):
+        mutated = deepcopy(load_capability_catalog())
+        coding_challenge = next(
+            item
+            for item in mutated["coverage_expansion_priorities"]
+            if item.get("headroom_challenge_eligible") is True
+            and item.get("use_case") == "agentic_coding"
+        )
+        coding_challenge["benchmark_check_ids"].remove("coding_static_repair_v1")
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "local_coding_capability: headroom challenge gate requires an explicit eligible "
+            "campaign target covering every positively weighted capability check",
+            failures,
+        )
+
+        coding_challenge["benchmark_check_ids"].append("coding_static_repair_v1")
+        coding_challenge["use_case"] = "general_assistant"
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+        self.assertIn(
+            "local_coding_capability: headroom challenge gate requires an explicit eligible "
+            "campaign target covering every positively weighted capability check",
             failures,
         )
 

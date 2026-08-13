@@ -225,6 +225,32 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
                 failures.append(f"{priority_id or '<missing>'}: coverage priority field {field} must be non-empty")
         if not isinstance(item.get("target_quants"), list) or not item.get("target_quants"):
             failures.append(f"{priority_id or '<missing>'}: target_quants must be a non-empty list")
+        if item.get("headroom_challenge_eligible") is True:
+            if item.get("calibration_campaign_eligible") is not True:
+                failures.append(
+                    f"{priority_id or '<missing>'}: headroom challenge must be calibration campaign eligible"
+                )
+            if item.get("model_freshness") not in {"current_generation", "recent_generation"}:
+                failures.append(
+                    f"{priority_id or '<missing>'}: headroom challenge must be current or recent generation"
+                )
+            if not str(item.get("model_id") or item.get("checkpoint_name") or "").strip():
+                failures.append(
+                    f"{priority_id or '<missing>'}: headroom challenge requires exact model identity"
+                )
+            target_observations = item.get("target_observations")
+            if (
+                isinstance(target_observations, bool)
+                or not isinstance(target_observations, int)
+                or target_observations < 2
+            ):
+                failures.append(
+                    f"{priority_id or '<missing>'}: headroom challenge requires at least two target observations"
+                )
+            if not str(item.get("headroom_challenge_rationale") or "").strip():
+                failures.append(
+                    f"{priority_id or '<missing>'}: headroom challenge rationale must be non-empty"
+                )
         generation_preset_id = str(item.get("generation_preset_id") or "").strip()
         if generation_preset_id and generation_preset_id not in SUPPORTED_COVERAGE_GENERATION_PRESETS:
             failures.append(
@@ -238,7 +264,13 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         for check_id in check_ids:
             if str(check_id) not in declared_check_ids:
                 failures.append(f"{priority_id or '<missing>'}: unknown coverage benchmark_check_id {check_id!r}")
+    from infergrade.capability_scoring import primary_surface_for_use_case
+
     checks_by_id = check_index(payload)
+    challenge_priorities = [
+        item for item in coverage_expansion_priorities(payload)
+        if item.get("headroom_challenge_eligible") is True
+    ]
     for surface_id, policy in surface_score_policies.items():
         if surface_id not in surfaces:
             failures.append(f"{surface_id}: surface score policy references an unknown surface")
@@ -264,6 +296,31 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
                 failures.append(f"{surface_id}: {field} must be above 0 and at most 1")
         if policy.get("calibration_status") != "not_psychometrically_calibrated":
             failures.append(f"{surface_id}: calibration_status must preserve the non-calibrated claim boundary")
+        calibration_policy = dict(policy.get("calibration_policy") or {})
+        headline_check_ids = {
+            check_id
+            for check_id, check in checks_by_id.items()
+            if check.get("surface_id") == surface_id
+            and check.get("evidence_kind") == "capability"
+            and isinstance(check.get("primary_score_weight"), (int, float))
+            and float(check.get("primary_score_weight")) > 0
+        }
+        surface_challenge_priorities = [
+            item for item in challenge_priorities
+            if primary_surface_for_use_case(item.get("use_case")) == surface_id
+            and headline_check_ids.issubset({
+                str(check_id)
+                for check_id in list(item.get("benchmark_check_ids") or [])
+            })
+        ]
+        if (
+            calibration_policy.get("minimum_headroom_challenge_observations")
+            and not surface_challenge_priorities
+        ):
+            failures.append(
+                f"{surface_id}: headroom challenge gate requires an explicit eligible campaign "
+                "target covering every positively weighted capability check"
+            )
         weights = [
             float(check.get("primary_score_weight"))
             for check in checks_by_id.values()
