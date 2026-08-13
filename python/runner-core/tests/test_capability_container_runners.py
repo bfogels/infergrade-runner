@@ -73,6 +73,86 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertIn("instruction_following_eval/data/input_data.jsonl", dockerfile)
         self.assertIn("ceea2f13fd823c3493d6e6f232f334d083671c94", dockerfile)
 
+    def test_ifeval_tier_sampling_is_order_independent_and_covers_instruction_types(self):
+        fake_nltk = types.SimpleNamespace(data=_FakeNltkData({"punkt", "punkt_tab"}))
+        fake_nltk.download = lambda *_args, **_kwargs: True
+        fake_instruction_module = types.SimpleNamespace(
+            evaluation_lib=types.SimpleNamespace()
+        )
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-ifeval", "runner.py")
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "nltk": fake_nltk,
+                "instruction_following_eval": fake_instruction_module,
+            },
+        ):
+            module = _load_module("ifeval_sampling_test_module", module_path)
+
+        inputs = [
+            types.SimpleNamespace(key="prefix-a", instruction_id_list=["type-a"]),
+            types.SimpleNamespace(key="prefix-a-2", instruction_id_list=["type-a"]),
+            types.SimpleNamespace(key="later-b", instruction_id_list=["type-b"]),
+            types.SimpleNamespace(key="later-c", instruction_id_list=["type-c"]),
+        ]
+        forward = module._sample_inputs(inputs, 3)
+        reverse = module._sample_inputs(list(reversed(inputs)), 3)
+
+        self.assertEqual({item.key for item in forward}, {item.key for item in reverse})
+        self.assertEqual(
+            {instruction for item in forward for instruction in item.instruction_id_list},
+            {"type-a", "type-b", "type-c"},
+        )
+        self.assertNotEqual(
+            {item.key for item in forward},
+            {item.key for item in inputs[:3]},
+        )
+
+    def test_ifeval_prepare_records_tier_coverage_and_selection_identity(self):
+        inputs = [
+            types.SimpleNamespace(
+                key="case-%d" % index,
+                instruction_id_list=["type-%d" % (index % 3)],
+                prompt="prompt-%d" % index,
+                kwargs=[{}],
+            )
+            for index in range(6)
+        ]
+        fake_nltk = types.SimpleNamespace(data=_FakeNltkData({"punkt", "punkt_tab"}))
+        fake_nltk.download = lambda *_args, **_kwargs: True
+        fake_instruction_module = types.SimpleNamespace(
+            evaluation_lib=types.SimpleNamespace(
+                read_prompt_list=lambda _path: inputs,
+            )
+        )
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-ifeval", "runner.py")
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "nltk": fake_nltk,
+                "instruction_following_eval": fake_instruction_module,
+            },
+        ):
+            module = _load_module("ifeval_prepare_metadata_test_module", module_path)
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            with mock.patch.object(module, "_ensure_nltk_tokenizers"):
+                module.prepare(tempdir, limit=3)
+            with open(
+                os.path.join(tempdir, "benchmark_metadata.json"),
+                encoding="utf-8",
+            ) as handle:
+                metadata = json.load(handle)
+
+        self.assertEqual(
+            metadata["sample_policy"],
+            "greedy_instruction_coverage_3_sha256_v1",
+        )
+        self.assertEqual(metadata["instruction_type_count"], 3)
+        self.assertEqual(metadata["full_instruction_type_count"], 3)
+        self.assertEqual(metadata["instruction_type_coverage_fraction"], 1.0)
+        self.assertEqual(len(metadata["selection_sha256"]), 64)
+
     def test_evalplus_mbpp_tasks_are_serialized_before_jsonl_write(self):
         fake_evalplus_data = types.SimpleNamespace(
             get_human_eval_plus=lambda: {},
@@ -135,6 +215,48 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
             "plus_input": [[2]],
         }
         self.assertEqual(module._jsonl_ready_task("humaneval", task), task)
+
+    def test_evalplus_tier_sampling_is_hash_ranked_and_order_independent(self):
+        fake_evalplus_data = types.SimpleNamespace(
+            get_human_eval_plus=lambda: {},
+            get_mbpp_plus=lambda: {},
+            write_jsonl=lambda *args, **kwargs: None,
+        )
+        fake_mbpp = types.SimpleNamespace(
+            mbpp_serialize_inputs=lambda _task_id, inputs: inputs
+        )
+        fake_evalplus_evaluate = types.SimpleNamespace(evaluate=lambda *args, **kwargs: None)
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-evalplus", "runner.py")
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "evalplus": types.SimpleNamespace(),
+                "evalplus.data": fake_evalplus_data,
+                "evalplus.data.mbpp": fake_mbpp,
+                "evalplus.evaluate": fake_evalplus_evaluate,
+            },
+        ):
+            module = _load_module("evalplus_sampling_test_module", module_path)
+
+        items = [
+            (
+                "HumanEval/%d" % index,
+                {"task_id": "HumanEval/%d" % index},
+            )
+            for index in range(20)
+        ]
+        forward = module._sample_items("humaneval", items, 5)
+        reverse = module._sample_items("humaneval", list(reversed(items)), 5)
+
+        self.assertEqual([item[0] for item in forward], [item[0] for item in reverse])
+        self.assertNotEqual(
+            {item[0] for item in forward},
+            {item[0] for item in items[:5]},
+        )
+        self.assertEqual(
+            module._sample_policy("humaneval", 5),
+            "humaneval_sha256_rank_5_from_evalplus_revision_v1",
+        )
 
     def test_evalplus_runner_extracts_task_failure_classes(self):
         fake_evalplus_data = types.SimpleNamespace(
@@ -383,6 +505,23 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertEqual(summary["category_metrics"]["math"]["accuracy"], 1.0)
         self.assertEqual(summary["category_metrics"]["other"]["accuracy"], 0.0)
 
+    def test_mmlu_pro_sample_is_order_independent_within_categories(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
+        module = _load_module("mmlu_pro_sampling_test_module", module_path)
+        rows = [
+            {"question_id": index, "category": "cat-%d" % (index % 2)}
+            for index in range(12)
+        ]
+
+        forward = module._sample_rows(rows, 6)
+        reverse = module._sample_rows(list(reversed(rows)), 6)
+
+        self.assertEqual(
+            {item["question_id"] for item in forward},
+            {item["question_id"] for item in reverse},
+        )
+        self.assertEqual({item["category"] for item in forward}, {"cat-0", "cat-1"})
+
     def test_mmlu_pro_scores_25_letters_with_llama_cpp_terminal_markers(self):
         module_path = os.path.join(ROOT_DIR, "containers", "capability-mmlu-pro", "runner.py")
         module = _load_module("mmlu_pro_terminal_marker_test_module", module_path)
@@ -599,9 +738,21 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
                 benchmark_metadata = json.load(handle)
 
         self.assertEqual({case["category"] for case in cases}, {"multiple", "parallel", "irrelevance"})
+        self.assertEqual(
+            {
+                row["id"]
+                for row in module._sample_rows(rows, 3)
+            },
+            {
+                row["id"]
+                for row in module._sample_rows(list(reversed(rows)), 3)
+            },
+        )
         self.assertTrue(all("Return only a JSON array" in case["prompt"] for case in cases))
         self.assertIn("official BFCL V4 leaderboard score", benchmark_metadata["claim_boundary"]["cannot_claim"])
         self.assertEqual(benchmark_metadata["prompt_format"], "infergrade_json_tool_calls_v1")
+        self.assertEqual(benchmark_metadata["sample_policy"], "category_round_robin_3_v2")
+        self.assertEqual(len(benchmark_metadata["selection_sha256"]), 64)
 
     def test_bfcl_strict_scorer_handles_optional_parallel_and_relevance_cases(self):
         module_path = os.path.join(ROOT_DIR, "containers", "capability-bfcl", "runner.py")
@@ -756,7 +907,16 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
             module.evaluate(tempdir)
             with open(os.path.join(tempdir, "summary.json"), encoding="utf-8") as handle:
                 summary = json.load(handle)
+            full_rows = module._load_rows(data_path)
+            forward_sample_ids = {
+                row["Record ID"] for row in module._sample_rows(full_rows, 3)
+            }
+            reverse_sample_ids = {
+                row["Record ID"]
+                for row in module._sample_rows(list(reversed(full_rows)), 3)
+            }
         self.assertEqual(len(cases), 3)
+        self.assertEqual(forward_sample_ids, reverse_sample_ids)
         self.assertEqual(summary["primary_metric"]["value"], 0.5)
         self.assertEqual(summary["metrics"]["malformed_output_count"], 1)
         self.assertEqual(summary["metrics"]["total_count"], 2)

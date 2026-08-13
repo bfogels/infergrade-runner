@@ -14,6 +14,7 @@ from infergrade.capabilities import (
     _capability_container_command,
     _capability_container_policy,
     _case_benchmark_protocol_identity,
+    _container_fixture_revision,
     _generate_predictions,
     _generation_prompt_for_case,
     _host_mount_path,
@@ -901,7 +902,9 @@ class CapabilityTests(unittest.TestCase):
                 {
                     "dataset_revision": "fixture-revision",
                     "snapshot_sha256": "fixture-snapshot-sha",
-                    "sample_policy": "category_round_robin_v1",
+                    "sample_policy": "category_round_robin_1_v2",
+                    "selection_sha256": "fixture-selection-sha",
+                    "case_count": 1,
                     "category_count": 1,
                 },
                 handle,
@@ -919,7 +922,19 @@ class CapabilityTests(unittest.TestCase):
             artifact = json.load(handle)
 
         self.assertEqual(artifact["protocol"]["scorer_type"], "json_schema")
-        self.assertEqual(artifact["protocol"]["fixture_revision"], "fixture-snapshot-sha")
+        self.assertTrue(
+            artifact["protocol"]["fixture_revision"].startswith(
+                "bfcl_local_reference_v1_selection_"
+            )
+        )
+        self.assertEqual(
+            artifact["protocol"]["source_snapshot_sha256"],
+            "fixture-snapshot-sha",
+        )
+        self.assertEqual(
+            artifact["protocol"]["selection_sha256"],
+            "fixture-selection-sha",
+        )
         self.assertEqual(artifact["evidence"]["surface"], "local_assistant_capability")
         self.assertEqual(artifact["tasks"][0]["score"], 1.0)
         self.assertNotIn("expected", artifact["tasks"][0])
@@ -929,6 +944,39 @@ class CapabilityTests(unittest.TestCase):
             "This is not an official BFCL V4 leaderboard score.",
             artifact["claim_boundary"]["unsupported_claims"],
         )
+
+    def test_container_fixture_identity_separates_exact_subsets(self):
+        spec = CAPABILITY_BENCHMARKS["bfcl_local_reference_v1"]
+        common = {
+            "dataset_revision": "fixture-revision",
+            "snapshot_sha256": "fixture-snapshot-sha",
+            "sample_policy": "category_round_robin_11_v2",
+            "case_count": 11,
+        }
+
+        first = _container_fixture_revision(
+            spec,
+            {**common, "selection_sha256": "selection-a"},
+            {},
+        )
+        second = _container_fixture_revision(
+            spec,
+            {**common, "selection_sha256": "selection-b"},
+            {},
+        )
+        larger = _container_fixture_revision(
+            spec,
+            {
+                **common,
+                "sample_policy": "category_round_robin_55_v2",
+                "case_count": 55,
+                "selection_sha256": "selection-c",
+            },
+            {},
+        )
+
+        self.assertNotEqual(first, second)
+        self.assertNotEqual(first, larger)
 
     def test_capability_images_include_repository_edit_diagnostic_when_selected(self):
         request = RunRequest(

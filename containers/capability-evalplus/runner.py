@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import importlib
 import json
 import os
@@ -83,6 +84,37 @@ def _jsonl_ready_task(dataset: str, task: dict) -> dict:
     return normalized
 
 
+def _sample_items(dataset: str, items, limit: int = None):
+    """Avoid positional dataset bias with a pinned, order-independent rank."""
+    ranked = sorted(
+        items,
+        key=lambda item: hashlib.sha256(
+            (
+                "evalplus_sha256_rank_v1\0"
+                + EVALPLUS_REVISION
+                + "\0"
+                + dataset
+                + "\0"
+                + str(item[0])
+            ).encode("utf-8")
+        ).hexdigest(),
+    )
+    if not limit or limit >= len(ranked):
+        return ranked
+    return ranked[:limit]
+
+
+def _selection_digest(task_ids) -> str:
+    return hashlib.sha256("\n".join(sorted(task_ids)).encode("utf-8")).hexdigest()
+
+
+def _sample_policy(dataset: str, case_count: int) -> str:
+    return "%s_sha256_rank_%d_from_evalplus_revision_v1" % (
+        dataset,
+        case_count,
+    )
+
+
 def _status_value(value):
     if isinstance(value, str):
         normalized = value.strip().lower()
@@ -165,10 +197,9 @@ def _case_result_for_task(task_id: str, payload) -> dict:
 
 def prepare(dataset: str, output_dir: str, limit: int = None) -> None:
     problems = _dataset_problems(dataset)
-    items = list(problems.items())
-    if limit:
-        items = items[:limit]
+    items = _sample_items(dataset, list(problems.items()), limit)
     selected_tasks = [_jsonl_ready_task(dataset, problem) for _task_id, problem in items]
+    selected_task_ids = [str(task["task_id"]) for task in selected_tasks]
     override_path = os.path.join(output_dir, "%s_override.jsonl" % dataset)
     write_jsonl(override_path, selected_tasks, drop_builtin=False)
     write_jsonl(
@@ -193,7 +224,8 @@ def prepare(dataset: str, output_dir: str, limit: int = None) -> None:
             "dataset": dataset,
             "case_count": len(selected_tasks),
             "evalplus_revision": EVALPLUS_REVISION,
-            "sample_policy": "%s_first_%d_from_evalplus_revision" % (dataset, len(selected_tasks)),
+            "sample_policy": _sample_policy(dataset, len(selected_tasks)),
+            "selection_sha256": _selection_digest(selected_task_ids),
             "override_path": override_path,
         },
     )
@@ -243,7 +275,8 @@ def evaluate(dataset: str, output_dir: str) -> None:
         "dataset": dataset,
         "case_count": len(results.get("eval", {})),
         "evalplus_revision": EVALPLUS_REVISION,
-        "sample_policy": "%s_first_%d_from_evalplus_revision" % (dataset, len(results.get("eval", {}))),
+        "sample_policy": _sample_policy(dataset, len(results.get("eval", {}))),
+        "selection_sha256": _selection_digest(sorted(str(item) for item in results.get("eval", {}))),
         "scoring_policy": "evalplus_pass_at_1_normalized_v2",
         "primary_metric": {
             "name": "pass_at_1_plus",

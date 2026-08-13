@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -68,12 +69,57 @@ def _ensure_nltk_tokenizers(output_dir: str) -> None:
         nltk.data.find(resource_path)
 
 
+def _sample_inputs(inputs: List, limit: int = None) -> List:
+    """Select a deterministic tier that favors breadth across instruction types."""
+    if not limit or limit >= len(inputs):
+        return list(inputs)
+    candidates = list(inputs)
+    selected = []
+    instruction_counts = {}
+    while candidates and len(selected) < limit:
+        def rank(item):
+            instruction_ids = sorted(set(item.instruction_id_list))
+            novel_count = sum(
+                instruction_counts.get(instruction_id, 0) == 0
+                for instruction_id in instruction_ids
+            )
+            coverage_load = sum(
+                instruction_counts.get(instruction_id, 0)
+                for instruction_id in instruction_ids
+            )
+            stable_rank = hashlib.sha256(
+                ("ifeval_instruction_coverage_v1\0" + str(item.key)).encode("utf-8")
+            ).hexdigest()
+            return (-novel_count, coverage_load, stable_rank)
+
+        chosen = min(candidates, key=rank)
+        candidates.remove(chosen)
+        selected.append(chosen)
+        for instruction_id in set(chosen.instruction_id_list):
+            instruction_counts[instruction_id] = instruction_counts.get(instruction_id, 0) + 1
+    return selected
+
+
+def _selection_digest(inputs: List) -> str:
+    payload = "\n".join(str(item.key) for item in inputs).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def prepare(output_dir: str, limit: int = None) -> None:
     _ensure_nltk_tokenizers(output_dir)
     input_path = "/opt/instruction_following_eval/data/input_data.jsonl"
-    inputs = evaluation_lib.read_prompt_list(input_path)
-    if limit:
-        inputs = inputs[:limit]
+    full_inputs = evaluation_lib.read_prompt_list(input_path)
+    inputs = _sample_inputs(full_inputs, limit)
+    all_instruction_types = {
+        instruction_id
+        for item in full_inputs
+        for instruction_id in item.instruction_id_list
+    }
+    selected_instruction_types = {
+        instruction_id
+        for item in inputs
+        for instruction_id in item.instruction_id_list
+    }
 
     filtered_input_path = os.path.join(output_dir, "input_data.jsonl")
     cases_path = os.path.join(output_dir, "cases.jsonl")
@@ -108,6 +154,18 @@ def prepare(output_dir: str, limit: int = None) -> None:
             "display_name": "IFEval",
             "case_count": len(inputs),
             "instruction_count": sum(len(inp.instruction_id_list) for inp in inputs),
+            "sample_policy": (
+                "greedy_instruction_coverage_%d_sha256_v1" % len(inputs)
+                if len(inputs) < len(full_inputs)
+                else "full_snapshot_order"
+            ),
+            "selection_sha256": _selection_digest(inputs),
+            "instruction_type_count": len(selected_instruction_types),
+            "full_instruction_type_count": len(all_instruction_types),
+            "instruction_type_coverage_fraction": round(
+                len(selected_instruction_types) / float(len(all_instruction_types)),
+                6,
+            ) if all_instruction_types else None,
         },
     )
 

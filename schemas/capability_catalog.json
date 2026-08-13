@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-13-outcome-slice-headroom-gate",
+  "catalog_version": "2026-08-13-tier-sampling-representativeness",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -671,7 +671,7 @@
       "fixture_or_dataset_revision_status": "fixture_policy_known_upstream_pinning_needed",
       "harness_status": "container_harness_implemented",
       "scoring_policy_id": "instruction_following_primary_accuracy_v1",
-      "sample_policy": "Decision-sized instruction-following sample; not a leaderboard protocol.",
+      "sample_policy": "Pinned IFEval revision; canary and standard tiers greedily maximize distinct instruction-type coverage with deterministic hash tie-breaking instead of taking a positional prefix. Not a leaderboard protocol.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "container_optional_for_scoring",
       "claim_boundary": "Instruction-following decision evidence only; not broad assistant quality or leaderboard evidence.",
@@ -829,7 +829,7 @@
       "fixture_or_dataset_revision_status": "pinned_upstream_harness_revision",
       "harness_status": "container_harness_implemented",
       "scoring_policy_id": "coding_primary_pass_at_1_normalized_v2",
-      "sample_policy": "Pinned EvalPlus HumanEval+ revision with canary and full local reference limits.",
+      "sample_policy": "Pinned EvalPlus HumanEval+ revision with deterministic task-id hash-ranked canary and full local reference limits, avoiding upstream positional-prefix bias.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "container_required_for_generated_code_execution",
       "claim_boundary": "EvalPlus HumanEval+ reference coding evidence under pass@1 unit tests; not repo-edit, LiveCodeBench, SWE-bench, gold, or broad agentic coding proof.",
@@ -849,7 +849,7 @@
       "fixture_or_dataset_revision_status": "pinned_upstream_harness_revision",
       "harness_status": "container_harness_implemented",
       "scoring_policy_id": "coding_primary_pass_at_1_normalized_v2",
-      "sample_policy": "Pinned EvalPlus MBPP+ revision with canary, sampled local reference, and full local reference limits.",
+      "sample_policy": "Pinned EvalPlus MBPP+ revision with deterministic task-id hash-ranked canary and sampled local reference limits plus the full local reference tier, avoiding upstream positional-prefix bias.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "container_required_for_generated_code_execution",
       "claim_boundary": "EvalPlus MBPP+ reference coding breadth evidence under pass@1 unit tests; not repo-edit, LiveCodeBench, SWE-bench, gold, or broad agentic coding proof.",
