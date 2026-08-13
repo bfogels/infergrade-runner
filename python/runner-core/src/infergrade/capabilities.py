@@ -30,6 +30,7 @@ from infergrade.stateful_tool_loop import (
     expected_call_matches,
     parse_tool_call,
 )
+from infergrade.statistical_bounds import wilson_score_interval
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcnow_iso, write_json
 
 CAPABILITY_REGISTRY_VERSION = "2026-07-capability-protocol-3.1"
@@ -115,6 +116,9 @@ class CapabilityBenchmarkSpec:
     execution_mode: str = "container"
     container_args: List[str] = field(default_factory=list)
     case_limits: Dict[str, int] = field(default_factory=dict)
+    binomial_success_count_field: Optional[str] = None
+    binomial_observation_count_field: Optional[str] = None
+    binomial_observation_unit: Optional[str] = None
 
 
 CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
@@ -126,6 +130,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=640,
         container_image=DEFAULT_CAPABILITY_IMAGES["ifeval"],
         case_limits={"canary": 25, "standard": 100, "gold": 541},
+        binomial_success_count_field="prompt_strict_correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="prompt",
     ),
     "evalplus_humaneval": CapabilityBenchmarkSpec(
         benchmark_id="evalplus_humaneval",
@@ -136,6 +143,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         container_image=DEFAULT_CAPABILITY_IMAGES["evalplus_humaneval"],
         container_args=["--dataset", "humaneval"],
         case_limits={"canary": 20, "standard": 164, "gold": 164},
+        binomial_success_count_field="passed_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "evalplus_mbpp": CapabilityBenchmarkSpec(
         benchmark_id="evalplus_mbpp",
@@ -146,6 +156,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         container_image=DEFAULT_CAPABILITY_IMAGES["evalplus_mbpp"],
         container_args=["--dataset", "mbpp"],
         case_limits={"canary": 25, "standard": 100, "gold": 378},
+        binomial_success_count_field="passed_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "multiturn_chat_memory_v1": CapabilityBenchmarkSpec(
         benchmark_id="multiturn_chat_memory_v1",
@@ -182,6 +195,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=32,
         execution_mode="native",
         case_limits={"canary": 2, "standard": 3, "gold": 3},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "mmlu_pro_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="mmlu_pro_reference_v1",
@@ -191,6 +207,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=64,
         container_image=DEFAULT_CAPABILITY_IMAGES["mmlu_pro_reference_v1"],
         case_limits={"canary": 25, "standard": 100, "gold": 300},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "gpqa_diamond_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="gpqa_diamond_reference_v1",
@@ -200,6 +219,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=64,
         container_image=DEFAULT_CAPABILITY_IMAGES["gpqa_diamond_reference_v1"],
         case_limits={"canary": 25, "standard": 100, "gold": 198},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "longbench_v2_local_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="longbench_v2_local_reference_v1",
@@ -211,6 +233,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
             "longbench_v2_local_reference_v1"
         ],
         case_limits={"canary": 6, "standard": 12, "gold": 23},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "bfcl_local_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="bfcl_local_reference_v1",
@@ -220,6 +245,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=384,
         container_image=DEFAULT_CAPABILITY_IMAGES["bfcl_local_reference_v1"],
         case_limits={"canary": 11, "standard": 55, "gold": 110},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "stateful_tool_loop_diagnostic_v1": CapabilityBenchmarkSpec(
         benchmark_id="stateful_tool_loop_diagnostic_v1",
@@ -229,6 +257,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=192,
         execution_mode="native",
         case_limits={"canary": 8, "standard": 16, "gold": 24},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="trajectory",
     ),
     "repository_edit_smoke_v1": CapabilityBenchmarkSpec(
         benchmark_id="repository_edit_smoke_v1",
@@ -238,6 +269,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=1024,
         container_image=DEFAULT_CAPABILITY_IMAGES["repository_edit_smoke_v1"],
         case_limits={"canary": 2, "standard": 6, "gold": 8},
+        binomial_success_count_field="passed_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "context_retrieval_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="context_retrieval_reference_v1",
@@ -247,6 +281,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=32,
         execution_mode="native",
         case_limits={"canary": 1, "standard": 3, "gold": 6},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "perplexity_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="perplexity_reference_v1",
@@ -571,6 +608,64 @@ def _benchmark_primary_metric_value(summary: Dict[str, Any]) -> Optional[float]:
         return None if value is None else round(float(value), 6)
     except (TypeError, ValueError):
         return None
+
+
+def _attach_primary_metric_uncertainty(
+    spec: CapabilityBenchmarkSpec,
+    summary: Dict[str, Any],
+    confidence_level: float = 0.95,
+) -> None:
+    """Attach a descriptive binomial interval for one-outcome-per-unit scores."""
+    success_field = spec.binomial_success_count_field
+    observation_field = spec.binomial_observation_count_field
+    observation_unit = spec.binomial_observation_unit
+    if not success_field or not observation_field or not observation_unit:
+        return
+    primary_metric_value = _benchmark_primary_metric_value(summary)
+    if primary_metric_value is None:
+        return
+    metrics = dict(summary.get("metrics") or {})
+    success_count = metrics.get(success_field)
+    observation_count = metrics.get(observation_field)
+    if (
+        isinstance(success_count, bool)
+        or isinstance(observation_count, bool)
+        or not isinstance(success_count, int)
+        or not isinstance(observation_count, int)
+        or observation_count <= 0
+        or success_count < 0
+        or success_count > observation_count
+    ):
+        return
+    count_derived_value = round(success_count / float(observation_count), 6)
+    if abs(primary_metric_value - count_derived_value) > 0.000001:
+        return
+    interval = wilson_score_interval(
+        success_count,
+        observation_count,
+        confidence_level,
+    )
+    if interval is None:
+        return
+    summary["primary_metric_uncertainty"] = {
+        "policy_id": "binomial_score_uncertainty_v1",
+        "method": "wilson_score_interval",
+        "confidence_level": confidence_level,
+        "lower_bound": round(interval[0], 6),
+        "upper_bound": round(interval[1], 6),
+        "success_count": success_count,
+        "observation_count": observation_count,
+        "observation_unit": observation_unit,
+        "population": "scored_completed_outcomes",
+        "excluded_unscored_count": int(
+            summary.get("unscored_generation_failure_count") or 0
+        ),
+        "interpretation": (
+            "Descriptive small-sample uncertainty for scored completed outcomes only. "
+            "It does not claim benchmark tasks are a random population sample and does "
+            "not cover model, runtime, prompt, hardware, or repeated-run variance."
+        ),
+    }
 
 
 def _benchmark_counts_as_scored(summary: Dict[str, Any]) -> bool:
@@ -918,6 +1013,15 @@ def _component_report_for_benchmark(
         "generation_failure_count": benchmark_result.get("generation_failure_count"),
         "generation_failure_rate": benchmark_result.get("generation_failure_rate"),
         "generation_failure_severity": benchmark_result.get("generation_failure_severity"),
+        **(
+            {
+                "primary_metric_uncertainty": dict(
+                    benchmark_result["primary_metric_uncertainty"]
+                )
+            }
+            if benchmark_result.get("primary_metric_uncertainty")
+            else {}
+        ),
     }
     metrics = benchmark_result.get("metrics") or {}
     if benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS and isinstance(metrics, dict):
@@ -1182,6 +1286,7 @@ def execute_capability_suite(
                 )
                 if isinstance(summary.get("primary_metric"), dict):
                     summary["primary_metric"]["value"] = None
+            _attach_primary_metric_uncertainty(spec, summary)
             write_json(os.path.join(benchmark_dir, "summary.json"), summary)
             capability_run_path = None
             if spec.execution_mode == "native":
@@ -1870,6 +1975,11 @@ def _write_native_capability_run_artifact(
         "summary": {
             "state": summary_state,
             "score": score if summary_state in ("scored", "partial") else None,
+            **(
+                {"score_uncertainty": dict(summary["primary_metric_uncertainty"])}
+                if summary.get("primary_metric_uncertainty")
+                else {}
+            ),
             "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
             "passed_count": (
                 summary.get("metrics", {}).get("correct_count")
@@ -2137,6 +2247,11 @@ def _write_multiple_choice_capability_run_artifact(
         "summary": {
             "state": summary_state,
             "score": score if summary_state in ("scored", "partial") else None,
+            **(
+                {"score_uncertainty": dict(summary["primary_metric_uncertainty"])}
+                if summary.get("primary_metric_uncertainty")
+                else {}
+            ),
             "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
             "passed_count": metrics.get("correct_count"),
             "failed_count": (
@@ -2317,6 +2432,11 @@ def _write_repository_edit_capability_run_artifact(
         "summary": {
             "state": summary_state,
             "score": score if summary_state in ("scored", "partial") else None,
+            **(
+                {"score_uncertainty": dict(summary["primary_metric_uncertainty"])}
+                if summary.get("primary_metric_uncertainty")
+                else {}
+            ),
             "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
             "passed_count": metrics.get("passed_count"),
             "failed_count": (
@@ -2495,6 +2615,11 @@ def _write_evalplus_capability_run_artifact(
         "summary": {
             "state": summary_state,
             "score": score if summary_state in ("scored", "partial") else None,
+            **(
+                {"score_uncertainty": dict(summary["primary_metric_uncertainty"])}
+                if summary.get("primary_metric_uncertainty")
+                else {}
+            ),
             "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
             "passed_count": metrics.get("passed_count"),
             "failed_count": metrics.get("failed_count"),

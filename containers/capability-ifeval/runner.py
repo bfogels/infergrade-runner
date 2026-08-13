@@ -205,6 +205,10 @@ def evaluate(output_dir: str) -> None:
             ),
         },
         "metrics": {
+            "prompt_strict_correct_count": sum(
+                output.follow_all_instructions for output in strict_outputs
+            ),
+            "total_count": len(strict_outputs),
             "prompt_strict_accuracy": round(
                 sum(output.follow_all_instructions for output in strict_outputs) / float(len(strict_outputs) or 1),
                 6,

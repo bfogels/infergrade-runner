@@ -11,6 +11,7 @@ sys.path.insert(0, "python/runner-core/src")
 from infergrade import __version__
 from infergrade.capabilities import (
     CAPABILITY_BENCHMARKS,
+    _attach_primary_metric_uncertainty,
     _capability_container_command,
     _capability_container_policy,
     _case_benchmark_protocol_identity,
@@ -198,6 +199,69 @@ class _MmluProAdapter(object):
 
 
 class CapabilityTests(unittest.TestCase):
+    def test_binomial_primary_metric_uncertainty_is_explicit_for_small_samples(self):
+        spec = CAPABILITY_BENCHMARKS["reasoning_exact_answer_v1"]
+        summary = {
+            "status": "completed",
+            "primary_metric": {"name": "exact_answer_accuracy", "value": 1 / 3},
+            "metrics": {"correct_count": 1, "total_count": 3},
+            "unscored_generation_failure_count": 0,
+        }
+
+        _attach_primary_metric_uncertainty(spec, summary)
+
+        uncertainty = summary["primary_metric_uncertainty"]
+        self.assertEqual(uncertainty["policy_id"], "binomial_score_uncertainty_v1")
+        self.assertEqual(uncertainty["observation_count"], 3)
+        self.assertEqual(uncertainty["success_count"], 1)
+        self.assertEqual(uncertainty["lower_bound"], 0.061492)
+        self.assertEqual(uncertainty["upper_bound"], 0.79234)
+        self.assertEqual(uncertainty["population"], "scored_completed_outcomes")
+
+    def test_binomial_uncertainty_omits_non_binomial_and_quarantined_scores(self):
+        non_binomial = {"primary_metric": {"name": "perplexity", "value": 7.2}, "metrics": {}}
+        _attach_primary_metric_uncertainty(
+            CAPABILITY_BENCHMARKS["perplexity_reference_v1"], non_binomial
+        )
+        quarantined = {
+            "primary_metric": {"name": "accuracy", "value": None},
+            "metrics": {"correct_count": 0, "total_count": 25},
+        }
+        _attach_primary_metric_uncertainty(
+            CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"], quarantined
+        )
+
+        self.assertNotIn("primary_metric_uncertainty", non_binomial)
+        self.assertNotIn("primary_metric_uncertainty", quarantined)
+
+    def test_binomial_uncertainty_fails_closed_when_counts_do_not_match_score(self):
+        summary = {
+            "primary_metric": {"name": "accuracy", "value": 0.75},
+            "metrics": {"correct_count": 1, "total_count": 3},
+        }
+
+        _attach_primary_metric_uncertainty(
+            CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"], summary
+        )
+
+        self.assertNotIn("primary_metric_uncertainty", summary)
+
+    def test_longbench_reference_uses_task_level_score_uncertainty(self):
+        summary = {
+            "primary_metric": {"name": "accuracy", "value": 0.75},
+            "metrics": {"correct_count": 9, "total_count": 12},
+        }
+
+        _attach_primary_metric_uncertainty(
+            CAPABILITY_BENCHMARKS["longbench_v2_local_reference_v1"], summary
+        )
+
+        uncertainty = summary["primary_metric_uncertainty"]
+        self.assertEqual(uncertainty["observation_unit"], "task")
+        self.assertEqual(uncertainty["observation_count"], 12)
+        self.assertLess(uncertainty["lower_bound"], 0.5)
+        self.assertGreater(uncertainty["upper_bound"], 0.9)
+
     def setUp(self):
         self.tempdir = tempfile.mkdtemp(prefix="infergrade-capability-")
 
@@ -1570,6 +1634,8 @@ class CapabilityTests(unittest.TestCase):
         result = execution.benchmark_results["reasoning_exact_answer_v1"]
         self.assertEqual(result["primary_metric"]["name"], "exact_answer_accuracy")
         self.assertEqual(result["metrics"]["correct_count"], result["metrics"]["total_count"])
+        self.assertEqual(result["primary_metric_uncertainty"]["observation_count"], 3)
+        self.assertEqual(result["primary_metric_uncertainty"]["lower_bound"], 0.438503)
         capability_run_path = execution.artifacts["reasoning_exact_answer_v1"]["capability_run_path"]
         with open(capability_run_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)
@@ -1580,6 +1646,10 @@ class CapabilityTests(unittest.TestCase):
         self.assertTrue(artifact["evidence"]["experimental"])
         self.assertEqual(artifact["summary"]["state"], "scored")
         self.assertEqual(artifact["summary"]["score"], 1.0)
+        self.assertEqual(
+            artifact["summary"]["score_uncertainty"],
+            result["primary_metric_uncertainty"],
+        )
         self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored"})
         self.assertEqual(artifact["protocol"]["scorer_type"], "exact_match")
         self.assertEqual(artifact["protocol"]["scoring_policy"], "deterministic_exact_answer_v1")
@@ -1610,6 +1680,9 @@ class CapabilityTests(unittest.TestCase):
         result = execution.benchmark_results["reasoning_exact_answer_v1"]
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["generation_failure_severity"], "partial")
+        self.assertEqual(
+            result["primary_metric_uncertainty"]["excluded_unscored_count"], 1
+        )
         capability_run_path = execution.artifacts["reasoning_exact_answer_v1"]["capability_run_path"]
         with open(capability_run_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)
@@ -2752,6 +2825,11 @@ class CapabilityTests(unittest.TestCase):
                     "display_name": "EvalPlus HumanEval+",
                     "status": "completed",
                     "primary_metric": {"name": "pass_at_1_plus", "value": 0.72},
+                    "primary_metric_uncertainty": {
+                        "policy_id": "binomial_score_uncertainty_v1",
+                        "lower_bound": 0.62,
+                        "upper_bound": 0.8,
+                    },
                 }
             },
         )
@@ -2767,6 +2845,10 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(completed_component["surface"], "local_coding_capability")
         self.assertEqual(completed_component["evidence_lane_id"], "reference")
         self.assertEqual(completed_component["confidence_label"], "sampled_reference")
+        self.assertEqual(
+            completed_component["primary_metric_uncertainty"]["lower_bound"],
+            0.62,
+        )
         missing_component = next(
             item for item in summary["capability_component_reports"] if item["benchmark_id"] == "evalplus_mbpp"
         )
