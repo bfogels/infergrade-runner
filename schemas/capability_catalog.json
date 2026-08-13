@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-01-benchmark-duration-truth",
+  "catalog_version": "2026-08-13-component-headroom-gate",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -60,6 +60,11 @@
         "minimum_replicated_setups": 4,
         "minimum_current_generation_fraction": 0.75,
         "maximum_suite_ceiling_fraction": 0.2,
+        "minimum_suite_headroom": 0.1,
+        "minimum_headline_component_observations": 8,
+        "maximum_headline_component_ceiling_fraction": 0.2,
+        "minimum_headline_component_headroom": 0.1,
+        "near_ceiling_threshold": 0.9,
         "maximum_largest_family_fraction": 0.4,
         "maximum_single_setup_fraction": 0.25
       },
@@ -87,6 +92,11 @@
         "minimum_replicated_setups": 4,
         "minimum_current_generation_fraction": 0.75,
         "maximum_suite_ceiling_fraction": 0.2,
+        "minimum_suite_headroom": 0.1,
+        "minimum_headline_component_observations": 8,
+        "maximum_headline_component_ceiling_fraction": 0.2,
+        "minimum_headline_component_headroom": 0.1,
+        "near_ceiling_threshold": 0.9,
         "maximum_largest_family_fraction": 0.4,
         "maximum_single_setup_fraction": 0.25
       },
@@ -114,6 +124,11 @@
         "minimum_replicated_setups": 4,
         "minimum_current_generation_fraction": 0.75,
         "maximum_suite_ceiling_fraction": 0.2,
+        "minimum_suite_headroom": 0.1,
+        "minimum_headline_component_observations": 8,
+        "maximum_headline_component_ceiling_fraction": 0.2,
+        "minimum_headline_component_headroom": 0.1,
+        "near_ceiling_threshold": 0.9,
         "maximum_largest_family_fraction": 0.4,
         "maximum_single_setup_fraction": 0.25
       },
@@ -1528,6 +1543,16 @@
       "primary_score_metric": "exact_answer_accuracy",
       "score_floor": 0.0,
       "primary_score_weight": 0.2,
+      "score_role": "headline_component",
+      "discrimination_status": "empirically_saturated_in_score_ready_cohort",
+      "saturation_evidence": {
+        "as_of": "2026-08-12",
+        "sample_scope": "latest_300_public_result_briefs_score_ready_reasoning_v2",
+        "scored_result_count": 13,
+        "suite_ceiling_count": 12,
+        "suite_ceiling_fraction": 0.923077,
+        "decision": "blocks_distribution_readiness_pending_replacement_or_demotion"
+      },
       "higher_is_better": true,
       "score_policy_id": "reasoning_exact_answer_v1",
       "score_breakdown_fields": [
@@ -1560,6 +1585,18 @@
       "primary_score_metric": "static_constraint_accuracy",
       "score_floor": 0.0,
       "primary_score_weight": 0.15,
+      "score_role": "headline_component",
+      "discrimination_status": "thin_ceiling_signal_with_high_partial_rate",
+      "saturation_evidence": {
+        "as_of": "2026-08-12",
+        "sample_scope": "latest_300_public_result_briefs",
+        "reported_result_count": 44,
+        "completed_result_count": 4,
+        "partial_result_count": 38,
+        "degraded_result_count": 2,
+        "completed_suite_ceiling_count": 4,
+        "decision": "insufficient_component_calibration_and_replacement_candidate"
+      },
       "higher_is_better": true,
       "score_policy_id": "coding_static_constraints_v1",
       "score_breakdown_fields": [
@@ -1592,6 +1629,7 @@
       "primary_score_metric": "pass_at_1_plus",
       "score_floor": 0.0,
       "primary_score_weight": 0.55,
+      "score_role": "headline_component",
       "higher_is_better": true,
       "score_policy_id": "coding_primary_pass_at_1_normalized_v2"
     },
@@ -1618,6 +1656,7 @@
       "primary_score_metric": "pass_at_1_plus",
       "score_floor": 0.0,
       "primary_score_weight": 0.3,
+      "score_role": "headline_component",
       "higher_is_better": true,
       "score_policy_id": "coding_primary_pass_at_1_normalized_v2"
     },

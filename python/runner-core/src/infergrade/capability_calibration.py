@@ -114,6 +114,7 @@ def extract_calibration_observations(
                     or document.get("quantization_scheme")
                     or ""
                 ).lower(),
+                "components": _component_score_observations(document, capability),
                 "source": source,
             }
         )
@@ -230,6 +231,7 @@ def audit_capability_observations(
         "mean": mean(scores) if scores else None,
         "p90": _percentile(scores, 0.9),
         "maximum": max(scores) if scores else None,
+        "headroom_to_suite_ceiling": round(1.0 - max(scores), 6) if scores else None,
         "suite_ceiling_count": ceiling_count,
         "suite_ceiling_fraction": round(ceiling_count / float(count), 6) if count else None,
         "largest_family_fraction": round(largest_family_count / float(count), 6) if count else None,
@@ -237,6 +239,9 @@ def audit_capability_observations(
         "family_counts": dict(sorted(families.items())),
         "parameter_band_counts": dict(sorted(bands.items())),
     }
+    component_metrics = _headline_component_metrics(selected, score_version, catalog, effective_policy)
+    if component_metrics:
+        metrics["headline_components"] = component_metrics
     blockers = []
     _minimum_gate(blockers, metrics, effective_policy, "observation_count", "minimum_observations")
     _minimum_gate(blockers, metrics, effective_policy, "model_family_count", "minimum_model_families")
@@ -252,8 +257,18 @@ def audit_capability_observations(
         and metrics["current_generation_fraction"] < float(effective_policy["minimum_current_generation_fraction"])
     ):
         blockers.append("insufficient_current_generation_fraction")
-    if metrics["suite_ceiling_fraction"] is not None and metrics["suite_ceiling_fraction"] > float(effective_policy["maximum_suite_ceiling_fraction"]):
+    suite_ceiling_blocked = (
+        metrics["suite_ceiling_fraction"] is not None
+        and metrics["suite_ceiling_fraction"] > float(effective_policy["maximum_suite_ceiling_fraction"])
+    )
+    if suite_ceiling_blocked:
         blockers.append("suite_ceiling_fraction_above_limit")
+    elif (
+        "minimum_suite_headroom" in effective_policy
+        and metrics["headroom_to_suite_ceiling"] is not None
+        and metrics["headroom_to_suite_ceiling"] < float(effective_policy["minimum_suite_headroom"])
+    ):
+        blockers.append("insufficient_suite_headroom")
     if metrics["largest_family_fraction"] is not None and metrics["largest_family_fraction"] > float(effective_policy["maximum_largest_family_fraction"]):
         blockers.append("largest_family_fraction_above_limit")
     if (
@@ -262,6 +277,29 @@ def audit_capability_observations(
         and metrics["largest_setup_fraction"] > float(effective_policy["maximum_single_setup_fraction"])
     ):
         blockers.append("single_setup_fraction_above_limit")
+    minimum_component_observations = effective_policy.get("minimum_headline_component_observations")
+    maximum_component_ceiling_fraction = effective_policy.get("maximum_headline_component_ceiling_fraction")
+    for component_id, component in component_metrics.items():
+        if (
+            minimum_component_observations is not None
+            and component["observation_count"] < int(minimum_component_observations)
+        ):
+            blockers.append("insufficient_headline_component_observations:%s" % component_id)
+            continue
+        component_ceiling_blocked = (
+            maximum_component_ceiling_fraction is not None
+            and component["suite_ceiling_fraction"] is not None
+            and component["suite_ceiling_fraction"] > float(maximum_component_ceiling_fraction)
+        )
+        if component_ceiling_blocked:
+            blockers.append("headline_component_ceiling_fraction_above_limit:%s" % component_id)
+        elif (
+            "minimum_headline_component_headroom" in effective_policy
+            and component["headroom_to_suite_ceiling"] is not None
+            and component["headroom_to_suite_ceiling"]
+            < float(effective_policy["minimum_headline_component_headroom"])
+        ):
+            blockers.append("insufficient_headline_component_headroom:%s" % component_id)
     insufficient = any(item.startswith("insufficient_") for item in blockers)
     status = "insufficient_calibration" if insufficient else ("saturation_or_concentration_risk" if blockers else "calibrated_headroom")
     return {
@@ -287,6 +325,84 @@ def policy_for_score_version(score_version: str, catalog: Optional[Dict[str, Any
 def policy_for_benchmark_id(benchmark_id: str, catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     check = check_index(catalog or load_capability_catalog()).get(benchmark_id) or {}
     return dict(check.get("calibration_policy") or {})
+
+
+def _component_score_observations(document: Dict[str, Any], capability: Dict[str, Any]) -> List[Dict[str, Any]]:
+    reports = document.get("capability_component_reports")
+    if not isinstance(reports, list):
+        reports = capability.get("capability_component_reports")
+    if not isinstance(reports, list):
+        return []
+    observations = {}
+    duplicate_ids = set()
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        benchmark_id = str(report.get("benchmark_id") or "")
+        score = _number(report.get("component_score"))
+        if score is None:
+            score = _number(report.get("primary_metric_value"))
+        if not benchmark_id or score is None or report.get("status") != "completed":
+            continue
+        if benchmark_id in observations:
+            duplicate_ids.add(benchmark_id)
+            continue
+        observations[benchmark_id] = {"benchmark_id": benchmark_id, "score": score}
+    return [
+        observations[benchmark_id]
+        for benchmark_id in sorted(observations)
+        if benchmark_id not in duplicate_ids
+    ]
+
+
+def _headline_component_metrics(
+    observations: List[Dict[str, Any]],
+    score_version: str,
+    catalog: Optional[Dict[str, Any]],
+    policy: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    if not catalog or not observations:
+        return {}
+    surface_ids = {str(item.get("surface_id") or "") for item in observations if item.get("surface_id")}
+    surface_ids.update(
+        str(surface_id)
+        for surface_id, surface_policy in surface_score_policy_index(catalog).items()
+        if surface_policy.get("score_version") == score_version
+    )
+    checks = check_index(catalog)
+    headline_ids = sorted(
+        check_id
+        for check_id, check in checks.items()
+        if check.get("surface_id") in surface_ids
+        and float(check.get("primary_score_weight") or 0.0) > 0.0
+        and check.get("score_role") != "diagnostic_only"
+    )
+    near_ceiling_threshold = float(policy.get("near_ceiling_threshold") or 0.9)
+    metrics = {}
+    for component_id in headline_ids:
+        scores = [
+            float(component["score"])
+            for observation in observations
+            for component in list(observation.get("components") or [])
+            if component.get("benchmark_id") == component_id and _number(component.get("score")) is not None
+        ]
+        ceiling_count = sum(1 for score in scores if math.isclose(score, 1.0, abs_tol=1e-9))
+        near_ceiling_count = sum(1 for score in scores if score >= near_ceiling_threshold)
+        maximum = max(scores) if scores else None
+        metrics[component_id] = {
+            "observation_count": len(scores),
+            "distinct_score_count": len(set(round(score, 6) for score in scores)),
+            "minimum": min(scores) if scores else None,
+            "median": median(scores) if scores else None,
+            "maximum": maximum,
+            "headroom_to_suite_ceiling": round(1.0 - maximum, 6) if maximum is not None else None,
+            "suite_ceiling_count": ceiling_count,
+            "suite_ceiling_fraction": round(ceiling_count / float(len(scores)), 6) if scores else None,
+            "near_ceiling_threshold": near_ceiling_threshold,
+            "near_ceiling_count": near_ceiling_count,
+            "near_ceiling_fraction": round(near_ceiling_count / float(len(scores)), 6) if scores else None,
+        }
+    return metrics
 
 
 def _minimum_gate(blockers: List[str], metrics: Dict[str, Any], policy: Dict[str, Any], metric: str, threshold: str) -> None:
