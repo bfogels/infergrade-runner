@@ -234,6 +234,14 @@ class BenchmarkCatalogTests(unittest.TestCase):
             item for item in priorities
             if item["priority_id"] == "apple_silicon_qwen35_9b_reasoning_anchor"
         )
+        coding_challenge = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_qwen36_27b_coding_challenge"
+        )
+        reasoning_challenge = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_qwen36_27b_reasoning_challenge"
+        )
         self.assertEqual(coding_anchor["model_id"], "Qwen/Qwen3.5-9B")
         self.assertEqual(coding_anchor["use_case"], "agentic_coding")
         self.assertEqual(
@@ -246,6 +254,14 @@ class BenchmarkCatalogTests(unittest.TestCase):
             ],
         )
         self.assertEqual(reasoning_anchor["use_case"], "reasoning")
+        self.assertEqual(coding_challenge["use_case"], "agentic_coding")
+        self.assertEqual(reasoning_challenge["use_case"], "reasoning")
+        self.assertTrue(coding_challenge["headroom_challenge_eligible"])
+        self.assertTrue(reasoning_challenge["headroom_challenge_eligible"])
+        self.assertEqual(coding_challenge["campaign_availability"], "blocked_pending_canary")
+        self.assertEqual(reasoning_challenge["campaign_availability"], "blocked_pending_canary")
+        self.assertEqual(coding_challenge["target_observations"], 2)
+        self.assertEqual(reasoning_challenge["target_observations"], 2)
         self.assertEqual(
             reasoning_anchor["benchmark_check_ids"],
             [
