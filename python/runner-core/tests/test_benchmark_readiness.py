@@ -148,6 +148,8 @@ def _calibrated_documents(catalog, saturated=False):
                     "model_family": "family-%d" % (index % 5),
                     "parameter_scale": bands[index % len(bands)],
                     "model_id": "models/%s-%d" % (surface_id, index % 10),
+                    "evidence_group_id": "group-%d" % (index // 10),
+                    "evidence_group_provenance": "trusted_corpus_operator_v1",
                     "quantization_scheme": "q4_k_m",
                     "capability": {
                         "capability_score_details": {

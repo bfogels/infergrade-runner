@@ -23,6 +23,7 @@ class CapabilityCalibrationTests(unittest.TestCase):
             self.assertEqual(policy["minimum_observations"], 20)
             self.assertEqual(policy["minimum_unique_setups"], 8)
             self.assertEqual(policy["minimum_replicated_setups"], 4)
+            self.assertEqual(policy["minimum_independently_replicated_setups"], 4)
             self.assertEqual(policy["maximum_suite_ceiling_fraction"], 0.2)
             self.assertEqual(policy["minimum_suite_headroom"], 0.1)
             self.assertEqual(policy["minimum_headline_component_observations"], 8)
@@ -71,6 +72,8 @@ class CapabilityCalibrationTests(unittest.TestCase):
                 "parameter_band": ["under_3b", "3b_to_under_8b", "8b_to_under_20b"][index % 3],
                 "model_identities": ["model-%d" % (index % 10)],
                 "quantization_scheme": "q4_k_m",
+                "evidence_group_id": "group-%d" % (index // 10),
+                "evidence_group_verified": True,
             }
             for index, score in enumerate(scores)
         ]
@@ -108,6 +111,26 @@ class CapabilityCalibrationTests(unittest.TestCase):
         self.assertEqual(observations[0]["parameter_band"], "8b_to_under_20b")
         self.assertIn("qwen359b", observations[0]["model_identities"])
         self.assertEqual(observations[0]["quantization_scheme"], "q4_k_m")
+
+    def test_evidence_group_requires_trusted_operator_provenance(self):
+        document = {
+            "result_id": "result-1",
+            "evidence_group_id": "runner-one",
+            "capability_score_version": "local_assistant_score_v4",
+            "capability_score": 0.5,
+            "capability_score_ready": True,
+        }
+
+        rejected = extract_calibration_observations([document])[0]
+        document["evidence_group_provenance"] = "trusted_corpus_operator_v1"
+        accepted = extract_calibration_observations([document])[0]
+
+        self.assertEqual(rejected["evidence_group_id"], "")
+        self.assertFalse(rejected["evidence_group_verified"])
+        self.assertTrue(rejected["evidence_group_claim_rejected"])
+        self.assertEqual(accepted["evidence_group_id"], "runner-one")
+        self.assertTrue(accepted["evidence_group_verified"])
+        self.assertFalse(accepted["evidence_group_claim_rejected"])
 
     def test_extracts_completed_component_scores_from_full_and_compact_results(self):
         component = {
@@ -172,6 +195,8 @@ class CapabilityCalibrationTests(unittest.TestCase):
                 "parameter_band": ["under_3b", "3b_to_under_8b", "8b_to_under_20b"][index % 3],
                 "model_identities": ["model-%d" % (index % 10)],
                 "quantization_scheme": "q4_k_m",
+                "evidence_group_id": "group-%d" % (index // 10),
+                "evidence_group_verified": True,
                 "components": [
                     {"benchmark_id": "mmlu_pro_reference_v1", "score": 0.2 + index / 100.0},
                     {"benchmark_id": "reasoning_exact_answer_v1", "score": 1.0},
@@ -207,6 +232,8 @@ class CapabilityCalibrationTests(unittest.TestCase):
                 "parameter_band": ["under_3b", "3b_to_under_8b", "8b_to_under_20b"][index % 3],
                 "model_identities": ["model-%d" % (index % 10)],
                 "quantization_scheme": "q4_k_m",
+                "evidence_group_id": "group-%d" % (index // 10),
+                "evidence_group_verified": True,
                 "components": [
                     {"benchmark_id": "evalplus_humaneval", "score": 0.5},
                     {"benchmark_id": "evalplus_mbpp", "score": 0.45},
@@ -244,6 +271,8 @@ class CapabilityCalibrationTests(unittest.TestCase):
                 "parameter_band": "3b_to_under_8b",
                 "model_identities": ["qwen257binstruct"],
                 "quantization_scheme": "q4_k_m",
+                "evidence_group_id": "same-source",
+                "evidence_group_verified": True,
             }
             for index in range(20)
         ]
@@ -257,9 +286,11 @@ class CapabilityCalibrationTests(unittest.TestCase):
 
         self.assertEqual(report["metrics"]["unique_setup_count"], 1)
         self.assertEqual(report["metrics"]["replicated_setup_count"], 1)
+        self.assertEqual(report["metrics"]["independently_replicated_setup_count"], 0)
         self.assertEqual(report["metrics"]["current_generation_fraction"], 0.0)
         self.assertIn("insufficient_unique_setup_count", report["blockers"])
         self.assertIn("insufficient_replicated_setup_count", report["blockers"])
+        self.assertIn("insufficient_independently_replicated_setup_count", report["blockers"])
         self.assertIn("insufficient_current_generation_fraction", report["blockers"])
         self.assertIn("single_setup_fraction_above_limit", report["blockers"])
 
@@ -279,6 +310,70 @@ class CapabilityCalibrationTests(unittest.TestCase):
         observations = extract_calibration_observations(documents, score_version="local_assistant_score_v4")
 
         self.assertEqual([item["score"] for item in observations], [0.25, 0.5])
+
+    def test_same_source_repeats_cannot_satisfy_independent_replication_gate(self):
+        policy = {
+            "minimum_observations": 8,
+            "minimum_model_families": 1,
+            "minimum_parameter_bands": 1,
+            "minimum_distinct_scores": 2,
+            "minimum_replicated_setups": 4,
+            "minimum_independently_replicated_setups": 4,
+            "maximum_suite_ceiling_fraction": 1.0,
+            "maximum_largest_family_fraction": 1.0,
+        }
+        observations = [
+            {
+                "score_version": "score-v1",
+                "score": 0.2 + index / 100.0,
+                "model_family": "family",
+                "parameter_band": "3b_to_under_8b",
+                "model_identities": ["model-%d" % (index % 4)],
+                "quantization_scheme": "q4_k_m",
+                "evidence_group_id": "one-runner",
+                "evidence_group_verified": True,
+            }
+            for index in range(8)
+        ]
+
+        report = audit_capability_observations(observations, "score-v1", policy=policy)
+
+        self.assertEqual(report["metrics"]["replicated_setup_count"], 4)
+        self.assertEqual(report["metrics"]["independently_replicated_setup_count"], 0)
+        self.assertEqual(report["metrics"]["evidence_group_count"], 1)
+        self.assertIn("insufficient_independently_replicated_setup_count", report["blockers"])
+        self.assertFalse(report["headline_ready"])
+
+    def test_distinct_trusted_evidence_groups_satisfy_independent_replication_gate(self):
+        observations = [
+            {
+                "score_version": "score-v1",
+                "score": 0.2 + index / 100.0,
+                "model_family": "family",
+                "parameter_band": "3b_to_under_8b",
+                "model_identities": ["model-%d" % (index % 4)],
+                "quantization_scheme": "q4_k_m",
+                "evidence_group_id": "runner-%d" % (index // 4),
+                "evidence_group_verified": True,
+            }
+            for index in range(8)
+        ]
+        policy = {
+            "minimum_observations": 8,
+            "minimum_model_families": 1,
+            "minimum_parameter_bands": 1,
+            "minimum_distinct_scores": 2,
+            "minimum_replicated_setups": 4,
+            "minimum_independently_replicated_setups": 4,
+            "maximum_suite_ceiling_fraction": 1.0,
+            "maximum_largest_family_fraction": 1.0,
+        }
+
+        report = audit_capability_observations(observations, "score-v1", policy=policy)
+
+        self.assertEqual(report["metrics"]["independently_replicated_setup_count"], 4)
+        self.assertEqual(report["metrics"]["evidence_group_count"], 2)
+        self.assertTrue(report["headline_ready"])
 
     def test_bundle_dedup_prefers_result_with_component_and_setup_detail(self):
         documents = [
@@ -424,6 +519,24 @@ class CapabilityCalibrationTests(unittest.TestCase):
             observations[0]["integrity_conflicts"],
             ["component_score_mismatch:ifeval"],
         )
+
+    def test_bundle_dedup_marks_conflicting_trusted_evidence_groups(self):
+        first = {
+            "_source": "/tmp/bundle/results/result.json",
+            "result_id": "result-1",
+            "evidence_group_id": "runner-one",
+            "evidence_group_provenance": "trusted_corpus_operator_v1",
+            "capability_score_version": "local_assistant_score_v4",
+            "capability_score": 0.5,
+            "capability_score_ready": True,
+        }
+        second = dict(first)
+        second["_source"] = "/tmp/bundle/artifacts/normalized_result.json"
+        second["evidence_group_id"] = "runner-two"
+
+        observations = extract_calibration_observations([first, second])
+
+        self.assertEqual(observations[0]["integrity_conflicts"], ["evidence_group_mismatch"])
 
     def test_extracts_flat_normalized_result_brief(self):
         observations = extract_calibration_observations([{
