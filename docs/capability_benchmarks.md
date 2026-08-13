@@ -16,6 +16,7 @@ InferGrade needs capability benchmarks that are:
 - `IFEval`
   - Why: strong fit for instruction following, objective checking, compact enough to tier by sample count, and already used by the Hugging Face Open LLM Leaderboard.
   - InferGrade role: first real quality gate for `general_assistant`.
+  - Output-shape policy: isolated empty visible responses remain strict wrong answers and are counted as model-output failures. A run with a majority of empty visible responses is quarantined as a model/template/runtime protocol failure instead of becoming a capability score. Token-budget exhaustion is recorded for diagnosis but does not invalidate IFEval on its own.
 
 - `Multi-turn chat memory`
   - Why: low-cost assistant decision signal for retaining facts, corrections, and output constraints across a short transcript.

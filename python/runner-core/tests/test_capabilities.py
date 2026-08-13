@@ -290,6 +290,32 @@ class CapabilityTests(unittest.TestCase):
             raw_cli["fingerprint_sha256"],
         )
 
+    def test_ifeval_protocol_identity_includes_host_output_shape_policy(self):
+        spec = CAPABILITY_BENCHMARKS["ifeval"]
+        cases = [{"case_id": "ifeval/1", "prompt": "Follow this instruction."}]
+        summary = {
+            "container_runtime": {"container_image_id": "sha256:fixture"},
+        }
+        selection_check = {
+            "score_policy_id": "instruction_following_primary_accuracy_v1",
+            "execution_pattern": "fast_capability_microcheck",
+        }
+
+        with mock.patch("infergrade.capabilities._benchmark_protocol_identity", return_value={}) as identity_mock:
+            _case_benchmark_protocol_identity(
+                spec,
+                cases,
+                [{"generation_preset_id": "deterministic_direct_answer_v1"}],
+                summary,
+                selection_check,
+            )
+
+        scoring_identity = identity_mock.call_args.kwargs["scoring_identity"]
+        self.assertEqual(
+            scoring_identity["output_shape_policy_id"],
+            "visible_response_output_shape_gate_v1",
+        )
+
     def test_resume_reuses_exact_completed_capability_cases(self):
         first_request = RunRequest(
             model="Qwen/Qwen3-8B",
@@ -1989,6 +2015,114 @@ class CapabilityTests(unittest.TestCase):
         public_summary = summarize_capability_execution(request, execution)
         self.assertEqual(public_summary["capability_state"], "not_comparable")
         self.assertIn("output_shape_gate_blocked", public_summary["capability_reason_codes"])
+
+    def test_ifeval_dominant_empty_visible_responses_are_quarantined(self):
+        def fake_prepare(spec, benchmark_dir, tier):
+            cases = [
+                {
+                    "case_id": "ifeval/%d" % index,
+                    "prompt": "Follow instruction %d" % index,
+                    "instruction_id_list": ["fixture"],
+                }
+                for index in range(4)
+            ]
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for case in cases:
+                    handle.write(json.dumps(case) + "\n")
+
+        def fake_evaluate(spec, benchmark_dir):
+            return {
+                "benchmark_id": spec.benchmark_id,
+                "display_name": spec.display_name,
+                "status": "completed",
+                "primary_metric": {"name": "prompt_strict_accuracy", "value": 0.25},
+                "metrics": {
+                    "prompt_strict_accuracy": 0.25,
+                    "instruction_strict_accuracy": 0.25,
+                    "prompt_loose_accuracy": 0.25,
+                    "instruction_loose_accuracy": 0.25,
+                },
+            }
+
+        adapter = mock.Mock()
+        adapter.generate_text.side_effect = [
+            {
+                "text": "",
+                "status": "completed",
+                "output_tokens": 640,
+            },
+            {
+                "text": "   ",
+                "status": "completed",
+                "output_tokens": 640,
+            },
+            {
+                "text": "",
+                "status": "completed",
+                "output_tokens": 20,
+            },
+            {
+                "text": "Visible answer",
+                "status": "completed",
+                "output_tokens": 3,
+            },
+        ]
+        request = RunRequest(
+            model="openbmb/MiniCPM5-1B",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            output_dir=self.tempdir,
+            benchmark_check_ids=["ifeval"],
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                with mock.patch("infergrade.capabilities.container_image_identity", return_value={}):
+                    execution = execute_capability_suite(adapter, request)
+
+        result = execution.benchmark_results["ifeval"]
+        self.assertEqual(execution.status, "not_comparable")
+        self.assertNotIn("ifeval", execution.component_scores)
+        self.assertIsNone(result["primary_metric"]["value"])
+        self.assertEqual(result["generation_failure_count"], 3)
+        self.assertEqual(result["model_output_failure_count"], 3)
+        self.assertEqual(result["unscored_generation_failure_count"], 0)
+        self.assertEqual(result["output_shape_gate"]["status"], "blocked")
+        self.assertEqual(
+            result["output_shape_gate"]["policy_id"],
+            "visible_response_output_shape_gate_v1",
+        )
+        self.assertEqual(result["output_shape_gate"]["empty_visible_response_count"], 3)
+        self.assertEqual(result["output_shape_gate"]["empty_visible_response_rate"], 0.75)
+        self.assertEqual(result["output_shape_gate"]["answer_budget_exhaustion_count"], 2)
+        self.assertIn(
+            "dominant_empty_visible_response",
+            result["output_shape_gate"]["reason_codes"],
+        )
+        with open(execution.artifacts["ifeval"]["predictions_path"], "r", encoding="utf-8") as handle:
+            predictions = [json.loads(line) for line in handle if line.strip()]
+        self.assertEqual(predictions[0]["generation_status"], "failed")
+        self.assertEqual(predictions[0]["generation_failure_kind"], "model_output")
+        self.assertEqual(predictions[0]["generation_error"], "Model produced no visible response.")
+
+    def test_ifeval_isolated_empty_visible_response_remains_strictly_scored_wrong(self):
+        from infergrade.capabilities import _visible_response_output_shape_gate
+
+        spec = CAPABILITY_BENCHMARKS["ifeval"]
+        predictions = [
+            {"generation_status": "failed", "response": "", "output_tokens": 640},
+            {"generation_status": "completed", "response": "Visible answer", "output_tokens": 3},
+        ]
+        summary = {
+            "primary_metric": {"name": "prompt_strict_accuracy", "value": 0.5},
+        }
+
+        gate = _visible_response_output_shape_gate(spec, predictions, summary)
+
+        self.assertEqual(gate["status"], "passed")
+        self.assertEqual(gate["empty_visible_response_rate"], 0.5)
+        self.assertEqual(gate["strict_primary_metric"]["value"], 0.5)
 
     def test_mmlu_isolated_malformed_output_remains_strictly_scored_wrong(self):
         spec = CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"]
