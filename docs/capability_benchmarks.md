@@ -52,13 +52,13 @@ InferGrade needs capability benchmarks that are:
   - Why: expands beyond HumanEval-style tasks, uses the same container/evaluation ecosystem, and gives us a second coding signal without introducing a completely separate harness.
   - InferGrade role: executable coding breadth reference lane for `agentic_coding`, separate from HumanEval+. It preserves MBPP task ids and prompts, generated samples, EvalPlus revision, sample policy, pass@1 base/plus scoring, raw outputs, scoring outputs, and task-level execution failure classes. It is not LiveCodeBench, SWE-bench, repo-edit proof, gold evidence, broad agentic software-engineering proof, or a public leaderboard claim.
 
-## Selected Next
-
-These are selected as high-value next additions, but are not yet wired into the first runnable capability container pass:
+## Diagnostic and Selected Next
 
 - `Repository edit smoke`
-  - Why: a deterministic, small repo-edit task can bridge the gap between code-generation benchmarks and SWE-style work.
-  - InferGrade role: likely next local-friendly coding decision check before heavier reference suites.
+  - Why: deterministic miniature repo-edit tasks bridge the gap between code-generation benchmarks and SWE-style work.
+  - InferGrade role: intentionally selectable zero-weight diagnostic. Its isolated scorer and pinned fixtures are implemented, but cross-family discrimination and headroom remain unproven.
+
+The following are selected as high-value later additions and are not runnable yet:
 
 - `LiveCodeBench`
   - Why: broad contemporary coding benchmark with multiple task modes and temporal freshness.
@@ -213,6 +213,12 @@ The first v1 local calibration on 2026-07-14 used three GGUF setups on Apple M1 
 The older 7B setup's remaining misses included genuine filtering, deduplication, transform, and state-update errors; five otherwise-correct answers violated the strict JSON-only contract with Markdown fences. The 9B setup retained clear headroom rather than reaching the v1 suite ceiling. A control run with thinking left enabled exhausted every Qwen3-0.6B task budget inside unfinished thinking and correctly remained failed evidence rather than becoming a zero score. The expanded v2 fixture subsequently scored Qwen3.5-9B Q4_K_M at 11/24 strict tasks (45.8%), retaining additional headroom. This remains component calibration, not full Capability protocol v3.1 calibration, because the composite also requires IFEval.
 
 The first local coding artifact path is `coding_static_repair_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. It checks fenced Python outputs against deterministic static constraints. It does not execute generated code, run unit tests, sandbox a repository, or support SWE-bench/LiveCodeBench-style claims.
+
+`repository_edit_smoke_v1` is the first executable repository-edit diagnostic. It uses eight pinned miniature Python repositories spanning state/time behavior, immutable transformations, archive-path safety, rate limiting, event reconciliation, protocol parsing, permission policy, and bounded scheduling. Canary runs two tasks, standard runs six, and gold runs all eight. The model receives source files and an issue description, returns one bounded unified diff, and the scorer permits edits only to the named existing files. Hidden deterministic tests are materialized after patch application.
+
+The scorer runs with no network, a read-only root filesystem, bounded memory and process counts, and no-new-privileges. Its root process retains only `SETUID` and `SETGID` so the generated-code subprocess can drop irreversibly to `nobody`; source and hidden tests are root-owned and read-only before generated code executes. The result records that exception as part of the sandbox policy. Dominant malformed-patch output is quarantined as a protocol mismatch, while a valid patch that fails hidden tests remains a real incorrect task.
+
+This benchmark has zero Capability protocol v3.1 weight and is not selected by default. It becomes eligible for score-weight consideration only after a cross-family distribution audit shows adequate observations, repeatability, manageable malformed/timeout rates, and component headroom. It is not SWE-bench, LiveCodeBench, autonomous-agent, arbitrary-repository, gold, or leaderboard evidence.
 
 The first executable coding reference artifact path is `evalplus_humaneval`: when selected, it emits a validated `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, `samples.jsonl`, `benchmark_metadata.json`, `eval_results.json`, and `summary.json`. It preserves the pinned EvalPlus revision, sample policy, pass@1 base/plus scores, generated outputs, scoring outputs, and task-level classes such as `test_failed`, `timeout`, `malformed_output`, and `generation_failed` where available from generated outputs and EvalPlus status rows. A completion-normalization failure caused by the model remains in EvalPlus's denominator as an incorrect answer and is disclosed separately; a runtime or adapter generation failure remains missing evidence and degrades or suppresses the score. It remains experimental reference evidence, not gold evidence or a public leaderboard claim.
 

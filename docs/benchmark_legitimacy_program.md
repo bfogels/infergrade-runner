@@ -67,6 +67,7 @@ The first thin local samples are:
 
 - `multiturn_chat_memory_v1`
 - `coding_static_repair_v1`
+- `repository_edit_smoke_v1` (intentional, zero-weight diagnostic pending a cross-family distribution audit)
 - `reasoning_exact_answer_v1`
 
 The first reference-runnable lanes are:

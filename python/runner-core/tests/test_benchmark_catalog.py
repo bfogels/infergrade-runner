@@ -257,6 +257,12 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(statuses["swebench_verified_gold_v1"]["maturity"], "gold_candidate")
         self.assertEqual(statuses["swebench_verified_gold_v1"]["runnable_status"], "not_runnable")
         self.assertIn("not runnable", statuses["swebench_verified_gold_v1"]["claim_boundary"])
+        self.assertEqual(statuses["repository_edit_smoke_v1"]["maturity"], "thin_local_sample")
+        self.assertEqual(
+            statuses["repository_edit_smoke_v1"]["runnable_status"],
+            "runnable_intentional_diagnostic",
+        )
+        self.assertIn("zero headline weight", statuses["repository_edit_smoke_v1"]["claim_boundary"])
         for check_id in ("multiturn_chat_memory_v1", "coding_static_repair_v1", "reasoning_exact_answer_v1"):
             self.assertEqual(statuses[check_id]["evidence_lane_id"], "decision")
             self.assertNotIn("reference", statuses[check_id]["maturity"])
@@ -387,6 +393,24 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(capability_benchmark_ids_for_request(request), ["coding_static_repair_v1"])
         self.assertEqual(request.use_case, "agentic_coding")
         self.assertEqual(request.capability, "auto")
+
+    def test_repository_edit_diagnostic_can_be_selected_explicitly_without_becoming_default(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            backend="llama.cpp",
+            tier="canary",
+            benchmark_group_ids=["repository_edit_diagnostic"],
+        )
+        normalize_request_selection(request)
+
+        self.assertEqual(request.benchmark_group_ids, ["repository_edit_diagnostic"])
+        self.assertEqual(request.benchmark_check_ids, ["repository_edit_smoke_v1"])
+        self.assertEqual(capability_benchmark_ids_for_request(request), ["repository_edit_smoke_v1"])
+        default_suite = next(
+            item for item in load_capability_catalog()["suites"]
+            if item["suite_id"] == "coding_code_editing"
+        )
+        self.assertNotIn("repository_edit_diagnostic", default_suite["default_group_ids"])
 
     def test_native_reasoning_exact_answer_check_can_be_selected_explicitly(self):
         request = RunRequest(

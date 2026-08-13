@@ -262,7 +262,7 @@ class ImageInstallTests(unittest.TestCase):
     def test_install_known_images_defaults_to_canonical_runner_version(self, install_mock):
         install_mock.side_effect = lambda image, **_kwargs: {"image": image, "action": "present"}
         installed = install_known_images()
-        self.assertEqual(len(installed), 6)
+        self.assertEqual(len(installed), 7)
         self.assertTrue(all(image.startswith("ghcr.io/bfogels/") and image.endswith(":" + __version__) for image in installed))
         self.assertTrue(all(call.kwargs["pull_if_missing"] for call in install_mock.call_args_list))
 

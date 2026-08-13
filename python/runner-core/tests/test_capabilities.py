@@ -11,6 +11,7 @@ sys.path.insert(0, "python/runner-core/src")
 from infergrade import __version__
 from infergrade.capabilities import (
     CAPABILITY_BENCHMARKS,
+    _capability_container_command,
     _capability_container_policy,
     _case_benchmark_protocol_identity,
     _generate_predictions,
@@ -19,7 +20,9 @@ from infergrade.capabilities import (
     _multiple_choice_artifact_claim_boundary,
     _normalize_evalplus_completion,
     _native_benchmark_cases,
+    _repository_edit_output_shape_gate,
     _run_capability_container,
+    _write_repository_edit_capability_run_artifact,
     capability_images_for_request,
     execute_capability_suite,
     remove_capability_case_checkpoints,
@@ -809,6 +812,121 @@ class CapabilityTests(unittest.TestCase):
 
         self.assertEqual([item["benchmark_id"] for item in images], ["gpqa_diamond_reference_v1"])
         self.assertEqual(images[0]["image"], "ghcr.io/bfogels/infergrade-gpqa:%s" % __version__)
+
+    def test_capability_images_include_repository_edit_diagnostic_when_selected(self):
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            benchmark_check_ids=["repository_edit_smoke_v1"],
+        )
+        images = capability_images_for_request(request)
+
+        self.assertEqual([item["benchmark_id"] for item in images], ["repository_edit_smoke_v1"])
+        self.assertEqual(
+            images[0]["image"],
+            "ghcr.io/bfogels/infergrade-repository-edit:%s" % __version__,
+        )
+
+    def test_repository_edit_dominant_malformed_patches_are_quarantined(self):
+        spec = CAPABILITY_BENCHMARKS["repository_edit_smoke_v1"]
+        gate = _repository_edit_output_shape_gate(
+            spec,
+            [{"generation_status": "completed"} for _ in range(3)],
+            {
+                "primary_metric": {"name": "task_success_rate", "value": 0.0},
+                "metrics": {"total_count": 3, "malformed_patch_count": 2},
+            },
+        )
+
+        self.assertEqual(gate["status"], "blocked")
+        self.assertEqual(gate["reason_codes"], ["dominant_malformed_patch_output"])
+        self.assertEqual(gate["strict_primary_metric"]["value"], 0.0)
+
+    def test_repository_edit_artifact_is_diagnostic_and_records_container_sandbox(self):
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="agentic_coding",
+            output_dir=self.tempdir,
+            benchmark_check_ids=["repository_edit_smoke_v1"],
+        )
+        benchmark_dir = os.path.join(self.tempdir, "repo-edit")
+        os.makedirs(benchmark_dir)
+        with open(os.path.join(benchmark_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "fixture_revision": "2026-08-repository-edit-v1",
+                    "sample_policy": "pinned_fixture_order_v1",
+                    "case_count": 1,
+                },
+                handle,
+            )
+        cases = [
+            {
+                "case_id": "repository_edit/simple",
+                "task_id": "repository_edit/simple",
+                "category": "repair",
+            }
+        ]
+        predictions = [
+            {
+                "case_id": "repository_edit/simple",
+                "task_id": "repository_edit/simple",
+                "generation_status": "completed",
+                "completion": "--- a/a.py\n+++ b/a.py\n",
+            }
+        ]
+        summary = {
+            "status": "completed",
+            "primary_metric": {"name": "task_success_rate", "value": 1.0},
+            "metrics": {
+                "total_count": 1,
+                "passed_count": 1,
+                "malformed_patch_count": 0,
+                "patch_apply_failure_count": 0,
+                "test_failure_count": 0,
+                "timeout_count": 0,
+            },
+            "case_results": [
+                {
+                    "task_id": "repository_edit/simple",
+                    "category": "repair",
+                    "score": 1.0,
+                    "passed": True,
+                    "error_class": None,
+                }
+            ],
+            "scoring_policy": "repo_edit_task_success_v1",
+            "fixture_revision": "2026-08-repository-edit-v1",
+            "generation_failure_severity": "none",
+            "container_runtime": {
+                "container_image": "ghcr.io/bfogels/infergrade-repository-edit:%s" % __version__,
+                "container_image_id": "sha256:repo-edit",
+                "sandbox_policy": {"policy_version": "capability_container_isolation_v1"},
+            },
+        }
+
+        path = _write_repository_edit_capability_run_artifact(
+            request,
+            CAPABILITY_BENCHMARKS["repository_edit_smoke_v1"],
+            benchmark_dir,
+            cases,
+            predictions,
+            summary,
+        )
+        with open(path, encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["evidence"]["surface"], "local_coding_capability")
+        self.assertEqual(artifact["protocol"]["scorer_type"], "unit_test")
+        self.assertEqual(artifact["summary"]["score"], 1.0)
+        self.assertEqual(
+            artifact["subject"]["runtime"]["sandbox_policy"]["policy_version"],
+            "capability_container_isolation_v1",
+        )
+        unsupported = " ".join(artifact["claim_boundary"]["unsupported_claims"])
+        self.assertIn("zero headline-score weight", unsupported)
 
     def test_gpqa_claim_boundary_names_gpqa_instead_of_mmlu_pro(self):
         boundary = _multiple_choice_artifact_claim_boundary(
@@ -2595,6 +2713,23 @@ class CapabilityTests(unittest.TestCase):
         policy = _capability_container_policy()
         self.assertEqual(policy["container_user"], "host_uid_gid")
         self.assertEqual(policy["container_user_id"], command[command.index("--user") + 1])
+
+    def test_repository_edit_container_retains_only_privilege_drop_capabilities(self):
+        command = _capability_container_command(
+            "ghcr.io/bfogels/infergrade-repository-edit:0.3.58",
+            "/tmp/repository-edit",
+            ["evaluate", "--output-dir", "/work"],
+        )
+        added = [command[index + 1] for index, item in enumerate(command) if item == "--cap-add"]
+        self.assertEqual(added, ["SETUID", "SETGID"])
+        self.assertEqual(command[command.index("--cap-drop") + 1], "ALL")
+        self.assertNotIn("--user", command)
+        policy = _capability_container_policy("infergrade-repository-edit:local")
+        self.assertEqual(policy["capabilities"], "setuid_setgid_only")
+        self.assertEqual(policy["container_user"], "root_supervisor")
+        self.assertEqual(policy["container_user_id"], "0:0")
+        self.assertEqual(policy["generated_code_user"], "nobody:65534")
+        self.assertIn("irreversibly drop", policy["capability_exception_reason"])
 
     def test_execute_capability_suite_reports_benchmark_progress(self):
         events = []

@@ -238,6 +238,7 @@ class ReleaseCiTests(unittest.TestCase):
             "INFERGRADE_EVALPLUS_IMAGE",
             "INFERGRADE_MMLU_PRO_IMAGE",
             "INFERGRADE_GPQA_IMAGE",
+            "INFERGRADE_REPOSITORY_EDIT_IMAGE",
         ):
             self.assertIn(variable, script)
 
@@ -255,6 +256,7 @@ class ReleaseCiTests(unittest.TestCase):
             "infergrade-evalplus",
             "infergrade-mmlu-pro",
             "infergrade-gpqa",
+            "infergrade-repository-edit",
         ):
             self.assertIn(image, verifier)
 

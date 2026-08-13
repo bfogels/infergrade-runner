@@ -100,7 +100,7 @@
         "maximum_largest_family_fraction": 0.4,
         "maximum_single_setup_fraction": 0.25
       },
-      "claim_boundary": "Task-scoped coding evidence from the versioned benchmark mix. It does not imply repository-editing or general software-engineering capability."
+      "claim_boundary": "Task-scoped coding evidence from the versioned headline benchmark mix. A separately labeled repository-edit diagnostic may support only its pinned miniature tasks; neither implies general software-engineering capability."
     },
     {
       "surface_id": "local_reasoning_capability",
@@ -779,19 +779,20 @@
       "check_id": "repository_edit_smoke_v1",
       "surface_id": "local_coding_capability",
       "evidence_lane_id": "decision",
-      "maturity": "planned",
-      "runnable_status": "not_runnable",
-      "default_inclusion_status": "not_default",
-      "fixture_or_dataset_revision_status": "fixture_repo_policy_needed",
-      "harness_status": "not_implemented",
+      "maturity": "thin_local_sample",
+      "runnable_status": "runnable_intentional_diagnostic",
+      "default_inclusion_status": "not_default_diagnostic",
+      "fixture_or_dataset_revision_status": "pinned_runner_fixture",
+      "harness_status": "isolated_container_harness_implemented",
       "scoring_policy_id": "repo_edit_task_success_v1",
-      "sample_policy": "Future tiny pinned repo-edit fixtures with rollback-safe execution and deterministic assertions.",
-      "expected_duration_token_volume_status": "unknown",
-      "sandbox_requirement": "required_before_generated_patch_execution",
-      "claim_boundary": "Future local repo-edit smoke only; not SWE-bench, LiveCodeBench, or broad agentic coding evidence.",
+      "sample_policy": "Eight pinned miniature Python repository repairs spanning state, parsing, policy, security, data transformation, and scheduling; canary runs two and standard runs six.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "capability_container_isolation_v1_plus_unprivileged_test_subprocess",
+      "claim_boundary": "Diagnostic local repository-edit evidence only; zero headline weight and not SWE-bench, LiveCodeBench, autonomous-agent, arbitrary-repository, or leaderboard evidence.",
       "promotion_blockers": [
-        "Define fixture repositories and rollback policy.",
-        "Design sandboxed patch application and deterministic scoring."
+        "Run a cross-family distribution audit before assigning headline score weight.",
+        "Measure malformed-patch, timeout, duration, repeatability, and ceiling rates across current and historical model bands.",
+        "Replace or expand fixtures if the component ceiling rate breaches the headroom gate."
       ]
     },
     {
@@ -887,6 +888,12 @@
       "score_policy_id": "coding_static_constraints_v1",
       "display_name": "Coding static constraints",
       "description": "Score small local coding outputs with deterministic static constraints and explicit malformed-output failure states.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "repo_edit_task_success_v1",
+      "display_name": "Sandboxed repository-edit task success",
+      "description": "Apply a bounded unified diff to a pinned miniature repository and score task success with hidden deterministic tests inside the recorded isolated scorer container.",
       "score_method": "primary_metric_value_v1"
     },
     {
@@ -1192,6 +1199,22 @@
       "token_volume_band": "tiny",
       "resumability_boundary": "benchmark",
       "execution_pattern": "native_capability_microcheck"
+    },
+    {
+      "group_id": "repository_edit_diagnostic",
+      "display_name": "Repository edit diagnostic",
+      "description": "Apply model-generated patches to pinned miniature repositories and run hidden deterministic tests in an isolated scorer.",
+      "evidence_kind": "capability",
+      "surface_id": "local_coding_capability",
+      "default_check_ids": [
+        "repository_edit_smoke_v1"
+      ],
+      "effort_hint": "balanced",
+      "suite_scope": "decision",
+      "expected_duration_band": "5-15 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "sandboxed_repository_edit"
     },
     {
       "group_id": "coding_core",
@@ -1607,6 +1630,48 @@
       ]
     },
     {
+      "check_id": "repository_edit_smoke_v1",
+      "display_name": "Repository edit diagnostic",
+      "description": "Pinned miniature Python repositories repaired by unified diff and scored with hidden deterministic tests inside an isolated container.",
+      "evidence_kind": "capability",
+      "group_id": "repository_edit_diagnostic",
+      "surface_id": "local_coding_capability",
+      "runner_target": "repository_edit_smoke_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "decision",
+      "evidence_lane_id": "decision",
+      "effort_level": "balanced",
+      "expected_duration_band": "5-15 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "sandboxed_repository_edit",
+      "selection_guidance": "Adds a practical diagnostic for producing and applying repository patches. It remains outside the headline score until cross-model calibration proves stable discrimination and headroom.",
+      "score_dimension": "repository_code_editing",
+      "primary_score_metric": "task_success_rate",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "score_role": "diagnostic_only",
+      "discrimination_status": "pending_distribution_audit",
+      "calibration_policy": {
+        "policy_id": "capability_headroom_gate_v1",
+        "minimum_task_count": 8
+      },
+      "higher_is_better": true,
+      "score_policy_id": "repo_edit_task_success_v1",
+      "score_breakdown_fields": [
+        "passed_count",
+        "total_count",
+        "malformed_patch_count",
+        "patch_apply_failure_count",
+        "test_failure_count",
+        "timeout_count"
+      ],
+      "fixture_revision": "2026-08-repository-edit-v1"
+    },
+    {
       "check_id": "evalplus_humaneval",
       "display_name": "EvalPlus HumanEval+",
       "description": "Core coding benchmark for code generation quality.",
@@ -1901,22 +1966,6 @@
       "planned_score_policy_id": "assistant_preference_win_rate_v1",
       "local_feasibility": "candidate",
       "why_not_default": "Needs an explicit judge policy before it can be trusted as a local decision score.",
-      "status": "planned"
-    },
-    {
-      "check_id": "repository_edit_smoke_v1",
-      "display_name": "Repository edit smoke",
-      "value": "Adds a small local coding-agent edit task before broader SWE-style suites.",
-      "cost": "small-to-medium token volume; needs deterministic fixture repos",
-      "implementation_risk": "medium",
-      "suite_placement": "coding_code_editing/decision",
-      "primary_use_case": "agentic_coding",
-      "benchmark_tier": "decision",
-      "evidence_lane_id": "decision",
-      "score_dimension": "repo_editing_smoke",
-      "planned_score_policy_id": "repo_edit_task_success_v1",
-      "local_feasibility": "good",
-      "why_not_default": "Needs deterministic fixture repositories and rollback-safe execution before default inclusion.",
       "status": "planned"
     },
     {
