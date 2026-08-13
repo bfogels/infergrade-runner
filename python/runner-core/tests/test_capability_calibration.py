@@ -27,6 +27,8 @@ class CapabilityCalibrationTests(unittest.TestCase):
             self.assertEqual(policy["maximum_suite_ceiling_fraction"], 0.2)
             self.assertEqual(policy["minimum_suite_headroom"], 0.1)
             self.assertEqual(policy["minimum_headline_component_observations"], 8)
+            self.assertEqual(policy["minimum_headline_component_model_families"], 3)
+            self.assertEqual(policy["minimum_headline_component_parameter_bands"], 2)
             self.assertEqual(policy["maximum_headline_component_ceiling_fraction"], 0.2)
             self.assertEqual(policy["minimum_headline_component_headroom"], 0.1)
 
@@ -219,6 +221,60 @@ class CapabilityCalibrationTests(unittest.TestCase):
             report["blockers"],
         )
         self.assertEqual(report["status"], "saturation_or_concentration_risk")
+        self.assertFalse(report["headline_ready"])
+
+    def test_headline_component_requires_its_own_family_and_size_breadth(self):
+        catalog = load_capability_catalog()
+        policy = policy_for_score_version("local_reasoning_score_v2", catalog=catalog)
+        policy.update({
+            "minimum_model_families": 1,
+            "minimum_parameter_bands": 1,
+            "minimum_unique_setups": 1,
+            "minimum_replicated_setups": 0,
+            "minimum_independently_replicated_setups": 0,
+            "minimum_current_generation_fraction": 0.0,
+            "maximum_largest_family_fraction": 1.0,
+            "maximum_single_setup_fraction": 1.0,
+        })
+        observations = []
+        for index in range(20):
+            component_rows = []
+            if index < 8:
+                component_rows = [
+                    {"benchmark_id": "mmlu_pro_reference_v1", "score": 0.2 + index / 100.0},
+                    {"benchmark_id": "reasoning_exact_answer_v1", "score": 0.3 + index / 100.0},
+                ]
+            observations.append({
+                "score_version": "local_reasoning_score_v2",
+                "surface_id": "local_reasoning_capability",
+                "score": 0.2 + index / 100.0,
+                "model_family": "single-component-family" if index < 8 else "other-%d" % (index % 4),
+                "parameter_band": "under_3b" if index < 8 else ["3b_to_under_8b", "8b_to_under_20b"][index % 2],
+                "model_identities": ["model-%d" % index],
+                "quantization_scheme": "q4_k_m",
+                "components": component_rows,
+            })
+
+        report = audit_capability_observations(
+            observations,
+            "local_reasoning_score_v2",
+            policy=policy,
+            catalog=catalog,
+        )
+
+        exact = report["metrics"]["headline_components"]["reasoning_exact_answer_v1"]
+        self.assertEqual(exact["observation_count"], 8)
+        self.assertEqual(exact["model_family_count"], 1)
+        self.assertEqual(exact["parameter_band_count"], 1)
+        self.assertIn(
+            "insufficient_headline_component_model_families:reasoning_exact_answer_v1",
+            report["blockers"],
+        )
+        self.assertIn(
+            "insufficient_headline_component_parameter_bands:reasoning_exact_answer_v1",
+            report["blockers"],
+        )
+        self.assertEqual(report["status"], "insufficient_calibration")
         self.assertFalse(report["headline_ready"])
 
     def test_thin_weighted_component_is_reported_as_insufficient_not_saturated(self):
