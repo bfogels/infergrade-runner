@@ -73,6 +73,10 @@ DEFAULT_CAPABILITY_IMAGES = {
     "gpqa_diamond_reference_v1": env_value(
         "INFERGRADE_GPQA_IMAGE", _released_capability_image("infergrade-gpqa")
     ),
+    "repository_edit_smoke_v1": env_value(
+        "INFERGRADE_REPOSITORY_EDIT_IMAGE",
+        _released_capability_image("infergrade-repository-edit"),
+    ),
 }
 
 _LISTENER_RUNS_DIR = "/app/runs"
@@ -175,6 +179,15 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=64,
         container_image=DEFAULT_CAPABILITY_IMAGES["gpqa_diamond_reference_v1"],
         case_limits={"canary": 25, "standard": 100, "gold": 198},
+    ),
+    "repository_edit_smoke_v1": CapabilityBenchmarkSpec(
+        benchmark_id="repository_edit_smoke_v1",
+        display_name="Repository edit diagnostic",
+        benchmark_kind="repository_code_editing",
+        primary_metric_name="task_success_rate",
+        generation_max_tokens=1024,
+        container_image=DEFAULT_CAPABILITY_IMAGES["repository_edit_smoke_v1"],
+        case_limits={"canary": 2, "standard": 6, "gold": 8},
     ),
     "context_retrieval_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="context_retrieval_reference_v1",
@@ -679,11 +692,47 @@ def _visible_response_output_shape_gate(
     }
 
 
+def _repository_edit_output_shape_gate(
+    spec: CapabilityBenchmarkSpec,
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    if spec.benchmark_id != "repository_edit_smoke_v1":
+        return {"status": "not_applicable", "policy_id": "repository_edit_output_shape_gate_v1"}
+    metrics = dict(summary.get("metrics") or {})
+    malformed_count = metrics.get("malformed_patch_count")
+    evaluated_count = metrics.get("total_count")
+    if not isinstance(malformed_count, int) or isinstance(malformed_count, bool):
+        malformed_count = 0
+    if not isinstance(evaluated_count, int) or isinstance(evaluated_count, bool):
+        evaluated_count = len(
+            [item for item in predictions if item.get("generation_status") == "completed"]
+        )
+    malformed_rate = round(malformed_count / float(evaluated_count), 6) if evaluated_count else 0.0
+    blocked = bool(evaluated_count and malformed_rate > _DOMINANT_MALFORMED_OUTPUT_RATE)
+    return {
+        "status": "blocked" if blocked else "passed",
+        "policy_id": "repository_edit_output_shape_gate_v1",
+        "threshold": {
+            "metric": "malformed_patch_rate",
+            "operator": ">",
+            "value": _DOMINANT_MALFORMED_OUTPUT_RATE,
+        },
+        "evaluated_count": evaluated_count,
+        "malformed_patch_count": malformed_count,
+        "malformed_patch_rate": malformed_rate,
+        "reason_codes": ["dominant_malformed_patch_output"] if blocked else [],
+        "strict_primary_metric": dict(summary.get("primary_metric") or {}),
+    }
+
+
 def _output_shape_policy_id(spec: CapabilityBenchmarkSpec) -> Optional[str]:
     if spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}:
         return "multiple_choice_output_shape_gate_v2"
     if spec.benchmark_id == "ifeval":
         return "visible_response_output_shape_gate_v1"
+    if spec.benchmark_id == "repository_edit_smoke_v1":
+        return "repository_edit_output_shape_gate_v1"
     return None
 
 
@@ -695,7 +744,10 @@ def _benchmark_output_shape_gate(
     gate = _multiple_choice_output_shape_gate(spec, predictions, summary)
     if gate["status"] != "not_applicable":
         return gate
-    return _visible_response_output_shape_gate(spec, predictions, summary)
+    gate = _visible_response_output_shape_gate(spec, predictions, summary)
+    if gate["status"] != "not_applicable":
+        return gate
+    return _repository_edit_output_shape_gate(spec, predictions, summary)
 
 
 # Compatibility alias for downstream tests and integrations that referenced the
@@ -935,7 +987,7 @@ def execute_capability_suite(
             if spec.execution_mode == "container":
                 summary["container_runtime"] = {
                     **container_image_identity(spec.container_image),
-                    "sandbox_policy": _capability_container_policy(),
+                    "sandbox_policy": _capability_container_policy(spec.container_image),
                 }
             if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:
                 summary["completion_normalization"] = _summarize_completion_normalization(predictions)
@@ -1000,7 +1052,7 @@ def execute_capability_suite(
             if output_shape_gate["status"] == "blocked" and unscored_failure_severity != "all_failed":
                 summary["status"] = "not_comparable"
                 summary["warning"] = (
-                    "Most completed responses did not match the answer protocol. "
+                    "Most completed responses did not match the benchmark output protocol. "
                     "InferGrade preserved the strict raw result but quarantined it from capability scoring."
                 )
                 if isinstance(summary.get("primary_metric"), dict):
@@ -1027,6 +1079,15 @@ def execute_capability_suite(
                 )
             elif spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}:
                 capability_run_path = _write_multiple_choice_capability_run_artifact(
+                    request=request,
+                    spec=spec,
+                    benchmark_dir=benchmark_dir,
+                    cases=cases,
+                    predictions=predictions,
+                    summary=summary,
+                )
+            elif spec.benchmark_id == "repository_edit_smoke_v1":
+                capability_run_path = _write_repository_edit_capability_run_artifact(
                     request=request,
                     spec=spec,
                     benchmark_dir=benchmark_dir,
@@ -1853,6 +1914,165 @@ def _write_multiple_choice_capability_run_artifact(
     return path
 
 
+def _write_repository_edit_capability_run_artifact(
+    request: RunRequest,
+    spec: CapabilityBenchmarkSpec,
+    benchmark_dir: str,
+    cases: List[Dict[str, Any]],
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> str:
+    check_metadata = _selected_check_metadata(request, spec.benchmark_id)
+    primary_metric = dict(summary.get("primary_metric") or {})
+    score = primary_metric.get("value")
+    summary_state = _capability_artifact_state(
+        summary.get("status"), score, summary.get("generation_failure_severity")
+    )
+    case_results = {
+        str(item.get("task_id") or item.get("case_id") or ""): dict(item)
+        for item in list(summary.get("case_results") or [])
+    }
+    metadata = _read_optional_json(os.path.join(benchmark_dir, "benchmark_metadata.json"))
+    gate_blocked = str((summary.get("output_shape_gate") or {}).get("status")) == "blocked"
+    tasks = []
+    for prediction in predictions:
+        task_id = str(prediction.get("task_id") or prediction.get("case_id") or "")
+        case = _case_by_task_id(cases, task_id)
+        result = case_results.get(task_id, {})
+        generation_status = str(prediction.get("generation_status") or "")
+        if generation_status != "completed":
+            task_state, task_score, error_class = "failed", None, "generation_failed"
+        elif gate_blocked:
+            task_state, task_score, error_class = (
+                "not_comparable",
+                None,
+                "systemic_output_protocol_mismatch",
+            )
+        else:
+            task_state, task_score, error_class = (
+                "scored",
+                result.get("score"),
+                result.get("error_class"),
+            )
+        tasks.append(
+            {
+                "task_id": task_id or str(case.get("task_id") or ""),
+                "task_family": spec.benchmark_kind,
+                "state": task_state,
+                "score": task_score,
+                "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
+                "scorer_type": "unit_test" if task_state == "scored" else None,
+                "scoring_policy": summary.get("scoring_policy") if task_state == "scored" else None,
+                "output_artifact": "predictions.jsonl#%s" % task_id,
+                "error_class": error_class,
+                **_task_performance_fields(prediction),
+                "category": result.get("category") or case.get("category"),
+                "patch_applied": bool(result)
+                and result.get("error_class")
+                not in {"malformed_patch", "patch_apply_failed", "unexpected_file_change"},
+                "tests_passed": result.get("passed"),
+            }
+        )
+    metrics = dict(summary.get("metrics") or {})
+    artifact = {
+        "artifact_spec_version": "0.1.0",
+        "artifact_kind": "capability_run",
+        "capability_run_id": "caprun_%s_%s"
+        % (
+            spec.benchmark_id,
+            stable_hash(
+                {
+                    "model": request.model,
+                    "benchmark_id": spec.benchmark_id,
+                    "fixture_revision": metadata.get("fixture_revision"),
+                    "generation_preset_id": request.generation_preset,
+                    "summary": summary,
+                },
+                length=10,
+            ),
+        ),
+        "created_at": utcnow_iso(),
+        "runner": {
+            "name": "infergrade-runner",
+            "version": __version__,
+            "contract_version": _CONTRACT_VERSION,
+        },
+        "evidence": {
+            "lane": check_metadata.get("evidence_lane_id") or "decision",
+            "surface": check_metadata.get("surface_id") or "local_coding_capability",
+            "grade": "thin_local_sample",
+            "experimental": True,
+            "confidence_label": "thin_local_sample",
+        },
+        "subject": {
+            "model": {
+                "model": request.model,
+                "quant_artifact": request.quant_artifact,
+                "quant_artifact_sha256": request.quant_artifact_sha256,
+                "quant_artifact_filename": request.quant_artifact_filename,
+            },
+            "runtime": {
+                "backend": request.backend,
+                "execution_mode": request.execution_mode,
+                "llama_cpp_cli_path": request.llama_cpp_cli_path,
+                **dict(summary.get("container_runtime") or container_image_identity(spec.container_image)),
+            },
+            "hardware": {"source": "run_bundle_environment"},
+            "generation_preset": {
+                "generation_preset_id": request.generation_preset,
+                "max_tokens": spec.generation_max_tokens,
+            },
+        },
+        "protocol": {
+            "task_family": spec.benchmark_kind,
+            "prompt_version": "repository_unified_diff_only_v1",
+            "task_version": spec.benchmark_id,
+            "fixture_revision": metadata.get("fixture_revision") or summary.get("fixture_revision"),
+            "dataset_revision": None,
+            "scorer_type": "unit_test",
+            "scoring_policy": summary.get("scoring_policy") or "repo_edit_task_success_v1",
+            "repetitions": 1,
+            "sample_policy": metadata.get("sample_policy"),
+            "case_count": metadata.get("case_count"),
+        },
+        "summary": {
+            "state": summary_state,
+            "score": score if summary_state in ("scored", "partial") else None,
+            "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
+            "passed_count": metrics.get("passed_count"),
+            "failed_count": (
+                metrics.get("total_count") - metrics.get("passed_count")
+                if isinstance(metrics.get("total_count"), int)
+                and isinstance(metrics.get("passed_count"), int)
+                else None
+            ),
+            "partial_count": summary.get("generation_failure_count") or 0,
+            "skipped_count": 0,
+            "not_comparable_count": len([task for task in tasks if task["state"] == "not_comparable"]),
+            **_artifact_summary_performance(summary.get("task_performance")),
+            "malformed_patch_count": metrics.get("malformed_patch_count"),
+            "patch_apply_failure_count": metrics.get("patch_apply_failure_count"),
+            "test_failure_count": metrics.get("test_failure_count"),
+            "timeout_count": metrics.get("timeout_count"),
+            "output_shape_gate": dict(summary.get("output_shape_gate") or {}),
+        },
+        "tasks": tasks,
+        "artifacts": {
+            "manifest": "capability_run.json",
+            "raw_outputs": ["predictions.jsonl"],
+            "scoring_outputs": ["summary.json"],
+            "supporting_files": ["cases.jsonl", "benchmark_metadata.json"],
+        },
+        "claim_boundary": _repository_edit_artifact_claim_boundary(summary_state),
+    }
+    errors = validate_capability_run_artifact(artifact)
+    if errors:
+        raise ValueError("Invalid capability_run artifact: %s" % "; ".join(errors))
+    path = os.path.join(benchmark_dir, "capability_run.json")
+    write_json(path, artifact)
+    return path
+
+
 def _write_evalplus_capability_run_artifact(
     request: RunRequest,
     spec: CapabilityBenchmarkSpec,
@@ -2290,6 +2510,25 @@ def _evalplus_artifact_claim_boundary(benchmark_id: str, state: str) -> Dict[str
     return {"supported_claims": supported, "unsupported_claims": unsupported}
 
 
+def _repository_edit_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    supported = [
+        "This setup attempted a pinned set of small repository-edit tasks.",
+        "Generated unified diffs were applied and checked by hidden deterministic tests inside the recorded isolated scorer container.",
+    ]
+    if state not in {"scored", "partial"}:
+        supported = [
+            "This artifact records an attempted pinned repository-edit diagnostic that was not fully comparable."
+        ]
+    return {
+        "supported_claims": supported,
+        "unsupported_claims": [
+            "This diagnostic is not part of Capability protocol v3.1 and carries zero headline-score weight.",
+            "This is not SWE-bench, LiveCodeBench, autonomous agent, arbitrary repository, or public leaderboard evidence.",
+            "Its score distribution and ceiling behavior require cross-family calibration before any promotion.",
+        ],
+    }
+
+
 def _capability_artifact_state(status: Any, score: Any, generation_failure_severity: Any = None) -> str:
     if str(generation_failure_severity or "") == "all_failed":
         return "failed"
@@ -2360,8 +2599,12 @@ def _capability_container_command(image: str, mount_source: str, args: List[str]
         "none",
         "--cap-drop",
         "ALL",
-        "--user",
-        "%s:%s" % (host_uid, host_gid),
+    ]
+    if "infergrade-repository-edit" in image:
+        command.extend(["--cap-add", "SETUID", "--cap-add", "SETGID"])
+    else:
+        command.extend(["--user", "%s:%s" % (host_uid, host_gid)])
+    command.extend([
         "--security-opt",
         "no-new-privileges",
         "--pids-limit",
@@ -2376,20 +2619,21 @@ def _capability_container_command(image: str, mount_source: str, args: List[str]
         "-v",
         "%s:/work" % mount_source,
         image,
-    ]
+    ])
     command.extend(args)
     return command
 
 
-def _capability_container_policy() -> Dict[str, Any]:
+def _capability_container_policy(image: str = "") -> Dict[str, Any]:
+    repository_edit = "infergrade-repository-edit" in str(image)
     host_uid = getattr(os, "getuid", lambda: 0)()
     host_gid = getattr(os, "getgid", lambda: 0)()
-    return {
+    policy = {
         "policy_version": CAPABILITY_CONTAINER_POLICY_VERSION,
         "network": "none",
-        "capabilities": "all_dropped",
-        "container_user": "host_uid_gid",
-        "container_user_id": "%s:%s" % (host_uid, host_gid),
+        "capabilities": "setuid_setgid_only" if repository_edit else "all_dropped",
+        "container_user": "root_supervisor" if repository_edit else "host_uid_gid",
+        "container_user_id": "0:0" if repository_edit else "%s:%s" % (host_uid, host_gid),
         "no_new_privileges": True,
         "read_only_root": True,
         "writable_paths": ["/work", "/tmp"],
@@ -2398,6 +2642,13 @@ def _capability_container_policy() -> Dict[str, Any]:
         "memory_limit": _CAPABILITY_CONTAINER_MEMORY,
         "memory_swap_limit": _CAPABILITY_CONTAINER_MEMORY,
     }
+    if repository_edit:
+        policy["generated_code_user"] = "nobody:65534"
+        policy["capability_exception_reason"] = (
+            "The root scorer retains only SETUID and SETGID so the generated-code test subprocess "
+            "can irreversibly drop to nobody; generated code does not retain those capabilities."
+        )
+    return policy
 
 
 def _host_mount_path(path: str) -> str:
@@ -2445,7 +2696,11 @@ def _case_checkpoint_fingerprint(
                 "generation_protocol": (
                     "multiple_choice_letter_grammar_v1"
                     if spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
-                    else "default_generation_v1"
+                    else (
+                        "unified_diff_only_v1"
+                        if spec.benchmark_id == "repository_edit_smoke_v1"
+                        else "default_generation_v1"
+                    )
                 ),
             },
             "cases": cases,
@@ -2712,6 +2967,8 @@ def _generate_predictions(
             record["benchmark_prompt_transform"] = "evalplus_code_only_v1"
             record["raw_completion"] = raw_completion
             record["completion_normalization"] = normalization
+        elif spec.benchmark_id == "repository_edit_smoke_v1":
+            record["benchmark_prompt_transform"] = "repository_unified_diff_only_v1"
         if spec.benchmark_kind in {"instruction_following", "multiturn_instruction_retention"}:
             record["prompt"] = case["prompt"]
             record["response"] = text
@@ -2746,6 +3003,8 @@ def _generate_predictions(
 
 def _generation_prompt_for_case(spec: CapabilityBenchmarkSpec, case: Dict[str, Any]) -> str:
     prompt = str(case["prompt"])
+    if spec.benchmark_id == "repository_edit_smoke_v1":
+        return prompt
     if spec.benchmark_id not in {"evalplus_humaneval", "evalplus_mbpp"}:
         return prompt
     if spec.benchmark_id == "evalplus_humaneval":

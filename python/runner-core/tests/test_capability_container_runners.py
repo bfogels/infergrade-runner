@@ -624,6 +624,131 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertIn("dataset/gpqa_diamond.csv", build_script)
         self.assertIn("Creative Commons Attribution 4.0", license_text)
 
+    def test_repository_edit_prepare_hides_tests_and_scores_a_valid_patch(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-repo-edit", "runner.py")
+        module = _load_module("repository_edit_runner_test_module", module_path)
+        module.FIXTURE_PATH = __import__("pathlib").Path(
+            ROOT_DIR, "containers", "capability-repo-edit", "fixtures.json"
+        )
+        with tempfile.TemporaryDirectory() as tempdir:
+            module.prepare(tempdir, limit=2)
+            with open(os.path.join(tempdir, "cases.jsonl"), encoding="utf-8") as handle:
+                cases = [json.loads(line) for line in handle]
+        self.assertEqual(len(cases), 2)
+        self.assertNotIn("tests", cases[0])
+        self.assertIn("Return only one unified diff", cases[0]["prompt"])
+
+        fixture = {
+            "task_id": "simple",
+            "category": "repair",
+            "issue": "Return 2.",
+            "editable_files": ["answer.py"],
+            "files": {"answer.py": "def answer():\n    return 1\n"},
+            "tests": {
+                "tests/test_answer.py": (
+                    "import unittest\nfrom answer import answer\n\n"
+                    "class AnswerTests(unittest.TestCase):\n"
+                    "    def test_answer(self):\n        self.assertEqual(answer(), 2)\n"
+                )
+            },
+        }
+        patch = "--- a/answer.py\n+++ b/answer.py\n@@ -1,2 +1,2 @@\n def answer():\n-    return 1\n+    return 2\n"
+        with mock.patch.object(module, "_drop_to_unprivileged_user", lambda: None):
+            scored = module._score_patch(fixture, patch)
+        self.assertTrue(scored["passed"])
+        self.assertIsNone(scored["failure_class"])
+
+    def test_repository_edit_fixture_loader_rejects_revision_and_path_drift(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-repo-edit", "runner.py")
+        module = _load_module("repository_edit_runner_fixture_test_module", module_path)
+        base = {
+            "fixture_revision": module.FIXTURE_REVISION,
+            "fixtures": [
+                {
+                    "task_id": "safe",
+                    "category": "repair",
+                    "issue": "Fix it.",
+                    "editable_files": ["answer.py"],
+                    "files": {"answer.py": "VALUE = 1\n"},
+                    "tests": {"tests/test_answer.py": "import unittest\n"},
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tempdir:
+            fixture_path = __import__("pathlib").Path(tempdir, "fixtures.json")
+            fixture_path.write_text(json.dumps({**base, "fixture_revision": "drifted"}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "revision"):
+                module._load_fixtures(fixture_path)
+            unsafe = json.loads(json.dumps(base))
+            unsafe["fixtures"][0]["tests"] = {"../test_answer.py": "import unittest\n"}
+            fixture_path.write_text(json.dumps(unsafe), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "safe relative POSIX"):
+                module._load_fixtures(fixture_path)
+
+    def test_repository_edit_rejects_paths_outside_the_editable_fixture(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-repo-edit", "runner.py")
+        module = _load_module("repository_edit_runner_path_test_module", module_path)
+        unsafe = "--- a/../tests/test_hidden.py\n+++ b/../tests/test_hidden.py\n@@ -1 +1 @@\n-x\n+y\n"
+        self.assertEqual(module._validate_patch_paths(unsafe, ["answer.py"]), "unsafe_patch_path")
+        other = "--- a/other.py\n+++ b/other.py\n@@ -1 +1 @@\n-x\n+y\n"
+        self.assertEqual(module._validate_patch_paths(other, ["answer.py"]), "non_editable_path")
+
+    def test_repository_edit_does_not_accept_an_early_zero_exit_as_passing_tests(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-repo-edit", "runner.py")
+        module = _load_module("repository_edit_runner_receipt_test_module", module_path)
+        fixture = {
+            "task_id": "early_exit",
+            "category": "repair",
+            "issue": "Return 2.",
+            "editable_files": ["answer.py"],
+            "files": {"answer.py": "def answer():\n    return 1\n"},
+            "tests": {
+                "tests/test_answer.py": (
+                    "import unittest\nfrom answer import answer\n\n"
+                    "class AnswerTests(unittest.TestCase):\n"
+                    "    def test_answer(self):\n        self.assertEqual(answer(), 2)\n"
+                )
+            },
+        }
+        patch = (
+            "--- a/answer.py\n+++ b/answer.py\n@@ -1,2 +1,4 @@\n"
+            "+import os\n+\n def answer():\n-    return 1\n+    os._exit(0)\n"
+        )
+        with mock.patch.object(module, "_drop_to_unprivileged_user", lambda: None):
+            scored = module._score_patch(fixture, patch)
+        self.assertFalse(scored["passed"])
+        self.assertEqual(scored["failure_class"], "test_protocol_failed")
+
+    def test_repository_edit_evaluate_separates_malformed_patch_from_test_failure(self):
+        module_path = os.path.join(ROOT_DIR, "containers", "capability-repo-edit", "runner.py")
+        module = _load_module("repository_edit_runner_evaluate_test_module", module_path)
+        module.FIXTURE_PATH = __import__("pathlib").Path(
+            ROOT_DIR, "containers", "capability-repo-edit", "fixtures.json"
+        )
+        with tempfile.TemporaryDirectory() as tempdir:
+            module.prepare(tempdir, limit=2)
+            with open(os.path.join(tempdir, "cases.jsonl"), encoding="utf-8") as handle:
+                cases = [json.loads(line) for line in handle]
+            with open(os.path.join(tempdir, "predictions.jsonl"), "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"task_id": cases[0]["task_id"], "completion": "not a patch"}) + "\n")
+                handle.write(
+                    json.dumps(
+                        {
+                            "task_id": cases[1]["task_id"],
+                            "completion": "--- a/config.py\n+++ b/config.py\n@@ -99 +99 @@\n-never present\n+still absent\n",
+                        }
+                    )
+                    + "\n"
+                )
+            with mock.patch.object(module, "_drop_to_unprivileged_user", lambda: None):
+                module.evaluate(tempdir)
+            with open(os.path.join(tempdir, "summary.json"), encoding="utf-8") as handle:
+                summary = json.load(handle)
+        self.assertEqual(summary["metrics"]["malformed_patch_count"], 1)
+        self.assertEqual(summary["metrics"]["patch_apply_failure_count"], 1)
+        self.assertEqual(summary["primary_metric"]["value"], 0.0)
+        self.assertTrue(all("failure_detail" not in item for item in summary["case_results"]))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,7 @@ LOCAL_IMAGE_DOCKERFILES: Dict[str, str] = {
     "infergrade-evalplus": "containers/capability-evalplus/Dockerfile",
     "infergrade-mmlu-pro": "containers/capability-mmlu-pro/Dockerfile",
     "infergrade-gpqa": "containers/capability-gpqa/Dockerfile",
+    "infergrade-repository-edit": "containers/capability-repo-edit/Dockerfile",
     "infergrade-runner-core": "containers/runner-core/Dockerfile",
 }
 CAPABILITY_IMAGE_REPOSITORIES = {
@@ -24,6 +25,7 @@ CAPABILITY_IMAGE_REPOSITORIES = {
     "infergrade-evalplus",
     "infergrade-mmlu-pro",
     "infergrade-gpqa",
+    "infergrade-repository-edit",
 }
 RUNNER_CORE_IMAGE = "infergrade-runner-core:local"
 _DOCKER_PULL_TIMEOUT_SECONDS = 1200
