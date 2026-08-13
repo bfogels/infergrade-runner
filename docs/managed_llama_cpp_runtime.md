@@ -44,6 +44,31 @@ previously archived build without rewriting any active run lock:
 infergrade-runner runtime rollback --runtime-build-id <sha256>
 ```
 
+### Maintainer candidate qualification
+
+Maintainers can materialize a reviewed upstream candidate into a new isolated
+cache before running an exact-artifact qualification. This is deliberately not
+a normal Runner install command and it cannot promote or authenticate a signed
+catalog target:
+
+```bash
+cargo run -p infergrade_runner_engine --bin materialize-runtime-candidate -- \
+  --manifest-entry <candidate.json> \
+  --archive <reviewed-runtime.tar.gz> \
+  --runtime-cache-dir <new-or-empty-qualification-cache> \
+  --consent-archive-sha256 <exact-archive-sha256>
+```
+
+The tool accepts only `reviewed_candidate` or `upstream_release` entries for the
+current host, requires a declared archive length, caps local archives at 2 GiB,
+verifies the exact digest through the shared install engine, and refuses
+non-empty or symlinked cache directories. It also rejects `infergrade_stable`
+and every non-null `catalog_assertion`: signed catalog targets must use the
+catalog verification and install path above. A successful materialization is
+only a checksum-verified immutable local package. Compatibility still requires
+an exact model/protocol canary and benchmark receipt; catalog activation,
+support promotion, result publication, and release remain separate decisions.
+
 `runtime/catalog/signed/` is currently a review-candidate root. Before
 production distribution, it will be replaced by a new production root version
 1 under the detached ceremony in `runtime_catalog_operations.md`; unreleased
