@@ -50,6 +50,17 @@ def _sample_rows(rows: List[dict], limit: Optional[int]) -> List[dict]:
     grouped: Dict[str, List[dict]] = defaultdict(list)
     for row in rows:
         grouped[str(row.get("High-level domain") or "unknown")].append(row)
+    for domain, bucket in grouped.items():
+        bucket.sort(
+            key=lambda row: hashlib.sha256(
+                (
+                    "gpqa_domain_rank_v2\0"
+                    + domain
+                    + "\0"
+                    + str(row.get("Record ID"))
+                ).encode("utf-8")
+            ).hexdigest()
+        )
     selected = []
     domains = sorted(grouped)
     cursor = 0
@@ -59,6 +70,11 @@ def _sample_rows(rows: List[dict], limit: Optional[int]) -> List[dict]:
         domains = [item for item in domains if grouped[item]]
         cursor += 1
     return selected
+
+
+def _selection_digest(rows: List[dict]) -> str:
+    record_ids = sorted(str(row.get("Record ID")) for row in rows)
+    return hashlib.sha256("\n".join(record_ids).encode("utf-8")).hexdigest()
 
 
 def _options_for_row(row: dict) -> List[str]:
@@ -117,7 +133,8 @@ def _prediction_letter(completion: str) -> Optional[str]:
 
 
 def prepare(output_dir: str, limit: int = None, data_path: str = DEFAULT_DATA_PATH) -> None:
-    rows = _sample_rows(_load_rows(data_path), limit)
+    full_rows = _load_rows(data_path)
+    rows = _sample_rows(full_rows, limit)
     cases = [_case_from_row(row) for row in rows]
     _write_jsonl(os.path.join(output_dir, "cases.jsonl"), cases)
     _write_json(
@@ -128,7 +145,12 @@ def prepare(output_dir: str, limit: int = None, data_path: str = DEFAULT_DATA_PA
             "case_count": len(cases),
             "dataset_revision": os.environ.get("GPQA_REPOSITORY_REVISION"),
             "dataset_sha256": os.environ.get("GPQA_DATASET_SHA256"),
-            "sample_policy": "domain_round_robin_v1" if limit else "full_snapshot_order",
+            "sample_policy": (
+                "domain_round_robin_%d_v2" % len(cases)
+                if len(rows) < len(full_rows)
+                else "full_snapshot_order"
+            ),
+            "selection_sha256": _selection_digest(rows),
             "category_count": len(set(case["category"] for case in cases)),
         },
     )

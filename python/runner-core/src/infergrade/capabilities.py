@@ -1909,6 +1909,29 @@ def _native_task_error_class(generation_status: str, case_score: Dict[str, Any])
     return None
 
 
+def _container_fixture_revision(
+    spec: CapabilityBenchmarkSpec,
+    metadata: Dict[str, Any],
+    summary: Dict[str, Any],
+) -> str:
+    """Bind a corpus observation to its source, sampling policy, and exact selection."""
+    identity = {
+        "benchmark_id": spec.benchmark_id,
+        "dataset_revision": metadata.get("dataset_revision"),
+        "dataset_sha256": metadata.get("dataset_sha256"),
+        "evalplus_revision": metadata.get("evalplus_revision"),
+        "upstream_revision": metadata.get("upstream_revision"),
+        "source_snapshot_sha256": metadata.get("snapshot_sha256"),
+        "sample_policy": metadata.get("sample_policy") or summary.get("sample_policy") or "unknown",
+        "case_count": metadata.get("case_count") or summary.get("case_count"),
+        "selection_sha256": metadata.get("selection_sha256") or summary.get("selection_sha256"),
+    }
+    return "%s_selection_%s" % (
+        spec.benchmark_id,
+        stable_hash(identity, length=32),
+    )
+
+
 def _write_multiple_choice_capability_run_artifact(
     request: RunRequest,
     spec: CapabilityBenchmarkSpec,
@@ -1993,6 +2016,11 @@ def _write_multiple_choice_capability_run_artifact(
                     "model": request.model,
                     "benchmark_id": spec.benchmark_id,
                     "dataset_revision": metadata.get("dataset_revision"),
+                    "fixture_revision": _container_fixture_revision(
+                        spec,
+                        metadata,
+                        summary,
+                    ),
                     "generation_preset_id": request.generation_preset,
                     "summary": summary,
                 },
@@ -2039,8 +2067,10 @@ def _write_multiple_choice_capability_run_artifact(
             "task_family": spec.benchmark_kind,
             "prompt_version": "%s_prompt_v1" % spec.benchmark_id,
             "task_version": spec.benchmark_id,
-            "fixture_revision": str(
-                metadata.get("snapshot_sha256") or metadata.get("sample_policy") or "%s_snapshot" % spec.benchmark_id
+            "fixture_revision": _container_fixture_revision(
+                spec,
+                metadata,
+                summary,
             ),
             "dataset_revision": metadata.get("dataset_revision"),
             "scorer_type": "json_schema" if structured_tool_use else "multiple_choice",
@@ -2053,6 +2083,10 @@ def _write_multiple_choice_capability_run_artifact(
             "repetitions": 1,
             "sample_policy": metadata.get("sample_policy"),
             "category_count": metadata.get("category_count"),
+            "case_count": metadata.get("case_count") or metrics.get("total_count"),
+            "selection_sha256": metadata.get("selection_sha256"),
+            "source_snapshot_sha256": metadata.get("snapshot_sha256"),
+            "dataset_sha256": metadata.get("dataset_sha256"),
         },
         "summary": {
             "state": summary_state,
@@ -2328,6 +2362,11 @@ def _write_evalplus_capability_run_artifact(
                     "model": request.model,
                     "benchmark_id": spec.benchmark_id,
                     "evalplus_revision": metadata.get("evalplus_revision") or summary.get("evalplus_revision"),
+                    "fixture_revision": _container_fixture_revision(
+                        spec,
+                        metadata,
+                        summary,
+                    ),
                     "generation_preset_id": request.generation_preset,
                     "summary": summary,
                 },
@@ -2372,10 +2411,10 @@ def _write_evalplus_capability_run_artifact(
             "task_family": spec.benchmark_kind,
             "prompt_version": "%s_prompt_v2" % spec.benchmark_id,
             "task_version": spec.benchmark_id,
-            "fixture_revision": str(
-                metadata.get("sample_policy")
-                or summary.get("sample_policy")
-                or "%s_evalplus_revision" % (metadata.get("dataset") or summary.get("dataset") or "evalplus")
+            "fixture_revision": _container_fixture_revision(
+                spec,
+                metadata,
+                summary,
             ),
             "dataset_revision": metadata.get("evalplus_revision") or summary.get("evalplus_revision"),
             "scorer_type": "unit_test",
@@ -2384,6 +2423,7 @@ def _write_evalplus_capability_run_artifact(
             "sample_policy": metadata.get("sample_policy") or summary.get("sample_policy"),
             "case_count": metadata.get("case_count") or summary.get("case_count"),
             "dataset": metadata.get("dataset") or summary.get("dataset"),
+            "selection_sha256": metadata.get("selection_sha256") or summary.get("selection_sha256"),
             "completion_normalization_policy": "evalplus_code_completion_v1",
         },
         "summary": {

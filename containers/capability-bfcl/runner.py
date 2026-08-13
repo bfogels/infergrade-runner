@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from collections import Counter, defaultdict
@@ -41,6 +42,17 @@ def _sample_rows(rows: list[dict], limit: Optional[int]) -> list[dict]:
     grouped = defaultdict(list)
     for row in rows:
         grouped[str(row["category"])].append(row)
+    for category, bucket in grouped.items():
+        bucket.sort(
+            key=lambda row: hashlib.sha256(
+                (
+                    "bfcl_category_rank_v2\0"
+                    + category
+                    + "\0"
+                    + str(row.get("id"))
+                ).encode("utf-8")
+            ).hexdigest()
+        )
     categories = sorted(grouped)
     selected = []
     while len(selected) < limit and categories:
@@ -51,6 +63,11 @@ def _sample_rows(rows: list[dict], limit: Optional[int]) -> list[dict]:
             if not grouped[category]:
                 categories.remove(category)
     return selected
+
+
+def _selection_digest(rows: list[dict]) -> str:
+    row_ids = sorted(str(row.get("id")) for row in rows)
+    return hashlib.sha256("\n".join(row_ids).encode("utf-8")).hexdigest()
 
 
 def _conversation_text(question) -> str:
@@ -97,7 +114,8 @@ def _case_from_row(row: dict) -> dict:
 
 
 def prepare(output_dir: str, limit: Optional[int] = None, data_path: str = DEFAULT_DATA_PATH) -> None:
-    rows = _sample_rows(_read_jsonl(data_path), limit)
+    full_rows = _read_jsonl(data_path)
+    rows = _sample_rows(full_rows, limit)
     if not rows:
         raise ValueError("BFCL snapshot is empty: %s" % data_path)
     cases = [_case_from_row(row) for row in rows]
@@ -111,7 +129,12 @@ def prepare(output_dir: str, limit: Optional[int] = None, data_path: str = DEFAU
             "case_count": len(cases),
             "category_count": len({case["category"] for case in cases}),
             "categories": sorted({case["category"] for case in cases}),
-            "sample_policy": "category_round_robin_v1" if limit else "pinned_snapshot_order",
+            "sample_policy": (
+                "category_round_robin_%d_v2" % len(cases)
+                if len(rows) < len(full_rows)
+                else "pinned_snapshot_order"
+            ),
+            "selection_sha256": _selection_digest(rows),
             "prompt_format": "infergrade_json_tool_calls_v1",
             "upstream_revision": snapshot_metadata["upstream_revision"],
             "dataset_revision": snapshot_metadata["upstream_revision"],
