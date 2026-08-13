@@ -69,6 +69,15 @@ only a checksum-verified immutable local package. Compatibility still requires
 an exact model/protocol canary and benchmark receipt; catalog activation,
 support promotion, result publication, and release remain separate decisions.
 
+The read-only `llama.cpp Runtime Intake` workflow can run the same composition
+for an exact `bNNNN` release through manual dispatch. Its macOS and Linux lanes
+verify the official archive, run a version smoke, materialize an isolated
+immutable package, and upload a path-free candidate receipt. The Windows lane
+retains its archive/version receipt because the candidate materializer is
+intentionally tar.gz-only. No lane writes repository contents, catalog
+metadata, releases, or support policy, and none of these package checks proves
+model compatibility.
+
 `runtime/catalog/signed/` is currently a review-candidate root. Before
 production distribution, it will be replaced by a new production root version
 1 under the detached ceremony in `runtime_catalog_operations.md`; unreleased

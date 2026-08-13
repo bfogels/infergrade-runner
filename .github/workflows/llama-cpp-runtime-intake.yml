@@ -8,6 +8,10 @@ on:
         required: false
         default: false
         type: boolean
+      release_tag:
+        description: Optional exact bNNNN release tag to inspect instead of latest
+        required: false
+        type: string
   schedule:
     - cron: "17 9 * * *"
     - cron: "47 9 * * 0"
@@ -34,17 +38,23 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Fetch official latest-release metadata
+      - name: Fetch official release metadata
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUESTED_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           mkdir -p runtime-intake
+          endpoint="latest"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${REQUESTED_RELEASE_TAG}" ]]; then
+            [[ "${REQUESTED_RELEASE_TAG}" =~ ^b[0-9]+$ ]]
+            endpoint="tags/${REQUESTED_RELEASE_TAG}"
+          fi
           curl --fail --show-error --silent --location \
             --retry 3 \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer ${GH_TOKEN}" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
+            "https://api.github.com/repos/ggml-org/llama.cpp/releases/${endpoint}" \
             > runtime-intake/latest-release.json
 
       - name: Read inspected release tag
@@ -163,6 +173,10 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Set up Rust for immutable materialization
+        if: matrix.platform != 'windows-cpu-x64'
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
       - name: Download inspected release metadata
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -172,15 +186,50 @@ jobs:
       - name: Verify candidate archive and version
         shell: bash
         run: |
+          retain_args=()
+          if [[ "${{ matrix.platform }}" != "windows-cpu-x64" ]]; then
+            retain_args+=(--retain-archive "runtime-intake/${{ matrix.platform }}-candidate.tar.gz")
+          fi
           python3 scripts/verify_llama_cpp_release_asset.py \
             --release-json runtime-intake/latest-release.json \
             --platform "${{ matrix.platform }}" \
             --run-version-smoke \
+            "${retain_args[@]}" \
             --output "runtime-intake/${{ matrix.platform }}-candidate-receipt.json"
+
+      - name: Materialize immutable candidate package
+        if: matrix.platform != 'windows-cpu-x64'
+        shell: bash
+        run: |
+          python3 scripts/write_runtime_candidate_manifest.py \
+            --archive-receipt "runtime-intake/${{ matrix.platform }}-candidate-receipt.json" \
+            --output "runtime-intake/${{ matrix.platform }}-candidate-manifest.json"
+          digest="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["artifact"]["downloaded_sha256"])' "runtime-intake/${{ matrix.platform }}-candidate-receipt.json")"
+          cargo run -p infergrade_runner_engine --bin materialize-runtime-candidate --locked -- \
+            --manifest-entry "runtime-intake/${{ matrix.platform }}-candidate-manifest.json" \
+            --archive "runtime-intake/${{ matrix.platform }}-candidate.tar.gz" \
+            --runtime-cache-dir "runtime-intake/${{ matrix.platform }}-candidate-cache" \
+            --consent-archive-sha256 "${digest}" \
+            --receipt-output "runtime-intake/${{ matrix.platform }}-materialization-receipt.json" \
+            > "runtime-intake/${{ matrix.platform }}-materialization-local.json"
+          python3 -c 'import json,sys; value=json.load(open(sys.argv[1], encoding="utf-8")); assert value["candidate_only"] is True; assert value["catalog_assertion"] is None' \
+            "runtime-intake/${{ matrix.platform }}-materialization-receipt.json"
 
       - name: Upload candidate receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: llama-cpp-candidate-${{ matrix.platform }}-${{ github.run_id }}
           path: runtime-intake/${{ matrix.platform }}-candidate-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload immutable materialization receipt
+        if: matrix.platform != 'windows-cpu-x64'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: llama-cpp-materialization-${{ matrix.platform }}-${{ github.run_id }}
+          path: |
+            runtime-intake/${{ matrix.platform }}-candidate-manifest.json
+            runtime-intake/${{ matrix.platform }}-materialization-receipt.json
+          if-no-files-found: error
           retention-days: 30

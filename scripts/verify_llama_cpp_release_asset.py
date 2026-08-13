@@ -228,6 +228,7 @@ def verify(
     output: pathlib.Path,
     run_smoke: bool,
     retained_runtime_dir: Optional[pathlib.Path] = None,
+    retained_archive: Optional[pathlib.Path] = None,
 ) -> Dict[str, Any]:
     asset_name, asset, required = release_asset(release, platform)
     with tempfile.TemporaryDirectory(prefix="infergrade-llama-candidate-") as tmp:
@@ -241,6 +242,11 @@ def verify(
         members = extract_archive(archive, extracted)
         located = locate_required(extracted, required)
         smoke = run_version_smoke(located[required[0]]) if run_smoke else {"status": "not_run"}
+        if retained_archive:
+            if os.path.lexists(retained_archive):
+                raise ValueError("retained archive path already exists")
+            retained_archive.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(archive, retained_archive)
         if retained_runtime_dir:
             if retained_runtime_dir.exists():
                 raise ValueError("retained runtime directory already exists")
@@ -259,6 +265,7 @@ def verify(
         "platform": platform,
         "artifact": {
             "name": asset_name,
+            "download_url": str(asset["browser_download_url"]),
             "size_bytes": int(asset["size"]),
             "github_asset_sha256": expected_digest,
             "downloaded_sha256": observed_digest,
@@ -268,6 +275,7 @@ def verify(
         },
         "version_smoke": smoke,
         "runtime_materialized_for_canary": retained_runtime_dir is not None,
+        "verified_archive_retained_for_same_job": retained_archive is not None,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -285,6 +293,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         type=pathlib.Path,
         help="Retain the verified extracted runtime for a same-job model canary.",
     )
+    parser.add_argument(
+        "--retain-archive",
+        type=pathlib.Path,
+        help="Retain the verified archive bytes for a same-job immutable materialization.",
+    )
     return parser.parse_args(argv)
 
 
@@ -297,6 +310,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             args.output,
             args.run_version_smoke,
             retained_runtime_dir=args.retain_runtime_dir,
+            retained_archive=args.retain_archive,
         )
     except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
         print(f"llama.cpp candidate verification failed: {exc}", file=sys.stderr)
