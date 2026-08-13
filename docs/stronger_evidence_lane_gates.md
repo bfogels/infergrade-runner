@@ -176,22 +176,25 @@ Acceptance:
 
 LiveCodeBench is useful, but execution safety and task-window pinning matter more than speed of implementation.
 
+Implementation status: the pinned local-reference scorer is implemented but intentionally remains non-runnable. The upstream Hugging Face dataset card and loader provide inconsistent license metadata; source-license review and a separately verified protocol image are required before release wiring.
+
 Source candidate:
 
 - Official code: https://github.com/LiveCodeBench/LiveCodeBench
 
 Runner scope:
 
-- Pin task window and upstream version.
-- Run generated code in a constrained sandbox.
-- Store task metadata, generated code, pass/fail, timeout, and error class.
-- Start with generation/pass@1 tasks before broader agentic modes.
+- Pin the exact `test6.jsonl` dataset revision and SHA-256 plus a deterministic 48-task snapshot spanning both platforms, all three difficulty labels, and January-April 2025.
+- Run generated Python as `nobody` in a separately limited subprocess under the offline, read-only capability container. The root supervisor retains only `SETUID`, `SETGID`, and `KILL` so it can drop the child identity and terminate a timed-out process group; the generated child clears those capabilities. The root scorer retains hidden expected outputs, and each child receives only one test input.
+- Store public task metadata, generated code, pass/fail, timeout, error class, platform/difficulty/month slices, and executed-test counts without persisting hidden inputs or expected outputs. The pinned snapshot records 1,895 selected tests; reviewed stress cases reach 4,355,536 input bytes and 3,444,445 output bytes, so the child uses an 8 MiB output cap with 6-second per-test and 30-second per-task limits.
+- Use one deterministic generation per task. This is a local pass@1 reference, not the official multi-sample leaderboard protocol or a broader agentic mode.
 
 Acceptance:
 
 - Sandbox limits are explicit and tested.
 - Timeouts and runtime errors are structured benchmark failures or task failures according to the score policy.
 - The Hub warns that it is a heavier reference lane.
+- Dataset-license review and exact protocol-image verification are complete before the check becomes selectable.
 
 ### Phase D: SWE-bench Verified Gold
 

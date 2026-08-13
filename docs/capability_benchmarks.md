@@ -72,7 +72,7 @@ The following are selected as high-value later additions and are not runnable ye
 
 - `LiveCodeBench`
   - Why: broad contemporary coding benchmark with multiple task modes and temporal freshness.
-  - InferGrade role: coding reference suite after local sandboxing, task pinning, and cost metadata are proven.
+  - InferGrade role: the pinned v6 Python pass@1 scorer and unprivileged hidden-test subprocess are implemented. It remains non-runnable until the inconsistent upstream dataset-license metadata is resolved, an exact protocol image is published and verified, and observed local cost/distribution evidence is collected. It is not the official multi-sample leaderboard protocol.
 
 - `SWE-bench Verified`
   - Why: highest-value software engineering benchmark in this space, but much more operationally expensive than the first-pass coding lanes.
