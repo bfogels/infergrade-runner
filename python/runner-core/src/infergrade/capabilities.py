@@ -56,6 +56,9 @@ _MMLU_TERMINAL_MARKER = re.compile(
     re.IGNORECASE,
 )
 _MMLU_EMPTY_THINK_PREFIX = re.compile(r"^\s*<think>\s*</think>\s*", re.IGNORECASE)
+CAPABILITY_CONTAINER_POLICY_VERSION = "capability_container_isolation_v1"
+_CAPABILITY_CONTAINER_MEMORY = "4g"
+_CAPABILITY_CONTAINER_PIDS_LIMIT = 256
 
 
 def _released_capability_image(image_name: str) -> str:
@@ -930,7 +933,10 @@ def execute_capability_suite(
             phase_timings["total_wall_seconds"] = round(time.perf_counter() - benchmark_started, 6)
             summary["phase_timings"] = dict(phase_timings)
             if spec.execution_mode == "container":
-                summary["container_runtime"] = container_image_identity(spec.container_image)
+                summary["container_runtime"] = {
+                    **container_image_identity(spec.container_image),
+                    "sandbox_policy": _capability_container_policy(),
+                }
             if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:
                 summary["completion_normalization"] = _summarize_completion_normalization(predictions)
             summary["task_performance"] = _summarize_task_performance_rows(predictions)
@@ -2333,21 +2339,65 @@ def _evaluate_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str) -> Di
 def _run_capability_container(image: str, benchmark_dir: str, args: List[str]) -> None:
     install_image(image)
     mount_source = _host_mount_path(os.path.abspath(benchmark_dir))
+    command = _capability_container_command(image, mount_source, args)
+    completed = subprocess.run(command, capture_output=True, text=True)
+    if completed.returncode != 0:
+        message = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(
+            "Capability container failed for image %s under %s: %s"
+            % (image, CAPABILITY_CONTAINER_POLICY_VERSION, message or "unknown error")
+        )
+
+
+def _capability_container_command(image: str, mount_source: str, args: List[str]) -> List[str]:
+    host_uid = getattr(os, "getuid", lambda: 0)()
+    host_gid = getattr(os, "getgid", lambda: 0)()
     command = [
         "docker",
         "run",
         "--rm",
+        "--network",
+        "none",
+        "--cap-drop",
+        "ALL",
+        "--user",
+        "%s:%s" % (host_uid, host_gid),
+        "--security-opt",
+        "no-new-privileges",
+        "--pids-limit",
+        str(_CAPABILITY_CONTAINER_PIDS_LIMIT),
+        "--memory",
+        _CAPABILITY_CONTAINER_MEMORY,
+        "--memory-swap",
+        _CAPABILITY_CONTAINER_MEMORY,
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,nodev,size=512m",
         "-v",
         "%s:/work" % mount_source,
         image,
     ]
     command.extend(args)
-    completed = subprocess.run(command, capture_output=True, text=True)
-    if completed.returncode != 0:
-        message = (completed.stderr or completed.stdout or "").strip()
-        raise RuntimeError(
-            "Capability container failed for image %s: %s" % (image, message or "unknown error")
-        )
+    return command
+
+
+def _capability_container_policy() -> Dict[str, Any]:
+    host_uid = getattr(os, "getuid", lambda: 0)()
+    host_gid = getattr(os, "getgid", lambda: 0)()
+    return {
+        "policy_version": CAPABILITY_CONTAINER_POLICY_VERSION,
+        "network": "none",
+        "capabilities": "all_dropped",
+        "container_user": "host_uid_gid",
+        "container_user_id": "%s:%s" % (host_uid, host_gid),
+        "no_new_privileges": True,
+        "read_only_root": True,
+        "writable_paths": ["/work", "/tmp"],
+        "tmpfs": "/tmp:rw,noexec,nosuid,nodev,size=512m",
+        "pids_limit": _CAPABILITY_CONTAINER_PIDS_LIMIT,
+        "memory_limit": _CAPABILITY_CONTAINER_MEMORY,
+        "memory_swap_limit": _CAPABILITY_CONTAINER_MEMORY,
+    }
 
 
 def _host_mount_path(path: str) -> str:

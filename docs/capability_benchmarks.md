@@ -155,6 +155,8 @@ Benchmark maturity is separate from evidence lane:
 
 Thin local samples cannot be promoted because their score is high. Promotion requires protocol controls.
 
+Container-backed capability scorers run under `capability_container_isolation_v1`: the invoking host user rather than container root, no network, all Linux capabilities dropped, no-new-privileges, a read-only root filesystem, bounded memory and process counts, and only `/work` plus a no-exec `/tmp` writable. The exact policy is recorded beside the scorer image identity in each result. These controls reduce risk from generated code and scorer dependencies; they do not make arbitrary community benchmarks safe or automatically promote a planned executable benchmark.
+
 ## Capability Surfaces
 
 Runner-owned capability artifacts use these surfaces:
