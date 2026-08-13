@@ -105,6 +105,20 @@ class BenchmarkCatalogTests(unittest.TestCase):
             1,
         )
         self.assertEqual(calibration_policy["maximum_single_setup_fraction"], 0.25)
+        for task_policy in score_policies.values():
+            facet_policy = task_policy["representativeness_policy"][
+                "empirical_priority_facet_policy"
+            ]
+            self.assertEqual(facet_policy["policy_id"], "priority_facet_evidence_gate_v1")
+            self.assertEqual(facet_policy["minimum_observations"], 8)
+            self.assertEqual(facet_policy["minimum_model_families"], 3)
+            self.assertEqual(facet_policy["minimum_parameter_bands"], 2)
+            self.assertEqual(
+                facet_policy["minimum_independently_replicated_setups"],
+                2,
+            )
+            self.assertEqual(facet_policy["maximum_suite_ceiling_fraction"], 0.2)
+            self.assertEqual(facet_policy["minimum_suite_headroom"], 0.1)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_coverage_fraction"], 0.5)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_scored_components"], 2)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_score_dimensions"], 2)

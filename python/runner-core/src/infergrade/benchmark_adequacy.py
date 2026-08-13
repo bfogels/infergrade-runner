@@ -40,7 +40,7 @@ def audit_benchmark_adequacy(
     broad_ready = bool(surfaces) and all(item["broad_surface_coverage_ready"] for item in surfaces)
     return {
         "artifact_kind": "benchmark_adequacy_audit",
-        "artifact_spec_version": "0.1.0",
+        "artifact_spec_version": "0.2.0",
         "catalog_version": payload.get("catalog_version"),
         "surface_filter": surface_id,
         "scoped_claim_coverage_ready": scoped_ready,
@@ -82,6 +82,45 @@ def validate_benchmark_adequacy_metadata(catalog: Optional[Dict[str, Any]] = Non
         minimum_refreshable = policy.get("minimum_refreshable_priority_facets")
         if isinstance(minimum_refreshable, bool) or not isinstance(minimum_refreshable, int) or minimum_refreshable < 0:
             failures.append(f"{surface_id}: minimum_refreshable_priority_facets must be a non-negative integer")
+        empirical_policy = policy.get("empirical_priority_facet_policy")
+        if not isinstance(empirical_policy, dict):
+            failures.append(f"{surface_id}: missing empirical_priority_facet_policy")
+        else:
+            if not str(empirical_policy.get("policy_id") or "").strip():
+                failures.append(
+                    f"{surface_id}: empirical priority facet policy_id must be non-empty"
+                )
+            for field in (
+                "minimum_observations",
+                "minimum_model_families",
+                "minimum_parameter_bands",
+                "minimum_independently_replicated_setups",
+            ):
+                value = empirical_policy.get(field)
+                if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                    failures.append(
+                        f"{surface_id}: empirical priority facet {field} must be a positive integer"
+                    )
+            ceiling_fraction = empirical_policy.get("maximum_suite_ceiling_fraction")
+            if (
+                isinstance(ceiling_fraction, bool)
+                or not isinstance(ceiling_fraction, (int, float))
+                or not 0.0 <= float(ceiling_fraction) < 1.0
+            ):
+                failures.append(
+                    f"{surface_id}: empirical priority facet maximum_suite_ceiling_fraction "
+                    "must be at least 0 and less than 1"
+                )
+            minimum_headroom = empirical_policy.get("minimum_suite_headroom")
+            if (
+                isinstance(minimum_headroom, bool)
+                or not isinstance(minimum_headroom, (int, float))
+                or not 0.0 < float(minimum_headroom) <= 1.0
+            ):
+                failures.append(
+                    f"{surface_id}: empirical priority facet minimum_suite_headroom "
+                    "must be greater than 0 and at most 1"
+                )
         for field in ("supporting_check_ids", "planned_check_ids"):
             ids = policy.get(field)
             if not isinstance(ids, list) or not all(isinstance(item, str) and item.strip() for item in ids):
@@ -205,6 +244,9 @@ def _surface_adequacy(
         "headline_check_ids": sorted(str(item.get("check_id")) for item in headline),
         "diagnostic_check_ids": sorted(str(item.get("check_id")) for item in diagnostics),
         "planned_check_ids": sorted(str(item.get("check_id")) for item in planned_checks),
+        "empirical_priority_facet_policy": dict(
+            policy.get("empirical_priority_facet_policy") or {}
+        ),
         "known_headline_saturation_risks": headline_saturation_risks,
         "known_diagnostic_saturation_risks": diagnostic_saturation_risks,
         "distribution_calibration_status": score_policy.get("distribution_calibration_status"),
