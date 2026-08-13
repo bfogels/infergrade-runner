@@ -876,6 +876,24 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("case_accuracy", metadata["benchmark_checks"][0]["score_breakdown_fields"])
         self.assertEqual(metadata["score_policies"][0]["score_policy_id"], "multiturn_constraint_retention_v1")
 
+    def test_selection_metadata_declares_stateful_outcome_saturation_slices(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="gold",
+            benchmark_check_ids=["stateful_tool_loop_diagnostic_v1"],
+        )
+
+        metadata = selection_metadata_for_request(request)
+
+        check = metadata["benchmark_checks"][0]
+        policy = check["empirical_saturation_slice_policy"]
+        self.assertEqual(policy["breakdown_field"], "variant_metrics")
+        self.assertEqual(policy["score_field"], "trajectory_success_rate")
+        self.assertEqual(policy["minimum_cases_per_slice"], 4)
+        self.assertEqual(policy["required_slices"], ["success", "blocked", "noop"])
+        self.assertIn("variant_metrics", check["score_breakdown_fields"])
+
     def test_selection_metadata_includes_coding_static_score_policy(self):
         request = RunRequest(
             model="Qwen/Qwen2.5-Coder-7B-Instruct",

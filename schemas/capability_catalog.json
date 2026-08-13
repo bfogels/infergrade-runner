@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-13-stateful-tool-loop-variant-metrics",
+  "catalog_version": "2026-08-13-outcome-slice-headroom-gate",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -1792,6 +1792,18 @@
       },
       "higher_is_better": true,
       "score_policy_id": "deterministic_stateful_tool_trajectory_v1",
+      "empirical_saturation_slice_policy": {
+        "policy_id": "stateful_tool_loop_outcome_saturation_v1",
+        "breakdown_field": "variant_metrics",
+        "score_field": "trajectory_success_rate",
+        "count_field": "total_count",
+        "minimum_cases_per_slice": 4,
+        "required_slices": [
+          "success",
+          "blocked",
+          "noop"
+        ]
+      },
       "score_breakdown_fields": [
         "correct_count",
         "total_count",

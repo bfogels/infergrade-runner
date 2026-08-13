@@ -167,6 +167,50 @@ def validate_benchmark_adequacy_metadata(catalog: Optional[Dict[str, Any]] = Non
         unknown_facets = sorted(declared_facets - priority)
         if unknown_facets:
             failures.append(f"{surface_id}: declared checks use unrecognized priority facets: {', '.join(unknown_facets)}")
+    for check_id, check in sorted(checks.items()):
+        slice_policy = check.get("empirical_saturation_slice_policy")
+        if slice_policy is None:
+            continue
+        if not isinstance(slice_policy, dict):
+            failures.append(f"{check_id}: empirical saturation slice policy must be an object")
+            continue
+        if check.get("higher_is_better") is not True:
+            failures.append(
+                f"{check_id}: empirical saturation slices require higher_is_better true"
+            )
+        if not str(slice_policy.get("policy_id") or "").strip():
+            failures.append(
+                f"{check_id}: empirical saturation slice policy_id must be non-empty"
+            )
+        for field in ("breakdown_field", "score_field", "count_field"):
+            if not str(slice_policy.get(field) or "").strip():
+                failures.append(
+                    f"{check_id}: empirical saturation slice {field} must be non-empty"
+                )
+        breakdown_field = str(slice_policy.get("breakdown_field") or "")
+        if breakdown_field not in set(check.get("score_breakdown_fields") or []):
+            failures.append(
+                f"{check_id}: empirical saturation slice breakdown_field must be declared "
+                "in score_breakdown_fields"
+            )
+        required_slices = slice_policy.get("required_slices")
+        if not _non_empty_string_list(required_slices):
+            failures.append(
+                f"{check_id}: empirical saturation required_slices must be a non-empty string array"
+            )
+        elif len(required_slices) != len(set(required_slices)):
+            failures.append(
+                f"{check_id}: empirical saturation required_slices must be unique"
+            )
+        minimum_cases = slice_policy.get("minimum_cases_per_slice")
+        if (
+            isinstance(minimum_cases, bool)
+            or not isinstance(minimum_cases, int)
+            or minimum_cases <= 0
+        ):
+            failures.append(
+                f"{check_id}: empirical saturation minimum_cases_per_slice must be a positive integer"
+            )
     return failures
 
 

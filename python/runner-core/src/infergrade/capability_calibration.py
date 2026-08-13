@@ -62,12 +62,19 @@ def extract_calibration_observations(
     documents: Iterable[Dict[str, Any]],
     score_version: Optional[str] = None,
     benchmark_id: Optional[str] = None,
+    catalog: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     observations: List[Dict[str, Any]] = []
+    checks = check_index(catalog) if catalog else {}
     for document in documents:
         source = str(document.get("_source") or "")
         if document.get("artifact_kind") == "capability_run":
-            observation = _component_observation(document, source)
+            protocol = dict(document.get("protocol") or {})
+            observation = _component_observation(
+                document,
+                source,
+                checks.get(str(protocol.get("task_version") or "")),
+            )
             if observation:
                 observations.append(observation)
             continue
@@ -149,6 +156,7 @@ def _observation_detail_rank(observation: Dict[str, Any]) -> tuple:
     """Prefer richer duplicate views without changing corpus cardinality."""
     return (
         len(list(observation.get("components") or [])),
+        len(dict(observation.get("saturation_slices") or {})),
         len(list(observation.get("model_identities") or [])),
         int(observation.get("evidence_group_verified") is True),
         int(bool(observation.get("quantization_scheme"))),
@@ -185,6 +193,19 @@ def _duplicate_integrity_conflicts(left: Dict[str, Any], right: Dict[str, Any]) 
             left_components[component_id], right_components[component_id], rel_tol=0.0, abs_tol=1e-9
         ):
             conflicts.append("component_score_mismatch:%s" % component_id)
+    left_slices = dict(left.get("saturation_slices") or {})
+    right_slices = dict(right.get("saturation_slices") or {})
+    for slice_id in sorted(set(left_slices).intersection(right_slices)):
+        left_slice = dict(left_slices.get(slice_id) or {})
+        right_slice = dict(right_slices.get(slice_id) or {})
+        left_score = _number(left_slice.get("score"))
+        right_score = _number(right_slice.get("score"))
+        if (
+            left_score is not None
+            and right_score is not None
+            and not math.isclose(left_score, right_score, rel_tol=0.0, abs_tol=1e-9)
+        ) or left_slice.get("case_count") != right_slice.get("case_count"):
+            conflicts.append("saturation_slice_mismatch:%s" % slice_id)
     return conflicts
 
 
@@ -215,7 +236,11 @@ def _surface_observation(surface: Dict[str, Any], document: Dict[str, Any], sour
     }
 
 
-def _component_observation(document: Dict[str, Any], source: str) -> Optional[Dict[str, Any]]:
+def _component_observation(
+    document: Dict[str, Any],
+    source: str,
+    check: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
     protocol = dict(document.get("protocol") or {})
     benchmark_id = str(protocol.get("task_version") or "")
     summary = dict(document.get("summary") or {})
@@ -248,9 +273,52 @@ def _component_observation(document: Dict[str, Any], source: str) -> Optional[Di
             or document.get("quantization_scheme")
             or ""
         ).lower(),
+        "saturation_slices": _declared_saturation_slices(summary, check or {}),
         **_evidence_group_observation(document),
         "source": source,
     }
+
+
+def _declared_saturation_slices(
+    summary: Dict[str, Any],
+    check: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """Extract only catalog-declared score slices with enough cases to be meaningful."""
+    policy = check.get("empirical_saturation_slice_policy")
+    if not isinstance(policy, dict):
+        return {}
+    breakdown = summary.get(str(policy.get("breakdown_field") or ""))
+    if not isinstance(breakdown, dict):
+        return {}
+    score_field = str(policy.get("score_field") or "")
+    count_field = str(policy.get("count_field") or "")
+    minimum_cases = policy.get("minimum_cases_per_slice")
+    if (
+        isinstance(minimum_cases, bool)
+        or not isinstance(minimum_cases, int)
+        or minimum_cases <= 0
+    ):
+        return {}
+    slices = {}
+    for slice_id in list(policy.get("required_slices") or []):
+        item = breakdown.get(slice_id)
+        if not isinstance(item, dict):
+            continue
+        score = _number(item.get(score_field))
+        case_count = item.get(count_field)
+        if (
+            score is None
+            or not 0.0 <= score <= 1.0
+            or isinstance(case_count, bool)
+            or not isinstance(case_count, int)
+            or case_count < minimum_cases
+        ):
+            continue
+        slices[str(slice_id)] = {
+            "score": score,
+            "case_count": case_count,
+        }
+    return slices
 
 
 def audit_capability_observations(

@@ -26,7 +26,7 @@ def audit_benchmark_readiness(
     metadata_errors = validate_benchmark_adequacy_metadata(payload)
     metadata_valid = not metadata_errors
     adequacy = audit_benchmark_adequacy(payload, surface_id=surface_id)
-    observations = extract_calibration_observations(document_list)
+    observations = extract_calibration_observations(document_list, catalog=payload)
     surfaces = []
     for structural in adequacy["surfaces"]:
         score_version = str(structural.get("score_version") or "")
@@ -204,6 +204,7 @@ def _audit_priority_facet_evidence(
                 composite_observations,
                 standalone_observations,
                 policy,
+                checks.get(check_id) or {},
             )
             for check_id in facet_check_ids
         ]
@@ -253,7 +254,14 @@ def _priority_check_metrics(
     composite_observations: List[Dict[str, Any]],
     standalone_observations: List[Dict[str, Any]],
     policy: Dict[str, Any],
+    check: Dict[str, Any],
 ) -> Dict[str, Any]:
+    declared_slice_policy = check.get("empirical_saturation_slice_policy")
+    slice_policy = (
+        dict(declared_slice_policy)
+        if isinstance(declared_slice_policy, dict)
+        else {}
+    )
     cohort_rows: Dict[str, List[tuple]] = {}
     for observation in composite_observations:
         for component in list(observation.get("components") or []):
@@ -278,13 +286,19 @@ def _priority_check_metrics(
             (observation, float(observation["score"]), "standalone_capability_run")
         )
     cohorts = [
-        _priority_cohort_metrics(cohort_id, rows, policy)
+        _priority_cohort_metrics(
+            cohort_id,
+            rows,
+            policy,
+            slice_policy,
+        )
         for cohort_id, rows in sorted(cohort_rows.items())
     ]
     selected = max(cohorts, key=_priority_cohort_rank) if cohorts else _priority_cohort_metrics(
         "none",
         [],
         policy,
+        slice_policy,
     )
     return {
         "check_id": check_id,
@@ -305,6 +319,7 @@ def _priority_cohort_metrics(
     cohort_id: str,
     raw_rows: List[tuple],
     policy: Dict[str, Any],
+    slice_policy: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     rows = _deduplicate_priority_check_rows(raw_rows)
     scores = [score for _, score, _ in rows]
@@ -354,9 +369,44 @@ def _priority_cohort_metrics(
         and headroom < float(policy.get("minimum_suite_headroom") or 0.0)
     ):
         blockers.append("insufficient_suite_headroom")
+    required_slice_metrics = {}
+    for slice_id in list((slice_policy or {}).get("required_slices") or []):
+        slice_rows = []
+        for observation, _, source_kind in rows:
+            saturation_slices = observation.get("saturation_slices")
+            if not isinstance(saturation_slices, dict):
+                continue
+            slice_item = saturation_slices.get(slice_id)
+            if not isinstance(slice_item, dict):
+                continue
+            slice_score = _attainment_score(slice_item.get("score"))
+            if slice_score is not None:
+                slice_rows.append((observation, slice_score, source_kind))
+        metrics = _priority_cohort_metrics(
+            "%s:slice:%s" % (cohort_id, slice_id),
+            slice_rows,
+            policy,
+        )
+        required_slice_metrics[str(slice_id)] = {
+            key: value for key, value in metrics.items() if key != "cohort_id"
+        }
+        if metrics["status"] == "unobserved":
+            blockers.append("required_slice_unobserved:%s" % slice_id)
+        elif metrics["status"] == "insufficient_evidence":
+            blockers.append("required_slice_evidence_insufficient:%s" % slice_id)
+        elif metrics["status"] == "saturation_risk":
+            blockers.append("required_slice_saturation_risk:%s" % slice_id)
     insufficient = any(
         item.startswith("insufficient_") and item != "insufficient_suite_headroom"
         for item in blockers
+    ) or any(
+        item.startswith("required_slice_unobserved:")
+        or item.startswith("required_slice_evidence_insufficient:")
+        for item in blockers
+    )
+    required_slice_evidence_complete = all(
+        item["status"] in {"ready", "saturation_risk"}
+        for item in required_slice_metrics.values()
     )
     status = (
         "unobserved"
@@ -384,6 +434,8 @@ def _priority_cohort_metrics(
         "independently_replicated_setup_count": independent_setups,
         "suite_ceiling_fraction": ceiling_fraction,
         "headroom_to_suite_ceiling": headroom,
+        "required_slice_metrics": required_slice_metrics,
+        "required_slice_evidence_complete": required_slice_evidence_complete,
         "blockers": blockers,
     }
 
@@ -391,6 +443,7 @@ def _priority_cohort_metrics(
 def _priority_cohort_rank(cohort: Dict[str, Any]) -> tuple:
     return (
         int(cohort.get("ready") is True),
+        int(cohort.get("required_slice_evidence_complete") is True),
         int(cohort.get("observation_count") or 0),
         int(cohort.get("model_family_count") or 0),
         int(cohort.get("parameter_band_count") or 0),
@@ -443,6 +496,7 @@ def _priority_row_rank(row: tuple) -> tuple:
     observation, _, source_kind = row
     return (
         int(source_kind == "score_ready_composite"),
+        len(dict(observation.get("saturation_slices") or {})),
         int(bool(observation.get("quantization_scheme"))),
         int(str(observation.get("parameter_band") or "unknown") != "unknown"),
         int(str(observation.get("model_family") or "unknown") != "unknown"),
