@@ -15,6 +15,7 @@ class BenchmarkAdequacyTests(unittest.TestCase):
         self.assertEqual(validate_benchmark_adequacy_metadata(catalog), [])
         report = audit_benchmark_adequacy(catalog)
 
+        self.assertEqual(report["artifact_spec_version"], "0.2.0")
         self.assertTrue(report["scoped_claim_coverage_ready"])
         self.assertFalse(report["broad_surface_coverage_ready"])
         self.assertEqual(len(report["surfaces"]), 3)
@@ -24,6 +25,14 @@ class BenchmarkAdequacyTests(unittest.TestCase):
         by_surface = {item["surface_id"]: item for item in report["surfaces"]}
 
         assistant = by_surface["local_assistant_capability"]
+        self.assertEqual(
+            assistant["empirical_priority_facet_policy"]["policy_id"],
+            "priority_facet_evidence_gate_v1",
+        )
+        self.assertEqual(
+            assistant["empirical_priority_facet_policy"]["minimum_observations"],
+            8,
+        )
         self.assertIn("tool_use", assistant["planned_only_priority_facets"])
         self.assertIn("long_context_task_reasoning", assistant["planned_only_priority_facets"])
         self.assertEqual(
@@ -68,6 +77,39 @@ class BenchmarkAdequacyTests(unittest.TestCase):
 
         self.assertIn(
             "local_coding_capability: supporting_check_ids omits weighted checks: coding_static_repair_v1",
+            failures,
+        )
+
+    def test_empirical_priority_facet_policy_cannot_be_disabled(self):
+        catalog = deepcopy(load_capability_catalog())
+        assistant = next(
+            item
+            for item in catalog["surface_score_policies"]
+            if item["surface_id"] == "local_assistant_capability"
+        )
+        assistant["representativeness_policy"]["empirical_priority_facet_policy"][
+            "minimum_observations"
+        ] = 0
+
+        failures = validate_benchmark_adequacy_metadata(catalog)
+
+        self.assertIn(
+            "local_assistant_capability: empirical priority facet minimum_observations must be a positive integer",
+            failures,
+        )
+
+        assistant["representativeness_policy"]["empirical_priority_facet_policy"][
+            "minimum_observations"
+        ] = 8
+        assistant["representativeness_policy"]["empirical_priority_facet_policy"][
+            "minimum_suite_headroom"
+        ] = 0.0
+
+        failures = validate_benchmark_adequacy_metadata(catalog)
+
+        self.assertIn(
+            "local_assistant_capability: empirical priority facet minimum_suite_headroom "
+            "must be greater than 0 and at most 1",
             failures,
         )
 

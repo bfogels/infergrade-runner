@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-13-benchmark-adequacy-audit",
+  "catalog_version": "2026-08-13-priority-facet-evidence-gate",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -99,7 +99,16 @@
           "bfcl_local_reference_v1",
           "longbench_v2_reference_v1"
         ],
-        "minimum_refreshable_priority_facets": 1
+        "minimum_refreshable_priority_facets": 1,
+        "empirical_priority_facet_policy": {
+          "policy_id": "priority_facet_evidence_gate_v1",
+          "minimum_observations": 8,
+          "minimum_model_families": 3,
+          "minimum_parameter_bands": 2,
+          "minimum_independently_replicated_setups": 2,
+          "maximum_suite_ceiling_fraction": 0.2,
+          "minimum_suite_headroom": 0.1
+        }
       },
       "claim_boundary": "Task-scoped benchmark attainment from IFEval and the compositional instruction fixture. A value at the suite ceiling means every scored check passed; it does not mean the model is perfect or establish a global intelligence rank."
     },
@@ -163,7 +172,16 @@
           "livecodebench_reference_v1",
           "swebench_verified_gold_v1"
         ],
-        "minimum_refreshable_priority_facets": 1
+        "minimum_refreshable_priority_facets": 1,
+        "empirical_priority_facet_policy": {
+          "policy_id": "priority_facet_evidence_gate_v1",
+          "minimum_observations": 8,
+          "minimum_model_families": 3,
+          "minimum_parameter_bands": 2,
+          "minimum_independently_replicated_setups": 2,
+          "maximum_suite_ceiling_fraction": 0.2,
+          "minimum_suite_headroom": 0.1
+        }
       },
       "claim_boundary": "Task-scoped coding evidence from the versioned headline benchmark mix. A separately labeled repository-edit diagnostic may support only its pinned miniature tasks; neither implies general software-engineering capability."
     },
@@ -224,7 +242,16 @@
         "planned_check_ids": [
           "longbench_v2_reference_v1"
         ],
-        "minimum_refreshable_priority_facets": 1
+        "minimum_refreshable_priority_facets": 1,
+        "empirical_priority_facet_policy": {
+          "policy_id": "priority_facet_evidence_gate_v1",
+          "minimum_observations": 8,
+          "minimum_model_families": 3,
+          "minimum_parameter_bands": 2,
+          "minimum_independently_replicated_setups": 2,
+          "maximum_suite_ceiling_fraction": 0.2,
+          "minimum_suite_headroom": 0.1
+        }
       },
       "claim_boundary": "Task-scoped reasoning evidence from the versioned benchmark mix. It is not an expert-reasoning, global intelligence, or leaderboard claim."
     }
