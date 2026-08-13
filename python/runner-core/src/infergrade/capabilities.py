@@ -1768,6 +1768,7 @@ def _write_native_capability_run_artifact(
                 **(
                     {
                         "category": case_score.get("category") or case.get("category"),
+                        "variant": case_score.get("variant") or case.get("variant"),
                         "format_valid": case_score.get("format_valid"),
                         "format_violation": case_score.get("error_class"),
                         "attempted_turn_count": case_score.get("attempted_turn_count"),
@@ -1876,6 +1877,7 @@ def _write_native_capability_run_artifact(
                     "wrong_call_count": summary.get("metrics", {}).get("wrong_call_count"),
                     "tool_execution_count": summary.get("metrics", {}).get("tool_execution_count"),
                     "category_metrics": dict(summary.get("metrics", {}).get("category_metrics") or {}),
+                    "variant_metrics": dict(summary.get("metrics", {}).get("variant_metrics") or {}),
                     "output_shape_gate": dict(summary.get("output_shape_gate") or {}),
                 }
                 if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
@@ -3999,20 +4001,8 @@ def _evaluate_stateful_tool_loop_benchmark(
     trajectory_success_rate = (
         round(correct_count / float(len(scored_rows)), 6) if scored_rows else None
     )
-    category_metrics: Dict[str, Dict[str, Any]] = {}
-    for category in sorted({str(item.get("category")) for item in case_results if item.get("category")}):
-        category_rows = [item for item in case_results if item.get("category") == category]
-        category_scored = [item for item in category_rows if item.get("score") is not None]
-        category_correct = len([item for item in category_scored if item.get("score") == 1.0])
-        category_metrics[category] = {
-            "correct_count": category_correct,
-            "total_count": len(category_scored),
-            "trajectory_success_rate": (
-                round(category_correct / float(len(category_scored)), 6)
-                if category_scored
-                else None
-            ),
-        }
+    category_metrics = _stateful_group_metrics(case_results, "category")
+    variant_metrics = _stateful_group_metrics(case_results, "variant")
     return {
         "benchmark_id": spec.benchmark_id,
         "display_name": spec.display_name,
@@ -4034,11 +4024,35 @@ def _evaluate_stateful_tool_loop_benchmark(
             "wrong_call_count": wrong_call_count,
             "tool_execution_count": tool_execution_count,
             "category_metrics": category_metrics,
+            "variant_metrics": variant_metrics,
         },
         "category_metrics": category_metrics,
+        "variant_metrics": variant_metrics,
         "case_results": case_results,
         "scoring_policy": STATEFUL_TOOL_LOOP_SCORING_POLICY,
     }
+
+
+def _stateful_group_metrics(
+    case_results: List[Dict[str, Any]],
+    field: str,
+) -> Dict[str, Dict[str, Any]]:
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for value in sorted({str(item.get(field)) for item in case_results if item.get(field)}):
+        scored = [
+            item
+            for item in case_results
+            if item.get(field) == value and item.get("score") is not None
+        ]
+        correct = len([item for item in scored if item.get("score") == 1.0])
+        grouped[value] = {
+            "correct_count": correct,
+            "total_count": len(scored),
+            "trajectory_success_rate": (
+                round(correct / float(len(scored)), 6) if scored else None
+            ),
+        }
+    return grouped
 
 
 def _normalize_score_text(value: Any) -> str:

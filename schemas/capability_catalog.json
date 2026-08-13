@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-13-stateful-tool-loop-diagnostic",
+  "catalog_version": "2026-08-13-stateful-tool-loop-variant-metrics",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -1800,7 +1800,8 @@
         "malformed_turn_count",
         "wrong_call_count",
         "tool_execution_count",
-        "category_metrics"
+        "category_metrics",
+        "variant_metrics"
       ]
     },
     {

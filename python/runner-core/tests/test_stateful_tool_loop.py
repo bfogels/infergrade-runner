@@ -194,6 +194,10 @@ class StatefulToolLoopTests(unittest.TestCase):
         self.assertEqual(summary["metrics"]["turn_accuracy"], 1.0)
         self.assertEqual(summary["metrics"]["tool_execution_count"], 4)
         self.assertEqual(set(summary["metrics"]["category_metrics"]), {"inventory", "scheduling"})
+        self.assertEqual(
+            summary["metrics"]["variant_metrics"],
+            {"success": {"correct_count": 2, "total_count": 2, "trajectory_success_rate": 1.0}},
+        )
 
     def test_wrong_and_malformed_calls_score_zero_without_tool_execution(self):
         cases = benchmark_cases()[:2]
@@ -234,6 +238,10 @@ class StatefulToolLoopTests(unittest.TestCase):
         self.assertEqual(summary["metrics"]["wrong_call_count"], 1)
         self.assertEqual(summary["metrics"]["malformed_turn_count"], 1)
         self.assertEqual(summary["metrics"]["tool_execution_count"], 0)
+        self.assertEqual(
+            summary["metrics"]["variant_metrics"]["noop"],
+            {"correct_count": 0, "total_count": 2, "trajectory_success_rate": 0.0},
+        )
 
     def test_dominant_malformed_turns_are_quarantined(self):
         gate = _stateful_tool_loop_output_shape_gate(
@@ -273,6 +281,11 @@ class StatefulToolLoopTests(unittest.TestCase):
         self.assertEqual(artifact["summary"]["passed_count"], 1)
         self.assertEqual(artifact["summary"]["failed_count"], 0)
         self.assertEqual(artifact["tasks"][0]["attempted_turn_count"], 3)
+        self.assertEqual(artifact["tasks"][0]["variant"], "success")
+        self.assertEqual(
+            artifact["summary"]["variant_metrics"]["success"],
+            {"correct_count": 1, "total_count": 1, "trajectory_success_rate": 1.0},
+        )
         unsupported = " ".join(artifact["claim_boundary"]["unsupported_claims"])
         self.assertIn("zero Capability protocol v3.1 headline-score weight", unsupported)
         self.assertIn("native runtime function calling", unsupported)
@@ -291,6 +304,7 @@ class StatefulToolLoopTests(unittest.TestCase):
         self.assertEqual(summary["metrics"]["generated_turn_count"], 19)
         self.assertEqual(summary["output_shape_gate"]["status"], "passed")
         self.assertEqual(len(summary["category_metrics"]), 8)
+        self.assertEqual(set(summary["variant_metrics"]), {"blocked", "noop", "success"})
         artifact_path = execution.artifacts["stateful_tool_loop_diagnostic_v1"]["capability_run_path"]
         self.assertTrue(os.path.exists(artifact_path))
 
