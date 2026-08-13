@@ -9,7 +9,7 @@ class BenchmarkReadinessTests(unittest.TestCase):
     def test_missing_corpus_evidence_fails_closed_even_when_scoped_facets_exist(self):
         report = audit_benchmark_readiness([], load_capability_catalog())
 
-        self.assertEqual(report["artifact_spec_version"], "0.2.0")
+        self.assertEqual(report["artifact_spec_version"], "0.3.0")
         self.assertFalse(report["scoped_claim_ready"])
         self.assertFalse(report["broad_surface_ready"])
         self.assertEqual(report["status"], "not_ready")
@@ -176,6 +176,109 @@ class BenchmarkReadinessTests(unittest.TestCase):
         self.assertEqual(check["independently_replicated_setup_count"], 0)
         self.assertIn("insufficient_independently_replicated_setups", check["blockers"])
 
+    def test_standalone_diagnostic_runs_establish_only_their_declared_facet(self):
+        catalog = _structurally_broad_catalog_with_assistant_diagnostic()
+        documents = _standalone_component_documents(
+            "local_assistant_capability",
+            "multiturn_chat_memory_v1",
+        )
+
+        report = audit_benchmark_readiness(documents, catalog)
+
+        assistant = _surface(report, "local_assistant_capability")
+        check = _facet(assistant, "multi_turn_state_retention")["checks"][0]
+        self.assertFalse(assistant["empirical_distribution_ready"])
+        self.assertFalse(assistant["scoped_claim_ready"])
+        self.assertEqual(check["status"], "ready")
+        self.assertEqual(check["observation_count"], 20)
+        self.assertEqual(check["score_ready_composite_observation_count"], 0)
+        self.assertEqual(check["standalone_capability_run_observation_count"], 20)
+        self.assertEqual(check["independently_replicated_setup_count"], 10)
+
+    def test_standalone_diagnostic_runs_can_complete_broad_facet_evidence(self):
+        catalog = _structurally_broad_catalog_with_assistant_diagnostic()
+        documents = _calibrated_documents(catalog)
+        documents.extend(
+            _standalone_component_documents(
+                "local_assistant_capability",
+                "multiturn_chat_memory_v1",
+            )
+        )
+
+        report = audit_benchmark_readiness(documents, catalog)
+
+        assistant = _surface(report, "local_assistant_capability")
+        check = _facet(assistant, "multi_turn_state_retention")["checks"][0]
+        self.assertTrue(assistant["empirical_distribution_ready"])
+        self.assertTrue(assistant["empirical_priority_facet_coverage_ready"])
+        self.assertTrue(assistant["broad_surface_ready"])
+        self.assertEqual(check["standalone_capability_run_observation_count"], 20)
+
+    def test_duplicate_standalone_and_composite_views_do_not_inflate_facets(self):
+        catalog = _structurally_broad_catalog_with_assistant_diagnostic()
+        documents = _calibrated_documents(catalog)
+        _add_component_observations(
+            documents,
+            "local_assistant_capability",
+            "multiturn_chat_memory_v1",
+        )
+        documents.extend(
+            _standalone_component_documents(
+                "local_assistant_capability",
+                "multiturn_chat_memory_v1",
+            )
+        )
+
+        report = audit_benchmark_readiness(documents, catalog)
+
+        assistant = _surface(report, "local_assistant_capability")
+        check = _facet(assistant, "multi_turn_state_retention")["checks"][0]
+        self.assertTrue(assistant["broad_surface_ready"])
+        self.assertEqual(check["observation_count"], 20)
+        self.assertEqual(check["score_ready_composite_observation_count"], 20)
+        self.assertEqual(check["standalone_capability_run_observation_count"], 0)
+        self.assertEqual(check["duplicate_view_count"], 0)
+        self.assertEqual(check["unpooled_alternate_observation_count"], 20)
+        self.assertEqual(len(check["evidence_cohorts"]), 2)
+
+    def test_standalone_fixture_revisions_never_pool_to_clear_a_gate(self):
+        catalog = _structurally_broad_catalog_with_assistant_diagnostic()
+        documents = _standalone_component_documents(
+            "local_assistant_capability",
+            "multiturn_chat_memory_v1",
+            fixture_revision=lambda index: "fixture-v%d" % (index % 4),
+        )
+
+        report = audit_benchmark_readiness(documents, catalog)
+
+        assistant = _surface(report, "local_assistant_capability")
+        check = _facet(assistant, "multi_turn_state_retention")["checks"][0]
+        self.assertFalse(check["ready"])
+        self.assertEqual(check["observation_count"], 5)
+        self.assertEqual(len(check["evidence_cohorts"]), 4)
+        self.assertEqual(
+            sum(item["observation_count"] for item in check["evidence_cohorts"]),
+            20,
+        )
+        self.assertEqual(check["unpooled_alternate_observation_count"], 15)
+        self.assertIn("insufficient_observations", check["blockers"])
+
+    def test_standalone_evidence_cannot_cross_score_surfaces(self):
+        catalog = _structurally_broad_catalog_with_assistant_diagnostic()
+        documents = _standalone_component_documents(
+            "local_coding_capability",
+            "multiturn_chat_memory_v1",
+        )
+
+        report = audit_benchmark_readiness(documents, catalog)
+
+        assistant = _surface(report, "local_assistant_capability")
+        check = _facet(assistant, "multi_turn_state_retention")["checks"][0]
+        self.assertFalse(check["ready"])
+        self.assertEqual(check["status"], "unobserved")
+        self.assertEqual(check["observation_count"], 0)
+        self.assertEqual(check["evidence_cohorts"], [])
+
     def test_surface_filter_keeps_readiness_scope_explicit(self):
         catalog = _structurally_broad_catalog()
 
@@ -250,6 +353,38 @@ def _add_component_observations(documents, surface_id, check_id, score=None):
                 "component_score": score if score is not None else 0.2 + index / 100.0,
             }
         )
+
+
+def _standalone_component_documents(surface_id, check_id, fixture_revision="fixture-v1"):
+    bands = ("1B", "4B", "9B")
+    return [
+        {
+            "artifact_kind": "capability_run",
+            "capability_run_id": "%s-standalone-%d" % (surface_id, index),
+            "protocol": {
+                "task_version": check_id,
+                "fixture_revision": (
+                    fixture_revision(index)
+                    if callable(fixture_revision)
+                    else fixture_revision
+                ),
+            },
+            "summary": {"score": 0.2 + index / 100.0, "state": "scored"},
+            "tasks": [{} for _ in range(8)],
+            "subject": {
+                "model": {
+                    "model": "models/%s-%d" % (surface_id, index % 10),
+                }
+            },
+            "evidence": {"surface": surface_id},
+            "model_family": "family-%d" % (index % 5),
+            "parameter_scale": bands[index % len(bands)],
+            "quantization_scheme": "q4_k_m",
+            "evidence_group_id": "group-%d" % (index // 10),
+            "evidence_group_provenance": "trusted_corpus_operator_v1",
+        }
+        for index in range(20)
+    ]
 
 
 def _calibrated_documents(catalog, saturated=False):
