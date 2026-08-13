@@ -24,7 +24,7 @@ from infergrade.cuda import windows_cuda_preflight
 from infergrade.environment import capture_environment
 from infergrade.images import docker_image_exists, local_build_command
 from infergrade.models import RunRequest
-from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cpp_runtime
+from infergrade.runtimes import selected_llama_cpp_runtime
 from infergrade.tls import tls_trust_configuration, verified_https_context
 
 
@@ -311,11 +311,25 @@ def _llama_native_binary_check(check_id: str, explicit_path: Optional[str], env_
     operator_override = bool(explicit_path or environment_path)
     managed_selection = None if operator_override else selected_llama_cpp_runtime()
     binary_kind = "cli" if "cli" in check_id else "server"
-    managed_path = managed_llama_cpp_binary_path(binary_kind) if not operator_override else None
-    requested = explicit_path or environment_path or managed_path or default_binary
-    path = shutil.which(requested)
+    selected_path = (
+        str(((managed_selection or {}).get("binaries") or {}).get(binary_kind) or "").strip()
+        if not operator_override
+        else ""
+    )
+    if operator_override:
+        requested = explicit_path or environment_path or default_binary
+        path = shutil.which(requested)
+    elif managed_selection is not None:
+        # A saved selection is an explicit preference. Do not silently fall back
+        # to a same-named PATH binary when its recorded executable disappears;
+        # runtime locking would still honor the stale selection and fail later.
+        requested = selected_path or default_binary
+        path = shutil.which(selected_path) if selected_path else None
+    else:
+        requested = default_binary
+        path = shutil.which(requested)
     install_hint = "brew install llama.cpp" if platform.system().lower() == "darwin" else None
-    source = "custom_path" if explicit_path else ("environment_path" if environment_path else ("managed_runtime" if managed_path else "system_path"))
+    source = "custom_path" if explicit_path else ("environment_path" if environment_path else ("managed_runtime" if managed_selection is not None else "system_path"))
     managed_details = {"managed_runtime": managed_selection} if source == "managed_runtime" else {}
     if not path:
         details = {
