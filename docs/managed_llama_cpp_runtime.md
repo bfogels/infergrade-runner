@@ -78,6 +78,13 @@ intentionally tar.gz-only. No lane writes repository contents, catalog
 metadata, releases, or support policy, and none of these package checks proves
 model compatibility.
 
+After all manual platform lanes pass, the workflow emits one candidate evidence
+ladder. It keeps release discovery, archive identity, native version execution,
+immutable materialization, exact recent-model canaries, exact benchmark
+qualifications, signed catalog policy, and support promotion as separate gates.
+The first incomplete gate is named as the next review action; the report never
+promotes a runtime automatically.
+
 `runtime/catalog/signed/` is currently a review-candidate root. Before
 production distribution, it will be replaced by a new production root version
 1 under the detached ceremony in `runtime_catalog_operations.md`; unreleased
