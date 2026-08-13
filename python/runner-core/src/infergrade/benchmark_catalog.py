@@ -295,12 +295,28 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         if policy.get("calibration_status") != "not_psychometrically_calibrated":
             failures.append(f"{surface_id}: calibration_status must preserve the non-calibrated claim boundary")
         calibration_policy = dict(policy.get("calibration_policy") or {})
+        headline_check_ids = {
+            check_id
+            for check_id, check in checks_by_id.items()
+            if check.get("surface_id") == surface_id
+            and check.get("evidence_kind") == "capability"
+            and isinstance(check.get("primary_score_weight"), (int, float))
+            and float(check.get("primary_score_weight")) > 0
+        }
+        surface_challenge_priorities = [
+            item for item in challenge_priorities
+            if headline_check_ids.issubset({
+                str(check_id)
+                for check_id in list(item.get("benchmark_check_ids") or [])
+            })
+        ]
         if (
             calibration_policy.get("minimum_headroom_challenge_observations")
-            and not challenge_priorities
+            and not surface_challenge_priorities
         ):
             failures.append(
-                f"{surface_id}: headroom challenge gate requires an explicit eligible campaign target"
+                f"{surface_id}: headroom challenge gate requires an explicit eligible campaign "
+                "target covering every positively weighted capability check"
             )
         weights = [
             float(check.get("primary_score_weight"))

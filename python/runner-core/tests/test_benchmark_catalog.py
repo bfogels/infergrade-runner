@@ -483,6 +483,24 @@ class BenchmarkCatalogTests(unittest.TestCase):
             failures,
         )
 
+    def test_catalog_legitimacy_validation_requires_complete_challenger_per_surface(self):
+        mutated = deepcopy(load_capability_catalog())
+        coding_challenge = next(
+            item
+            for item in mutated["coverage_expansion_priorities"]
+            if item.get("headroom_challenge_eligible") is True
+            and item.get("use_case") == "agentic_coding"
+        )
+        coding_challenge["benchmark_check_ids"].remove("coding_static_repair_v1")
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "local_coding_capability: headroom challenge gate requires an explicit eligible "
+            "campaign target covering every positively weighted capability check",
+            failures,
+        )
+
     def test_catalog_protocol_name_requires_a_versioned_label_pair(self):
         mutated = deepcopy(load_capability_catalog())
         policy = next(
