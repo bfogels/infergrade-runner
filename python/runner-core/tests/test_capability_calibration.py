@@ -29,6 +29,10 @@ class CapabilityCalibrationTests(unittest.TestCase):
             self.assertEqual(policy["minimum_headline_component_observations"], 8)
             self.assertEqual(policy["minimum_headline_component_model_families"], 3)
             self.assertEqual(policy["minimum_headline_component_parameter_bands"], 2)
+            self.assertEqual(
+                policy["minimum_headline_component_independently_replicated_setups"],
+                2,
+            )
             self.assertEqual(policy["maximum_headline_component_ceiling_fraction"], 0.2)
             self.assertEqual(policy["minimum_headline_component_headroom"], 0.1)
 
@@ -315,6 +319,110 @@ class CapabilityCalibrationTests(unittest.TestCase):
         self.assertNotIn(
             "headline_component_ceiling_fraction_above_limit:coding_static_repair_v1",
             report["blockers"],
+        )
+
+    def test_headline_component_requires_independent_setup_repeats_before_ceiling_judgment(self):
+        catalog = load_capability_catalog()
+        policy = policy_for_score_version("local_reasoning_score_v2", catalog=catalog)
+        policy.update({
+            "minimum_observations": 8,
+            "minimum_model_families": 1,
+            "minimum_parameter_bands": 1,
+            "minimum_unique_setups": 1,
+            "minimum_replicated_setups": 0,
+            "minimum_independently_replicated_setups": 0,
+            "minimum_current_generation_fraction": 0.0,
+            "maximum_largest_family_fraction": 1.0,
+            "maximum_single_setup_fraction": 1.0,
+        })
+        observations = [
+            {
+                "score_version": "local_reasoning_score_v2",
+                "surface_id": "local_reasoning_capability",
+                "score": 0.2 + index / 100.0,
+                "model_family": "family-%d" % (index % 4),
+                "parameter_band": ["under_3b", "8b_to_under_20b"][index % 2],
+                "model_identities": ["model-%d" % (index % 4)],
+                "quantization_scheme": "q4_k_m",
+                "evidence_group_id": "one-source",
+                "evidence_group_verified": True,
+                "components": [
+                    {"benchmark_id": "mmlu_pro_reference_v1", "score": 1.0},
+                    {"benchmark_id": "reasoning_exact_answer_v1", "score": 1.0},
+                ],
+            }
+            for index in range(8)
+        ]
+
+        same_source = audit_capability_observations(
+            observations,
+            "local_reasoning_score_v2",
+            policy=policy,
+            catalog=catalog,
+        )
+
+        exact = same_source["metrics"]["headline_components"]["reasoning_exact_answer_v1"]
+        self.assertEqual(exact["model_family_count"], 4)
+        self.assertEqual(exact["parameter_band_count"], 2)
+        self.assertEqual(exact["evidence_group_count"], 1)
+        self.assertEqual(exact["independently_replicated_setup_count"], 0)
+        self.assertIn(
+            "insufficient_headline_component_independently_replicated_setups:reasoning_exact_answer_v1",
+            same_source["blockers"],
+        )
+        self.assertNotIn(
+            "headline_component_ceiling_fraction_above_limit:reasoning_exact_answer_v1",
+            same_source["blockers"],
+        )
+        self.assertEqual(same_source["status"], "insufficient_calibration")
+
+        untrusted_claims = [
+            dict(
+                observation,
+                evidence_group_id="claimed-source-%d" % (index // 4),
+                evidence_group_verified=False,
+            )
+            for index, observation in enumerate(observations)
+        ]
+        untrusted_report = audit_capability_observations(
+            untrusted_claims,
+            "local_reasoning_score_v2",
+            policy=policy,
+            catalog=catalog,
+        )
+        untrusted_exact = untrusted_report["metrics"]["headline_components"][
+            "reasoning_exact_answer_v1"
+        ]
+        self.assertEqual(untrusted_exact["evidence_group_count"], 0)
+        self.assertEqual(untrusted_exact["ungrouped_observation_count"], 8)
+        self.assertEqual(untrusted_exact["independently_replicated_setup_count"], 0)
+        self.assertIn(
+            "insufficient_headline_component_independently_replicated_setups:reasoning_exact_answer_v1",
+            untrusted_report["blockers"],
+        )
+
+        independently_repeated = [
+            dict(observation, evidence_group_id="source-%d" % (index // 4))
+            for index, observation in enumerate(observations)
+        ]
+        repeated_report = audit_capability_observations(
+            independently_repeated,
+            "local_reasoning_score_v2",
+            policy=policy,
+            catalog=catalog,
+        )
+        repeated_exact = repeated_report["metrics"]["headline_components"][
+            "reasoning_exact_answer_v1"
+        ]
+        self.assertEqual(repeated_exact["evidence_group_count"], 2)
+        self.assertEqual(repeated_exact["independently_replicated_setup_count"], 4)
+        self.assertNotIn(
+            "insufficient_headline_component_independently_replicated_setups:reasoning_exact_answer_v1",
+            repeated_report["blockers"],
+        )
+        self.assertIn(
+            "headline_component_ceiling_fraction_above_limit:reasoning_exact_answer_v1",
+            repeated_report["blockers"],
         )
 
     def test_runner_policy_blocks_legacy_repeat_farming(self):

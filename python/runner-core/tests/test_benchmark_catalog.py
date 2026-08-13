@@ -91,6 +91,10 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(calibration_policy["minimum_unique_setups"], 8)
         self.assertEqual(calibration_policy["minimum_replicated_setups"], 4)
         self.assertEqual(calibration_policy["minimum_independently_replicated_setups"], 4)
+        self.assertEqual(
+            calibration_policy["minimum_headline_component_independently_replicated_setups"],
+            2,
+        )
         self.assertEqual(calibration_policy["minimum_current_generation_fraction"], 0.75)
         self.assertEqual(calibration_policy["maximum_single_setup_fraction"], 0.25)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_coverage_fraction"], 0.5)
@@ -110,6 +114,12 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.assertEqual(
                 task_policy["calibration_policy"]["minimum_independently_replicated_setups"],
                 4,
+            )
+            self.assertEqual(
+                task_policy["calibration_policy"][
+                    "minimum_headline_component_independently_replicated_setups"
+                ],
+                2,
             )
             self.assertEqual(task_policy["calibration_policy"]["minimum_current_generation_fraction"], 0.75)
             self.assertEqual(task_policy["calibration_policy"]["maximum_suite_ceiling_fraction"], 0.2)
