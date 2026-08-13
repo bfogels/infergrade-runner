@@ -7,6 +7,7 @@ import {
   assignmentPreflightPresentation,
   assignmentProgressStage,
   assignmentTitleFromRunId,
+  catalogRuntimeRepairRequirement,
   desktopReadinessPresentation,
   displayCacheArtifactName,
   firstRunHandoffFromDeepLink,
@@ -172,6 +173,7 @@ let currentAssignmentResultId = "";
 let currentAssignmentPhase = "idle";
 let recentCompletion = null;
 let pendingRequiredRuntime = null;
+let pendingManagedRuntimeRepair = false;
 let currentHandoffRunId = "";
 let currentHandoffWorkerId = "";
 let previewStateApplied = false;
@@ -450,6 +452,7 @@ function renderAssignmentStages({ phase = "", checkName = "", progress = 0, wait
 
 function renderAssignmentIdle() {
   pendingRequiredRuntime = null;
+  pendingManagedRuntimeRepair = false;
   if (!assignmentPanel) {
     return;
   }
@@ -504,6 +507,8 @@ function renderRecentCompletion() {
     return;
   }
   const completion = recentCompletion;
+  pendingRequiredRuntime = null;
+  pendingManagedRuntimeRepair = false;
   assignmentPanel.dataset.state = "completed";
   currentAssignmentRunId = completion.runId;
   currentAssignmentResultId = completion.resultId;
@@ -593,8 +598,12 @@ function renderAssignmentActive({
     assignmentStartListeningButton.hidden = !waitingForListener;
   }
   if (assignmentInstallRuntimeButton) {
-    assignmentInstallRuntimeButton.hidden = !pendingRequiredRuntime;
-    assignmentInstallRuntimeButton.textContent = pendingRequiredRuntime ? "Install runtime and retry" : "Install required runtime";
+    assignmentInstallRuntimeButton.hidden = !pendingRequiredRuntime && !pendingManagedRuntimeRepair;
+    assignmentInstallRuntimeButton.textContent = pendingRequiredRuntime
+      ? "Install runtime and retry"
+      : pendingManagedRuntimeRepair
+      ? "Repair runtime and retry"
+      : "Install required runtime";
   }
   if (assignmentOpenHubButton && phase !== "Complete") {
     assignmentOpenHubButton.textContent = phase === "Ready to retry" ? "Retry in Hub" : "Open in Hub";
@@ -726,7 +735,7 @@ function applyPreviewStateFromUrl() {
     return;
   }
   previewStateApplied = true;
-  if (mockState === "ready" || mockAssignment === "active") {
+  if (mockState === "ready" || ["active", "runtime-repair"].includes(mockAssignment)) {
     savedTokenAvailable = true;
     runnerProfileAvailable = true;
     childProcess = { preview: true };
@@ -772,6 +781,16 @@ function applyPreviewStateFromUrl() {
       checkName: "llama.cpp readiness check",
       remaining: "about 6 min remaining",
       runId: "run_preview_assignment",
+    });
+  } else if (mockAssignment === "runtime-repair") {
+    pendingManagedRuntimeRepair = true;
+    renderAssignmentActive({
+      title: "Qwen3.5-4B · benchmark evidence run",
+      phase: "Needs attention",
+      description: "The saved llama.cpp executable is unavailable. Repair the runtime here, then Runner will retry this benchmark.",
+      progress: 100,
+      checkName: "Saved runtime needs repair",
+      runId: "run_preview_runtime_repair",
     });
   } else if (mockAssignment === "paused") {
     currentHandoffRunId = "run_qwen3_5_9b_complete_the_missing_benchmark_evidence_preview";
@@ -1770,6 +1789,7 @@ function renderAssignmentFromListenerEvent(payload = {}) {
   const recovery = phase === "Needs attention" ? assignmentEventRecovery(payload) : null;
   if (recovery) {
     pendingRequiredRuntime = recovery.requiredRuntime;
+    pendingManagedRuntimeRepair = ["repair_saved_runtime", "install_managed_runtime"].includes(recovery.kind);
   }
   renderAssignmentActive({
     title: redactSecrets(payload.title || assignmentTitleFromRunId(runId)),
@@ -1814,6 +1834,7 @@ function renderAssignmentFromListenerLine(line = "") {
   const claimed = trimmed.match(/^Claimed run ([^\.\s]+)\.?/);
   if (claimed) {
     pendingRequiredRuntime = null;
+    pendingManagedRuntimeRepair = false;
     const runId = claimed[1];
     renderAssignmentActive({
       title: assignmentTitleFromRunId(runId),
@@ -1829,8 +1850,12 @@ function renderAssignmentFromListenerLine(line = "") {
   const failed = trimmed.match(/^Run ([^\.\s]+) failed: (.+)$/);
   if (failed) {
     const runId = failed[1];
+    if (currentAssignmentRunId === runId && currentAssignmentPhase === "Needs attention") {
+      return true;
+    }
     const recovery = assignmentFailureRecovery(failed[2]);
     pendingRequiredRuntime = recovery.requiredRuntime;
+    pendingManagedRuntimeRepair = false;
     renderAssignmentActive({
       title: assignmentTitleFromRunId(runId),
       phase: "Needs attention",
@@ -2286,6 +2311,80 @@ async function installRequiredCatalogRuntime() {
     appendLog(`Installed required signed-catalog runtime: ${JSON.stringify(result)}`);
   }
   return { runtime: result, resume: null, resumeError };
+}
+
+async function resumeRunAfterRuntimeRepair(runtimeResult, checkName) {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) throw new Error("Open the desktop app to retry this benchmark.");
+  const runId = currentAssignmentRunId || currentFirstRunUploadRunId();
+  if (!runId) {
+    renderAssignmentActive({
+      title: "Runtime ready",
+      phase: "Ready to retry",
+      description: "The runtime is ready. Return to Hub and queue the benchmark again.",
+      progress: 100,
+      checkName,
+    });
+    return { runtime: runtimeResult, resume: null };
+  }
+  let resumed = null;
+  let resumeError = "";
+  try {
+    resumed = await invoke("resume_hub_run", { apiUrl: readApiUrl(), runId });
+  } catch (error) {
+    resumeError = redactSecrets(String(error?.message || error || "Hub retry failed"));
+  }
+  if (!resumed?.resume_requested) {
+    renderAssignmentActive({
+      title: assignmentTitleFromRunId(runId),
+      phase: "Ready to retry",
+      description: "The runtime is repaired, but Hub could not requeue this run. Retry it from Hub; Runner will repeat all claim-bound checks.",
+      progress: 100,
+      checkName: "Runtime repaired",
+      runId,
+    });
+    setStatus("Runtime ready · retry in Hub", "warning");
+    if (resumeError) appendLog(`Runtime repaired, but Hub retry failed: ${resumeError}`);
+    return { runtime: runtimeResult, resume: null, resumeError };
+  }
+  renderAssignmentActive({
+    title: assignmentTitleFromRunId(runId),
+    phase: childProcess ? "Ready to claim" : "Ready to start",
+    description: childProcess
+      ? "The runtime is repaired and this run is requeued. Runner will repeat exact artifact, runtime, and model checks."
+      : "The runtime is repaired and this run is requeued. Start listening to continue.",
+    progress: 10,
+    checkName,
+    runId,
+    waitingForListener: !childProcess,
+  });
+  setStatus("Runtime ready · run requeued", "good");
+  return { runtime: runtimeResult, resume: resumed };
+}
+
+async function repairManagedRuntimeAndRetry() {
+  if (!pendingManagedRuntimeRepair) return null;
+  const invoke = await loadTauriInvoke();
+  if (!invoke) throw new Error("Open the desktop app to repair the runtime.");
+  const plan = await invoke("llama_cpp_runtime_plan");
+  const required = catalogRuntimeRepairRequirement(plan);
+  let result;
+  if (required) {
+    llamaRuntimeReadiness = `Repairing reviewed runtime ${required.runtimeBuildId.slice(0, 12)}…`;
+    renderLocalReadinessChecklist();
+    result = await invoke("install_required_runtime_catalog_target", {
+      targetName: required.targetName,
+      consentRuntimeBuildId: required.runtimeBuildId,
+    });
+  } else {
+    result = await installManagedRuntime({ reinstall: plan?.selected_runtime?.status !== "not_selected" });
+  }
+  pendingManagedRuntimeRepair = false;
+  llamaRuntimeReadiness = managedRuntimeInstallSummary(result);
+  llamaRuntimeAvailable = true;
+  renderLocalReadinessChecklist();
+  appendLog("Runtime repair completed; the failed run will be requeued for all claim-bound checks.");
+  return resumeRunAfterRuntimeRepair(result, "Runtime repaired · Hub run requeued");
 }
 
 async function removeSelectedRuntime() {
@@ -3031,10 +3130,18 @@ runtimeInstallManagedButton?.addEventListener("click", () => {
 });
 
 assignmentInstallRuntimeButton?.addEventListener("click", () => {
-  installRequiredCatalogRuntime()
+  const repairingManagedRuntime = !pendingRequiredRuntime && pendingManagedRuntimeRepair;
+  if (!pendingRequiredRuntime && !pendingManagedRuntimeRepair) return;
+  assignmentInstallRuntimeButton.disabled = true;
+  const action = pendingRequiredRuntime ? installRequiredCatalogRuntime() : repairManagedRuntimeAndRetry();
+  Promise.resolve(action)
     .catch((error) => {
-      setStatus("Required runtime install failed", "error");
-      appendLog(`Could not install required signed-catalog runtime: ${error.message || error}`);
+      setStatus(repairingManagedRuntime ? "Runtime repair failed" : "Required runtime install failed", "error");
+      appendLog(
+        repairingManagedRuntime
+          ? `Could not repair the saved runtime: ${error.message || error}`
+          : `Could not install required signed-catalog runtime: ${error.message || error}`
+      );
     })
     .finally(() => {
       assignmentInstallRuntimeButton.disabled = false;

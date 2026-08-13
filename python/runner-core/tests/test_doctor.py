@@ -307,6 +307,52 @@ class DoctorTests(unittest.TestCase):
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.selected_llama_cpp_runtime")
     @mock.patch("infergrade.doctor.shutil.which")
+    def test_doctor_does_not_hide_stale_saved_runtime_behind_path_binary(
+        self,
+        which_mock,
+        selected_runtime_mock,
+        capture_environment_mock,
+    ):
+        capture_environment_mock.return_value = {
+            "environment_class": "local_workstation",
+            "hardware_class": "apple_silicon",
+            "accelerator_api": "metal",
+            "accelerator_type": "gpu",
+            "accelerator_count": 1,
+            "hardware_id": "hw_test",
+        }
+        selected_runtime_mock.return_value = {
+            "runtime_id": "llama-cpp-saved-runtime",
+            "source": "managed_download",
+            "binaries": {
+                "cli": "/missing/llama-cli",
+                "server": "/missing/llama-server",
+            },
+        }
+        which_mock.side_effect = lambda name: (
+            "/opt/homebrew/bin/%s" % name if name in ("llama-cli", "llama-server") else None
+        )
+        request = RunRequest(
+            model="Qwen/Qwen3.5-4B",
+            backend="llama.cpp",
+            tier="canary",
+            quant_artifact=os.path.join(self.tempdir.name, "missing.gguf"),
+            execution_mode="local_native",
+            simulate=False,
+        )
+
+        report = run_doctor(request=request)
+
+        checks = {item["id"]: item for item in report["checks"]}
+        self.assertEqual(checks["llama_cli_native"]["status"], "error")
+        self.assertEqual(checks["llama_cli_native"]["details"]["source"], "managed_runtime")
+        self.assertEqual(checks["llama_cli_native"]["details"]["requested"], "/missing/llama-cli")
+        self.assertEqual(checks["llama_server_native"]["status"], "error")
+        self.assertNotIn("/opt/homebrew/bin", str(checks["llama_cli_native"]))
+
+    @mock.patch("infergrade.doctor.capture_environment")
+    @mock.patch("infergrade.doctor.selected_llama_cpp_runtime")
+    @mock.patch("infergrade.doctor.shutil.which")
     def test_doctor_reports_custom_native_llama_paths(
         self,
         which_mock,

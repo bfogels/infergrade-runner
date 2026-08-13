@@ -165,6 +165,14 @@ infergrade-runner runtime install
   the run. Mutation or a missing lock fails the attempt; it never triggers a
   silent runtime substitution. Resume verifies the saved lock and marks the
   same attempt active again before backend execution.
+- Before a per-attempt lock exists, Doctor treats a saved selection as
+  authoritative and will not hide a missing selected executable behind a
+  same-named binary on `PATH`. Desktop can explicitly repair that selection:
+  it reinstalls the same signed-catalog target when the saved assertion is
+  valid, otherwise installs the pinned managed fallback, then asks Hub to
+  requeue the failed run so artifact, runtime, and model checks all repeat.
+  The structured failure sent to Hub names the selection source without
+  including the local executable path.
 - Clearing a selected runtime removes only the mutable preference. It never
   deletes immutable managed bytes. Cross-process leases, crashed-run recovery,
   inventory, and safe pruning remain a separate lifecycle feature; until that
