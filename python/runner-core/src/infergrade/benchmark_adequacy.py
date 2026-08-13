@@ -163,13 +163,24 @@ def _surface_adequacy(
     )
     minimum_refreshable = int(policy.get("minimum_refreshable_priority_facets") or 0)
     freshness_ready = len(set(refreshable_runnable) & priority_facets) >= minimum_refreshable
-    saturation_risks = sorted(
+    headline_saturation_risks = sorted(
         str(item.get("check_id"))
         for item in headline
         if _known_saturation_risk(item)
     )
+    diagnostic_saturation_risks = sorted(
+        str(item.get("check_id"))
+        for item in diagnostics
+        if _known_saturation_risk(item)
+    )
     scoped_ready = not missing_scoped
-    broad_ready = scoped_ready and not missing_priority and freshness_ready and not saturation_risks
+    broad_ready = (
+        scoped_ready
+        and not missing_priority
+        and freshness_ready
+        and not headline_saturation_risks
+        and not diagnostic_saturation_risks
+    )
     if not scoped_ready:
         status = "scoped_claim_coverage_gap"
     elif broad_ready:
@@ -194,7 +205,8 @@ def _surface_adequacy(
         "headline_check_ids": sorted(str(item.get("check_id")) for item in headline),
         "diagnostic_check_ids": sorted(str(item.get("check_id")) for item in diagnostics),
         "planned_check_ids": sorted(str(item.get("check_id")) for item in planned_checks),
-        "known_headline_saturation_risks": saturation_risks,
+        "known_headline_saturation_risks": headline_saturation_risks,
+        "known_diagnostic_saturation_risks": diagnostic_saturation_risks,
         "distribution_calibration_status": score_policy.get("distribution_calibration_status"),
         "freshness": {
             "minimum_refreshable_priority_facets": minimum_refreshable,

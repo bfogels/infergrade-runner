@@ -26,6 +26,10 @@ class BenchmarkAdequacyTests(unittest.TestCase):
         assistant = by_surface["local_assistant_capability"]
         self.assertIn("tool_use", assistant["planned_only_priority_facets"])
         self.assertIn("long_context_task_reasoning", assistant["planned_only_priority_facets"])
+        self.assertEqual(
+            assistant["known_diagnostic_saturation_risks"],
+            ["multiturn_chat_memory_v1"],
+        )
         self.assertFalse(assistant["freshness"]["ready"])
 
         coding = by_surface["local_coding_capability"]
@@ -76,6 +80,27 @@ class BenchmarkAdequacyTests(unittest.TestCase):
                 "provisional_pending_distribution_audit",
             )
         self.assertIn("does not prove", report["interpretation"])
+
+    def test_saturated_diagnostic_blocks_broad_readiness_without_blocking_narrow_scope(self):
+        catalog = deepcopy(load_capability_catalog())
+        assistant = next(
+            item for item in catalog["surface_score_policies"]
+            if item["surface_id"] == "local_assistant_capability"
+        )
+        assistant_policy = assistant["representativeness_policy"]
+        assistant_policy["priority_facets"] = list(assistant_policy["scoped_claim_facets"]) + [
+            "multi_turn_state_retention"
+        ]
+        assistant_policy["planned_check_ids"] = []
+        assistant_policy["minimum_refreshable_priority_facets"] = 0
+
+        surface = audit_benchmark_adequacy(catalog, surface_id="local_assistant_capability")["surfaces"][0]
+
+        self.assertTrue(surface["scoped_claim_coverage_ready"])
+        self.assertEqual(surface["missing_priority_facets"], [])
+        self.assertEqual(surface["known_headline_saturation_risks"], [])
+        self.assertEqual(surface["known_diagnostic_saturation_risks"], ["multiturn_chat_memory_v1"])
+        self.assertFalse(surface["broad_surface_coverage_ready"])
 
 
 if __name__ == "__main__":
