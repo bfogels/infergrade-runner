@@ -183,6 +183,7 @@ def _build_result_record(
     config_payload = {
         "model": request.model,
         "quant_artifact": request.quant_artifact,
+        "quant_artifact_revision": request.quant_artifact_revision,
         "quant_artifact_sha256": request.quant_artifact_sha256,
         "backend": request.backend,
         "backend_image": request.backend_image,
@@ -217,7 +218,7 @@ def _build_result_record(
             "model_instance_name": request.model.split("/")[-1],
             "model_source": "user_input",
             "model_source_repo": request.model,
-            "model_revision": "unspecified",
+            "model_revision": request.quant_artifact_revision or "unspecified",
             "quant_label": request.quant_artifact_filename or (os.path.basename(request.quant_artifact) if request.quant_artifact else "auto_resolved"),
             "quant_format": quant_format,
             "quant_artifact_sha256": artifact_sha256,
