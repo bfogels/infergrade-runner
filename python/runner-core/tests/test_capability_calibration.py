@@ -16,15 +16,16 @@ class CapabilityCalibrationTests(unittest.TestCase):
         coding = policy_for_score_version("local_coding_score_v2", catalog=catalog)
         reasoning = policy_for_score_version("local_reasoning_score_v2", catalog=catalog)
 
-        self.assertEqual(assistant["policy_id"], "capability_headroom_gate_v2")
-        self.assertEqual(coding["policy_id"], "coding_capability_headroom_gate_v1")
-        self.assertEqual(reasoning["policy_id"], "reasoning_capability_headroom_gate_v1")
+        self.assertEqual(assistant["policy_id"], "capability_headroom_gate_v3")
+        self.assertEqual(coding["policy_id"], "coding_capability_headroom_gate_v2")
+        self.assertEqual(reasoning["policy_id"], "reasoning_capability_headroom_gate_v2")
         for policy in (assistant, coding, reasoning):
             self.assertEqual(policy["minimum_observations"], 20)
             self.assertEqual(policy["minimum_unique_setups"], 8)
             self.assertEqual(policy["minimum_replicated_setups"], 4)
             self.assertEqual(policy["minimum_independently_replicated_setups"], 4)
             self.assertEqual(policy["maximum_suite_ceiling_fraction"], 0.2)
+            self.assertEqual(policy["ceiling_fraction_confidence_level"], 0.95)
             self.assertEqual(policy["minimum_suite_headroom"], 0.1)
             self.assertEqual(policy["minimum_headline_component_observations"], 8)
             self.assertEqual(policy["minimum_headline_component_model_families"], 3)
@@ -69,6 +70,82 @@ class CapabilityCalibrationTests(unittest.TestCase):
         self.assertEqual(report["status"], "calibrated_headroom")
         self.assertTrue(report["headline_ready"])
         self.assertEqual(report["blockers"], [])
+
+    def test_small_clean_sample_cannot_prove_ceiling_rate_below_policy(self):
+        policy = {
+            "minimum_observations": 8,
+            "minimum_model_families": 1,
+            "minimum_parameter_bands": 1,
+            "minimum_distinct_scores": 1,
+            "maximum_suite_ceiling_fraction": 0.2,
+            "ceiling_fraction_confidence_level": 0.95,
+            "minimum_suite_headroom": 0.1,
+            "maximum_largest_family_fraction": 1.0,
+        }
+        observations = [
+            {
+                "score_version": "test-score-v1",
+                "score": 0.2 + index / 100.0,
+                "model_family": "family-a",
+                "parameter_band": "under_3b",
+            }
+            for index in range(8)
+        ]
+
+        report = audit_capability_observations(
+            observations,
+            "test-score-v1",
+            policy=policy,
+        )
+
+        self.assertEqual(report["metrics"]["suite_ceiling_count"], 0)
+        self.assertEqual(report["metrics"]["suite_ceiling_fraction"], 0.0)
+        self.assertEqual(
+            report["metrics"]["suite_ceiling_fraction_wilson_upper_bound"],
+            0.324408,
+        )
+        self.assertIn(
+            "insufficient_suite_ceiling_fraction_confidence",
+            report["blockers"],
+        )
+        self.assertEqual(report["status"], "insufficient_calibration")
+
+    def test_sixteen_clean_observations_clear_twenty_percent_confidence_limit(self):
+        policy = {
+            "minimum_observations": 8,
+            "minimum_model_families": 1,
+            "minimum_parameter_bands": 1,
+            "minimum_distinct_scores": 1,
+            "maximum_suite_ceiling_fraction": 0.2,
+            "ceiling_fraction_confidence_level": 0.95,
+            "minimum_suite_headroom": 0.1,
+            "maximum_largest_family_fraction": 1.0,
+        }
+        observations = [
+            {
+                "score_version": "test-score-v1",
+                "score": 0.2 + index / 100.0,
+                "model_family": "family-a",
+                "parameter_band": "under_3b",
+            }
+            for index in range(16)
+        ]
+
+        report = audit_capability_observations(
+            observations,
+            "test-score-v1",
+            policy=policy,
+        )
+
+        self.assertEqual(
+            report["metrics"]["suite_ceiling_fraction_wilson_upper_bound"],
+            0.193608,
+        )
+        self.assertNotIn(
+            "insufficient_suite_ceiling_fraction_confidence",
+            report["blockers"],
+        )
+        self.assertTrue(report["headline_ready"])
 
     def test_curated_headroom_challenge_is_required_after_generic_diversity_passes(self):
         policy = {

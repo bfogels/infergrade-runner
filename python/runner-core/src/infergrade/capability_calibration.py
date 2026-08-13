@@ -13,6 +13,7 @@ from statistics import mean, median
 from typing import Any, Dict, Iterable, List, Optional
 
 from infergrade.benchmark_catalog import check_index, load_capability_catalog, surface_score_policy_index
+from infergrade.statistical_bounds import wilson_score_upper_bound
 
 
 DEFAULT_POLICY = {
@@ -22,6 +23,7 @@ DEFAULT_POLICY = {
     "minimum_parameter_bands": 3,
     "minimum_distinct_scores": 6,
     "maximum_suite_ceiling_fraction": 0.2,
+    "ceiling_fraction_confidence_level": 0.95,
     "maximum_largest_family_fraction": 0.4,
 }
 TRUSTED_EVIDENCE_GROUP_PROVENANCE = "trusted_corpus_operator_v1"
@@ -360,6 +362,14 @@ def audit_capability_observations(
     effective_policy.update(policy or {})
     count = len(scores)
     ceiling_count = sum(1 for value in scores if math.isclose(value, 1.0, abs_tol=1e-9))
+    ceiling_confidence_level = float(
+        effective_policy["ceiling_fraction_confidence_level"]
+    )
+    ceiling_fraction_upper_bound = wilson_score_upper_bound(
+        ceiling_count,
+        count,
+        ceiling_confidence_level,
+    )
     largest_family_count = max(families.values()) if families else 0
     setup_counts = Counter(_observation_setup_key(item) for item in selected)
     replicated_setup_count = sum(1 for setup_count in setup_counts.values() if setup_count >= 2)
@@ -451,6 +461,12 @@ def audit_capability_observations(
         "headroom_to_suite_ceiling": round(1.0 - max(scores), 6) if scores else None,
         "suite_ceiling_count": ceiling_count,
         "suite_ceiling_fraction": round(ceiling_count / float(count), 6) if count else None,
+        "suite_ceiling_fraction_confidence_level": ceiling_confidence_level,
+        "suite_ceiling_fraction_wilson_upper_bound": (
+            round(ceiling_fraction_upper_bound, 6)
+            if ceiling_fraction_upper_bound is not None
+            else None
+        ),
         "largest_family_fraction": round(largest_family_count / float(count), 6) if count else None,
         "largest_setup_fraction": round(largest_setup_count / float(count), 6) if count else None,
         "family_counts": dict(sorted(families.items())),
@@ -506,6 +522,12 @@ def audit_capability_observations(
         and metrics["headroom_to_suite_ceiling"] < float(effective_policy["minimum_suite_headroom"])
     ):
         blockers.append("insufficient_suite_headroom")
+    elif (
+        metrics["suite_ceiling_fraction_wilson_upper_bound"] is not None
+        and metrics["suite_ceiling_fraction_wilson_upper_bound"]
+        > float(effective_policy["maximum_suite_ceiling_fraction"])
+    ):
+        blockers.append("insufficient_suite_ceiling_fraction_confidence")
     if metrics["largest_family_fraction"] is not None and metrics["largest_family_fraction"] > float(effective_policy["maximum_largest_family_fraction"]):
         blockers.append("largest_family_fraction_above_limit")
     if (
@@ -567,6 +589,16 @@ def audit_capability_observations(
             < float(effective_policy["minimum_headline_component_headroom"])
         ):
             blockers.append("insufficient_headline_component_headroom:%s" % component_id)
+        elif (
+            maximum_component_ceiling_fraction is not None
+            and component["suite_ceiling_fraction_wilson_upper_bound"] is not None
+            and component["suite_ceiling_fraction_wilson_upper_bound"]
+            > float(maximum_component_ceiling_fraction)
+        ):
+            blockers.append(
+                "insufficient_headline_component_ceiling_fraction_confidence:%s"
+                % component_id
+            )
     insufficient = any(item.startswith("insufficient_") for item in blockers)
     status = (
         "evidence_integrity_risk"
@@ -575,7 +607,7 @@ def audit_capability_observations(
     )
     return {
         "artifact_kind": "capability_calibration_audit",
-        "artifact_spec_version": "0.1.0",
+        "artifact_spec_version": "0.2.0",
         "score_version": score_version,
         "status": status,
         "headline_ready": not blockers,
@@ -587,7 +619,10 @@ def audit_capability_observations(
             "evidence_group_id values bearing trusted_corpus_operator_v1 provenance; missing or untrusted "
             "provenance never counts as independence. Headroom-challenge membership comes only from an "
             "explicit current or recent Runner campaign target; it is a suite stress role, not a general "
-            "capability or frontier claim. The audit never rescales, curves, or caps raw benchmark attainment."
+            "capability or frontier claim. Wilson upper bounds prevent a small sample with few ceiling "
+            "hits from being treated as proof that the ceiling rate is below policy; they are a screening "
+            "bound, not proof of population independence. The audit never rescales, curves, or caps raw "
+            "benchmark attainment."
         ),
     }
 
@@ -642,6 +677,9 @@ def _headline_component_metrics(
         return {}
     headline_ids = _headline_component_ids(observations, score_version, catalog)
     near_ceiling_threshold = float(policy.get("near_ceiling_threshold") or 0.9)
+    ceiling_confidence_level = float(
+        policy.get("ceiling_fraction_confidence_level") or 0.95
+    )
     metrics = {}
     for component_id in headline_ids:
         component_rows = [
@@ -679,6 +717,11 @@ def _headline_component_metrics(
             for group_id in groups
         })
         ceiling_count = sum(1 for score in scores if math.isclose(score, 1.0, abs_tol=1e-9))
+        ceiling_fraction_upper_bound = wilson_score_upper_bound(
+            ceiling_count,
+            len(scores),
+            ceiling_confidence_level,
+        )
         near_ceiling_count = sum(1 for score in scores if score >= near_ceiling_threshold)
         maximum = max(scores) if scores else None
         metrics[component_id] = {
@@ -699,6 +742,12 @@ def _headline_component_metrics(
             "headroom_to_suite_ceiling": round(1.0 - maximum, 6) if maximum is not None else None,
             "suite_ceiling_count": ceiling_count,
             "suite_ceiling_fraction": round(ceiling_count / float(len(scores)), 6) if scores else None,
+            "suite_ceiling_fraction_confidence_level": ceiling_confidence_level,
+            "suite_ceiling_fraction_wilson_upper_bound": (
+                round(ceiling_fraction_upper_bound, 6)
+                if ceiling_fraction_upper_bound is not None
+                else None
+            ),
             "near_ceiling_threshold": near_ceiling_threshold,
             "near_ceiling_count": near_ceiling_count,
             "near_ceiling_fraction": round(near_ceiling_count / float(len(scores)), 6) if scores else None,

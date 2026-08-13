@@ -13,6 +13,7 @@ from infergrade.capability_calibration import (
     extract_calibration_observations,
     policy_for_score_version,
 )
+from infergrade.statistical_bounds import wilson_score_upper_bound
 
 
 def audit_benchmark_readiness(
@@ -92,7 +93,7 @@ def audit_benchmark_readiness(
     broad_ready = bool(surfaces) and all(item["broad_surface_ready"] for item in surfaces)
     return {
         "artifact_kind": "benchmark_readiness_audit",
-        "artifact_spec_version": "0.4.0",
+        "artifact_spec_version": "0.5.0",
         "catalog_version": payload.get("catalog_version"),
         "catalog_metadata_valid": metadata_valid,
         "catalog_metadata_errors": metadata_errors,
@@ -114,7 +115,8 @@ def audit_benchmark_readiness(
             "diversity and headroom, and representative observations for every priority capability facet. "
             "A facet counts only when one protocol-identity cohort for a supporting check independently "
             "clears its observation, model-family, parameter-band, repeat, and headroom gates; standalone "
-            "evidence must also meet the check's declared minimum task count. Missing "
+            "evidence must also meet the check's declared minimum task count. A Wilson upper bound keeps "
+            "small samples from prematurely clearing the ceiling-rate gate. Missing "
             "result evidence fails closed. "
             "Raw benchmark attainment is never curved, capped, or rescaled by this audit."
         ),
@@ -408,6 +410,14 @@ def _priority_cohort_metrics(
     independent_setups = sum(1 for groups in setup_groups.values() if len(groups) >= 2)
     ceiling_count = sum(1 for score in scores if math.isclose(score, 1.0, abs_tol=1e-9))
     ceiling_fraction = round(ceiling_count / float(len(scores)), 6) if scores else None
+    ceiling_confidence_level = float(
+        policy.get("ceiling_fraction_confidence_level") or 0.95
+    )
+    ceiling_fraction_upper_bound = wilson_score_upper_bound(
+        ceiling_count,
+        len(scores),
+        ceiling_confidence_level,
+    )
     maximum = max(scores) if scores else None
     headroom = round(1.0 - maximum, 6) if maximum is not None else None
     blockers = []
@@ -434,6 +444,12 @@ def _priority_cohort_metrics(
         and headroom < float(policy.get("minimum_suite_headroom") or 0.0)
     ):
         blockers.append("insufficient_suite_headroom")
+    elif (
+        ceiling_fraction_upper_bound is not None
+        and ceiling_fraction_upper_bound
+        > float(policy.get("maximum_suite_ceiling_fraction") or 0.0)
+    ):
+        blockers.append("insufficient_suite_ceiling_fraction_confidence")
     required_slice_metrics = {}
     for slice_id in list((slice_policy or {}).get("required_slices") or []):
         slice_rows = []
@@ -498,6 +514,12 @@ def _priority_cohort_metrics(
         "parameter_band_count": len(bands),
         "independently_replicated_setup_count": independent_setups,
         "suite_ceiling_fraction": ceiling_fraction,
+        "suite_ceiling_fraction_confidence_level": ceiling_confidence_level,
+        "suite_ceiling_fraction_wilson_upper_bound": (
+            round(ceiling_fraction_upper_bound, 6)
+            if ceiling_fraction_upper_bound is not None
+            else None
+        ),
         "headroom_to_suite_ceiling": headroom,
         "required_slice_metrics": required_slice_metrics,
         "required_slice_evidence_complete": required_slice_evidence_complete,

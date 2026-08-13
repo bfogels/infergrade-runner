@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-13-tier-representativeness-audit",
+  "catalog_version": "2026-08-13-ceiling-confidence-bounds",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -53,7 +53,7 @@
       "calibration_status": "not_psychometrically_calibrated",
       "distribution_calibration_status": "provisional_pending_distribution_audit",
       "calibration_policy": {
-        "policy_id": "capability_headroom_gate_v2",
+        "policy_id": "capability_headroom_gate_v3",
         "minimum_observations": 20,
         "minimum_model_families": 5,
         "minimum_parameter_bands": 3,
@@ -66,6 +66,7 @@
         "minimum_headroom_challenge_model_families": 1,
         "minimum_headroom_challenge_independently_replicated_setups": 1,
         "maximum_suite_ceiling_fraction": 0.2,
+        "ceiling_fraction_confidence_level": 0.95,
         "minimum_suite_headroom": 0.1,
         "minimum_headline_component_observations": 8,
         "minimum_headline_component_model_families": 3,
@@ -105,12 +106,13 @@
         ],
         "minimum_refreshable_priority_facets": 1,
         "empirical_priority_facet_policy": {
-          "policy_id": "priority_facet_evidence_gate_v1",
-          "minimum_observations": 8,
+          "policy_id": "priority_facet_evidence_gate_v2",
+          "minimum_observations": 16,
           "minimum_model_families": 3,
           "minimum_parameter_bands": 2,
           "minimum_independently_replicated_setups": 2,
           "maximum_suite_ceiling_fraction": 0.2,
+          "ceiling_fraction_confidence_level": 0.95,
           "minimum_suite_headroom": 0.1
         }
       },
@@ -129,7 +131,7 @@
       "calibration_status": "not_psychometrically_calibrated",
       "distribution_calibration_status": "provisional_pending_distribution_audit",
       "calibration_policy": {
-        "policy_id": "coding_capability_headroom_gate_v1",
+        "policy_id": "coding_capability_headroom_gate_v2",
         "minimum_observations": 20,
         "minimum_model_families": 5,
         "minimum_parameter_bands": 3,
@@ -142,6 +144,7 @@
         "minimum_headroom_challenge_model_families": 1,
         "minimum_headroom_challenge_independently_replicated_setups": 1,
         "maximum_suite_ceiling_fraction": 0.2,
+        "ceiling_fraction_confidence_level": 0.95,
         "minimum_suite_headroom": 0.1,
         "minimum_headline_component_observations": 8,
         "minimum_headline_component_model_families": 3,
@@ -178,12 +181,13 @@
         ],
         "minimum_refreshable_priority_facets": 1,
         "empirical_priority_facet_policy": {
-          "policy_id": "priority_facet_evidence_gate_v1",
-          "minimum_observations": 8,
+          "policy_id": "priority_facet_evidence_gate_v2",
+          "minimum_observations": 16,
           "minimum_model_families": 3,
           "minimum_parameter_bands": 2,
           "minimum_independently_replicated_setups": 2,
           "maximum_suite_ceiling_fraction": 0.2,
+          "ceiling_fraction_confidence_level": 0.95,
           "minimum_suite_headroom": 0.1
         }
       },
@@ -202,7 +206,7 @@
       "calibration_status": "not_psychometrically_calibrated",
       "distribution_calibration_status": "provisional_pending_distribution_audit",
       "calibration_policy": {
-        "policy_id": "reasoning_capability_headroom_gate_v1",
+        "policy_id": "reasoning_capability_headroom_gate_v2",
         "minimum_observations": 20,
         "minimum_model_families": 5,
         "minimum_parameter_bands": 3,
@@ -215,6 +219,7 @@
         "minimum_headroom_challenge_model_families": 1,
         "minimum_headroom_challenge_independently_replicated_setups": 1,
         "maximum_suite_ceiling_fraction": 0.2,
+        "ceiling_fraction_confidence_level": 0.95,
         "minimum_suite_headroom": 0.1,
         "minimum_headline_component_observations": 8,
         "minimum_headline_component_model_families": 3,
@@ -248,12 +253,13 @@
         ],
         "minimum_refreshable_priority_facets": 1,
         "empirical_priority_facet_policy": {
-          "policy_id": "priority_facet_evidence_gate_v1",
-          "minimum_observations": 8,
+          "policy_id": "priority_facet_evidence_gate_v2",
+          "minimum_observations": 16,
           "minimum_model_families": 3,
           "minimum_parameter_bands": 2,
           "minimum_independently_replicated_setups": 2,
           "maximum_suite_ceiling_fraction": 0.2,
+          "ceiling_fraction_confidence_level": 0.95,
           "minimum_suite_headroom": 0.1
         }
       },
