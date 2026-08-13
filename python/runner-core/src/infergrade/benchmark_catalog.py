@@ -264,6 +264,8 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         for check_id in check_ids:
             if str(check_id) not in declared_check_ids:
                 failures.append(f"{priority_id or '<missing>'}: unknown coverage benchmark_check_id {check_id!r}")
+    from infergrade.capability_scoring import primary_surface_for_use_case
+
     checks_by_id = check_index(payload)
     challenge_priorities = [
         item for item in coverage_expansion_priorities(payload)
@@ -305,7 +307,8 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         }
         surface_challenge_priorities = [
             item for item in challenge_priorities
-            if headline_check_ids.issubset({
+            if primary_surface_for_use_case(item.get("use_case")) == surface_id
+            and headline_check_ids.issubset({
                 str(check_id)
                 for check_id in list(item.get("benchmark_check_ids") or [])
             })

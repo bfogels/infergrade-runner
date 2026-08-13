@@ -501,6 +501,15 @@ class BenchmarkCatalogTests(unittest.TestCase):
             failures,
         )
 
+        coding_challenge["benchmark_check_ids"].append("coding_static_repair_v1")
+        coding_challenge["use_case"] = "general_assistant"
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+        self.assertIn(
+            "local_coding_capability: headroom challenge gate requires an explicit eligible "
+            "campaign target covering every positively weighted capability check",
+            failures,
+        )
+
     def test_catalog_protocol_name_requires_a_versioned_label_pair(self):
         mutated = deepcopy(load_capability_catalog())
         policy = next(

@@ -259,6 +259,7 @@ def audit_capability_observations(
     headroom_challenge_targets = [
         item for item in current_targets
         if item.get("headroom_challenge_eligible") is True
+        and _priority_matches_score_surface(item, selected, score_version, catalog)
     ]
     selected = [dict(item) for item in selected]
     for observation in selected:
@@ -647,6 +648,29 @@ def _headline_component_ids(
         and float(check.get("primary_score_weight") or 0.0) > 0.0
         and check.get("score_role") != "diagnostic_only"
     )
+
+
+def _priority_matches_score_surface(
+    priority: Dict[str, Any],
+    observations: List[Dict[str, Any]],
+    score_version: str,
+    catalog: Optional[Dict[str, Any]],
+) -> bool:
+    surface_ids = {
+        str(item.get("surface_id") or "")
+        for item in observations
+        if item.get("surface_id")
+    }
+    surface_ids.update(
+        str(surface_id)
+        for surface_id, policy in surface_score_policy_index(catalog).items()
+        if policy.get("score_version") == score_version
+    )
+    if not surface_ids:
+        return True
+    from infergrade.capability_scoring import primary_surface_for_use_case
+
+    return primary_surface_for_use_case(priority.get("use_case")) in surface_ids
 
 
 def _minimum_gate(blockers: List[str], metrics: Dict[str, Any], policy: Dict[str, Any], metric: str, threshold: str) -> None:
