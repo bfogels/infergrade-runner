@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-13-priority-facet-evidence-gate",
+  "catalog_version": "2026-08-13-bfcl-local-reference",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -17,7 +17,8 @@
       "10-30 min",
       "15-45 min",
       "25-60 min",
-      "15-90 min"
+      "15-90 min",
+      "45-120 min"
     ],
     "token_volume_band": [
       "tiny",
@@ -92,11 +93,11 @@
         "supporting_check_ids": [
           "ifeval",
           "assistant_compositional_instruction_v2",
-          "multiturn_chat_memory_v1"
+          "multiturn_chat_memory_v1",
+          "bfcl_local_reference_v1"
         ],
         "planned_check_ids": [
           "arena_hard_local_reference_v1",
-          "bfcl_local_reference_v1",
           "longbench_v2_reference_v1"
         ],
         "minimum_refreshable_priority_facets": 1,
@@ -1011,20 +1012,20 @@
       "check_id": "bfcl_local_reference_v1",
       "surface_id": "local_assistant_capability",
       "evidence_lane_id": "reference",
-      "maturity": "planned",
-      "runnable_status": "not_runnable",
+      "maturity": "reference_runnable",
+      "runnable_status": "runnable_intentional_reference",
       "default_inclusion_status": "not_default",
-      "fixture_or_dataset_revision_status": "upstream_release_and_scenario_subset_pin_needed",
-      "harness_status": "not_implemented",
-      "scoring_policy_id": "executable_function_call_accuracy_v1",
-      "sample_policy": "Future pinned BFCL scenario subset preserving single-turn, multi-turn, and multi-step result boundaries.",
-      "expected_duration_token_volume_status": "unknown",
-      "sandbox_requirement": "sandbox_required_for_executable_function_validation",
-      "claim_boundary": "Future executable tool-use reference candidate; not agent autonomy, arbitrary API competence, or a default local lane.",
+      "fixture_or_dataset_revision_status": "pinned_bfcl_v4_commit_source_digests_and_110_case_selection",
+      "harness_status": "implemented_container_scorer",
+      "scoring_policy_id": "infergrade_bfcl_structured_call_accuracy_v1",
+      "sample_policy": "Hash-ranked 110-case BFCL V4 subset balanced across 11 static and live single-turn selection, parallel, and relevance categories; canary and standard tiers round-robin across every category.",
+      "expected_duration_token_volume_status": "estimated medium; 11 to 110 generations",
+      "sandbox_requirement": "offline_read_only_no_network_scorer_container",
+      "claim_boundary": "Pinned BFCL-derived local structured tool-use diagnostic only; not an official BFCL score, native runtime function-calling proof, multi-turn tool-use result, or agent-autonomy claim.",
       "promotion_blockers": [
-        "Pin an upstream BFCL release and locally feasible scenario subset.",
-        "Implement executable schema, state, timeout, and failure-class preservation.",
-        "Keep single-turn, multi-turn, and agentic interpretations separate."
+        "Collect independently replicated local distributions before treating the tool-use facet as empirically broad.",
+        "Demonstrate headroom below the configured saturation ceiling on current large local models.",
+        "Implement a separately identified stateful multi-turn or agentic lane before making those broader claims."
       ]
     },
     {
@@ -1077,6 +1078,12 @@
       "score_policy_id": "exact_multiple_choice_letter_accuracy_v4",
       "display_name": "Strict answer-letter accuracy with empty-think normalization",
       "description": "Use strict answer-letter accuracy after removing only a leading empty thinking wrapper and trailing runtime terminal markers. Completed malformed answers score incorrect; generation failures remain unscored execution failures.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "infergrade_bfcl_structured_call_accuracy_v1",
+      "display_name": "InferGrade BFCL-derived structured call accuracy",
+      "description": "Score strict JSON tool-call arrays against pinned BFCL V4 function selection, argument alternatives, parallel calls, and relevance abstention. This local prompt/scorer contract is not an official BFCL protocol score.",
       "score_method": "primary_metric_value_v1"
     },
     {
@@ -1655,6 +1662,55 @@
       ]
     },
     {
+      "check_id": "bfcl_local_reference_v1",
+      "display_name": "BFCL V4 local tool-use reference",
+      "description": "Pinned BFCL-derived single-turn diagnostic for structured function selection, arguments, parallel calls, and relevance abstention using a strict local JSON call contract.",
+      "capability_facets": [
+        "tool_use"
+      ],
+      "temporal_scope": "periodically_refreshed_snapshot",
+      "evidence_kind": "capability",
+      "group_id": "tool_use_reference",
+      "surface_id": "local_assistant_capability",
+      "runner_target": "bfcl_local_reference_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "reference",
+      "evidence_lane_id": "reference",
+      "effort_level": "deep",
+      "expected_duration_band": "15-45 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "throughput_oriented_offline_suite",
+      "selection_guidance": "Adds a broad structured tool-use diagnostic while keeping its local JSON prompt format and single-turn scope distinct from official BFCL, native tool calling, multi-turn, and agentic claims.",
+      "score_dimension": "structured_tool_use",
+      "primary_score_metric": "accuracy",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "score_role": "diagnostic_only",
+      "discrimination_status": "pending_distribution_audit",
+      "calibration_policy": {
+        "policy_id": "capability_headroom_gate_v1",
+        "minimum_task_count": 55
+      },
+      "higher_is_better": true,
+      "score_policy_id": "infergrade_bfcl_structured_call_accuracy_v1",
+      "score_breakdown_fields": [
+        "correct_count",
+        "total_count",
+        "function_selection_accuracy",
+        "function_selection_correct_count",
+        "malformed_output_count",
+        "category_metrics"
+      ],
+      "source": "https://github.com/ShishirPatil/gorilla",
+      "dataset_revision": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8",
+      "dataset_sha256": "7c239c7ae1d0ef371a15f96ec9fc0f38e79c331c94adbf54d7f73c0614445562",
+      "dataset_license": "Apache-2.0"
+    },
+    {
       "check_id": "mmlu_pro_reference_v1",
       "display_name": "MMLU-Pro reference",
       "description": "Sampled harder broad knowledge and reasoning benchmark.",
@@ -2176,10 +2232,10 @@
     {
       "shortcut_id": "assistant_reference",
       "display_name": "Assistant reference",
-      "description": "Stronger assistant evidence with complete score-weighted assistant coverage, sampled MMLU-Pro, chat memory, deployment, and quant fidelity signals.",
+      "description": "Stronger assistant evidence with complete score-weighted assistant coverage plus sampled reasoning, structured tool-use, chat memory, deployment, and quant fidelity diagnostics.",
       "suite_scope": "reference",
       "effort_level": "deep",
-      "expected_duration_band": "25-60 min",
+      "expected_duration_band": "45-120 min",
       "suite_ids": [
         "chat_instruction_following",
         "quant_fidelity"
@@ -2189,6 +2245,7 @@
         "chat_memory",
         "assistant_compositional",
         "broad_reasoning_knowledge",
+        "tool_use_reference",
         "deployment_chat",
         "deployment_batch",
         "quant_fidelity"
@@ -2198,6 +2255,7 @@
         "multiturn_chat_memory_v1",
         "assistant_compositional_instruction_v2",
         "mmlu_pro_reference_v1",
+        "bfcl_local_reference_v1",
         "interactive_chat_v1",
         "batch_generation_v1",
         "perplexity_reference_v1"
@@ -2263,26 +2321,6 @@
       "planned_score_policy_id": "repository_issue_resolution_v1",
       "local_feasibility": "curated_reference_first",
       "why_not_default": "Operationally expensive enough that it should start as maintainer-reviewed gold evidence, not a default laptop run.",
-      "status": "planned"
-    },
-    {
-      "check_id": "bfcl_local_reference_v1",
-      "display_name": "BFCL local tool-use reference",
-      "value": "Adds executable function-selection, argument, and multi-step tool-use coverage missing from the assistant headline mix.",
-      "cost": "medium token volume plus executable schema and state validation",
-      "implementation_risk": "high",
-      "suite_placement": "chat_instruction_following/reference",
-      "primary_use_case": "general_assistant",
-      "benchmark_tier": "reference",
-      "evidence_lane_id": "reference",
-      "score_dimension": "executable_tool_use",
-      "capability_facets": [
-        "tool_use"
-      ],
-      "temporal_scope": "periodically_refreshed_snapshot",
-      "planned_score_policy_id": "executable_function_call_accuracy_v1",
-      "local_feasibility": "candidate",
-      "why_not_default": "Needs a pinned BFCL release, local execution sandbox, cost receipts, and separation between single-turn and agentic results.",
       "status": "planned"
     },
     {

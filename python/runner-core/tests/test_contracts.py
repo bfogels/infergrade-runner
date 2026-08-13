@@ -347,6 +347,7 @@ class ContractExportTests(unittest.TestCase):
             (image_dir / "infergrade-llama-cpp_1.2.3-preview.tar").write_text("runtime-image", encoding="utf-8")
             (image_dir / "infergrade-mmlu-pro_1.2.3-preview.tar").write_text("mmlu-image", encoding="utf-8")
             (image_dir / "infergrade-gpqa_1.2.3-preview.tar").write_text("gpqa-image", encoding="utf-8")
+            (image_dir / "infergrade-bfcl_1.2.3-preview.tar").write_text("bfcl-image", encoding="utf-8")
             (image_dir / "infergrade-repository-edit_1.2.3-preview.tar").write_text(
                 "repository-edit-image", encoding="utf-8"
             )
@@ -384,6 +385,10 @@ class ContractExportTests(unittest.TestCase):
             self.assertEqual(
                 "images/infergrade-gpqa_1.2.3-preview.tar",
                 capability_refs["infergrade-gpqa"]["archive_path"],
+            )
+            self.assertEqual(
+                "images/infergrade-bfcl_1.2.3-preview.tar",
+                capability_refs["infergrade-bfcl"]["archive_path"],
             )
             self.assertEqual(
                 "images/infergrade-repository-edit_1.2.3-preview.tar",

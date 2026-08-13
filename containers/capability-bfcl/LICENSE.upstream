@@ -1,0 +1,11 @@
+The BFCL source snapshot used by this image is derived from the Gorilla repository:
+https://github.com/ShishirPatil/gorilla
+
+Pinned revision: 6ea57973c7a6097fd7c5915698c54c17c5b1b6c8
+License: Apache License 2.0
+
+The full upstream license text is available at:
+https://github.com/ShishirPatil/gorilla/blob/6ea57973c7a6097fd7c5915698c54c17c5b1b6c8/LICENSE
+
+InferGrade's prompt format and scorer are local adaptations. Results are not
+official BFCL leaderboard scores and are not directly comparable to them.

@@ -50,6 +50,9 @@ jobs:
           - image: infergrade-gpqa
             dockerfile: containers/capability-gpqa/Dockerfile
             platforms: linux/amd64,linux/arm64
+          - image: infergrade-bfcl
+            dockerfile: containers/capability-bfcl/Dockerfile
+            platforms: linux/amd64,linux/arm64
           - image: infergrade-repository-edit
             dockerfile: containers/capability-repo-edit/Dockerfile
             platforms: linux/amd64,linux/arm64

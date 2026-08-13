@@ -73,6 +73,9 @@ DEFAULT_CAPABILITY_IMAGES = {
     "gpqa_diamond_reference_v1": env_value(
         "INFERGRADE_GPQA_IMAGE", _released_capability_image("infergrade-gpqa")
     ),
+    "bfcl_local_reference_v1": env_value(
+        "INFERGRADE_BFCL_IMAGE", _released_capability_image("infergrade-bfcl")
+    ),
     "repository_edit_smoke_v1": env_value(
         "INFERGRADE_REPOSITORY_EDIT_IMAGE",
         _released_capability_image("infergrade-repository-edit"),
@@ -179,6 +182,15 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=64,
         container_image=DEFAULT_CAPABILITY_IMAGES["gpqa_diamond_reference_v1"],
         case_limits={"canary": 25, "standard": 100, "gold": 198},
+    ),
+    "bfcl_local_reference_v1": CapabilityBenchmarkSpec(
+        benchmark_id="bfcl_local_reference_v1",
+        display_name="BFCL V4 local tool-use reference",
+        benchmark_kind="structured_tool_use",
+        primary_metric_name="accuracy",
+        generation_max_tokens=384,
+        container_image=DEFAULT_CAPABILITY_IMAGES["bfcl_local_reference_v1"],
+        case_limits={"canary": 11, "standard": 55, "gold": 110},
     ),
     "repository_edit_smoke_v1": CapabilityBenchmarkSpec(
         benchmark_id="repository_edit_smoke_v1",
@@ -726,6 +738,40 @@ def _repository_edit_output_shape_gate(
     }
 
 
+def _structured_tool_use_output_shape_gate(
+    spec: CapabilityBenchmarkSpec,
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    if spec.benchmark_id != "bfcl_local_reference_v1":
+        return {"status": "not_applicable", "policy_id": "structured_tool_use_output_shape_gate_v1"}
+    metrics = dict(summary.get("metrics") or {})
+    malformed_count = metrics.get("malformed_output_count")
+    evaluated_count = metrics.get("total_count")
+    if not isinstance(malformed_count, int) or isinstance(malformed_count, bool):
+        malformed_count = 0
+    if not isinstance(evaluated_count, int) or isinstance(evaluated_count, bool):
+        evaluated_count = len(
+            [item for item in predictions if item.get("generation_status") == "completed"]
+        )
+    malformed_rate = round(malformed_count / float(evaluated_count), 6) if evaluated_count else 0.0
+    blocked = bool(evaluated_count and malformed_rate > _DOMINANT_MALFORMED_OUTPUT_RATE)
+    return {
+        "status": "blocked" if blocked else "passed",
+        "policy_id": "structured_tool_use_output_shape_gate_v1",
+        "threshold": {
+            "metric": "malformed_output_rate",
+            "operator": ">",
+            "value": _DOMINANT_MALFORMED_OUTPUT_RATE,
+        },
+        "evaluated_count": evaluated_count,
+        "malformed_output_count": malformed_count,
+        "malformed_output_rate": malformed_rate,
+        "reason_codes": ["dominant_malformed_structured_tool_output"] if blocked else [],
+        "strict_primary_metric": dict(summary.get("primary_metric") or {}),
+    }
+
+
 def _output_shape_policy_id(spec: CapabilityBenchmarkSpec) -> Optional[str]:
     if spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}:
         return "multiple_choice_output_shape_gate_v2"
@@ -733,6 +779,8 @@ def _output_shape_policy_id(spec: CapabilityBenchmarkSpec) -> Optional[str]:
         return "visible_response_output_shape_gate_v1"
     if spec.benchmark_id == "repository_edit_smoke_v1":
         return "repository_edit_output_shape_gate_v1"
+    if spec.benchmark_id == "bfcl_local_reference_v1":
+        return "structured_tool_use_output_shape_gate_v1"
     return None
 
 
@@ -747,7 +795,10 @@ def _benchmark_output_shape_gate(
     gate = _visible_response_output_shape_gate(spec, predictions, summary)
     if gate["status"] != "not_applicable":
         return gate
-    return _repository_edit_output_shape_gate(spec, predictions, summary)
+    gate = _repository_edit_output_shape_gate(spec, predictions, summary)
+    if gate["status"] != "not_applicable":
+        return gate
+    return _structured_tool_use_output_shape_gate(spec, predictions, summary)
 
 
 # Compatibility alias for downstream tests and integrations that referenced the
@@ -1077,7 +1128,11 @@ def execute_capability_suite(
                     predictions=predictions,
                     summary=summary,
                 )
-            elif spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}:
+            elif spec.benchmark_id in {
+                "mmlu_pro_reference_v1",
+                "gpqa_diamond_reference_v1",
+                "bfcl_local_reference_v1",
+            }:
                 capability_run_path = _write_multiple_choice_capability_run_artifact(
                     request=request,
                     spec=spec,
@@ -1764,6 +1819,7 @@ def _write_multiple_choice_capability_run_artifact(
     predictions: List[Dict[str, Any]],
     summary: Dict[str, Any],
 ) -> str:
+    structured_tool_use = spec.benchmark_id == "bfcl_local_reference_v1"
     check_metadata = _selected_check_metadata(request, spec.benchmark_id)
     primary_metric = dict(summary.get("primary_metric") or {})
     score = primary_metric.get("value")
@@ -1780,6 +1836,7 @@ def _write_multiple_choice_capability_run_artifact(
         result = case_results.get(task_id, {})
         generation_status = str(prediction.get("generation_status") or "")
         predicted = result.get("predicted")
+        malformed = bool(result.get("malformed")) if structured_tool_use else predicted is None
         gate_blocked = str((summary.get("output_shape_gate") or {}).get("status")) == "blocked"
         if generation_status != "completed":
             task_state = "failed"
@@ -1789,7 +1846,7 @@ def _write_multiple_choice_capability_run_artifact(
             task_state = "not_comparable"
             task_score = None
             error_class = "systemic_output_protocol_mismatch"
-        elif predicted is None:
+        elif malformed:
             task_state = "scored"
             task_score = 0.0
             error_class = None
@@ -1804,16 +1861,27 @@ def _write_multiple_choice_capability_run_artifact(
                 "state": task_state,
                 "score": task_score,
                 "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
-                "scorer_type": "multiple_choice" if task_state == "scored" else None,
+                "scorer_type": ("json_schema" if structured_tool_use else "multiple_choice") if task_state == "scored" else None,
                 "scoring_policy": summary.get("scoring_policy") if task_state == "scored" else None,
                 "output_artifact": "predictions.jsonl#%s" % (task_id or str(case.get("case_id") or "")),
                 "error_class": error_class,
                 **_task_performance_fields(prediction),
                 "category": result.get("category") or case.get("category"),
-                "expected": result.get("expected") or case.get("answer"),
-                "predicted": predicted,
-                "format_valid": predicted is not None if generation_status == "completed" else None,
-                "format_violation": "malformed_output" if generation_status == "completed" and predicted is None else None,
+                **(
+                    {
+                        "function_selection_correct": result.get("function_selection_correct"),
+                        "format_valid": not malformed if generation_status == "completed" else None,
+                        "format_violation": "malformed_output" if generation_status == "completed" and malformed else None,
+                        "scoring_error_type": result.get("error_type"),
+                    }
+                    if structured_tool_use
+                    else {
+                        "expected": result.get("expected") or case.get("answer"),
+                        "predicted": predicted,
+                        "format_valid": predicted is not None if generation_status == "completed" else None,
+                        "format_violation": "malformed_output" if generation_status == "completed" and predicted is None else None,
+                    }
+                ),
             }
         )
     metrics = dict(summary.get("metrics") or {})
@@ -1841,7 +1909,9 @@ def _write_multiple_choice_capability_run_artifact(
         },
         "evidence": {
             "lane": "reference",
-            "surface": check_metadata.get("surface_id") or "local_reasoning_capability",
+            "surface": check_metadata.get("surface_id") or (
+                "local_assistant_capability" if structured_tool_use else "local_reasoning_capability"
+            ),
             "grade": "sampled_reference",
             "experimental": True,
             "confidence_label": "sampled_reference",
@@ -1871,10 +1941,17 @@ def _write_multiple_choice_capability_run_artifact(
             "task_family": spec.benchmark_kind,
             "prompt_version": "%s_prompt_v1" % spec.benchmark_id,
             "task_version": spec.benchmark_id,
-            "fixture_revision": str(metadata.get("sample_policy") or "%s_snapshot" % spec.benchmark_id),
+            "fixture_revision": str(
+                metadata.get("snapshot_sha256") or metadata.get("sample_policy") or "%s_snapshot" % spec.benchmark_id
+            ),
             "dataset_revision": metadata.get("dataset_revision"),
-            "scorer_type": "multiple_choice",
-            "scoring_policy": summary.get("scoring_policy") or "exact_multiple_choice_letter_accuracy_v4",
+            "scorer_type": "json_schema" if structured_tool_use else "multiple_choice",
+            "scoring_policy": summary.get("scoring_policy")
+            or (
+                "infergrade_bfcl_structured_call_accuracy_v1"
+                if structured_tool_use
+                else "exact_multiple_choice_letter_accuracy_v4"
+            ),
             "repetitions": 1,
             "sample_policy": metadata.get("sample_policy"),
             "category_count": metadata.get("category_count"),
@@ -1904,7 +1981,11 @@ def _write_multiple_choice_capability_run_artifact(
             "scoring_outputs": ["summary.json"],
             "supporting_files": ["cases.jsonl", "benchmark_metadata.json"],
         },
-        "claim_boundary": _multiple_choice_artifact_claim_boundary(spec.benchmark_id, summary_state),
+        "claim_boundary": (
+            _structured_tool_use_artifact_claim_boundary(summary_state)
+            if structured_tool_use
+            else _multiple_choice_artifact_claim_boundary(spec.benchmark_id, summary_state)
+        ),
     }
     errors = validate_capability_run_artifact(artifact)
     if errors:
@@ -2461,6 +2542,37 @@ def _multiple_choice_artifact_claim_boundary(benchmark_id: str, state: str) -> D
             "This artifact records that the pinned %s sampled reference protocol was not yet scored." % label,
         ]
     return {"supported_claims": supported, "unsupported_claims": unsupported}
+
+
+def _structured_tool_use_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    if state == "scored":
+        supported = [
+            "This setup completed the pinned BFCL-derived local structured tool-use protocol recorded in this artifact.",
+            "The score reports strict JSON function selection, argument, parallel-call, and relevance-abstention accuracy for the recorded single-turn subset.",
+        ]
+    elif state == "partial":
+        supported = [
+            "This setup attempted the pinned BFCL-derived local structured tool-use protocol with partial generation failures.",
+            "The artifact preserves scored, malformed, and failed task rows separately.",
+        ]
+    elif state == "not_comparable":
+        supported = [
+            "This setup attempted the pinned BFCL-derived local protocol, but most outputs did not match its structured JSON call format.",
+            "Raw responses and malformed-output diagnostics are preserved without publishing a capability score.",
+        ]
+    else:
+        supported = [
+            "This artifact records an attempted pinned BFCL-derived local structured tool-use protocol without a complete score.",
+        ]
+    return {
+        "supported_claims": supported,
+        "unsupported_claims": [
+            "This is not an official BFCL V4 leaderboard score.",
+            "This does not prove native runtime function-calling support.",
+            "This does not measure BFCL multi-turn, stateful agentic, web-search, or memory capability.",
+            "This is not a global assistant-quality or agent-autonomy score.",
+        ],
+    }
 
 
 def _context_retrieval_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:

@@ -1,6 +1,6 @@
 # Capability Benchmarks
 
-Capability container defaults use the canonical public `ghcr.io/bfogels/<image>:<runner-version>` release reference. Source checkouts build that exact reference; installed runners pull it. Capability artifacts record the resolved local image ID and any repository digest so the actual scorer can be audited after the run. Source developers may override an image explicitly with `INFERGRADE_IFEVAL_IMAGE`, `INFERGRADE_EVALPLUS_IMAGE`, `INFERGRADE_MMLU_PRO_IMAGE`, or `INFERGRADE_GPQA_IMAGE`; an unversioned `:local` image is never selected implicitly for evidence collection.
+Capability container defaults use the canonical public `ghcr.io/bfogels/<image>:<runner-version>` release reference. Source checkouts build that exact reference; installed runners pull it. Capability artifacts record the resolved local image ID and any repository digest so the actual scorer can be audited after the run. Source developers may override an image explicitly with `INFERGRADE_IFEVAL_IMAGE`, `INFERGRADE_EVALPLUS_IMAGE`, `INFERGRADE_MMLU_PRO_IMAGE`, `INFERGRADE_GPQA_IMAGE`, or `INFERGRADE_BFCL_IMAGE`; an unversioned `:local` image is never selected implicitly for evidence collection.
 
 InferGrade needs capability benchmarks that are:
 
@@ -33,6 +33,11 @@ InferGrade needs capability benchmarks that are:
 - `GPQA Diamond reference`
   - Why: harder expert-level multiple-choice evidence can add headroom where smaller reasoning checks cluster.
   - InferGrade role: deliberately selected diagnostic reference evidence. It has zero Capability protocol v3.1 weight until cross-family distribution, duration, malformed-output, and repeatability audits justify promotion.
+
+- `BFCL V4 local tool-use reference`
+  - Why: structured function selection, arguments, parallel calls, and relevance abstention cover an assistant capability that instruction-following accuracy does not.
+  - InferGrade role: zero-weight, intentionally selected reference diagnostic over a hash-ranked 110-case subset balanced across 11 BFCL V4 static and live single-turn categories. The upstream commit and every downloaded source file digest are pinned. Canary and standard samples round-robin across categories instead of taking a narrow prefix.
+  - Claim boundary: InferGrade uses a strict runtime-neutral JSON call prompt and local deterministic scorer. The result is not an official BFCL V4 leaderboard score, does not prove native runtime function calling, and does not measure BFCL multi-turn, memory, web-search, or stateful agentic capability. Those require separately identified protocols.
 
 - `Context retrieval reference`
   - Why: local users need to know whether a setup can retrieve a pinned fact at the prompt lengths they intend to use.
@@ -68,10 +73,6 @@ The following are selected as high-value later additions and are not runnable ye
   - Why: highest-value software engineering benchmark in this space, but much more operationally expensive than the first-pass coding lanes.
   - InferGrade role: gold evidence first, with curated provenance and maintainer review, not a default laptop run.
 
-- `Berkeley Function Calling Leaderboard (BFCL)`
-  - Why: executable function selection, arguments, multi-turn state, and multi-step tool-use scenarios cover an assistant capability that instruction-following accuracy does not.
-  - InferGrade role: assistant reference candidate after a BFCL release and locally feasible scenario subset are pinned, execution is sandboxed, and single-turn results remain separate from multi-turn or agentic interpretations. Source: [Berkeley Function Calling Leaderboard](https://github.com/ShishirPatil/gorilla/tree/main/berkeley-function-call-leaderboard).
-
 - `LongBench v2`
   - Why: realistic long-context task reasoning across multiple task categories is materially broader than deterministic key retrieval.
   - InferGrade role: reasoning and assistant reference candidate after memory-fit, task-sampling, duration, recovery, and explicit judge-identity policies are proven. Source: [LongBench v2](https://arxiv.org/abs/2412.15204).
@@ -97,7 +98,7 @@ Planned candidates are roadmap metadata only. They must not be rendered or valid
 - which missing facets have an explicit planned benchmark rather than an unowned gap,
 - and whether the surface has a refreshable lane plus any already-known headline saturation risk.
 
-The audit deliberately reports `scoped_claim_coverage_ready` separately from `broad_surface_coverage_ready`. The current catalog covers its narrow task-scoped claim definitions, but it does not pass broad-surface coverage. Assistant lacks runnable preference, tool-use, and long-context task-reasoning evidence, and its memory diagnostic is already saturated. Coding lacks runnable contemporary and real-repository issue-resolution evidence. Reasoning lacks runnable long-context task reasoning. All three also lack a runnable refreshable priority facet, while Coding and Reasoning retain known headline component ceiling risks. A known saturation risk blocks broad readiness whether the affected priority facet is headline-weighted or diagnostic-only; role separation remains visible in the report.
+The audit deliberately reports `scoped_claim_coverage_ready` separately from `broad_surface_coverage_ready`. The current catalog covers its narrow task-scoped claim definitions, but it does not pass broad-surface coverage. Assistant now has a runnable, periodically refreshable structured tool-use diagnostic, but still lacks runnable preference and long-context task-reasoning evidence; tool use also lacks the independent cross-family observations and demonstrated headroom required by the empirical facet gate, and the memory diagnostic is already saturated. Coding lacks runnable contemporary and real-repository issue-resolution evidence. Reasoning lacks runnable long-context task reasoning. Coding and Reasoning also lack a runnable refreshable priority facet and retain known headline component ceiling risks. A known saturation risk blocks broad readiness whether the affected priority facet is headline-weighted or diagnostic-only; role separation remains visible in the report.
 
 This is a catalog-structure audit, not empirical validation. `scripts/audit_capability_calibration.py` remains the result-corpus gate for cross-family distribution, repeats, failure quality, component ceiling rates, and score headroom. A surface needs both kinds of evidence before broader claims are credible; passing either audit never substitutes for the other.
 
