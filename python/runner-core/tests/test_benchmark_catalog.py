@@ -90,7 +90,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(score_policies["local_assistant_capability"]["protocol_label"], "Capability protocol v3.1")
         self.assertEqual(score_policies["local_assistant_capability"]["scale_interpretation"], "benchmark_attainment_index")
         calibration_policy = score_policies["local_assistant_capability"]["calibration_policy"]
-        self.assertEqual(calibration_policy["policy_id"], "capability_headroom_gate_v2")
+        self.assertEqual(calibration_policy["policy_id"], "capability_headroom_gate_v3")
+        self.assertEqual(calibration_policy["ceiling_fraction_confidence_level"], 0.95)
         self.assertEqual(calibration_policy["minimum_unique_setups"], 8)
         self.assertEqual(calibration_policy["minimum_replicated_setups"], 4)
         self.assertEqual(calibration_policy["minimum_independently_replicated_setups"], 4)
@@ -112,8 +113,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
             facet_policy = task_policy["representativeness_policy"][
                 "empirical_priority_facet_policy"
             ]
-            self.assertEqual(facet_policy["policy_id"], "priority_facet_evidence_gate_v1")
-            self.assertEqual(facet_policy["minimum_observations"], 8)
+            self.assertEqual(facet_policy["policy_id"], "priority_facet_evidence_gate_v2")
+            self.assertEqual(facet_policy["minimum_observations"], 16)
             self.assertEqual(facet_policy["minimum_model_families"], 3)
             self.assertEqual(facet_policy["minimum_parameter_bands"], 2)
             self.assertEqual(
@@ -121,14 +122,15 @@ class BenchmarkCatalogTests(unittest.TestCase):
                 2,
             )
             self.assertEqual(facet_policy["maximum_suite_ceiling_fraction"], 0.2)
+            self.assertEqual(facet_policy["ceiling_fraction_confidence_level"], 0.95)
             self.assertEqual(facet_policy["minimum_suite_headroom"], 0.1)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_coverage_fraction"], 0.5)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_scored_components"], 2)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_score_dimensions"], 2)
         self.assertEqual(score_policies["local_coding_capability"]["maximum_component_weight_fraction"], 0.8)
         for surface_id, expected_policy_id in (
-            ("local_coding_capability", "coding_capability_headroom_gate_v1"),
-            ("local_reasoning_capability", "reasoning_capability_headroom_gate_v1"),
+            ("local_coding_capability", "coding_capability_headroom_gate_v2"),
+            ("local_reasoning_capability", "reasoning_capability_headroom_gate_v2"),
         ):
             task_policy = score_policies[surface_id]
             self.assertEqual(task_policy["distribution_calibration_status"], "provisional_pending_distribution_audit")
@@ -158,6 +160,10 @@ class BenchmarkCatalogTests(unittest.TestCase):
                 1,
             )
             self.assertEqual(task_policy["calibration_policy"]["maximum_suite_ceiling_fraction"], 0.2)
+            self.assertEqual(
+                task_policy["calibration_policy"]["ceiling_fraction_confidence_level"],
+                0.95,
+            )
             self.assertEqual(task_policy["calibration_policy"]["maximum_single_setup_fraction"], 0.25)
         self.assertEqual(
             score_policies["local_assistant_capability"]["representativeness_policy"]["scoped_claim_facets"],
@@ -497,6 +503,25 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn(
             "%s: headroom challenge rationale must be non-empty"
             % priority["priority_id"],
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_requires_ceiling_confidence_level(self):
+        mutated = deepcopy(load_capability_catalog())
+        assistant = next(
+            item
+            for item in mutated["surface_score_policies"]
+            if item["surface_id"] == "local_assistant_capability"
+        )
+        assistant["calibration_policy"][
+            "ceiling_fraction_confidence_level"
+        ] = 1.0
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "local_assistant_capability: calibration_policy "
+            "ceiling_fraction_confidence_level must be greater than 0 and less than 1",
             failures,
         )
 

@@ -121,6 +121,19 @@ def validate_benchmark_adequacy_metadata(catalog: Optional[Dict[str, Any]] = Non
                     f"{surface_id}: empirical priority facet minimum_suite_headroom "
                     "must be greater than 0 and at most 1"
                 )
+            confidence_level = empirical_policy.get(
+                "ceiling_fraction_confidence_level"
+            )
+            if (
+                isinstance(confidence_level, bool)
+                or not isinstance(confidence_level, (int, float))
+                or not 0.0 < float(confidence_level) < 1.0
+            ):
+                failures.append(
+                    f"{surface_id}: empirical priority facet "
+                    "ceiling_fraction_confidence_level must be greater than 0 "
+                    "and less than 1"
+                )
         for field in ("supporting_check_ids", "planned_check_ids"):
             ids = policy.get(field)
             if not isinstance(ids, list) or not all(isinstance(item, str) and item.strip() for item in ids):

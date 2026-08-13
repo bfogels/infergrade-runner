@@ -27,11 +27,11 @@ class BenchmarkAdequacyTests(unittest.TestCase):
         assistant = by_surface["local_assistant_capability"]
         self.assertEqual(
             assistant["empirical_priority_facet_policy"]["policy_id"],
-            "priority_facet_evidence_gate_v1",
+            "priority_facet_evidence_gate_v2",
         )
         self.assertEqual(
             assistant["empirical_priority_facet_policy"]["minimum_observations"],
-            8,
+            16,
         )
         self.assertIn("assistant_preference_quality", assistant["planned_only_priority_facets"])
         self.assertIn("tool_use", assistant["diagnostic_facets_covered"])
@@ -113,6 +113,16 @@ class BenchmarkAdequacyTests(unittest.TestCase):
         self.assertIn(
             "local_assistant_capability: empirical priority facet minimum_suite_headroom "
             "must be greater than 0 and at most 1",
+            failures,
+        )
+
+        assistant["representativeness_policy"]["empirical_priority_facet_policy"][
+            "ceiling_fraction_confidence_level"
+        ] = 1.0
+        failures = validate_benchmark_adequacy_metadata(catalog)
+        self.assertIn(
+            "local_assistant_capability: empirical priority facet "
+            "ceiling_fraction_confidence_level must be greater than 0 and less than 1",
             failures,
         )
 

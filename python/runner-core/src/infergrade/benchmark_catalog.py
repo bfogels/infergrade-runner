@@ -307,6 +307,18 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         if policy.get("calibration_status") != "not_psychometrically_calibrated":
             failures.append(f"{surface_id}: calibration_status must preserve the non-calibrated claim boundary")
         calibration_policy = dict(policy.get("calibration_policy") or {})
+        confidence_level = calibration_policy.get(
+            "ceiling_fraction_confidence_level"
+        )
+        if (
+            isinstance(confidence_level, bool)
+            or not isinstance(confidence_level, (int, float))
+            or not 0.0 < float(confidence_level) < 1.0
+        ):
+            failures.append(
+                f"{surface_id}: calibration_policy ceiling_fraction_confidence_level "
+                "must be greater than 0 and less than 1"
+            )
         headline_check_ids = {
             check_id
             for check_id, check in checks_by_id.items()
