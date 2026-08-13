@@ -68,6 +68,14 @@ The following are selected as high-value later additions and are not runnable ye
   - Why: highest-value software engineering benchmark in this space, but much more operationally expensive than the first-pass coding lanes.
   - InferGrade role: gold evidence first, with curated provenance and maintainer review, not a default laptop run.
 
+- `Berkeley Function Calling Leaderboard (BFCL)`
+  - Why: executable function selection, arguments, multi-turn state, and multi-step tool-use scenarios cover an assistant capability that instruction-following accuracy does not.
+  - InferGrade role: assistant reference candidate after a BFCL release and locally feasible scenario subset are pinned, execution is sandboxed, and single-turn results remain separate from multi-turn or agentic interpretations. Source: [Berkeley Function Calling Leaderboard](https://github.com/ShishirPatil/gorilla/tree/main/berkeley-function-call-leaderboard).
+
+- `LongBench v2`
+  - Why: realistic long-context task reasoning across multiple task categories is materially broader than deterministic key retrieval.
+  - InferGrade role: reasoning and assistant reference candidate after memory-fit, task-sampling, duration, recovery, and explicit judge-identity policies are proven. Source: [LongBench v2](https://arxiv.org/abs/2412.15204).
+
 ## Expansion Principle
 
 InferGrade should move toward benchmark legitimacy comparable to serious model-analysis products without making first users wait hours for a first answer. That means every new benchmark candidate should declare:
@@ -79,6 +87,21 @@ InferGrade should move toward benchmark legitimacy comparable to serious model-a
 - and why it is not part of the default quick path yet.
 
 Planned candidates are roadmap metadata only. They must not be rendered or validated as runnable checks until Runner owns a reproducible harness, scoring policy, fixture/version pin, and runtime-cost story.
+
+## Benchmark Adequacy Audit
+
+`scripts/audit_benchmark_adequacy.py` audits the static catalog along four separate axes:
+
+- whether every narrow claim facet is backed by a positively weighted check,
+- which broader real-world priority facets have runnable or diagnostic coverage,
+- which missing facets have an explicit planned benchmark rather than an unowned gap,
+- and whether the surface has a refreshable lane plus any already-known headline saturation risk.
+
+The audit deliberately reports `scoped_claim_coverage_ready` separately from `broad_surface_coverage_ready`. The current catalog covers its narrow task-scoped claim definitions, but it does not pass broad-surface coverage. Assistant lacks runnable preference, tool-use, and long-context task-reasoning evidence. Coding lacks runnable contemporary and real-repository issue-resolution evidence. Reasoning lacks runnable long-context task reasoning. All three also lack a runnable refreshable priority facet, while Coding and Reasoning retain known headline component ceiling risks.
+
+This is a catalog-structure audit, not empirical validation. `scripts/audit_capability_calibration.py` remains the result-corpus gate for cross-family distribution, repeats, failure quality, component ceiling rates, and score headroom. A surface needs both kinds of evidence before broader claims are credible; passing either audit never substitutes for the other.
+
+The gap choices are grounded in the scope of the candidate benchmarks rather than their popularity. [LiveCodeBench](https://arxiv.org/abs/2403.07974) adds continuously collected coding problems and broader execution modes beyond static function-generation sets. [SWE-bench](https://arxiv.org/abs/2310.06770) uses real repository issues that can require multi-file changes. [GPQA](https://arxiv.org/abs/2311.12022) supplies a harder expert-science diagnostic, while [MMLU-Pro](https://arxiv.org/abs/2406.01574) remains the harder broad multi-domain headline component. [IFEval](https://arxiv.org/abs/2311.07911) remains a verifiable instruction-following component, not a proxy for tool use, preference quality, or long-context task reasoning.
 
 ## Optional Local Judge Boundary
 

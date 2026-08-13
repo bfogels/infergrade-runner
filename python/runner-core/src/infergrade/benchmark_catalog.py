@@ -244,6 +244,11 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
             failures.append(f"{surface_id}: surface score policy has no positively weighted capability checks")
         elif abs(sum(weights) - 1.0) > 0.000001:
             failures.append(f"{surface_id}: positive primary score weights must sum to 1.0")
+    # Local import avoids a module cycle while keeping the established catalog
+    # legitimacy gate authoritative for representativeness metadata too.
+    from infergrade.benchmark_adequacy import validate_benchmark_adequacy_metadata
+
+    failures.extend(validate_benchmark_adequacy_metadata(payload))
     return failures
 
 

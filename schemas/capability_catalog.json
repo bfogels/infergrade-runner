@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-13-component-headroom-gate",
+  "catalog_version": "2026-08-13-benchmark-adequacy-audit",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -68,6 +68,32 @@
         "maximum_largest_family_fraction": 0.4,
         "maximum_single_setup_fraction": 0.25
       },
+      "representativeness_policy": {
+        "policy_id": "assistant_representativeness_v1",
+        "scoped_claim_facets": [
+          "verifiable_instruction_following",
+          "compositional_rule_execution"
+        ],
+        "priority_facets": [
+          "verifiable_instruction_following",
+          "compositional_rule_execution",
+          "multi_turn_state_retention",
+          "assistant_preference_quality",
+          "tool_use",
+          "long_context_task_reasoning"
+        ],
+        "supporting_check_ids": [
+          "ifeval",
+          "assistant_compositional_instruction_v2",
+          "multiturn_chat_memory_v1"
+        ],
+        "planned_check_ids": [
+          "arena_hard_local_reference_v1",
+          "bfcl_local_reference_v1",
+          "longbench_v2_reference_v1"
+        ],
+        "minimum_refreshable_priority_facets": 1
+      },
       "claim_boundary": "Task-scoped benchmark attainment from IFEval and the compositional instruction fixture. A value at the suite ceiling means every scored check passed; it does not mean the model is perfect or establish a global intelligence rank."
     },
     {
@@ -100,6 +126,31 @@
         "maximum_largest_family_fraction": 0.4,
         "maximum_single_setup_fraction": 0.25
       },
+      "representativeness_policy": {
+        "policy_id": "coding_representativeness_v1",
+        "scoped_claim_facets": [
+          "function_code_generation",
+          "bounded_code_repair"
+        ],
+        "priority_facets": [
+          "function_code_generation",
+          "bounded_code_repair",
+          "repository_code_editing",
+          "contemporary_code_generation",
+          "real_repository_issue_resolution"
+        ],
+        "supporting_check_ids": [
+          "coding_static_repair_v1",
+          "repository_edit_smoke_v1",
+          "evalplus_humaneval",
+          "evalplus_mbpp"
+        ],
+        "planned_check_ids": [
+          "livecodebench_reference_v1",
+          "swebench_verified_gold_v1"
+        ],
+        "minimum_refreshable_priority_facets": 1
+      },
       "claim_boundary": "Task-scoped coding evidence from the versioned headline benchmark mix. A separately labeled repository-edit diagnostic may support only its pinned miniature tasks; neither implies general software-engineering capability."
     },
     {
@@ -131,6 +182,28 @@
         "near_ceiling_threshold": 0.9,
         "maximum_largest_family_fraction": 0.4,
         "maximum_single_setup_fraction": 0.25
+      },
+      "representativeness_policy": {
+        "policy_id": "reasoning_representativeness_v1",
+        "scoped_claim_facets": [
+          "broad_multidomain_reasoning",
+          "exact_micro_reasoning"
+        ],
+        "priority_facets": [
+          "broad_multidomain_reasoning",
+          "exact_micro_reasoning",
+          "expert_scientific_reasoning",
+          "long_context_task_reasoning"
+        ],
+        "supporting_check_ids": [
+          "mmlu_pro_reference_v1",
+          "gpqa_diamond_reference_v1",
+          "reasoning_exact_answer_v1"
+        ],
+        "planned_check_ids": [
+          "longbench_v2_reference_v1"
+        ],
+        "minimum_refreshable_priority_facets": 1
       },
       "claim_boundary": "Task-scoped reasoning evidence from the versioned benchmark mix. It is not an expert-reasoning, global intelligence, or leaderboard claim."
     }
@@ -833,6 +906,46 @@
         "Implement sandboxed environment prep and maintainer-review workflow.",
         "Block product copy from presenting this as self-run local default evidence."
       ]
+    },
+    {
+      "check_id": "bfcl_local_reference_v1",
+      "surface_id": "local_assistant_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "planned",
+      "runnable_status": "not_runnable",
+      "default_inclusion_status": "not_default",
+      "fixture_or_dataset_revision_status": "upstream_release_and_scenario_subset_pin_needed",
+      "harness_status": "not_implemented",
+      "scoring_policy_id": "executable_function_call_accuracy_v1",
+      "sample_policy": "Future pinned BFCL scenario subset preserving single-turn, multi-turn, and multi-step result boundaries.",
+      "expected_duration_token_volume_status": "unknown",
+      "sandbox_requirement": "sandbox_required_for_executable_function_validation",
+      "claim_boundary": "Future executable tool-use reference candidate; not agent autonomy, arbitrary API competence, or a default local lane.",
+      "promotion_blockers": [
+        "Pin an upstream BFCL release and locally feasible scenario subset.",
+        "Implement executable schema, state, timeout, and failure-class preservation.",
+        "Keep single-turn, multi-turn, and agentic interpretations separate."
+      ]
+    },
+    {
+      "check_id": "longbench_v2_reference_v1",
+      "surface_id": "local_reasoning_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "planned",
+      "runnable_status": "not_runnable",
+      "default_inclusion_status": "not_default",
+      "fixture_or_dataset_revision_status": "task_subset_and_judge_policy_pin_needed",
+      "harness_status": "not_implemented",
+      "scoring_policy_id": "long_context_task_accuracy_v1",
+      "sample_policy": "Future pinned locally feasible LongBench v2 subset across realistic long-context task categories.",
+      "expected_duration_token_volume_status": "unknown",
+      "sandbox_requirement": "memory_fit_gate_and_explicit_judge_policy_required",
+      "claim_boundary": "Future long-context task-reasoning reference candidate; not maximum-context support, broad reasoning, or a default laptop lane.",
+      "promotion_blockers": [
+        "Pin a locally feasible task subset and upstream revision.",
+        "Define explicit judge identity, scoring, and non-comparable failure policy.",
+        "Prove memory-fit gating, resumability, duration, and headroom on current large local models."
+      ]
     }
   ],
   "score_policies": [
@@ -1321,6 +1434,10 @@
       "check_id": "ifeval",
       "display_name": "IFEval",
       "description": "Instruction-following benchmark.",
+      "capability_facets": [
+        "verifiable_instruction_following"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "instruction_following",
       "surface_id": "local_assistant_capability",
@@ -1349,6 +1466,10 @@
       "check_id": "multiturn_chat_memory_v1",
       "display_name": "Multi-turn chat memory",
       "description": "Short transcript-retention benchmark for corrected facts, remembered preferences, and output constraints.",
+      "capability_facets": [
+        "multi_turn_state_retention"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "chat_memory",
       "surface_id": "local_assistant_capability",
@@ -1391,6 +1512,10 @@
       "check_id": "assistant_compositional_instruction_v2",
       "display_name": "Compositional instruction following",
       "description": "Pinned synthetic assistant tasks that combine state corrections, filtering, ordering, conditional rules, and strict JSON output.",
+      "capability_facets": [
+        "compositional_rule_execution"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "assistant_compositional",
       "surface_id": "local_assistant_capability",
@@ -1433,6 +1558,10 @@
       "check_id": "mmlu_pro_reference_v1",
       "display_name": "MMLU-Pro reference",
       "description": "Sampled harder broad knowledge and reasoning benchmark.",
+      "capability_facets": [
+        "broad_multidomain_reasoning"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "broad_reasoning_knowledge",
       "surface_id": "local_reasoning_capability",
@@ -1470,6 +1599,10 @@
       "check_id": "gpqa_diamond_reference_v1",
       "display_name": "GPQA Diamond reference",
       "description": "Official expert-level multiple-choice reference split with strict answer-letter scoring.",
+      "capability_facets": [
+        "expert_scientific_reasoning"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "expert_reasoning_reference",
       "surface_id": "local_reasoning_capability",
@@ -1546,6 +1679,10 @@
       "check_id": "reasoning_exact_answer_v1",
       "display_name": "Reasoning exact answer",
       "description": "Small local reasoning prompts scored by deterministic exact-answer matching.",
+      "capability_facets": [
+        "exact_micro_reasoning"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "reasoning_exact_answer",
       "surface_id": "local_reasoning_capability",
@@ -1588,6 +1725,10 @@
       "check_id": "coding_static_repair_v1",
       "display_name": "Coding static repair",
       "description": "Small local coding repair prompts scored by deterministic static constraints without executing generated code.",
+      "capability_facets": [
+        "bounded_code_repair"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "coding_static_repair",
       "surface_id": "local_coding_capability",
@@ -1633,6 +1774,10 @@
       "check_id": "repository_edit_smoke_v1",
       "display_name": "Repository edit diagnostic",
       "description": "Pinned miniature Python repositories repaired by unified diff and scored with hidden deterministic tests inside an isolated container.",
+      "capability_facets": [
+        "repository_code_editing"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "repository_edit_diagnostic",
       "surface_id": "local_coding_capability",
@@ -1675,6 +1820,10 @@
       "check_id": "evalplus_humaneval",
       "display_name": "EvalPlus HumanEval+",
       "description": "Core coding benchmark for code generation quality.",
+      "capability_facets": [
+        "function_code_generation"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "coding_core",
       "surface_id": "local_coding_capability",
@@ -1702,6 +1851,10 @@
       "check_id": "evalplus_mbpp",
       "display_name": "EvalPlus MBPP+",
       "description": "Broader coding benchmark focused on practical Python tasks.",
+      "capability_facets": [
+        "function_code_generation"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "coding_breadth",
       "surface_id": "local_coding_capability",
@@ -1963,6 +2116,10 @@
       "benchmark_tier": "reference",
       "evidence_lane_id": "reference",
       "score_dimension": "assistant_preference_quality",
+      "capability_facets": [
+        "assistant_preference_quality"
+      ],
+      "temporal_scope": "periodically_refreshed_snapshot",
       "planned_score_policy_id": "assistant_preference_win_rate_v1",
       "local_feasibility": "candidate",
       "why_not_default": "Needs an explicit judge policy before it can be trusted as a local decision score.",
@@ -1979,6 +2136,10 @@
       "benchmark_tier": "reference",
       "evidence_lane_id": "reference",
       "score_dimension": "contemporary_code_generation",
+      "capability_facets": [
+        "contemporary_code_generation"
+      ],
+      "temporal_scope": "rolling_window",
       "planned_score_policy_id": "code_task_pass_rate_v1",
       "local_feasibility": "reference_only",
       "why_not_default": "Needs pinned task windows and robust local sandboxing before it can support reproducible local comparisons.",
@@ -1995,9 +2156,53 @@
       "benchmark_tier": "gold",
       "evidence_lane_id": "gold",
       "score_dimension": "software_engineering_task_success",
+      "capability_facets": [
+        "real_repository_issue_resolution"
+      ],
+      "temporal_scope": "periodically_refreshed_snapshot",
       "planned_score_policy_id": "repository_issue_resolution_v1",
       "local_feasibility": "curated_reference_first",
       "why_not_default": "Operationally expensive enough that it should start as maintainer-reviewed gold evidence, not a default laptop run.",
+      "status": "planned"
+    },
+    {
+      "check_id": "bfcl_local_reference_v1",
+      "display_name": "BFCL local tool-use reference",
+      "value": "Adds executable function-selection, argument, and multi-step tool-use coverage missing from the assistant headline mix.",
+      "cost": "medium token volume plus executable schema and state validation",
+      "implementation_risk": "high",
+      "suite_placement": "chat_instruction_following/reference",
+      "primary_use_case": "general_assistant",
+      "benchmark_tier": "reference",
+      "evidence_lane_id": "reference",
+      "score_dimension": "executable_tool_use",
+      "capability_facets": [
+        "tool_use"
+      ],
+      "temporal_scope": "periodically_refreshed_snapshot",
+      "planned_score_policy_id": "executable_function_call_accuracy_v1",
+      "local_feasibility": "candidate",
+      "why_not_default": "Needs a pinned BFCL release, local execution sandbox, cost receipts, and separation between single-turn and agentic results.",
+      "status": "planned"
+    },
+    {
+      "check_id": "longbench_v2_reference_v1",
+      "display_name": "LongBench v2 task-reasoning reference",
+      "value": "Adds realistic long-context task reasoning beyond deterministic key retrieval.",
+      "cost": "large context and token volume with substantial memory-fit constraints on consumer hardware",
+      "implementation_risk": "high",
+      "suite_placement": "reasoning/reference",
+      "primary_use_case": "general_assistant",
+      "benchmark_tier": "reference",
+      "evidence_lane_id": "reference",
+      "score_dimension": "long_context_task_reasoning",
+      "capability_facets": [
+        "long_context_task_reasoning"
+      ],
+      "temporal_scope": "static_pinned",
+      "planned_score_policy_id": "long_context_task_accuracy_v1",
+      "local_feasibility": "reference_only",
+      "why_not_default": "Needs pinned task sampling, memory-fit gating, long-duration recovery, and a judge policy that does not hide scorer identity.",
       "status": "planned"
     }
   ],

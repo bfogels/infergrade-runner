@@ -31,6 +31,8 @@ The memory microcheck was removed from assistant headline weight after a 2026-07
 
 Every weighted component needs a periodic distribution audit across diverse model families and sizes. If its ceiling rate exceeds the documented threshold, InferGrade must demote it to diagnostic evidence, expand or replace it, and increment the score version. A saturated component must not be rescued by arbitrary penalties or model-age priors.
 
+Benchmark representativeness is a separate gate from score distribution. `scripts/audit_benchmark_adequacy.py` verifies that narrow claim facets map to weighted checks, exposes broader priority facets covered only by diagnostics or planned candidates, and requires an explicit freshness path. Its catalog result does not prove empirical discrimination. Conversely, a diverse score distribution does not prove the mix represents tool use, long-context work, repository editing, or other omitted real-world facets. Broader surface claims require both coverage and corpus-headroom evidence.
+
 ## Coverage gate
 
 Capability protocol v3.1 needs all declared benchmark weight (`1.00`), at least two scored components, at least two score dimensions, and `standard` or deeper sample depth before an individual aggregate can publish. A canary can guide setup and expose failures, but it cannot publish the index even if all sampled cases pass.
