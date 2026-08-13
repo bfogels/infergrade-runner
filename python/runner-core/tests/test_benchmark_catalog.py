@@ -438,6 +438,24 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("mmlu_pro_reference_v1", selection["check_ids"])
         self.assertNotIn("mmlu_pro_reference_v1", shortcut_selection("quick_default")["check_ids"])
 
+    def test_assistant_shortcuts_cover_every_weighted_assistant_check(self):
+        catalog = load_capability_catalog()
+        weighted_assistant_check_ids = {
+            str(item["check_id"])
+            for item in catalog["checks"]
+            if item.get("surface_id") == "local_assistant_capability"
+            and float(item.get("primary_score_weight") or 0) > 0
+        }
+
+        self.assertEqual(
+            weighted_assistant_check_ids,
+            {"ifeval", "assistant_compositional_instruction_v2"},
+        )
+        for shortcut_id in ("quick_default", "broad_compare", "assistant_reference"):
+            with self.subTest(shortcut_id=shortcut_id):
+                selection = shortcut_selection(shortcut_id)
+                self.assertTrue(weighted_assistant_check_ids.issubset(set(selection["check_ids"])))
+
     def test_coding_default_shortcut_covers_every_weighted_coding_check(self):
         catalog = load_capability_catalog()
         weighted_coding_check_ids = {
@@ -471,6 +489,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
             [
                 "ifeval",
                 "multiturn_chat_memory_v1",
+                "assistant_compositional_instruction_v2",
                 "interactive_chat_v1",
                 "batch_generation_v1",
                 "perplexity_reference_v1",
