@@ -373,13 +373,30 @@ def audit_capability_observations(
     ):
         blockers.append("single_setup_fraction_above_limit")
     minimum_component_observations = effective_policy.get("minimum_headline_component_observations")
+    minimum_component_families = effective_policy.get("minimum_headline_component_model_families")
+    minimum_component_bands = effective_policy.get("minimum_headline_component_parameter_bands")
     maximum_component_ceiling_fraction = effective_policy.get("maximum_headline_component_ceiling_fraction")
     for component_id, component in component_metrics.items():
+        component_insufficient = False
         if (
             minimum_component_observations is not None
             and component["observation_count"] < int(minimum_component_observations)
         ):
             blockers.append("insufficient_headline_component_observations:%s" % component_id)
+            component_insufficient = True
+        if (
+            minimum_component_families is not None
+            and component["model_family_count"] < int(minimum_component_families)
+        ):
+            blockers.append("insufficient_headline_component_model_families:%s" % component_id)
+            component_insufficient = True
+        if (
+            minimum_component_bands is not None
+            and component["parameter_band_count"] < int(minimum_component_bands)
+        ):
+            blockers.append("insufficient_headline_component_parameter_bands:%s" % component_id)
+            component_insufficient = True
+        if component_insufficient:
             continue
         component_ceiling_blocked = (
             maximum_component_ceiling_fraction is not None
@@ -484,17 +501,28 @@ def _headline_component_metrics(
     near_ceiling_threshold = float(policy.get("near_ceiling_threshold") or 0.9)
     metrics = {}
     for component_id in headline_ids:
-        scores = [
-            float(component["score"])
+        component_rows = [
+            (observation, float(component["score"]))
             for observation in observations
             for component in list(observation.get("components") or [])
             if component.get("benchmark_id") == component_id and _number(component.get("score")) is not None
         ]
+        scores = [score for _, score in component_rows]
+        families = {
+            str(observation.get("model_family") or "unknown")
+            for observation, _ in component_rows
+        } - {"unknown"}
+        bands = {
+            str(observation.get("parameter_band") or "unknown")
+            for observation, _ in component_rows
+        } - {"unknown"}
         ceiling_count = sum(1 for score in scores if math.isclose(score, 1.0, abs_tol=1e-9))
         near_ceiling_count = sum(1 for score in scores if score >= near_ceiling_threshold)
         maximum = max(scores) if scores else None
         metrics[component_id] = {
             "observation_count": len(scores),
+            "model_family_count": len(families),
+            "parameter_band_count": len(bands),
             "distinct_score_count": len(set(round(score, 6) for score in scores)),
             "minimum": min(scores) if scores else None,
             "median": median(scores) if scores else None,
