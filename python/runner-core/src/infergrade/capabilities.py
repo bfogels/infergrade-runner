@@ -1731,6 +1731,11 @@ def _write_native_capability_run_artifact(
         for item in list(summary.get("case_results") or [])
     }
     tasks = []
+    fixture_revision = _selected_fixture_revision(
+        spec.benchmark_id,
+        _native_fixture_revision(spec),
+        cases,
+    )
     for prediction in predictions:
         case_id = str(prediction.get("case_id") or "")
         case = _case_by_id(cases, case_id)
@@ -1789,6 +1794,7 @@ def _write_native_capability_run_artifact(
                 {
                     "model": request.model,
                     "benchmark_id": spec.benchmark_id,
+                    "fixture_revision": fixture_revision,
                     "generation_preset_id": request.generation_preset,
                     "summary": summary,
                 },
@@ -1832,7 +1838,10 @@ def _write_native_capability_run_artifact(
             "task_family": spec.benchmark_kind,
             "prompt_version": spec.benchmark_id,
             "task_version": spec.benchmark_id,
-            "fixture_revision": _native_fixture_revision(spec),
+            "fixture_revision": fixture_revision,
+            "source_fixture_revision": _native_fixture_revision(spec),
+            "selection_sha256": _case_selection_digest(cases),
+            "case_count": len(cases),
             "dataset_revision": None,
             "scorer_type": _native_scorer_type(spec),
             "scoring_policy": summary.get("scoring_policy") or _native_scoring_policy(spec),
@@ -2146,6 +2155,11 @@ def _write_repository_edit_capability_run_artifact(
         for item in list(summary.get("case_results") or [])
     }
     metadata = _read_optional_json(os.path.join(benchmark_dir, "benchmark_metadata.json"))
+    fixture_revision = _selected_fixture_revision(
+        spec.benchmark_id,
+        metadata.get("fixture_revision") or summary.get("fixture_revision") or "unknown",
+        cases,
+    )
     gate_blocked = str((summary.get("output_shape_gate") or {}).get("status")) == "blocked"
     tasks = []
     for prediction in predictions:
@@ -2197,7 +2211,7 @@ def _write_repository_edit_capability_run_artifact(
                 {
                     "model": request.model,
                     "benchmark_id": spec.benchmark_id,
-                    "fixture_revision": metadata.get("fixture_revision"),
+                    "fixture_revision": fixture_revision,
                     "generation_preset_id": request.generation_preset,
                     "summary": summary,
                 },
@@ -2240,7 +2254,9 @@ def _write_repository_edit_capability_run_artifact(
             "task_family": spec.benchmark_kind,
             "prompt_version": "repository_unified_diff_only_v1",
             "task_version": spec.benchmark_id,
-            "fixture_revision": metadata.get("fixture_revision") or summary.get("fixture_revision"),
+            "fixture_revision": fixture_revision,
+            "source_fixture_revision": metadata.get("fixture_revision") or summary.get("fixture_revision"),
+            "selection_sha256": metadata.get("selection_sha256") or _case_selection_digest(cases),
             "dataset_revision": None,
             "scorer_type": "unit_test",
             "scoring_policy": summary.get("scoring_policy") or "repo_edit_task_success_v1",
@@ -2506,6 +2522,31 @@ def _native_fixture_revision(spec: CapabilityBenchmarkSpec) -> str:
     if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
         return STATEFUL_TOOL_LOOP_FIXTURE_REVISION
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
+
+
+def _case_selection_digest(cases: List[Dict[str, Any]]) -> str:
+    case_ids = sorted(
+        str(item.get("task_id") or item.get("case_id") or stable_hash(item, length=64))
+        for item in cases
+    )
+    return stable_hash(case_ids, length=64)
+
+
+def _selected_fixture_revision(
+    benchmark_id: str,
+    source_fixture_revision: Any,
+    cases: List[Dict[str, Any]],
+) -> str:
+    identity = {
+        "benchmark_id": benchmark_id,
+        "source_fixture_revision": str(source_fixture_revision or "unknown"),
+        "case_count": len(cases),
+        "selection_sha256": _case_selection_digest(cases),
+    }
+    return "%s_selection_%s" % (
+        benchmark_id,
+        stable_hash(identity, length=32),
+    )
 
 
 def _selected_check_metadata(request: RunRequest, benchmark_id: str) -> Dict[str, Any]:

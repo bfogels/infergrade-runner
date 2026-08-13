@@ -1,5 +1,6 @@
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
@@ -107,6 +108,9 @@ def prepare(output_dir: str, limit: Optional[int] = None) -> None:
         for fixture in selected
     ]
     root = Path(output_dir)
+    selection_sha256 = hashlib.sha256(
+        "\n".join(sorted(str(item["task_id"]) for item in selected)).encode("utf-8")
+    ).hexdigest()
     _write_jsonl(root / "cases.jsonl", cases)
     _write_json(
         root / "benchmark_metadata.json",
@@ -116,6 +120,7 @@ def prepare(output_dir: str, limit: Optional[int] = None) -> None:
             "case_count": len(cases),
             "fixture_revision": FIXTURE_REVISION,
             "sample_policy": "pinned_fixture_order_v1",
+            "selection_sha256": selection_sha256,
             "scoring_policy": "repo_edit_task_success_v1",
         },
     )

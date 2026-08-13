@@ -16,6 +16,9 @@ unset \
 PYTHONPATH="$ROOT_DIR/python/runner-core/src${PYTHONPATH:+:$PYTHONPATH}" \
   python3 -m unittest discover -s "$ROOT_DIR/python/runner-core/tests"
 
+PYTHONPATH="$ROOT_DIR/python/runner-core/src${PYTHONPATH:+:$PYTHONPATH}" \
+  python3 "$ROOT_DIR/scripts/audit_benchmark_tiers.py" --fail-invalid >/dev/null
+
 # Rust tests are owned by the dedicated `rust` CI job and the local
 # `cargo test --workspace` workflow. Opt in here only when explicitly
 # requested -- presence of `cargo` is not a strong enough signal because
