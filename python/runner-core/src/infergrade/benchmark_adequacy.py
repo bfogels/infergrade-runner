@@ -1,5 +1,6 @@
 """Catalog-level benchmark representativeness and headroom-risk audits."""
 
+from datetime import date
 from typing import Any, Dict, List, Optional, Set
 
 from infergrade.benchmark_catalog import (
@@ -15,9 +16,11 @@ REFRESHABLE_TEMPORAL_SCOPES = {"rolling_window", "periodically_refreshed_snapsho
 def audit_benchmark_adequacy(
     catalog: Optional[Dict[str, Any]] = None,
     surface_id: Optional[str] = None,
+    as_of_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Report what the catalog covers without treating metadata as run evidence."""
     payload = catalog or load_capability_catalog()
+    audit_date = _audit_date(as_of_date)
     checks = check_index(payload)
     planned = {
         str(item.get("check_id")): dict(item)
@@ -34,14 +37,16 @@ def audit_benchmark_adequacy(
                 score_policy,
                 checks,
                 planned,
+                audit_date,
             )
         )
     scoped_ready = bool(surfaces) and all(item["scoped_claim_coverage_ready"] for item in surfaces)
     broad_ready = bool(surfaces) and all(item["broad_surface_coverage_ready"] for item in surfaces)
     return {
         "artifact_kind": "benchmark_adequacy_audit",
-        "artifact_spec_version": "0.2.0",
+        "artifact_spec_version": "0.3.0",
         "catalog_version": payload.get("catalog_version"),
+        "audit_date": audit_date.isoformat(),
         "surface_filter": surface_id,
         "scoped_claim_coverage_ready": scoped_ready,
         "broad_surface_coverage_ready": broad_ready,
@@ -224,6 +229,41 @@ def validate_benchmark_adequacy_metadata(catalog: Optional[Dict[str, Any]] = Non
             failures.append(
                 f"{check_id}: empirical saturation minimum_cases_per_slice must be a positive integer"
             )
+    refreshable_items = list(checks.values()) + [
+        item
+        for item in list(payload.get("planned_benchmark_candidates") or [])
+        if isinstance(item.get("freshness_policy"), dict)
+    ]
+    for item in refreshable_items:
+        if item.get("temporal_scope") not in REFRESHABLE_TEMPORAL_SCOPES:
+            continue
+        check_id = str(item.get("check_id") or "<missing>")
+        freshness_policy = item.get("freshness_policy")
+        if not isinstance(freshness_policy, dict):
+            failures.append(
+                f"{check_id}: refreshable benchmark requires freshness_policy"
+            )
+            continue
+        for field in ("policy_id", "source_release", "source_release_url"):
+            if not str(freshness_policy.get(field) or "").strip():
+                failures.append(
+                    f"{check_id}: freshness_policy {field} must be non-empty"
+                )
+        try:
+            date.fromisoformat(str(freshness_policy.get("content_release_date") or ""))
+        except ValueError:
+            failures.append(
+                f"{check_id}: freshness_policy content_release_date must use YYYY-MM-DD"
+            )
+        maximum_age = freshness_policy.get("maximum_content_age_days")
+        if (
+            isinstance(maximum_age, bool)
+            or not isinstance(maximum_age, int)
+            or maximum_age <= 0
+        ):
+            failures.append(
+                f"{check_id}: freshness_policy maximum_content_age_days must be a positive integer"
+            )
     return failures
 
 
@@ -232,6 +272,7 @@ def _surface_adequacy(
     score_policy: Dict[str, Any],
     checks: Dict[str, Dict[str, Any]],
     planned: Dict[str, Dict[str, Any]],
+    audit_date: date,
 ) -> Dict[str, Any]:
     policy = dict(score_policy.get("representativeness_policy") or {})
     supporting = [checks[check_id] for check_id in policy.get("supporting_check_ids") or [] if check_id in checks]
@@ -251,7 +292,23 @@ def _surface_adequacy(
     missing_priority = sorted(priority_facets - runnable_facets)
     planned_only = sorted((priority_facets & planned_facets) - runnable_facets)
     unplanned = sorted(priority_facets - runnable_facets - planned_facets)
-    refreshable_runnable = sorted(
+    runnable_refresh_snapshots = [
+        _freshness_snapshot(item, audit_date)
+        for item in supporting
+        if item.get("temporal_scope") in REFRESHABLE_TEMPORAL_SCOPES
+    ]
+    planned_refresh_snapshots = [
+        _freshness_snapshot(item, audit_date)
+        for item in planned_checks
+        if item.get("temporal_scope") in REFRESHABLE_TEMPORAL_SCOPES
+    ]
+    refreshable_runnable = sorted(_facets(
+        item
+        for item in supporting
+        if item.get("temporal_scope") in REFRESHABLE_TEMPORAL_SCOPES
+        and _freshness_snapshot(item, audit_date)["ready"]
+    ))
+    declared_refreshable_runnable = sorted(
         _facets(item for item in supporting if item.get("temporal_scope") in REFRESHABLE_TEMPORAL_SCOPES)
     )
     refreshable_planned = sorted(
@@ -310,7 +367,10 @@ def _surface_adequacy(
         "freshness": {
             "minimum_refreshable_priority_facets": minimum_refreshable,
             "runnable_refreshable_facets": refreshable_runnable,
+            "declared_runnable_refreshable_facets": declared_refreshable_runnable,
             "planned_refreshable_facets": refreshable_planned,
+            "runnable_snapshots": runnable_refresh_snapshots,
+            "planned_snapshots": planned_refresh_snapshots,
             "ready": freshness_ready,
         },
         "claim_boundary": score_policy.get("claim_boundary"),
@@ -323,6 +383,66 @@ def _known_saturation_risk(check: Dict[str, Any]) -> bool:
         return True
     decision = str((check.get("saturation_evidence") or {}).get("decision") or "").lower()
     return "saturat" in decision or "replacement" in decision or "demotion" in decision
+
+
+def _audit_date(value: Optional[str]) -> date:
+    if value is None:
+        return date.today()
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError as exc:
+        raise ValueError("as_of_date must use YYYY-MM-DD") from exc
+
+
+def _freshness_snapshot(item: Dict[str, Any], audit_date: date) -> Dict[str, Any]:
+    policy = item.get("freshness_policy")
+    if not isinstance(policy, dict):
+        return {
+            "check_id": item.get("check_id"),
+            "status": "freshness_provenance_missing",
+            "ready": False,
+        }
+    try:
+        content_release_date = date.fromisoformat(
+            str(policy.get("content_release_date") or "")
+        )
+    except ValueError:
+        return {
+            "check_id": item.get("check_id"),
+            "policy_id": policy.get("policy_id"),
+            "status": "freshness_provenance_invalid",
+            "ready": False,
+        }
+    maximum_age = policy.get("maximum_content_age_days")
+    if (
+        isinstance(maximum_age, bool)
+        or not isinstance(maximum_age, int)
+        or maximum_age <= 0
+    ):
+        return {
+            "check_id": item.get("check_id"),
+            "policy_id": policy.get("policy_id"),
+            "content_release_date": content_release_date.isoformat(),
+            "status": "freshness_provenance_invalid",
+            "ready": False,
+        }
+    content_age_days = (audit_date - content_release_date).days
+    if content_age_days < 0:
+        status = "future_content_release_date"
+    elif content_age_days > maximum_age:
+        status = "content_snapshot_stale"
+    else:
+        status = "content_snapshot_current"
+    return {
+        "check_id": item.get("check_id"),
+        "policy_id": policy.get("policy_id"),
+        "source_release": policy.get("source_release"),
+        "content_release_date": content_release_date.isoformat(),
+        "content_age_days": content_age_days,
+        "maximum_content_age_days": maximum_age,
+        "status": status,
+        "ready": status == "content_snapshot_current",
+    }
 
 
 def _facets(items: Any) -> Set[str]:

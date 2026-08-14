@@ -183,7 +183,20 @@ class BenchmarkCatalogTests(unittest.TestCase):
         )
         self.assertEqual(
             score_policies["local_reasoning_capability"]["representativeness_policy"]["planned_check_ids"],
-            [],
+            ["livebench_reasoning_refresh_candidate_v1"],
+        )
+        livebench = next(
+            item for item in catalog["planned_benchmark_candidates"]
+            if item["check_id"] == "livebench_reasoning_refresh_candidate_v1"
+        )
+        self.assertEqual(livebench["status"], "research_candidate_near_ceiling_risk")
+        self.assertEqual(
+            livebench["external_headroom_observation"]["headroom_to_suite_ceiling"],
+            0.083,
+        )
+        self.assertEqual(
+            livebench["external_headroom_observation"]["status"],
+            "below_infergrade_headroom_policy",
         )
 
     def test_coverage_expansion_priorities_are_ordered_and_answer_loop_scoped(self):
