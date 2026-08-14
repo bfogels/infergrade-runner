@@ -13,15 +13,19 @@ class BenchmarkAdequacyTests(unittest.TestCase):
         catalog = load_capability_catalog()
 
         self.assertEqual(validate_benchmark_adequacy_metadata(catalog), [])
-        report = audit_benchmark_adequacy(catalog)
+        report = audit_benchmark_adequacy(catalog, as_of_date="2026-08-14")
 
-        self.assertEqual(report["artifact_spec_version"], "0.2.0")
+        self.assertEqual(report["artifact_spec_version"], "0.3.0")
+        self.assertEqual(report["audit_date"], "2026-08-14")
         self.assertTrue(report["scoped_claim_coverage_ready"])
         self.assertFalse(report["broad_surface_coverage_ready"])
         self.assertEqual(len(report["surfaces"]), 3)
 
     def test_report_exposes_current_broad_coverage_and_headroom_gaps(self):
-        report = audit_benchmark_adequacy(load_capability_catalog())
+        report = audit_benchmark_adequacy(
+            load_capability_catalog(),
+            as_of_date="2026-08-14",
+        )
         by_surface = {item["surface_id"]: item for item in report["surfaces"]}
 
         assistant = by_surface["local_assistant_capability"]
@@ -36,12 +40,20 @@ class BenchmarkAdequacyTests(unittest.TestCase):
         self.assertIn("assistant_preference_quality", assistant["planned_only_priority_facets"])
         self.assertIn("tool_use", assistant["diagnostic_facets_covered"])
         self.assertIn("stateful_tool_use", assistant["diagnostic_facets_covered"])
-        self.assertIn("tool_use", assistant["freshness"]["runnable_refreshable_facets"])
+        self.assertEqual(assistant["freshness"]["runnable_refreshable_facets"], [])
+        self.assertIn(
+            "tool_use",
+            assistant["freshness"]["declared_runnable_refreshable_facets"],
+        )
+        self.assertEqual(
+            assistant["freshness"]["runnable_snapshots"][0]["status"],
+            "content_snapshot_stale",
+        )
         self.assertEqual(
             assistant["known_diagnostic_saturation_risks"],
             ["multiturn_chat_memory_v1"],
         )
-        self.assertTrue(assistant["freshness"]["ready"])
+        self.assertFalse(assistant["freshness"]["ready"])
 
         coding = by_surface["local_coding_capability"]
         self.assertIn("repository_code_editing", coding["diagnostic_facets_covered"])
@@ -53,6 +65,61 @@ class BenchmarkAdequacyTests(unittest.TestCase):
         self.assertIn("long_context_task_reasoning", reasoning["diagnostic_facets_covered"])
         self.assertNotIn("long_context_task_reasoning", reasoning["planned_only_priority_facets"])
         self.assertIn("reasoning_exact_answer_v1", reasoning["known_headline_saturation_risks"])
+        self.assertIn(
+            "broad_multidomain_reasoning",
+            reasoning["freshness"]["planned_refreshable_facets"],
+        )
+        self.assertEqual(
+            reasoning["freshness"]["planned_snapshots"][0]["status"],
+            "content_snapshot_current",
+        )
+
+    def test_refreshable_content_must_be_recent_not_merely_labeled_refreshable(self):
+        catalog = deepcopy(load_capability_catalog())
+        bfcl = next(
+            item for item in catalog["checks"]
+            if item["check_id"] == "bfcl_local_reference_v1"
+        )
+        bfcl["freshness_policy"]["content_release_date"] = "2026-07-01"
+
+        current = audit_benchmark_adequacy(
+            catalog,
+            surface_id="local_assistant_capability",
+            as_of_date="2026-08-14",
+        )["surfaces"][0]
+        stale = audit_benchmark_adequacy(
+            catalog,
+            surface_id="local_assistant_capability",
+            as_of_date="2027-08-14",
+        )["surfaces"][0]
+
+        self.assertIn("tool_use", current["freshness"]["runnable_refreshable_facets"])
+        self.assertTrue(current["freshness"]["ready"])
+        self.assertEqual(
+            current["freshness"]["runnable_snapshots"][0]["content_age_days"],
+            44,
+        )
+        self.assertEqual(stale["freshness"]["runnable_refreshable_facets"], [])
+        self.assertFalse(stale["freshness"]["ready"])
+        self.assertEqual(
+            stale["freshness"]["runnable_snapshots"][0]["status"],
+            "content_snapshot_stale",
+        )
+
+    def test_refreshable_runnable_check_requires_fail_closed_freshness_policy(self):
+        catalog = deepcopy(load_capability_catalog())
+        bfcl = next(
+            item for item in catalog["checks"]
+            if item["check_id"] == "bfcl_local_reference_v1"
+        )
+        bfcl.pop("freshness_policy")
+
+        failures = validate_benchmark_adequacy_metadata(catalog)
+
+        self.assertIn(
+            "bfcl_local_reference_v1: refreshable benchmark requires freshness_policy",
+            failures,
+        )
 
     def test_missing_scoped_facet_fails_only_structural_claim_coverage(self):
         catalog = deepcopy(load_capability_catalog())

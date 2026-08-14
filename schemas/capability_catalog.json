@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-14-reasoning-headroom-diagnostic",
+  "catalog_version": "2026-08-14-refresh-provenance",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -249,7 +249,9 @@
           "reasoning_constraint_stress_v1",
           "longbench_v2_local_reference_v1"
         ],
-        "planned_check_ids": [],
+        "planned_check_ids": [
+          "livebench_reasoning_refresh_candidate_v1"
+        ],
         "minimum_refreshable_priority_facets": 1,
         "empirical_priority_facet_policy": {
           "policy_id": "priority_facet_evidence_gate_v2",
@@ -1012,6 +1014,26 @@
         "Run a cross-family distribution audit before assigning headline score weight.",
         "Measure malformed-patch, timeout, duration, repeatability, and ceiling rates across current and historical model bands.",
         "Replace or expand fixtures if the component ceiling rate breaches the headroom gate."
+      ]
+    },
+    {
+      "check_id": "livebench_reasoning_refresh_candidate_v1",
+      "surface_id": "local_reasoning_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "planned",
+      "runnable_status": "not_runnable",
+      "default_inclusion_status": "not_default",
+      "fixture_or_dataset_revision_status": "release_and_harder_subset_policy_needed",
+      "harness_status": "not_implemented",
+      "scoring_policy_id": "livebench_objective_reasoning_accuracy_v1",
+      "sample_policy": "Future release-pinned, objective-scored reasoning subset only after a harder local mix clears the headroom policy.",
+      "expected_duration_token_volume_status": "unknown",
+      "sandbox_requirement": "none_for_generation_task_specific_scorers_pending",
+      "claim_boundary": "Research candidate for refreshable reasoning evidence; not runnable, not a leaderboard reproduction, and not proof of future headroom.",
+      "promotion_blockers": [
+        "Define a bounded objective-scored local subset and pin every release input.",
+        "Demonstrate at least ten points of headroom across current challenge models.",
+        "Collect cross-family, independent-repeat, category-slice, and local-duration evidence."
       ]
     },
     {
@@ -1842,7 +1864,15 @@
       "source": "https://github.com/ShishirPatil/gorilla",
       "dataset_revision": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8",
       "dataset_sha256": "7c239c7ae1d0ef371a15f96ec9fc0f38e79c331c94adbf54d7f73c0614445562",
-      "dataset_license": "Apache-2.0"
+      "dataset_license": "Apache-2.0",
+      "freshness_policy": {
+        "policy_id": "benchmark_content_age_gate_v1",
+        "source_release": "BFCL V4",
+        "content_release_date": "2025-07-17",
+        "maximum_content_age_days": 365,
+        "revision_pinned_date": "2026-03-23",
+        "source_release_url": "https://github.com/ShishirPatil/gorilla/blob/main/berkeley-function-call-leaderboard/CHANGELOG.md"
+      }
     },
     {
       "check_id": "stateful_tool_loop_diagnostic_v1",
@@ -2592,6 +2622,44 @@
       "local_feasibility": "candidate",
       "why_not_default": "Needs an explicit judge policy before it can be trusted as a local decision score.",
       "status": "planned"
+    },
+    {
+      "check_id": "livebench_reasoning_refresh_candidate_v1",
+      "display_name": "LiveBench reasoning refresh candidate",
+      "value": "Adds objective, release-pinned reasoning tasks from a benchmark designed to refresh its question sources over time.",
+      "cost": "unknown local duration; requires a bounded objective-scored subset and release-by-release fixture review",
+      "implementation_risk": "medium",
+      "suite_placement": "broad_reasoning_knowledge/reference",
+      "primary_use_case": "reasoning",
+      "surface_id": "local_reasoning_capability",
+      "benchmark_tier": "reference",
+      "evidence_lane_id": "reference",
+      "score_dimension": "broad_multidomain_reasoning",
+      "capability_facets": [
+        "broad_multidomain_reasoning"
+      ],
+      "temporal_scope": "periodically_refreshed_snapshot",
+      "planned_score_policy_id": "livebench_objective_reasoning_accuracy_v1",
+      "local_feasibility": "research_candidate",
+      "freshness_policy": {
+        "policy_id": "benchmark_content_age_gate_v1",
+        "source_release": "LiveBench 2026-06-25",
+        "content_release_date": "2026-06-25",
+        "maximum_content_age_days": 180,
+        "source_release_url": "https://livebench.ai/"
+      },
+      "external_headroom_observation": {
+        "observed_at": "2026-08-14",
+        "release": "2026-06-25",
+        "category": "reasoning",
+        "highest_observed_score": 0.917,
+        "headroom_to_suite_ceiling": 0.083,
+        "minimum_required_headroom": 0.1,
+        "status": "below_infergrade_headroom_policy",
+        "source": "https://livebench.ai/"
+      },
+      "why_not_default": "Refreshability does not guarantee headroom. The observed 2026-06-25 reasoning leaderboard leaves only 8.3 points at the top, below InferGrade's 10-point minimum; a harder bounded local mix must independently pass cross-family, challenger, and slice audits before becoming runnable.",
+      "status": "research_candidate_near_ceiling_risk"
     },
     {
       "check_id": "livecodebench_reference_v1",
