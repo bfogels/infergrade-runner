@@ -120,6 +120,7 @@ def prepare(output_dir: str, limit: Optional[int] = None) -> None:
             "case_count": len(cases),
             "fixture_revision": FIXTURE_REVISION,
             "sample_policy": "pinned_fixture_order_v1",
+            "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
             "selection_sha256": selection_sha256,
             "scoring_policy": "repo_edit_task_success_v1",
         },

@@ -193,6 +193,7 @@ def prepare(output_dir: str, limit: int = None, data_path: str = DEFAULT_DATA_PA
                 if len(rows) < len(full_rows)
                 else "full_snapshot_order"
             ),
+            "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
             "selection_sha256": _selection_digest(rows),
             "category_count": len(set(case["category"] for case in cases)),
         },

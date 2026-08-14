@@ -101,7 +101,7 @@ def _sample_inputs(inputs: List, limit: int = None) -> List:
 
 
 def _selection_digest(inputs: List) -> str:
-    payload = "\n".join(str(item.key) for item in inputs).encode("utf-8")
+    payload = "\n".join(sorted(str(item.key) for item in inputs)).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -159,6 +159,7 @@ def prepare(output_dir: str, limit: int = None) -> None:
                 if len(inputs) < len(full_inputs)
                 else "full_snapshot_order"
             ),
+            "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
             "selection_sha256": _selection_digest(inputs),
             "instruction_type_count": len(selected_instruction_types),
             "full_instruction_type_count": len(all_instruction_types),

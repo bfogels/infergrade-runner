@@ -225,6 +225,7 @@ def prepare(dataset: str, output_dir: str, limit: int = None) -> None:
             "case_count": len(selected_tasks),
             "evalplus_revision": EVALPLUS_REVISION,
             "sample_policy": _sample_policy(dataset, len(selected_tasks)),
+            "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
             "selection_sha256": _selection_digest(selected_task_ids),
             "override_path": override_path,
         },
@@ -276,6 +277,7 @@ def evaluate(dataset: str, output_dir: str) -> None:
         "case_count": len(results.get("eval", {})),
         "evalplus_revision": EVALPLUS_REVISION,
         "sample_policy": _sample_policy(dataset, len(results.get("eval", {}))),
+        "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
         "selection_sha256": _selection_digest(sorted(str(item) for item in results.get("eval", {}))),
         "scoring_policy": "evalplus_pass_at_1_normalized_v2",
         "primary_metric": {

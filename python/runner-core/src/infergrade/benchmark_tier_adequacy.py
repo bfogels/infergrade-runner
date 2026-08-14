@@ -9,6 +9,11 @@ from typing import Any, Dict, Optional
 
 from infergrade.benchmark_catalog import check_index, load_capability_catalog
 from infergrade.capabilities import CAPABILITY_BENCHMARKS, _native_benchmark_cases
+from infergrade.selection_identity import (
+    SELECTION_DIGEST_ALGORITHMS,
+    selection_digest,
+    selection_digest_algorithm_for_execution_mode,
+)
 
 
 TIER_NAMES = ("canary", "standard", "gold")
@@ -73,6 +78,17 @@ def audit_benchmark_tier_adequacy(
             benchmark_errors.append("missing_stratification_fields")
         if policy.get("selection_identity_policy") != EXACT_SELECTION_IDENTITY_POLICY:
             benchmark_errors.append("selection_identity_not_exact")
+        expected_digest_algorithm = selection_digest_algorithm_for_execution_mode(
+            spec.execution_mode
+        )
+        declared_digest_algorithm = policy.get("selection_digest_algorithm")
+        if declared_digest_algorithm not in SELECTION_DIGEST_ALGORITHMS:
+            benchmark_errors.append("selection_digest_algorithm_invalid")
+            digest_algorithm = expected_digest_algorithm
+        else:
+            digest_algorithm = str(declared_digest_algorithm)
+            if digest_algorithm != expected_digest_algorithm:
+                benchmark_errors.append("selection_digest_algorithm_mismatch")
         declared_limits = policy.get("case_limits")
         if declared_limits != case_limits:
             benchmark_errors.append("case_limits_mismatch")
@@ -81,6 +97,7 @@ def audit_benchmark_tier_adequacy(
                 spec,
                 policy,
                 case_limits,
+                digest_algorithm,
             )
             benchmark_errors.extend(fixture_verification["errors"])
         elif benchmark_id in STATIC_FIXTURE_MANIFESTS:
@@ -88,6 +105,7 @@ def audit_benchmark_tier_adequacy(
                 spec,
                 policy,
                 case_limits,
+                digest_algorithm,
             )
             benchmark_errors.extend(fixture_verification["errors"])
         else:
@@ -100,6 +118,8 @@ def audit_benchmark_tier_adequacy(
                 "source_fixture_revision": None,
                 "source_fixture_sha256": None,
                 "source_fixture_status": "external_runtime_only",
+                "selection_digest_algorithm": digest_algorithm,
+                "selection_digest_verified": False,
                 "tiers": [],
                 "errors": [],
             }
@@ -116,6 +136,7 @@ def audit_benchmark_tier_adequacy(
                 "strategy": strategy or None,
                 "stratification_fields": list(fields) if isinstance(fields, list) else [],
                 "selection_identity_policy": policy.get("selection_identity_policy"),
+                "selection_digest_algorithm": declared_digest_algorithm,
                 "fixture_verification": fixture_verification,
                 "errors": benchmark_errors,
             }
@@ -124,7 +145,7 @@ def audit_benchmark_tier_adequacy(
     errors.extend("%s:unexpected_tier_sampling_policy" % item for item in extra_ids)
     return {
         "artifact_kind": "benchmark_tier_adequacy_audit",
-        "artifact_spec_version": "0.3.0",
+        "artifact_spec_version": "0.4.0",
         "catalog_version": payload.get("catalog_version"),
         "status": "ready" if not errors else "invalid",
         "ready": not errors,
@@ -152,10 +173,28 @@ def audit_benchmark_tier_adequacy(
             if item["fixture_verification"]["tier_coverage_contract"]
             and item["fixture_verification"]["ready"]
         ),
+        "declared_selection_digest_algorithm_count": sum(
+            1
+            for item in benchmark_reports
+            if item["selection_digest_algorithm"] in SELECTION_DIGEST_ALGORITHMS
+        ),
+        "materialized_selection_digest_verified_count": sum(
+            1
+            for item in benchmark_reports
+            if item["fixture_verification"]["selection_digest_verified"]
+        ),
+        "runtime_only_selection_digest_contract_count": sum(
+            1
+            for item in benchmark_reports
+            if item["fixture_verification"]["status"]
+            == "external_runtime_not_materialized"
+            and item["selection_digest_algorithm"] in SELECTION_DIGEST_ALGORITHMS
+        ),
         "benchmarks": benchmark_reports,
         "errors": errors,
         "claim_boundary": (
-            "This audit validates declared tier-selection and exact-selection identity contracts. Native "
+            "This audit validates declared tier-selection and exact-selection identity contracts, including "
+            "a versioned selected-case digest serialization. Native "
             "fixtures are also materialized to verify case counts, unique identities, and declared per-tier "
             "category coverage. The first-party repository-edit fixture is verified from its bundled exact-source "
             "manifest and, in source checkouts, against the container fixture itself. Upstream container-owned "
@@ -169,11 +208,13 @@ def _audit_native_fixture(
     spec: Any,
     policy: Dict[str, Any],
     case_limits: Dict[str, int],
+    digest_algorithm: str,
 ) -> Dict[str, Any]:
     return _audit_fixture_cases(
         cases=_native_benchmark_cases(spec),
         policy=policy,
         case_limits=case_limits,
+        digest_algorithm=digest_algorithm,
         identity_error_prefix="native_fixture",
         success_status="materialized_verified",
         invalid_status="materialized_invalid",
@@ -194,6 +235,7 @@ def _audit_static_fixture_manifest(
     spec: Any,
     policy: Dict[str, Any],
     case_limits: Dict[str, int],
+    digest_algorithm: str,
 ) -> Dict[str, Any]:
     manifest = load_static_fixture_manifest(spec.benchmark_id)
     errors = []
@@ -223,6 +265,7 @@ def _audit_static_fixture_manifest(
         cases=cases,
         policy=policy,
         case_limits=case_limits,
+        digest_algorithm=digest_algorithm,
         identity_error_prefix="static_fixture_manifest",
         success_status=(
             "source_fixture_verified"
@@ -284,6 +327,7 @@ def _audit_fixture_cases(
     cases: list,
     policy: Dict[str, Any],
     case_limits: Dict[str, int],
+    digest_algorithm: str,
     identity_error_prefix: str,
     success_status: str,
     invalid_status: str,
@@ -406,7 +450,10 @@ def _audit_fixture_cases(
             {
                 "tier": tier,
                 "selected_case_count": len(selected),
-                "selection_sha256": _case_id_digest(case_ids[:limit]),
+                "selection_digest_algorithm": digest_algorithm,
+                "selection_sha256": selection_digest(
+                    case_ids[:limit], digest_algorithm
+                ),
                 "coverage_requirements": requirement_reports,
             }
         )
@@ -420,14 +467,16 @@ def _audit_fixture_cases(
         "source_fixture_revision": source_fixture_revision,
         "source_fixture_sha256": source_fixture_sha256,
         "source_fixture_status": source_fixture_status,
+        "selection_digest_algorithm": digest_algorithm,
+        "selection_digest_verified": (
+            digest_algorithm in SELECTION_DIGEST_ALGORITHMS
+            and not any(not case_id for case_id in case_ids)
+            and len(case_ids) == len(set(case_ids))
+            and len(cases) >= maximum_limit
+        ),
         "tiers": tier_reports,
         "errors": errors,
     }
-
-
-def _case_id_digest(case_ids: list) -> str:
-    encoded = json.dumps(sorted(case_ids), separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _json_scalar_identity(value: Any) -> str:

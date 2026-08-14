@@ -134,6 +134,7 @@ def prepare(output_dir: str, limit: Optional[int] = None, data_path: str = DEFAU
                 if len(rows) < len(full_rows)
                 else "pinned_snapshot_order"
             ),
+            "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
             "selection_sha256": _selection_digest(rows),
             "prompt_format": "infergrade_json_tool_calls_v1",
             "upstream_revision": snapshot_metadata["upstream_revision"],

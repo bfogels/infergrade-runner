@@ -151,7 +151,15 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertEqual(metadata["instruction_type_count"], 3)
         self.assertEqual(metadata["full_instruction_type_count"], 3)
         self.assertEqual(metadata["instruction_type_coverage_fraction"], 1.0)
+        self.assertEqual(
+            metadata["selection_digest_algorithm"],
+            "sorted_utf8_newline_sha256_v1",
+        )
         self.assertEqual(len(metadata["selection_sha256"]), 64)
+        self.assertEqual(
+            module._selection_digest(inputs),
+            module._selection_digest(list(reversed(inputs))),
+        )
 
     def test_evalplus_mbpp_tasks_are_serialized_before_jsonl_write(self):
         fake_evalplus_data = types.SimpleNamespace(
@@ -752,6 +760,10 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
         self.assertIn("official BFCL V4 leaderboard score", benchmark_metadata["claim_boundary"]["cannot_claim"])
         self.assertEqual(benchmark_metadata["prompt_format"], "infergrade_json_tool_calls_v1")
         self.assertEqual(benchmark_metadata["sample_policy"], "category_round_robin_3_v2")
+        self.assertEqual(
+            benchmark_metadata["selection_digest_algorithm"],
+            "sorted_utf8_newline_sha256_v1",
+        )
         self.assertEqual(len(benchmark_metadata["selection_sha256"]), 64)
 
     def test_bfcl_strict_scorer_handles_optional_parallel_and_relevance_cases(self):
