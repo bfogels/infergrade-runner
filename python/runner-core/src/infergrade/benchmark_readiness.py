@@ -8,6 +8,7 @@ from infergrade.benchmark_adequacy import (
     validate_benchmark_adequacy_metadata,
 )
 from infergrade.benchmark_catalog import check_index, load_capability_catalog
+from infergrade.benchmark_tier_adequacy import audit_benchmark_tier_adequacy
 from infergrade.capability_calibration import (
     audit_capability_observations,
     extract_calibration_observations,
@@ -24,7 +25,12 @@ def audit_benchmark_readiness(
     """Require structural coverage and empirical discrimination together."""
     payload = catalog or load_capability_catalog()
     document_list = list(documents)
-    metadata_errors = validate_benchmark_adequacy_metadata(payload)
+    adequacy_metadata_errors = validate_benchmark_adequacy_metadata(payload)
+    tier_adequacy = audit_benchmark_tier_adequacy(payload)
+    tier_sampling_errors = list(tier_adequacy.get("errors") or [])
+    metadata_errors = list(adequacy_metadata_errors) + [
+        "tier_sampling:%s" % error for error in tier_sampling_errors
+    ]
     metadata_valid = not metadata_errors
     adequacy = audit_benchmark_adequacy(payload, surface_id=surface_id)
     observations = extract_calibration_observations(document_list, catalog=payload)
@@ -93,10 +99,18 @@ def audit_benchmark_readiness(
     broad_ready = bool(surfaces) and all(item["broad_surface_ready"] for item in surfaces)
     return {
         "artifact_kind": "benchmark_readiness_audit",
-        "artifact_spec_version": "0.5.0",
+        "artifact_spec_version": "0.6.0",
         "catalog_version": payload.get("catalog_version"),
         "catalog_metadata_valid": metadata_valid,
         "catalog_metadata_errors": metadata_errors,
+        "catalog_tier_sampling_valid": not tier_sampling_errors,
+        "catalog_tier_sampling_errors": tier_sampling_errors,
+        "materialized_native_fixture_count": tier_adequacy.get(
+            "materialized_native_fixture_count"
+        ),
+        "native_tier_coverage_contract_count": tier_adequacy.get(
+            "native_tier_coverage_contract_count"
+        ),
         "surface_filter": surface_id,
         "input_document_count": len(document_list),
         "calibration_observation_count": len(observations),
@@ -111,8 +125,9 @@ def audit_benchmark_readiness(
         ),
         "surfaces": surfaces,
         "interpretation": (
-            "Readiness requires Runner catalog coverage, an empirical score distribution with the required "
-            "diversity and headroom, and representative observations for every priority capability facet. "
+            "Readiness requires Runner catalog coverage, executable native tier-coverage contracts, an "
+            "empirical score distribution with the required diversity and headroom, and representative "
+            "observations for every priority capability facet. "
             "A facet counts only when one protocol-identity cohort for a supporting check independently "
             "clears its observation, model-family, parameter-band, repeat, and headroom gates; standalone "
             "evidence must also meet the check's declared minimum task count. A Wilson upper bound keeps "

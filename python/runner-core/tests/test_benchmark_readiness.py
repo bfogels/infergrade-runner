@@ -9,7 +9,10 @@ class BenchmarkReadinessTests(unittest.TestCase):
     def test_missing_corpus_evidence_fails_closed_even_when_scoped_facets_exist(self):
         report = audit_benchmark_readiness([], load_capability_catalog())
 
-        self.assertEqual(report["artifact_spec_version"], "0.5.0")
+        self.assertEqual(report["artifact_spec_version"], "0.6.0")
+        self.assertTrue(report["catalog_tier_sampling_valid"])
+        self.assertEqual(report["materialized_native_fixture_count"], 7)
+        self.assertEqual(report["native_tier_coverage_contract_count"], 3)
         self.assertFalse(report["scoped_claim_ready"])
         self.assertFalse(report["broad_surface_ready"])
         self.assertEqual(report["status"], "not_ready")
@@ -80,6 +83,30 @@ class BenchmarkReadinessTests(unittest.TestCase):
             any(
                 item.startswith("catalog_metadata:")
                 for item in _surface(report, "local_assistant_capability")["scoped_claim_blockers"]
+            )
+        )
+
+    def test_invalid_native_tier_coverage_blocks_claim_readiness(self):
+        catalog = _structurally_broad_catalog()
+        catalog["tier_sampling_policies"]["reasoning_constraint_stress_v1"][
+            "tier_coverage_requirements"
+        ]["canary"]["category"]["required_values"].append("missing_category")
+
+        report = audit_benchmark_readiness(_calibrated_documents(catalog), catalog)
+
+        self.assertFalse(report["catalog_metadata_valid"])
+        self.assertFalse(report["catalog_tier_sampling_valid"])
+        self.assertFalse(report["scoped_claim_ready"])
+        self.assertIn(
+            "reasoning_constraint_stress_v1:tier_coverage_missing_required_values:canary:category",
+            report["catalog_tier_sampling_errors"],
+        )
+        self.assertTrue(
+            any(
+                item.startswith("catalog_metadata:tier_sampling:")
+                for item in _surface(
+                    report, "local_reasoning_capability"
+                )["scoped_claim_blockers"]
             )
         )
 

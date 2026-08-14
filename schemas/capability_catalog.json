@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-14-refresh-provenance",
+  "catalog_version": "2026-08-14-native-tier-coverage",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -645,14 +645,71 @@
     "assistant_compositional_instruction_v2": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 4, "standard": 24, "gold": 24}},
     "coding_static_repair_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 2, "standard": 3, "gold": 3}},
     "reasoning_exact_answer_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 2, "standard": 3, "gold": 3}},
-    "reasoning_constraint_stress_v1": {"strategy": "balanced_tier_blocks", "stratification_fields": ["category", "structural_tier"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 6, "standard": 24, "gold": 48}},
+    "reasoning_constraint_stress_v1": {
+      "strategy": "balanced_tier_blocks",
+      "stratification_fields": ["category", "structural_tier"],
+      "selection_identity_policy": "exact_selected_case_ids_sha256_v1",
+      "case_limits": {"canary": 6, "standard": 24, "gold": 48},
+      "tier_coverage_requirements": {
+        "canary": {
+          "category": {"required_values": ["state_tracking", "graph_planning", "modular_reasoning", "set_reasoning", "dependency_planning", "arrangement_counting"], "minimum_cases_per_required_value": 1},
+          "structural_tier": {"required_values": ["foundation"], "minimum_cases_per_required_value": 1}
+        },
+        "standard": {
+          "category": {"required_values": ["state_tracking", "graph_planning", "modular_reasoning", "set_reasoning", "dependency_planning", "arrangement_counting"], "minimum_cases_per_required_value": 4},
+          "structural_tier": {"required_values": ["foundation", "intermediate", "hard", "stress"], "minimum_cases_per_required_value": 6}
+        },
+        "gold": {
+          "category": {"required_values": ["state_tracking", "graph_planning", "modular_reasoning", "set_reasoning", "dependency_planning", "arrangement_counting"], "minimum_cases_per_required_value": 8},
+          "structural_tier": {"required_values": ["foundation", "intermediate", "hard", "stress"], "minimum_cases_per_required_value": 6}
+        }
+      }
+    },
     "mmlu_pro_reference_v1": {"strategy": "stratum_round_robin_hash_rank", "stratification_fields": ["category"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 300}},
     "gpqa_diamond_reference_v1": {"strategy": "stratum_round_robin_hash_rank", "stratification_fields": ["domain"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 198}},
     "longbench_v2_local_reference_v1": {"strategy": "balanced_tier_blocks", "stratification_fields": ["domain", "difficulty", "length"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 6, "standard": 12, "gold": 23}},
     "bfcl_local_reference_v1": {"strategy": "stratum_round_robin_hash_rank", "stratification_fields": ["category"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 11, "standard": 55, "gold": 110}},
-    "stateful_tool_loop_diagnostic_v1": {"strategy": "balanced_tier_blocks", "stratification_fields": ["category", "variant"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 8, "standard": 16, "gold": 24}},
+    "stateful_tool_loop_diagnostic_v1": {
+      "strategy": "balanced_tier_blocks",
+      "stratification_fields": ["category", "variant"],
+      "selection_identity_policy": "exact_selected_case_ids_sha256_v1",
+      "case_limits": {"canary": 8, "standard": 16, "gold": 24},
+      "tier_coverage_requirements": {
+        "canary": {
+          "category": {"required_values": ["inventory", "access_control", "service_operations", "budgeting", "scheduling", "data_workflow", "communication", "release_safety"], "minimum_cases_per_required_value": 1},
+          "variant": {"required_values": ["success", "blocked", "noop"], "minimum_cases_per_required_value": 2}
+        },
+        "standard": {
+          "category": {"required_values": ["inventory", "access_control", "service_operations", "budgeting", "scheduling", "data_workflow", "communication", "release_safety"], "minimum_cases_per_required_value": 2},
+          "variant": {"required_values": ["success", "blocked", "noop"], "minimum_cases_per_required_value": 5}
+        },
+        "gold": {
+          "category": {"required_values": ["inventory", "access_control", "service_operations", "budgeting", "scheduling", "data_workflow", "communication", "release_safety"], "minimum_cases_per_required_value": 3},
+          "variant": {"required_values": ["success", "blocked", "noop"], "minimum_cases_per_required_value": 8}
+        }
+      }
+    },
     "repository_edit_smoke_v1": {"strategy": "pinned_semantic_order", "stratification_fields": ["category"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 2, "standard": 6, "gold": 8}},
-    "context_retrieval_reference_v1": {"strategy": "balanced_tier_blocks", "stratification_fields": ["context_bucket_tokens", "key_position"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 1, "standard": 3, "gold": 6}}
+    "context_retrieval_reference_v1": {
+      "strategy": "balanced_tier_blocks",
+      "stratification_fields": ["context_bucket_tokens", "key_position"],
+      "selection_identity_policy": "exact_selected_case_ids_sha256_v1",
+      "case_limits": {"canary": 1, "standard": 3, "gold": 6},
+      "tier_coverage_requirements": {
+        "canary": {
+          "context_bucket_tokens": {"required_values": [4096], "minimum_cases_per_required_value": 1},
+          "key_position": {"required_values": ["early"], "minimum_cases_per_required_value": 1}
+        },
+        "standard": {
+          "context_bucket_tokens": {"required_values": [4096, 8192, 16384], "minimum_cases_per_required_value": 1},
+          "key_position": {"required_values": ["early", "middle", "late"], "minimum_cases_per_required_value": 1}
+        },
+        "gold": {
+          "context_bucket_tokens": {"required_values": [4096, 8192, 16384], "minimum_cases_per_required_value": 2},
+          "key_position": {"required_values": ["early", "middle", "late"], "minimum_cases_per_required_value": 2}
+        }
+      }
+    }
   },
   "benchmark_maturity_levels": [
     {
