@@ -30,6 +30,11 @@ InferGrade needs capability benchmarks that are:
   - Why: gives local users a compact reasoning decision signal without shipping restricted datasets or making reference-suite claims.
   - InferGrade role: native local-friendly exact-answer reasoning check for thin local sample evidence.
 
+- `Reasoning constraint stress`
+  - Why: the weighted three-case exact-answer component is empirically saturated, so a broader six-category bank is needed to measure whether a successor can discriminate current models.
+  - InferGrade role: explicitly selected, zero-weight diagnostic with 48 pinned synthetic cases. Canary runs one case from every category; standard runs four per category; gold runs all eight per category.
+  - Claim boundary: structural tiers describe fixture construction, not validated model difficulty. The diagnostic is not a replacement score unless cross-family, independently replicated distribution and slice-headroom evidence supports a new score version.
+
 - `GPQA Diamond reference`
   - Why: harder expert-level multiple-choice evidence can add headroom where smaller reasoning checks cluster.
   - InferGrade role: deliberately selected diagnostic reference evidence. It has zero Capability protocol v3.1 weight until cross-family distribution, duration, malformed-output, and repeatability audits justify promotion.
@@ -147,6 +152,8 @@ The currently implemented first-user catalog is:
   - check: `multiturn_chat_memory_v1`
 - group: `reasoning_exact_answer`
   - check: `reasoning_exact_answer_v1`
+- group: `reasoning_headroom_diagnostic`
+  - check: `reasoning_constraint_stress_v1` (intentional, zero-weight diagnostic)
 - group: `broad_reasoning_knowledge`
   - check: `mmlu_pro_reference_v1`
 - group: `deployment_chat`
@@ -268,6 +275,8 @@ This diagnostic has zero Capability protocol v3.1 weight and must remain separat
 The first executable coding reference artifact path is `evalplus_humaneval`: when selected, it emits a validated `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, `samples.jsonl`, `benchmark_metadata.json`, `eval_results.json`, and `summary.json`. It preserves the pinned EvalPlus revision, sample policy, pass@1 base/plus scores, generated outputs, scoring outputs, and task-level classes such as `test_failed`, `timeout`, `malformed_output`, and `generation_failed` where available from generated outputs and EvalPlus status rows. A completion-normalization failure caused by the model remains in EvalPlus's denominator as an incorrect answer and is disclosed separately; a runtime or adapter generation failure remains missing evidence and degrades or suppresses the score. It remains experimental reference evidence, not gold evidence or a public leaderboard claim.
 
 The first local reasoning artifact path is `reasoning_exact_answer_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. It checks a compact synthetic exact-answer fixture set. It does not use GPQA, does not replace MMLU-Pro reference evidence, and does not support broad reasoning, expert knowledge, or gold-evidence claims.
+
+`reasoning_constraint_stress_v1` is a separate diagnostic successor candidate, not an in-place rewrite of that historical score component. Its 48 cases interleave state tracking, graph planning, modular recurrence, set inclusion-exclusion, dependency planning, and constrained arrangement counting so every tier spans every category. Reports preserve per-category and structural-tier accuracy, and its category saturation gate requires at least four scored cases per slice. Completed scored outcomes form the accuracy and Wilson-interval population; runtime generation failures remain explicit unscored partial evidence. It has zero Capability protocol weight and is excluded from default suites until a cross-family distribution audit demonstrates discrimination and headroom.
 
 The first sampled reasoning reference artifact path is `mmlu_pro_reference_v1`: when intentionally selected, it emits a validated `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, `benchmark_metadata.json`, and `summary.json`. It preserves the pinned dataset revision, sample policy, category breakdowns, and reference-sample claim boundaries. It remains experimental reference evidence, not gold evidence or a public leaderboard claim.
 

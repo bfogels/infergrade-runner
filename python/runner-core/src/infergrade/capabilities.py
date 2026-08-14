@@ -21,6 +21,11 @@ from infergrade.contracts import load_contract_manifest
 from infergrade.images import container_image_identity, install_image
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.progress import request_fingerprint
+from infergrade.reasoning_constraint_stress import (
+    FIXTURE_REVISION as REASONING_CONSTRAINT_STRESS_FIXTURE_REVISION,
+    SCORING_POLICY as REASONING_CONSTRAINT_STRESS_SCORING_POLICY,
+    reasoning_constraint_stress_cases,
+)
 from infergrade.stateful_tool_loop import (
     FIXTURE_REVISION as STATEFUL_TOOL_LOOP_FIXTURE_REVISION,
     SCORING_POLICY as STATEFUL_TOOL_LOOP_SCORING_POLICY,
@@ -195,6 +200,18 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=32,
         execution_mode="native",
         case_limits={"canary": 2, "standard": 3, "gold": 3},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
+    ),
+    "reasoning_constraint_stress_v1": CapabilityBenchmarkSpec(
+        benchmark_id="reasoning_constraint_stress_v1",
+        display_name="Reasoning constraint stress",
+        benchmark_kind="constraint_reasoning",
+        primary_metric_name="exact_answer_accuracy",
+        generation_max_tokens=64,
+        execution_mode="native",
+        case_limits={"canary": 6, "standard": 24, "gold": 48},
         binomial_success_count_field="correct_count",
         binomial_observation_count_field="total_count",
         binomial_observation_unit="task",
@@ -1908,6 +1925,15 @@ def _write_native_capability_run_artifact(
                     if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
                     else {}
                 ),
+                **(
+                    {
+                        "category": case_score.get("category") or case.get("category"),
+                        "structural_tier": case_score.get("structural_tier")
+                        or case.get("structural_tier"),
+                    }
+                    if spec.benchmark_id == "reasoning_constraint_stress_v1"
+                    else {}
+                ),
             }
         )
     artifact = {
@@ -2020,6 +2046,18 @@ def _write_native_capability_run_artifact(
                     "output_shape_gate": dict(summary.get("output_shape_gate") or {}),
                 }
                 if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
+                else {}
+            ),
+            **(
+                {
+                    "category_metrics": dict(
+                        summary.get("metrics", {}).get("category_metrics") or {}
+                    ),
+                    "structural_tier_metrics": dict(
+                        summary.get("metrics", {}).get("structural_tier_metrics") or {}
+                    ),
+                }
+                if spec.benchmark_id == "reasoning_constraint_stress_v1"
                 else {}
             ),
         },
@@ -2658,7 +2696,7 @@ def _native_scorer_type(spec: CapabilityBenchmarkSpec) -> str:
         return "strict_json_equality"
     if spec.benchmark_id == "coding_static_repair_v1":
         return "static_check"
-    if spec.benchmark_id == "reasoning_exact_answer_v1":
+    if spec.benchmark_id in {"reasoning_exact_answer_v1", "reasoning_constraint_stress_v1"}:
         return "exact_match"
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return "exact_match"
@@ -2676,6 +2714,8 @@ def _native_scoring_policy(spec: CapabilityBenchmarkSpec) -> str:
         return "deterministic_static_code_constraints_v1"
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return "deterministic_exact_answer_v1"
+    if spec.benchmark_id == "reasoning_constraint_stress_v1":
+        return REASONING_CONSTRAINT_STRESS_SCORING_POLICY
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return "deterministic_context_key_retrieval_v1"
     if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
@@ -2692,6 +2732,8 @@ def _native_fixture_revision(spec: CapabilityBenchmarkSpec) -> str:
         return CODING_STATIC_REPAIR_FIXTURE_REVISION
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return REASONING_EXACT_ANSWER_FIXTURE_REVISION
+    if spec.benchmark_id == "reasoning_constraint_stress_v1":
+        return REASONING_CONSTRAINT_STRESS_FIXTURE_REVISION
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return CONTEXT_RETRIEVAL_FIXTURE_REVISION
     if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
@@ -2821,6 +2863,8 @@ def _native_artifact_claim_boundary(spec: CapabilityBenchmarkSpec, state: str) -
         return _coding_artifact_claim_boundary(state)
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return _reasoning_artifact_claim_boundary(state)
+    if spec.benchmark_id == "reasoning_constraint_stress_v1":
+        return _reasoning_constraint_stress_artifact_claim_boundary(state)
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return _context_retrieval_artifact_claim_boundary(state)
     if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
@@ -2868,6 +2912,32 @@ def _reasoning_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
         supported = [
             "This artifact records that the pinned exact-answer reasoning fixture set was not yet scored.",
         ]
+    return {"supported_claims": supported, "unsupported_claims": unsupported}
+
+
+def _reasoning_constraint_stress_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    unsupported = [
+        "This is not a replacement reasoning score or evidence that the saturated v1 component has been repaired in place.",
+        "This synthetic fixture is not a global reasoning, intelligence, expert-knowledge, leaderboard, or contamination-free benchmark.",
+        "A high score does not establish headroom until cross-family, independently replicated ceiling evidence clears the catalog gate.",
+    ]
+    if state == "scored":
+        supported = [
+            "This setup completed the pinned reasoning constraint-stress fixture selected for this tier.",
+            "The artifact reports exact-answer accuracy and category slices for six deterministic reasoning task types.",
+        ]
+    elif state == "partial":
+        supported = [
+            "This setup attempted the pinned reasoning constraint-stress fixture with partial generation failures.",
+            "Scored and failed task rows remain separate in the artifact.",
+        ]
+    elif state == "failed":
+        supported = [
+            "This setup attempted the pinned reasoning constraint-stress fixture.",
+            "Generation failures remain failed evidence rather than zero-valued reasoning scores.",
+        ]
+    else:
+        supported = ["This artifact records that the reasoning constraint-stress fixture was not yet scored."]
     return {"supported_claims": supported, "unsupported_claims": unsupported}
 
 
@@ -3983,10 +4053,19 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
     for prediction in predictions:
         case_id = str(prediction.get("case_id") or "")
         case = cases_by_id.get(case_id) or {}
+        diagnostic_metadata = (
+            {
+                "category": case.get("category"),
+                "structural_tier": case.get("structural_tier"),
+            }
+            if spec.benchmark_id == "reasoning_constraint_stress_v1"
+            else {}
+        )
         checks = list(case.get("checks") or [])
         response = str(prediction.get("response") or prediction.get("completion") or "")
         if prediction.get("generation_status") != "completed":
-            total_constraints += len(checks) if checks else 1
+            # Runtime/transport failures are missing evidence, not model misses.
+            # Preserve their task rows, but exclude them from score denominators.
             case_results.append(
                 {
                     "case_id": case_id,
@@ -3995,6 +4074,7 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                     "passed_constraints": 0,
                     "total_constraints": len(checks) if checks else 1,
                     "score": None,
+                    **diagnostic_metadata,
                 }
             )
             continue
@@ -4067,6 +4147,7 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                     "total_constraints": 1,
                     "score": 1.0 if passed else 0.0,
                     "format_valid": not format_violation,
+                    **diagnostic_metadata,
                     **(
                         {
                             "context_bucket_tokens": case.get("context_bucket_tokens"),
@@ -4126,6 +4207,7 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
     score = round(passed_constraints / float(total_constraints), 6) if total_constraints else None
     malformed_output_count = len([item for item in case_results if item.get("error_class") == "malformed_output"])
     correct_count = len([item for item in case_results if item.get("score") == 1.0])
+    scored_case_results = [item for item in case_results if item.get("score") is not None]
     # A completed response that violates a deterministic output contract is a
     # model-output miss, not absent evidence. Its constraints are already in the
     # denominator and score zero above. Transport/generation failures remain
@@ -4140,13 +4222,14 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
         "passed_constraints": passed_constraints,
         "total_constraints": total_constraints,
         "correct_count": correct_count,
-        "total_count": len(case_results),
+        "total_count": len(scored_case_results),
         "malformed_output_count": malformed_output_count,
         "case_accuracy": round(
-            len([item for item in case_results if item.get("score") == 1.0]) / float(len(case_results)),
+            len([item for item in scored_case_results if item.get("score") == 1.0])
+            / float(len(scored_case_results)),
             6,
         )
-        if case_results
+        if scored_case_results
         else None,
     }
     if spec.benchmark_id == "assistant_compositional_instruction_v2":
@@ -4156,6 +4239,11 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                 "semantic_correct_count": semantic_correct_count,
                 "semantic_task_accuracy": round(semantic_correct_count / float(len(case_results)), 6) if case_results else None,
             }
+        )
+    if spec.benchmark_id == "reasoning_constraint_stress_v1":
+        metrics["category_metrics"] = _exact_answer_group_metrics(case_results, "category")
+        metrics["structural_tier_metrics"] = _exact_answer_group_metrics(
+            case_results, "structural_tier"
         )
     if spec.benchmark_id == "context_retrieval_reference_v1":
         metrics["format_violation_count"] = format_violation_count
@@ -4321,6 +4409,28 @@ def _stateful_group_metrics(
     return grouped
 
 
+def _exact_answer_group_metrics(
+    case_results: List[Dict[str, Any]],
+    field: str,
+) -> Dict[str, Dict[str, Any]]:
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for value in sorted({str(item.get(field)) for item in case_results if item.get(field)}):
+        scored = [
+            item
+            for item in case_results
+            if item.get(field) == value and item.get("score") is not None
+        ]
+        correct = len([item for item in scored if item.get("score") == 1.0])
+        grouped[value] = {
+            "correct_count": correct,
+            "total_count": len(scored),
+            "exact_answer_accuracy": (
+                round(correct / float(len(scored)), 6) if scored else None
+            ),
+        }
+    return grouped
+
+
 def _normalize_score_text(value: Any) -> str:
     return " ".join(str(value or "").lower().split())
 
@@ -4398,6 +4508,8 @@ def _native_benchmark_cases(spec: CapabilityBenchmarkSpec) -> List[Dict[str, Any
         return _coding_static_repair_cases()
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return _reasoning_exact_answer_cases()
+    if spec.benchmark_id == "reasoning_constraint_stress_v1":
+        return reasoning_constraint_stress_cases()
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return _context_retrieval_cases()
     if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":

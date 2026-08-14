@@ -61,6 +61,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("assistant_compositional_instruction_v2", check_ids)
         self.assertIn("coding_static_repair_v1", check_ids)
         self.assertIn("reasoning_exact_answer_v1", check_ids)
+        self.assertIn("reasoning_constraint_stress_v1", check_ids)
         self.assertIn("mmlu_pro_reference_v1", check_ids)
         self.assertIn("bfcl_local_reference_v1", check_ids)
         self.assertIn("stateful_tool_loop_diagnostic_v1", check_ids)
@@ -68,6 +69,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertNotIn("multiturn_chat_memory_v1", planned_ids)
         self.assertNotIn("coding_static_repair_v1", planned_ids)
         self.assertNotIn("reasoning_exact_answer_v1", planned_ids)
+        self.assertNotIn("reasoning_constraint_stress_v1", planned_ids)
         self.assertNotIn("mmlu_pro_reference_v1", planned_ids)
         self.assertNotIn("bfcl_local_reference_v1", planned_ids)
         self.assertNotIn("stateful_tool_loop_diagnostic_v1", planned_ids)
@@ -296,6 +298,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
             reasoning_anchor["benchmark_check_ids"],
             [
                 "reasoning_exact_answer_v1",
+                "reasoning_constraint_stress_v1",
                 "mmlu_pro_reference_v1",
                 "gpqa_diamond_reference_v1",
             ],
@@ -346,6 +349,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
             "multiturn_chat_memory_v1",
             "coding_static_repair_v1",
             "reasoning_exact_answer_v1",
+            "reasoning_constraint_stress_v1",
             "mmlu_pro_reference_v1",
             "evalplus_humaneval",
             "evalplus_mbpp",
@@ -360,6 +364,15 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(statuses["multiturn_chat_memory_v1"]["maturity"], "thin_local_sample")
         self.assertEqual(statuses["coding_static_repair_v1"]["maturity"], "thin_local_sample")
         self.assertEqual(statuses["reasoning_exact_answer_v1"]["maturity"], "thin_local_sample")
+        self.assertEqual(statuses["reasoning_constraint_stress_v1"]["maturity"], "thin_local_sample")
+        self.assertEqual(
+            statuses["reasoning_constraint_stress_v1"]["runnable_status"],
+            "runnable_intentional_diagnostic",
+        )
+        self.assertIn(
+            "Zero-weight",
+            statuses["reasoning_constraint_stress_v1"]["claim_boundary"],
+        )
         self.assertEqual(statuses["mmlu_pro_reference_v1"]["maturity"], "reference_runnable")
         self.assertEqual(statuses["perplexity_reference_v1"]["maturity"], "reference_runnable")
         self.assertEqual(statuses["perplexity_reference_v1"]["surface_id"], "quant_fidelity")
@@ -680,6 +693,35 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(request.benchmark_check_ids, ["reasoning_exact_answer_v1"])
         self.assertEqual(capability_benchmark_ids_for_request(request), ["reasoning_exact_answer_v1"])
         self.assertEqual(request.capability, "auto")
+
+    def test_reasoning_headroom_diagnostic_is_explicit_and_zero_weight(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_group_ids=["reasoning_headroom_diagnostic"],
+        )
+        normalize_request_selection(request)
+
+        self.assertEqual(request.benchmark_group_ids, ["reasoning_headroom_diagnostic"])
+        self.assertEqual(request.benchmark_check_ids, ["reasoning_constraint_stress_v1"])
+        self.assertEqual(
+            capability_benchmark_ids_for_request(request),
+            ["reasoning_constraint_stress_v1"],
+        )
+        check = next(
+            item
+            for item in load_capability_catalog()["checks"]
+            if item["check_id"] == "reasoning_constraint_stress_v1"
+        )
+        self.assertEqual(check["primary_score_weight"], 0.0)
+        self.assertEqual(check["score_role"], "diagnostic_only")
+        default_suite = next(
+            item
+            for item in load_capability_catalog()["suites"]
+            if item["suite_id"] == "reasoning_problem_solving"
+        )
+        self.assertNotIn("reasoning_headroom_diagnostic", default_suite["default_group_ids"])
 
     def test_reasoning_suite_resolves_to_reasoning_use_case(self):
         request = RunRequest(

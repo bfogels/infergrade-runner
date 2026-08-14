@@ -9,6 +9,7 @@ from unittest import mock
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade import __version__
+from infergrade.reasoning_constraint_stress import reasoning_constraint_stress_cases
 from infergrade.capabilities import (
     CAPABILITY_BENCHMARKS,
     _attach_primary_metric_uncertainty,
@@ -1471,7 +1472,9 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["generation_failure_severity"], "partial")
         self.assertEqual(result["metrics"]["malformed_output_count"], 1)
-        self.assertEqual(result["primary_metric"]["value"], 0.333333)
+        self.assertEqual(result["primary_metric"]["value"], 0.5)
+        self.assertEqual(result["metrics"]["total_count"], 2)
+        self.assertEqual(result["unscored_generation_failure_count"], 1)
         capability_run_path = execution.artifacts["coding_static_repair_v1"]["capability_run_path"]
         with open(capability_run_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)
@@ -1690,6 +1693,108 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored", "failed"})
         self.assertEqual({task["error_class"] for task in artifact["tasks"] if task["state"] == "failed"}, {"generation_failed"})
         self.assertIn("partial generation failures", artifact["claim_boundary"]["supported_claims"][0])
+
+    def test_reasoning_constraint_stress_reports_balanced_diagnostic_slices(self):
+        answers_by_prompt = {
+            case["prompt"]: case["expected_answers"][0]
+            for case in reasoning_constraint_stress_cases()
+        }
+
+        class _PassingStressAdapter(object):
+            def generate_text(self, request, prompt, max_tokens):
+                return {
+                    "text": answers_by_prompt[prompt],
+                    "status": "completed",
+                    "error": None,
+                }
+
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["reasoning_constraint_stress_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        with mock.patch("infergrade.capabilities._run_capability_container") as container_mock:
+            execution = execute_capability_suite(_PassingStressAdapter(), request)
+
+        container_mock.assert_not_called()
+        self.assertEqual(execution.status, "completed")
+        self.assertIsNone(execution.score)
+        result = execution.benchmark_results["reasoning_constraint_stress_v1"]
+        self.assertEqual(result["primary_metric"], {"name": "exact_answer_accuracy", "value": 1.0})
+        self.assertEqual(result["metrics"]["total_count"], 24)
+        self.assertEqual(result["primary_metric_uncertainty"]["observation_count"], 24)
+        self.assertEqual(
+            {key: value["total_count"] for key, value in result["metrics"]["category_metrics"].items()},
+            {
+                "arrangement_counting": 4,
+                "dependency_planning": 4,
+                "graph_planning": 4,
+                "modular_reasoning": 4,
+                "set_reasoning": 4,
+                "state_tracking": 4,
+            },
+        )
+        self.assertEqual(
+            set(result["metrics"]["structural_tier_metrics"]),
+            {"foundation", "intermediate", "hard", "stress"},
+        )
+        capability_run_path = execution.artifacts["reasoning_constraint_stress_v1"][
+            "capability_run_path"
+        ]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["evidence"]["lane"], "reference")
+        self.assertEqual(artifact["summary"]["score_dimension"], "constraint_reasoning_stress")
+        self.assertEqual(len(artifact["summary"]["category_metrics"]), 6)
+        self.assertTrue(all(task.get("category") for task in artifact["tasks"]))
+        self.assertTrue(all(task.get("structural_tier") for task in artifact["tasks"]))
+        self.assertIn(
+            "This is not a replacement reasoning score",
+            artifact["claim_boundary"]["unsupported_claims"][0],
+        )
+
+    def test_native_generation_failures_are_excluded_from_stress_score_population(self):
+        cases = reasoning_constraint_stress_cases()
+        answers_by_prompt = {case["prompt"]: case["expected_answers"][0] for case in cases}
+        failed_prompt = cases[0]["prompt"]
+
+        class _PartiallyFailingStressAdapter(object):
+            def generate_text(self, request, prompt, max_tokens):
+                if prompt == failed_prompt:
+                    raise RuntimeError("stress generation failed")
+                return {
+                    "text": answers_by_prompt[prompt],
+                    "status": "completed",
+                    "error": None,
+                }
+
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["reasoning_constraint_stress_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        execution = execute_capability_suite(_PartiallyFailingStressAdapter(), request)
+
+        self.assertEqual(execution.status, "partial")
+        result = execution.benchmark_results["reasoning_constraint_stress_v1"]
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["primary_metric"]["value"], 1.0)
+        self.assertEqual(result["metrics"]["correct_count"], 23)
+        self.assertEqual(result["metrics"]["total_count"], 23)
+        self.assertEqual(result["primary_metric_uncertainty"]["observation_count"], 23)
+        self.assertEqual(result["primary_metric_uncertainty"]["excluded_unscored_count"], 1)
+        self.assertEqual(result["metrics"]["category_metrics"]["state_tracking"]["total_count"], 3)
+        failed_rows = [row for row in result["case_results"] if row["state"] == "failed"]
+        self.assertEqual(len(failed_rows), 1)
+        self.assertIsNone(failed_rows[0]["score"])
 
     def test_native_reasoning_exact_answer_extracts_common_answer_formats(self):
         request = RunRequest(
