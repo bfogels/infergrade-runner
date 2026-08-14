@@ -11,9 +11,24 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
 
         self.assertTrue(report["ready"])
         self.assertEqual(report["status"], "ready")
+        self.assertEqual(report["artifact_spec_version"], "0.2.0")
         self.assertEqual(report["varying_tier_benchmark_count"], 15)
+        self.assertEqual(report["materialized_native_fixture_count"], 7)
+        self.assertEqual(report["native_tier_coverage_contract_count"], 3)
         self.assertEqual(report["errors"], [])
         self.assertTrue(all(item["ready"] for item in report["benchmarks"]))
+        by_id = {item["benchmark_id"]: item for item in report["benchmarks"]}
+        reasoning = by_id["reasoning_constraint_stress_v1"]["fixture_verification"]
+        self.assertEqual(reasoning["status"], "materialized_verified")
+        self.assertEqual(reasoning["source_fixture_case_count"], 48)
+        self.assertTrue(reasoning["tier_coverage_contract"])
+        self.assertTrue(
+            all(
+                requirement["ready"]
+                for tier in reasoning["tiers"]
+                for requirement in tier["coverage_requirements"]
+            )
+        )
 
     def test_missing_or_stale_policy_fails_closed(self):
         catalog = deepcopy(load_capability_catalog())
@@ -45,6 +60,50 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
 
         self.assertIn(
             "stateful_tool_loop_diagnostic_v1:missing_stratification_fields",
+            report["errors"],
+        )
+
+    def test_native_strata_require_executable_per_tier_coverage_contracts(self):
+        catalog = deepcopy(load_capability_catalog())
+        catalog["tier_sampling_policies"]["reasoning_constraint_stress_v1"].pop(
+            "tier_coverage_requirements"
+        )
+
+        report = audit_benchmark_tier_adequacy(catalog)
+
+        self.assertFalse(report["ready"])
+        self.assertIn(
+            "reasoning_constraint_stress_v1:missing_tier_coverage_requirements",
+            report["errors"],
+        )
+
+    def test_native_tier_coverage_fails_when_required_values_are_absent(self):
+        catalog = deepcopy(load_capability_catalog())
+        catalog["tier_sampling_policies"]["stateful_tool_loop_diagnostic_v1"][
+            "tier_coverage_requirements"
+        ]["canary"]["variant"]["required_values"].append("unsafe_mutation")
+
+        report = audit_benchmark_tier_adequacy(catalog)
+
+        self.assertFalse(report["ready"])
+        self.assertIn(
+            "stateful_tool_loop_diagnostic_v1:tier_coverage_missing_required_values:canary:variant",
+            report["errors"],
+        )
+
+    def test_native_tier_coverage_fails_when_case_floor_is_too_high(self):
+        catalog = deepcopy(load_capability_catalog())
+        catalog["tier_sampling_policies"]["context_retrieval_reference_v1"][
+            "tier_coverage_requirements"
+        ]["standard"]["context_bucket_tokens"][
+            "minimum_cases_per_required_value"
+        ] = 2
+
+        report = audit_benchmark_tier_adequacy(catalog)
+
+        self.assertFalse(report["ready"])
+        self.assertIn(
+            "context_retrieval_reference_v1:tier_coverage_under_minimum_cases:standard:context_bucket_tokens",
             report["errors"],
         )
 
