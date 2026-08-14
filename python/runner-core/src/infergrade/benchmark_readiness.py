@@ -99,7 +99,7 @@ def audit_benchmark_readiness(
     broad_ready = bool(surfaces) and all(item["broad_surface_ready"] for item in surfaces)
     return {
         "artifact_kind": "benchmark_readiness_audit",
-        "artifact_spec_version": "0.6.0",
+        "artifact_spec_version": "0.7.0",
         "catalog_version": payload.get("catalog_version"),
         "catalog_metadata_valid": metadata_valid,
         "catalog_metadata_errors": metadata_errors,
@@ -110,6 +110,12 @@ def audit_benchmark_readiness(
         ),
         "native_tier_coverage_contract_count": tier_adequacy.get(
             "native_tier_coverage_contract_count"
+        ),
+        "verified_static_fixture_manifest_count": tier_adequacy.get(
+            "verified_static_fixture_manifest_count"
+        ),
+        "verified_tier_coverage_contract_count": tier_adequacy.get(
+            "verified_tier_coverage_contract_count"
         ),
         "surface_filter": surface_id,
         "input_document_count": len(document_list),
@@ -125,7 +131,8 @@ def audit_benchmark_readiness(
         ),
         "surfaces": surfaces,
         "interpretation": (
-            "Readiness requires Runner catalog coverage, executable native tier-coverage contracts, an "
+            "Readiness requires Runner catalog coverage, executable native and source-manifest tier-coverage "
+            "contracts, an "
             "empirical score distribution with the required diversity and headroom, and representative "
             "observations for every priority capability facet. "
             "A facet counts only when one protocol-identity cohort for a supporting check independently "

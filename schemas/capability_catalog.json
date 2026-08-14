@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-14-native-tier-coverage",
+  "catalog_version": "2026-08-14-container-tier-coverage",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -689,7 +689,23 @@
         }
       }
     },
-    "repository_edit_smoke_v1": {"strategy": "pinned_semantic_order", "stratification_fields": ["category"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "case_limits": {"canary": 2, "standard": 6, "gold": 8}},
+    "repository_edit_smoke_v1": {
+      "strategy": "pinned_semantic_order",
+      "stratification_fields": ["category"],
+      "selection_identity_policy": "exact_selected_case_ids_sha256_v1",
+      "case_limits": {"canary": 2, "standard": 6, "gold": 8},
+      "tier_coverage_requirements": {
+        "canary": {
+          "category": {"required_values": ["state_and_time", "data_transformation"], "minimum_cases_per_required_value": 1}
+        },
+        "standard": {
+          "category": {"required_values": ["state_and_time", "data_transformation", "security_boundary", "protocol_parsing"], "minimum_cases_per_required_value": 1}
+        },
+        "gold": {
+          "category": {"required_values": ["state_and_time", "data_transformation", "security_boundary", "protocol_parsing", "policy_logic", "scheduling"], "minimum_cases_per_required_value": 1}
+        }
+      }
+    },
     "context_retrieval_reference_v1": {
       "strategy": "balanced_tier_blocks",
       "stratification_fields": ["context_bucket_tokens", "key_position"],
