@@ -1,0 +1,42 @@
+{
+  "artifact_kind": "repository_edit_fixture_manifest",
+  "artifact_spec_version": "0.1.0",
+  "benchmark_id": "repository_edit_smoke_v1",
+  "fixture_revision": "2026-08-repository-edit-v1",
+  "source_fixture_sha256": "0630c9d2781c5fc49188392ec76fa3b658c9f22033bc34dee2d53ddc6577e29a",
+  "selection_policy": "pinned_fixture_order_v1",
+  "cases": [
+    {
+      "task_id": "ttl_cache_boundary_and_eviction",
+      "category": "state_and_time"
+    },
+    {
+      "task_id": "immutable_recursive_config_merge",
+      "category": "data_transformation"
+    },
+    {
+      "task_id": "safe_archive_member_path",
+      "category": "security_boundary"
+    },
+    {
+      "task_id": "keyed_sliding_window_limiter",
+      "category": "state_and_time"
+    },
+    {
+      "task_id": "newest_event_stable_order",
+      "category": "data_transformation"
+    },
+    {
+      "task_id": "retry_after_seconds_or_http_date",
+      "category": "protocol_parsing"
+    },
+    {
+      "task_id": "permission_deny_precedence",
+      "category": "policy_logic"
+    },
+    {
+      "task_id": "bounded_ordered_task_batches",
+      "category": "scheduling"
+    }
+  ]
+}

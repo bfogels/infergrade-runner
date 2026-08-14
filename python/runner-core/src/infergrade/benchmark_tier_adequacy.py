@@ -3,6 +3,8 @@
 import hashlib
 import json
 from collections import Counter
+from importlib import resources
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from infergrade.benchmark_catalog import check_index, load_capability_catalog
@@ -18,6 +20,12 @@ SAMPLING_STRATEGIES = {
     "stratum_round_robin_hash_rank",
 }
 EXACT_SELECTION_IDENTITY_POLICY = "exact_selected_case_ids_sha256_v1"
+STATIC_FIXTURE_MANIFESTS = {
+    "repository_edit_smoke_v1": (
+        "infergrade.audit_manifests",
+        "repository_edit_fixture_manifest.json",
+    ),
+}
 
 
 def audit_benchmark_tier_adequacy(
@@ -75,6 +83,13 @@ def audit_benchmark_tier_adequacy(
                 case_limits,
             )
             benchmark_errors.extend(fixture_verification["errors"])
+        elif benchmark_id in STATIC_FIXTURE_MANIFESTS:
+            fixture_verification = _audit_static_fixture_manifest(
+                spec,
+                policy,
+                case_limits,
+            )
+            benchmark_errors.extend(fixture_verification["errors"])
         else:
             fixture_verification = {
                 "status": "external_runtime_not_materialized",
@@ -82,6 +97,9 @@ def audit_benchmark_tier_adequacy(
                 "source_fixture_case_count": None,
                 "unique_case_id_count": None,
                 "tier_coverage_contract": False,
+                "source_fixture_revision": None,
+                "source_fixture_sha256": None,
+                "source_fixture_status": "external_runtime_only",
                 "tiers": [],
                 "errors": [],
             }
@@ -106,7 +124,7 @@ def audit_benchmark_tier_adequacy(
     errors.extend("%s:unexpected_tier_sampling_policy" % item for item in extra_ids)
     return {
         "artifact_kind": "benchmark_tier_adequacy_audit",
-        "artifact_spec_version": "0.2.0",
+        "artifact_spec_version": "0.3.0",
         "catalog_version": payload.get("catalog_version"),
         "status": "ready" if not errors else "invalid",
         "ready": not errors,
@@ -120,15 +138,29 @@ def audit_benchmark_tier_adequacy(
             1
             for item in benchmark_reports
             if item["fixture_verification"]["tier_coverage_contract"]
+            and item["fixture_verification"]["status"] == "materialized_verified"
+        ),
+        "verified_static_fixture_manifest_count": sum(
+            1
+            for item in benchmark_reports
+            if item["fixture_verification"]["status"]
+            in {"source_fixture_verified", "source_manifest_verified"}
+        ),
+        "verified_tier_coverage_contract_count": sum(
+            1
+            for item in benchmark_reports
+            if item["fixture_verification"]["tier_coverage_contract"]
+            and item["fixture_verification"]["ready"]
         ),
         "benchmarks": benchmark_reports,
         "errors": errors,
         "claim_boundary": (
             "This audit validates declared tier-selection and exact-selection identity contracts. Native "
             "fixtures are also materialized to verify case counts, unique identities, and declared per-tier "
-            "category coverage. Container-owned datasets remain runtime-verified only. Structural coverage "
-            "does not prove empirical difficulty, score reliability, source representativeness, or absence "
-            "of benchmark leakage."
+            "category coverage. The first-party repository-edit fixture is verified from its bundled exact-source "
+            "manifest and, in source checkouts, against the container fixture itself. Upstream container-owned "
+            "datasets remain runtime-verified only. Structural coverage does not prove empirical difficulty, "
+            "score reliability, source representativeness, or absence of benchmark leakage."
         ),
     }
 
@@ -138,19 +170,139 @@ def _audit_native_fixture(
     policy: Dict[str, Any],
     case_limits: Dict[str, int],
 ) -> Dict[str, Any]:
+    return _audit_fixture_cases(
+        cases=_native_benchmark_cases(spec),
+        policy=policy,
+        case_limits=case_limits,
+        identity_error_prefix="native_fixture",
+        success_status="materialized_verified",
+        invalid_status="materialized_invalid",
+        source_fixture_revision=None,
+        source_fixture_sha256=None,
+        source_fixture_status="materialized_native_fixture",
+    )
+
+
+def load_static_fixture_manifest(benchmark_id: str) -> Dict[str, Any]:
+    """Load a bundled first-party fixture manifest by benchmark id."""
+    package, filename = STATIC_FIXTURE_MANIFESTS[benchmark_id]
+    with resources.open_text(package, filename, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _audit_static_fixture_manifest(
+    spec: Any,
+    policy: Dict[str, Any],
+    case_limits: Dict[str, int],
+) -> Dict[str, Any]:
+    manifest = load_static_fixture_manifest(spec.benchmark_id)
     errors = []
-    cases = _native_benchmark_cases(spec)
+    if manifest.get("artifact_kind") != "repository_edit_fixture_manifest":
+        errors.append("static_fixture_manifest_kind_mismatch")
+    if manifest.get("benchmark_id") != spec.benchmark_id:
+        errors.append("static_fixture_manifest_benchmark_mismatch")
+    if not str(manifest.get("fixture_revision") or "").strip():
+        errors.append("static_fixture_manifest_revision_missing")
+    source_sha256 = str(manifest.get("source_fixture_sha256") or "")
+    if len(source_sha256) != 64 or any(character not in "0123456789abcdef" for character in source_sha256):
+        errors.append("static_fixture_manifest_source_sha256_invalid")
+    if manifest.get("selection_policy") != "pinned_fixture_order_v1":
+        errors.append("static_fixture_manifest_selection_policy_mismatch")
+    raw_cases = manifest.get("cases")
+    if not isinstance(raw_cases, list) or not raw_cases or not all(
+        isinstance(item, dict) for item in raw_cases
+    ):
+        errors.append("static_fixture_manifest_cases_invalid")
+        cases = []
+    else:
+        cases = [dict(item) for item in raw_cases]
+
+    source_status, source_errors = _verify_static_source_fixture(manifest)
+    errors.extend(source_errors)
+    verification = _audit_fixture_cases(
+        cases=cases,
+        policy=policy,
+        case_limits=case_limits,
+        identity_error_prefix="static_fixture_manifest",
+        success_status=(
+            "source_fixture_verified"
+            if source_status == "source_fixture_verified"
+            else "source_manifest_verified"
+        ),
+        invalid_status="source_manifest_invalid",
+        source_fixture_revision=manifest.get("fixture_revision"),
+        source_fixture_sha256=source_sha256 or None,
+        source_fixture_status=source_status,
+    )
+    verification["errors"] = errors + verification["errors"]
+    verification["ready"] = not verification["errors"]
+    if verification["errors"]:
+        verification["status"] = "source_manifest_invalid"
+    return verification
+
+
+def _verify_static_source_fixture(manifest: Dict[str, Any]) -> tuple:
+    source_path = _static_source_fixture_path()
+    if source_path is None:
+        return "not_available_in_installed_package", []
+    errors = []
+    source_bytes = source_path.read_bytes()
+    if hashlib.sha256(source_bytes).hexdigest() != manifest.get("source_fixture_sha256"):
+        errors.append("static_source_fixture_sha256_mismatch")
+    try:
+        payload = json.loads(source_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return "source_fixture_invalid", errors + ["static_source_fixture_json_invalid"]
+    if payload.get("fixture_revision") != manifest.get("fixture_revision"):
+        errors.append("static_source_fixture_revision_mismatch")
+    source_cases = [
+        {
+            "task_id": str(item.get("task_id") or ""),
+            "category": str(item.get("category") or ""),
+        }
+        for item in list(payload.get("fixtures") or [])
+        if isinstance(item, dict)
+    ]
+    if source_cases != list(manifest.get("cases") or []):
+        errors.append("static_source_fixture_case_manifest_mismatch")
+    return (
+        "source_fixture_verified" if not errors else "source_fixture_invalid",
+        errors,
+    )
+
+
+def _static_source_fixture_path() -> Optional[Path]:
+    relative = Path("containers/capability-repo-edit/fixtures.json")
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / relative
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _audit_fixture_cases(
+    cases: list,
+    policy: Dict[str, Any],
+    case_limits: Dict[str, int],
+    identity_error_prefix: str,
+    success_status: str,
+    invalid_status: str,
+    source_fixture_revision: Any,
+    source_fixture_sha256: Optional[str],
+    source_fixture_status: str,
+) -> Dict[str, Any]:
+    errors = []
     case_ids = [
         str(item.get("task_id") or item.get("case_id") or "").strip()
         for item in cases
     ]
     if any(not case_id for case_id in case_ids):
-        errors.append("native_fixture_missing_case_identity")
+        errors.append("%s_missing_case_identity" % identity_error_prefix)
     if len(case_ids) != len(set(case_ids)):
-        errors.append("native_fixture_duplicate_case_identity")
+        errors.append("%s_duplicate_case_identity" % identity_error_prefix)
     maximum_limit = max(case_limits.values()) if case_limits else 0
     if len(cases) < maximum_limit:
-        errors.append("native_fixture_below_maximum_tier_limit")
+        errors.append("%s_below_maximum_tier_limit" % identity_error_prefix)
 
     fields = policy.get("stratification_fields")
     stratification_fields = list(fields) if isinstance(fields, list) else []
@@ -178,14 +330,17 @@ def _audit_native_fixture(
         limit = case_limits[tier]
         selected = cases[:limit]
         if len(selected) != limit:
-            errors.append("native_fixture_tier_case_count_mismatch:%s" % tier)
+            errors.append("%s_tier_case_count_mismatch:%s" % (identity_error_prefix, tier))
         field_counts = {
             field: Counter(item.get(field) for item in selected if field in item)
             for field in stratification_fields
         }
         for field in stratification_fields:
             if any(field not in item for item in selected):
-                errors.append("native_fixture_missing_stratification_field:%s:%s" % (tier, field))
+                errors.append(
+                    "%s_missing_stratification_field:%s:%s"
+                    % (identity_error_prefix, tier, field)
+                )
 
         tier_requirement = requirements.get(tier)
         if has_coverage_contract and not isinstance(tier_requirement, dict):
@@ -257,11 +412,14 @@ def _audit_native_fixture(
         )
 
     return {
-        "status": "materialized_verified" if not errors else "materialized_invalid",
+        "status": success_status if not errors else invalid_status,
         "ready": not errors,
         "source_fixture_case_count": len(cases),
         "unique_case_id_count": len(set(case_ids) - {""}),
         "tier_coverage_contract": has_coverage_contract,
+        "source_fixture_revision": source_fixture_revision,
+        "source_fixture_sha256": source_fixture_sha256,
+        "source_fixture_status": source_fixture_status,
         "tiers": tier_reports,
         "errors": errors,
     }
