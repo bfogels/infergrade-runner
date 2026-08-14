@@ -72,6 +72,7 @@ The first thin local samples are:
 - `repository_edit_smoke_v1` (intentional, zero-weight diagnostic pending a cross-family distribution audit)
 - `stateful_tool_loop_diagnostic_v1` (intentional, zero-weight synthetic stateful diagnostic pending a cross-family distribution audit)
 - `reasoning_exact_answer_v1`
+- `reasoning_constraint_stress_v1` (intentional, zero-weight successor diagnostic pending cross-family and per-category headroom audits)
 
 The first reference-runnable lanes are:
 
