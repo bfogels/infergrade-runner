@@ -90,6 +90,16 @@
         "task_version": { "type": ["string", "null"] },
         "fixture_revision": { "type": "string", "minLength": 1 },
         "dataset_revision": { "type": ["string", "null"] },
+        "selection_digest_algorithm": {
+          "enum": [
+            "sorted_json_string_array_sha256_v1",
+            "sorted_utf8_newline_sha256_v1"
+          ]
+        },
+        "selection_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
         "scorer_type": {
           "enum": ["exact_match", "regex", "json_schema", "strict_json_equality", "unit_test", "static_check", "multiple_choice", "perplexity", "metric_only", "manual_review"]
         },

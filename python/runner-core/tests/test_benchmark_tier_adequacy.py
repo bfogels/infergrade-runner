@@ -10,6 +10,11 @@ from infergrade.benchmark_tier_adequacy import (
     audit_benchmark_tier_adequacy,
     load_static_fixture_manifest,
 )
+from infergrade.selection_identity import (
+    SORTED_JSON_STRING_ARRAY_SHA256_V1,
+    SORTED_UTF8_NEWLINE_SHA256_V1,
+    selection_digest,
+)
 
 
 class BenchmarkTierAdequacyTests(unittest.TestCase):
@@ -18,12 +23,15 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
 
         self.assertTrue(report["ready"])
         self.assertEqual(report["status"], "ready")
-        self.assertEqual(report["artifact_spec_version"], "0.3.0")
+        self.assertEqual(report["artifact_spec_version"], "0.4.0")
         self.assertEqual(report["varying_tier_benchmark_count"], 15)
         self.assertEqual(report["materialized_native_fixture_count"], 7)
         self.assertEqual(report["native_tier_coverage_contract_count"], 3)
         self.assertEqual(report["verified_static_fixture_manifest_count"], 1)
         self.assertEqual(report["verified_tier_coverage_contract_count"], 4)
+        self.assertEqual(report["declared_selection_digest_algorithm_count"], 15)
+        self.assertEqual(report["materialized_selection_digest_verified_count"], 8)
+        self.assertEqual(report["runtime_only_selection_digest_contract_count"], 7)
         self.assertEqual(report["errors"], [])
         self.assertTrue(all(item["ready"] for item in report["benchmarks"]))
         by_id = {item["benchmark_id"]: item for item in report["benchmarks"]}
@@ -46,6 +54,18 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
             "0630c9d2781c5fc49188392ec76fa3b658c9f22033bc34dee2d53ddc6577e29a",
         )
         self.assertTrue(repository_edit["tier_coverage_contract"])
+        self.assertEqual(
+            repository_edit["selection_digest_algorithm"],
+            SORTED_UTF8_NEWLINE_SHA256_V1,
+        )
+        self.assertTrue(repository_edit["selection_digest_verified"])
+        self.assertEqual(
+            repository_edit["tiers"][-1]["selection_sha256"],
+            selection_digest(
+                [item["task_id"] for item in load_static_fixture_manifest("repository_edit_smoke_v1")["cases"]],
+                SORTED_UTF8_NEWLINE_SHA256_V1,
+            ),
+        )
         self.assertTrue(
             all(
                 requirement["ready"]
@@ -113,6 +133,42 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
         self.assertIn(
             "stateful_tool_loop_diagnostic_v1:missing_stratification_fields",
             report["errors"],
+        )
+
+    def test_missing_or_execution_incompatible_digest_algorithm_fails_closed(self):
+        catalog = deepcopy(load_capability_catalog())
+        catalog["tier_sampling_policies"]["ifeval"].pop(
+            "selection_digest_algorithm"
+        )
+        catalog["tier_sampling_policies"]["reasoning_exact_answer_v1"][
+            "selection_digest_algorithm"
+        ] = SORTED_UTF8_NEWLINE_SHA256_V1
+
+        report = audit_benchmark_tier_adequacy(catalog)
+
+        self.assertIn(
+            "ifeval:selection_digest_algorithm_invalid",
+            report["errors"],
+        )
+        self.assertIn(
+            "reasoning_exact_answer_v1:selection_digest_algorithm_mismatch",
+            report["errors"],
+        )
+
+    def test_selection_digest_serialization_is_explicit_and_order_independent(self):
+        case_ids = ["case-b", "case-a"]
+
+        self.assertEqual(
+            selection_digest(case_ids, SORTED_JSON_STRING_ARRAY_SHA256_V1),
+            selection_digest(reversed(case_ids), SORTED_JSON_STRING_ARRAY_SHA256_V1),
+        )
+        self.assertEqual(
+            selection_digest(case_ids, SORTED_UTF8_NEWLINE_SHA256_V1),
+            selection_digest(reversed(case_ids), SORTED_UTF8_NEWLINE_SHA256_V1),
+        )
+        self.assertNotEqual(
+            selection_digest(case_ids, SORTED_JSON_STRING_ARRAY_SHA256_V1),
+            selection_digest(case_ids, SORTED_UTF8_NEWLINE_SHA256_V1),
         )
 
     def test_native_strata_require_executable_per_tier_coverage_contracts(self):

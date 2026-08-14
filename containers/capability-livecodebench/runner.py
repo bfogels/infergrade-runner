@@ -242,6 +242,7 @@ def prepare(
                 for test in row["tests"]
             ),
             "sample_policy": "platform_difficulty_temporal_balanced_%d_v1" % len(cases),
+            "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
             "selection_sha256": _selection_digest(selected),
             "scoring_policy": "livecodebench_v6_local_pass_at_1_v1",
             "repetitions": 1,

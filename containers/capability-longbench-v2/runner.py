@@ -197,6 +197,7 @@ def prepare(
                 if len(cases) == 6
                 else "short_domain_difficulty_balanced_%d_v1" % len(cases)
             ),
+            "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
             "selection_sha256": _selection_digest(rows),
         },
     )

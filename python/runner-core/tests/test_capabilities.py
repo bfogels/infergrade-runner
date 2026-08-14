@@ -1009,7 +1009,8 @@ class CapabilityTests(unittest.TestCase):
                     "dataset_revision": "fixture-revision",
                     "snapshot_sha256": "fixture-snapshot-sha",
                     "sample_policy": "category_round_robin_1_v2",
-                    "selection_sha256": "fixture-selection-sha",
+                    "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
+                    "selection_sha256": "a" * 64,
                     "case_count": 1,
                     "category_count": 1,
                 },
@@ -1039,7 +1040,11 @@ class CapabilityTests(unittest.TestCase):
         )
         self.assertEqual(
             artifact["protocol"]["selection_sha256"],
-            "fixture-selection-sha",
+            "a" * 64,
+        )
+        self.assertEqual(
+            artifact["protocol"]["selection_digest_algorithm"],
+            "sorted_utf8_newline_sha256_v1",
         )
         self.assertEqual(artifact["evidence"]["surface"], "local_assistant_capability")
         self.assertEqual(artifact["tasks"][0]["score"], 1.0)
@@ -1058,6 +1063,7 @@ class CapabilityTests(unittest.TestCase):
             "snapshot_sha256": "fixture-snapshot-sha",
             "sample_policy": "category_round_robin_11_v2",
             "case_count": 11,
+            "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
         }
 
         first = _container_fixture_revision(
@@ -1083,6 +1089,16 @@ class CapabilityTests(unittest.TestCase):
 
         self.assertNotEqual(first, second)
         self.assertNotEqual(first, larger)
+        alternate_serialization = _container_fixture_revision(
+            spec,
+            {
+                **common,
+                "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
+                "selection_sha256": "selection-a",
+            },
+            {},
+        )
+        self.assertNotEqual(first, alternate_serialization)
 
     def test_native_fixture_identity_separates_exact_tier_subsets(self):
         cases = [
@@ -1225,6 +1241,11 @@ class CapabilityTests(unittest.TestCase):
             artifact["protocol"]["source_fixture_revision"],
             "2026-08-repository-edit-v1",
         )
+        self.assertEqual(
+            artifact["protocol"]["selection_digest_algorithm"],
+            "sorted_utf8_newline_sha256_v1",
+        )
+        self.assertEqual(len(artifact["protocol"]["selection_sha256"]), 64)
         self.assertEqual(artifact["summary"]["score"], 1.0)
         self.assertEqual(
             artifact["subject"]["runtime"]["sandbox_policy"]["policy_version"],

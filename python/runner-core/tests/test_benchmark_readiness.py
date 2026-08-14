@@ -9,12 +9,15 @@ class BenchmarkReadinessTests(unittest.TestCase):
     def test_missing_corpus_evidence_fails_closed_even_when_scoped_facets_exist(self):
         report = audit_benchmark_readiness([], load_capability_catalog())
 
-        self.assertEqual(report["artifact_spec_version"], "0.7.0")
+        self.assertEqual(report["artifact_spec_version"], "0.8.0")
         self.assertTrue(report["catalog_tier_sampling_valid"])
         self.assertEqual(report["materialized_native_fixture_count"], 7)
         self.assertEqual(report["native_tier_coverage_contract_count"], 3)
         self.assertEqual(report["verified_static_fixture_manifest_count"], 1)
         self.assertEqual(report["verified_tier_coverage_contract_count"], 4)
+        self.assertEqual(report["declared_selection_digest_algorithm_count"], 15)
+        self.assertEqual(report["materialized_selection_digest_verified_count"], 8)
+        self.assertEqual(report["runtime_only_selection_digest_contract_count"], 7)
         self.assertFalse(report["scoped_claim_ready"])
         self.assertFalse(report["broad_surface_ready"])
         self.assertEqual(report["status"], "not_ready")

@@ -26,6 +26,11 @@ from infergrade.reasoning_constraint_stress import (
     SCORING_POLICY as REASONING_CONSTRAINT_STRESS_SCORING_POLICY,
     reasoning_constraint_stress_cases,
 )
+from infergrade.selection_identity import (
+    SORTED_JSON_STRING_ARRAY_SHA256_V1,
+    SORTED_UTF8_NEWLINE_SHA256_V1,
+    selection_digest,
+)
 from infergrade.stateful_tool_loop import (
     FIXTURE_REVISION as STATEFUL_TOOL_LOOP_FIXTURE_REVISION,
     SCORING_POLICY as STATEFUL_TOOL_LOOP_SCORING_POLICY,
@@ -1991,6 +1996,7 @@ def _write_native_capability_run_artifact(
             "task_version": spec.benchmark_id,
             "fixture_revision": fixture_revision,
             "source_fixture_revision": _native_fixture_revision(spec),
+            "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
             "selection_sha256": _case_selection_digest(cases),
             "case_count": len(cases),
             "dataset_revision": None,
@@ -2101,6 +2107,9 @@ def _container_fixture_revision(
         "source_snapshot_sha256": metadata.get("snapshot_sha256"),
         "sample_policy": metadata.get("sample_policy") or summary.get("sample_policy") or "unknown",
         "case_count": metadata.get("case_count") or summary.get("case_count"),
+        "selection_digest_algorithm": metadata.get("selection_digest_algorithm")
+        or summary.get("selection_digest_algorithm")
+        or SORTED_UTF8_NEWLINE_SHA256_V1,
         "selection_sha256": metadata.get("selection_sha256") or summary.get("selection_sha256"),
     }
     return "%s_selection_%s" % (
@@ -2278,6 +2287,8 @@ def _write_multiple_choice_capability_run_artifact(
             "sample_policy": metadata.get("sample_policy"),
             "category_count": metadata.get("category_count"),
             "case_count": metadata.get("case_count") or metrics.get("total_count"),
+            "selection_digest_algorithm": metadata.get("selection_digest_algorithm")
+            or SORTED_UTF8_NEWLINE_SHA256_V1,
             "selection_sha256": metadata.get("selection_sha256"),
             "source_snapshot_sha256": metadata.get("snapshot_sha256"),
             "dataset_sha256": metadata.get("dataset_sha256"),
@@ -2459,7 +2470,10 @@ def _write_repository_edit_capability_run_artifact(
             "task_version": spec.benchmark_id,
             "fixture_revision": fixture_revision,
             "source_fixture_revision": metadata.get("fixture_revision") or summary.get("fixture_revision"),
-            "selection_sha256": metadata.get("selection_sha256") or _case_selection_digest(cases),
+            "selection_digest_algorithm": metadata.get("selection_digest_algorithm")
+            or SORTED_UTF8_NEWLINE_SHA256_V1,
+            "selection_sha256": metadata.get("selection_sha256")
+            or _case_selection_digest(cases, SORTED_UTF8_NEWLINE_SHA256_V1),
             "dataset_revision": None,
             "scorer_type": "unit_test",
             "scoring_policy": summary.get("scoring_policy") or "repo_edit_task_success_v1",
@@ -2647,6 +2661,9 @@ def _write_evalplus_capability_run_artifact(
             "sample_policy": metadata.get("sample_policy") or summary.get("sample_policy"),
             "case_count": metadata.get("case_count") or summary.get("case_count"),
             "dataset": metadata.get("dataset") or summary.get("dataset"),
+            "selection_digest_algorithm": metadata.get("selection_digest_algorithm")
+            or summary.get("selection_digest_algorithm")
+            or SORTED_UTF8_NEWLINE_SHA256_V1,
             "selection_sha256": metadata.get("selection_sha256") or summary.get("selection_sha256"),
             "completion_normalization_policy": "evalplus_code_completion_v1",
         },
@@ -2741,12 +2758,15 @@ def _native_fixture_revision(spec: CapabilityBenchmarkSpec) -> str:
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
-def _case_selection_digest(cases: List[Dict[str, Any]]) -> str:
-    case_ids = sorted(
+def _case_selection_digest(
+    cases: List[Dict[str, Any]],
+    algorithm: str = SORTED_JSON_STRING_ARRAY_SHA256_V1,
+) -> str:
+    case_ids = (
         str(item.get("task_id") or item.get("case_id") or stable_hash(item, length=64))
         for item in cases
     )
-    return stable_hash(case_ids, length=64)
+    return selection_digest(case_ids, algorithm)
 
 
 def _selected_fixture_revision(
@@ -2758,6 +2778,7 @@ def _selected_fixture_revision(
         "benchmark_id": benchmark_id,
         "source_fixture_revision": str(source_fixture_revision or "unknown"),
         "case_count": len(cases),
+        "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
         "selection_sha256": _case_selection_digest(cases),
     }
     return "%s_selection_%s" % (
