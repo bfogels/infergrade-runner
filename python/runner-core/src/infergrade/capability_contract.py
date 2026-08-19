@@ -60,6 +60,7 @@ SELECTION_PROTOCOL_FIELDS = (
     "selection_sha256",
     "case_count",
 )
+CAPABILITY_RUN_ADMISSION_ERROR_LIMIT = 20
 
 
 def repo_root() -> Path:
@@ -223,6 +224,15 @@ def validate_current_capability_run_artifact(artifact: Any) -> List[str]:
             % CAPABILITY_RUN_ARTIFACT_SPEC_VERSION
         )
     return errors
+
+
+def capability_run_admission_error_summary(errors: List[str]) -> Dict[str, Any]:
+    """Bound rejection diagnostics before they enter shareable artifacts."""
+    return {
+        "admission_errors": list(errors[:CAPABILITY_RUN_ADMISSION_ERROR_LIMIT]),
+        "admission_error_count": len(errors),
+        "admission_errors_truncated": len(errors) > CAPABILITY_RUN_ADMISSION_ERROR_LIMIT,
+    }
 
 
 def _validate_optional_selection_fields(protocol: Dict[str, Any], errors: List[str]) -> None:

@@ -13,7 +13,11 @@ from statistics import mean, median
 from typing import Any, Dict, Iterable, List, Optional
 
 from infergrade.benchmark_catalog import check_index, load_capability_catalog, surface_score_policy_index
-from infergrade.capability_contract import validate_current_capability_run_artifact
+from infergrade.capability_contract import (
+    CAPABILITY_SURFACES,
+    capability_run_admission_error_summary,
+    validate_current_capability_run_artifact,
+)
 from infergrade.statistical_bounds import wilson_score_upper_bound
 from infergrade.utils import stable_hash
 
@@ -78,30 +82,46 @@ def extract_calibration_observations(
             if admission_errors:
                 protocol = document.get("protocol")
                 protocol = protocol if isinstance(protocol, dict) else {}
-                rejected_benchmark_id = str(protocol.get("task_version") or "")
+                rejected_benchmark_id = _bounded_identifier(
+                    protocol.get("task_version")
+                )
+                rejected_fixture_revision = _bounded_identifier(
+                    protocol.get("fixture_revision")
+                ) or "unknown"
                 check = checks.get(rejected_benchmark_id) or {}
                 evidence = document.get("evidence")
                 evidence = evidence if isinstance(evidence, dict) else {}
                 source_fingerprint = stable_hash(source) if source else None
+                artifact_fingerprint = stable_hash(document, length=16)
+                artifact_spec_version = _bounded_identifier(
+                    document.get("artifact_spec_version"),
+                    maximum_length=32,
+                )
+                rejected_surface = check.get("surface_id")
+                if rejected_surface not in CAPABILITY_SURFACES:
+                    candidate_surface = evidence.get("surface")
+                    rejected_surface = (
+                        candidate_surface
+                        if candidate_surface in CAPABILITY_SURFACES
+                        else None
+                    )
                 rejected = {
-                    "observation_id": str(
-                        document.get("capability_run_id")
-                        or "rejected_%s" % (source_fingerprint or "unknown")
-                    ),
+                    "observation_id": "rejected_%s" % artifact_fingerprint,
                     "score_version": (
                         "benchmark:%s:%s"
                         % (
                             rejected_benchmark_id,
-                            protocol.get("fixture_revision") or "unknown",
+                            rejected_fixture_revision,
                         )
                         if rejected_benchmark_id
                         else None
                     ),
-                    "benchmark_id": rejected_benchmark_id or None,
-                    "surface_id": check.get("surface_id") or evidence.get("surface"),
+                    "benchmark_id": rejected_benchmark_id,
+                    "surface_id": rejected_surface,
                     "admission_status": "rejected",
-                    "admission_errors": admission_errors,
-                    "artifact_spec_version": document.get("artifact_spec_version"),
+                    **capability_run_admission_error_summary(admission_errors),
+                    "artifact_spec_version": artifact_spec_version,
+                    "artifact_fingerprint": artifact_fingerprint,
                     "source_fingerprint": source_fingerprint,
                 }
                 observations.append(rejected)
@@ -211,6 +231,19 @@ def extract_calibration_observations(
             )
         ]
     return deduplicated
+
+
+def _bounded_identifier(value: Any, maximum_length: int = 128) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if (
+        not normalized
+        or len(normalized) > maximum_length
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]*", normalized)
+    ):
+        return None
+    return normalized
 
 
 def _observation_detail_rank(observation: Dict[str, Any]) -> tuple:

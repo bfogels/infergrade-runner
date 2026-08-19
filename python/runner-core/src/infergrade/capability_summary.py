@@ -9,6 +9,7 @@ from infergrade import __version__
 from infergrade.benchmark_catalog import selection_metadata_for_request
 from infergrade.capability_contract import (
     CAPABILITY_SURFACES,
+    capability_run_admission_error_summary,
     validate_capability_summary_artifact,
     validate_current_capability_run_artifact,
 )
@@ -181,7 +182,7 @@ def _discover_capability_run_artifacts(execution: CapabilityExecution, output_di
                     "task_count": 0,
                     "failure_count": 0,
                     "error_class": "artifact_not_current_admissible",
-                    "admission_errors": admission_errors,
+                    **capability_run_admission_error_summary(admission_errors),
                 }
             )
             continue

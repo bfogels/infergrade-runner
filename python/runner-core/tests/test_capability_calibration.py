@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from infergrade.capability_calibration import (
@@ -1081,6 +1082,45 @@ class CapabilityCalibrationTests(unittest.TestCase):
         self.assertEqual(observation["admission_status"], "current_verified")
         self.assertEqual(observation["score"], 0.458333)
         self.assertEqual(observation["task_count"], 24)
+
+    def test_rejected_metadata_is_bounded_and_container_values_are_not_reflected(self):
+        artifact = _current_capability_run()
+        artifact["artifact_spec_version"] = ["0.1.1"]
+        artifact["capability_run_id"] = {"private": "x" * 1000}
+        artifact["protocol"]["task_version"] = ["private-task" * 100]
+        artifact["protocol"]["fixture_revision"] = {
+            "private": "revision" * 100
+        }
+        artifact["protocol"]["selection_digest_algorithm"] = {
+            "private": "algorithm" * 100
+        }
+        artifact["evidence"]["surface"] = {"private": "surface" * 100}
+        artifact["tasks"] = [None for _ in range(50)]
+
+        rejected = extract_calibration_observations([artifact])[0]
+
+        self.assertRegex(rejected["observation_id"], r"^rejected_[0-9a-f]{16}$")
+        self.assertIsNone(rejected["benchmark_id"])
+        self.assertIsNone(rejected["surface_id"])
+        self.assertIsNone(rejected["artifact_spec_version"])
+        self.assertEqual(len(rejected["admission_errors"]), 20)
+        self.assertGreater(rejected["admission_error_count"], 20)
+        self.assertTrue(rejected["admission_errors_truncated"])
+        encoded = json.dumps(rejected)
+        self.assertNotIn("private-task", encoded)
+        self.assertNotIn("algorithmalgorithm", encoded)
+        self.assertNotIn("surfacesurface", encoded)
+        self.assertLess(len(encoded), 4096)
+
+        artifact["protocol"]["task_version"] = (
+            "assistant_compositional_instruction_v2"
+        )
+        revision_rejected = extract_calibration_observations([artifact])[0]
+        self.assertEqual(
+            revision_rejected["score_version"],
+            "benchmark:assistant_compositional_instruction_v2:unknown",
+        )
+        self.assertNotIn("revisionrevision", json.dumps(revision_rejected))
 
 
 def _current_capability_run():
