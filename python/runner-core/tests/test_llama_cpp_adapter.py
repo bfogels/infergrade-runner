@@ -1086,11 +1086,14 @@ class LlamaCppAdapterTests(unittest.TestCase):
                     "prompt_per_second": 100.0,
                     "predicted_per_second": 44.4,
                 },
-                "stop_type": "length",
             },
         }
         limited = _metrics_from_server_completion(base, {}, 500.0, None)
         self.assertEqual(limited["output_tokens"], 40)
+        self.assertIsNone(limited["token_budget_exhausted"])
+        self.assertIsNone(limited["natural_stop"])
+        base["final_payload"]["stop_type"] = "length"
+        limited = _metrics_from_server_completion(base, {}, 500.0, None)
         self.assertTrue(limited["token_budget_exhausted"])
         self.assertFalse(limited["natural_stop"])
         base["final_payload"]["stop_type"] = "stop"
@@ -1511,13 +1514,14 @@ class LlamaCppAdapterTests(unittest.TestCase):
         error = _llama_generation_protocol_error(observed, max_tokens=64, output_tokens=None)
         self.assertIn("interactive llama-cli output contaminated", error)
 
-    def test_generation_protocol_rejects_token_exhaustion_inside_thinking(self):
-        error = _llama_generation_protocol_error(
-            "<think>Still reasoning and no final answer",
-            max_tokens=64,
-            output_tokens=64,
+    def test_generation_protocol_preserves_token_exhaustion_as_model_output(self):
+        self.assertIsNone(
+            _llama_generation_protocol_error(
+                "<think>Still reasoning and no final answer",
+                max_tokens=64,
+                output_tokens=64,
+            )
         )
-        self.assertIn("exhausted max_tokens", error)
 
     def test_generation_protocol_accepts_closed_thinking_with_answer(self):
         self.assertIsNone(
@@ -1613,7 +1617,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(execution.metrics["warmup_runs"], 0)
         self.assertEqual(execution.metrics["measured_runs"], 2)
         self.assertEqual(execution.metrics["output_tokens_p50"], 6.0)
-        self.assertEqual(execution.metrics["token_budget_exhaustion_rate"], 0.0)
+        self.assertIsNone(execution.metrics["token_budget_exhaustion_rate"])
         self.assertFalse(execution.metrics["semantic_task_completion_proof"])
         self.assertIn("capability task-time", execution.metrics["completion_semantics"])
         self.assertIsNone(execution.metrics["peak_vram_mb"])

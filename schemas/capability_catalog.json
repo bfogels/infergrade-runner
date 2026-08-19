@@ -1,5 +1,15 @@
 {
-  "catalog_version": "2026-08-19-longbench-selection-receipt",
+  "catalog_version": "2026-08-19-integrity-quarantine",
+  "quarantined_benchmarks": {
+    "reasoning_constraint_stress_v1": {
+      "reason_code": "legacy_direct_no_think_v1_no_capability_validity_evidence",
+      "legacy_artifact_label": "legacy_direct_no_think_v1",
+      "runnable": false,
+      "excluded_from_readiness": true,
+      "excluded_from_recommendation": true,
+      "excluded_from_release_evidence": true
+    }
+  },
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -246,7 +256,6 @@
           "mmlu_pro_reference_v1",
           "gpqa_diamond_reference_v1",
           "reasoning_exact_answer_v1",
-          "reasoning_constraint_stress_v1",
           "longbench_v2_local_reference_v1"
         ],
         "planned_check_ids": [
@@ -499,9 +508,9 @@
       "target_quants": ["q4_k_m"],
       "use_case": "reasoning",
       "generation_preset_id": "deterministic_direct_answer_v1",
-      "benchmark_check_ids": ["reasoning_exact_answer_v1", "reasoning_constraint_stress_v1", "mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"],
-      "why": "Establish a current-model reasoning anchor with exact-answer and sampled MMLU-Pro evidence plus zero-weight expert and constraint-stress diagnostics instead of relying on the historical Qwen2.5 control.",
-      "what_it_would_change": "Gives reasoning recommendations a current Qwen3.5 capability, speed, task-time, and memory observation while collecting expert and per-category constraint-reasoning discrimination evidence without changing the reasoning score.",
+      "benchmark_check_ids": ["reasoning_exact_answer_v1", "mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"],
+      "why": "Establish a current-model reasoning anchor with exact-answer and sampled MMLU-Pro evidence plus a zero-weight expert diagnostic instead of relying on the historical Qwen2.5 control; the legacy direct-no-think constraint fixture is quarantined.",
+      "what_it_would_change": "Gives reasoning recommendations a current Qwen3.5 capability, speed, task-time, and memory observation while collecting expert discrimination evidence without changing the reasoning score. The quarantined constraint fixture remains forensic-only.",
       "status": "needs_first_observation",
       "model_freshness": "current_generation",
       "campaign_role": "current_task_anchor",
@@ -546,9 +555,9 @@
       "target_quants": ["q3_k_m"],
       "use_case": "reasoning",
       "generation_preset_id": "deterministic_direct_answer_v1",
-      "benchmark_check_ids": ["reasoning_exact_answer_v1", "reasoning_constraint_stress_v1", "mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"],
-      "why": "Challenge the reasoning suite with the curated current 27B setup only after its 24 GB artifact, runtime, fit, and direct-answer task protocol are qualified.",
-      "what_it_would_change": "Tests weighted reasoning-suite and zero-weight constraint-diagnostic headroom against the same curated setup without treating model size or selection as a frontier-capability claim.",
+      "benchmark_check_ids": ["reasoning_exact_answer_v1", "mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"],
+      "why": "Challenge the reasoning suite with the curated current 27B setup only after its 24 GB artifact, runtime, fit, and direct-answer task protocol are qualified; the legacy direct-no-think constraint fixture is quarantined.",
+      "what_it_would_change": "Tests weighted reasoning-suite and expert-reference evidence against the same curated setup without treating model size or selection as a frontier-capability claim. The quarantined constraint fixture remains forensic-only.",
       "status": "blocked_pending_24gb_artifact_runtime_task_protocol_canary",
       "model_freshness": "current_generation",
       "campaign_role": "task_headroom_challenge",
@@ -883,15 +892,15 @@
       "surface_id": "local_reasoning_capability",
       "evidence_lane_id": "reference",
       "maturity": "thin_local_sample",
-      "runnable_status": "runnable_intentional_diagnostic",
-      "default_inclusion_status": "not_default_diagnostic",
+      "runnable_status": "quarantined",
+      "default_inclusion_status": "excluded_quarantined",
       "fixture_or_dataset_revision_status": "pinned_runner_fixture",
       "harness_status": "native_harness_implemented",
       "scoring_policy_id": "deterministic_exact_answer_category_metrics_v1",
       "sample_policy": "Forty-eight pinned synthetic exact-answer cases interleaved across six task categories and eight rounds spanning four structural tiers; canary spans all six categories and standard runs four cases per category.",
       "expected_duration_token_volume_status": "estimated small; 6 to 48 short generations",
       "sandbox_requirement": "none_native_generation_only",
-      "claim_boundary": "Zero-weight synthetic reasoning headroom diagnostic only; not a replacement score, global intelligence measure, expert-knowledge benchmark, leaderboard, or contamination-free benchmark.",
+      "claim_boundary": "Legacy direct-no-think v1 synthetic reasoning fixture retained for forensic and unit-test artifacts only; excluded from runnable, readiness, recommendation, and release evidence. It is not a replacement score, global intelligence measure, expert-knowledge benchmark, leaderboard, or contamination-free benchmark.",
       "promotion_blockers": [
         "Collect current and older cross-family local distributions with independent replication.",
         "Demonstrate category-level and whole-suite headroom below the configured saturation ceiling on current large local models.",
@@ -1644,7 +1653,7 @@
     {
       "group_id": "reasoning_headroom_diagnostic",
       "display_name": "Reasoning headroom diagnostic",
-      "description": "Run a broader synthetic exact-answer stress bank to measure discrimination before proposing any new reasoning score version.",
+      "description": "Legacy direct-no-think diagnostic retained for forensic artifacts; not a runnable benchmark until a reasoning-capable successor protocol is qualified.",
       "evidence_kind": "capability",
       "surface_id": "local_reasoning_capability",
       "default_check_ids": [
@@ -2264,6 +2273,7 @@
       "group_id": "reasoning_headroom_diagnostic",
       "surface_id": "local_reasoning_capability",
       "runner_target": "reasoning_constraint_stress_v1",
+      "status": "quarantined",
       "supported_backends": [
         "llama.cpp",
         "vllm"
@@ -2275,7 +2285,7 @@
       "token_volume_band": "small",
       "resumability_boundary": "benchmark",
       "execution_pattern": "native_reasoning_constraint_stress",
-      "selection_guidance": "Use only to collect cross-family discrimination and slice-level headroom evidence. It does not replace the saturated historical component and does not affect the current reasoning score.",
+      "selection_guidance": "Legacy direct-no-think v1 fixture retained for forensic and unit-test artifacts only; explicit runnable selection is rejected until a reasoning-capable successor protocol is qualified.",
       "score_dimension": "constraint_reasoning_stress",
       "primary_score_metric": "exact_answer_accuracy",
       "score_floor": 0.0,

@@ -311,7 +311,6 @@ class BenchmarkCatalogTests(unittest.TestCase):
             reasoning_anchor["benchmark_check_ids"],
             [
                 "reasoning_exact_answer_v1",
-                "reasoning_constraint_stress_v1",
                 "mmlu_pro_reference_v1",
                 "gpqa_diamond_reference_v1",
             ],
@@ -380,10 +379,10 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(statuses["reasoning_constraint_stress_v1"]["maturity"], "thin_local_sample")
         self.assertEqual(
             statuses["reasoning_constraint_stress_v1"]["runnable_status"],
-            "runnable_intentional_diagnostic",
+            "quarantined",
         )
         self.assertIn(
-            "Zero-weight",
+            "excluded from runnable",
             statuses["reasoning_constraint_stress_v1"]["claim_boundary"],
         )
         self.assertEqual(statuses["mmlu_pro_reference_v1"]["maturity"], "reference_runnable")
@@ -424,6 +423,35 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertTrue(any("multiturn_chat_memory_v1" in item and "does not match check" in item for item in failures))
         self.assertTrue(any("multiturn_chat_memory_v1" in item and "is not declared" in item for item in failures))
         self.assertTrue(any("gpqa_diamond_reference_v1" in item and "does not match check" in item for item in failures))
+
+    def test_catalog_legitimacy_validation_enforces_quarantine_consistency(self):
+        mutations = {
+            "missing_declaration": lambda catalog: catalog["quarantined_benchmarks"].clear(),
+            "runnable_flag": lambda catalog: catalog["quarantined_benchmarks"][
+                "reasoning_constraint_stress_v1"
+            ].update({"runnable": True}),
+            "status_drift": lambda catalog: next(
+                item
+                for item in catalog["benchmark_status_matrix"]
+                if item["check_id"] == "reasoning_constraint_stress_v1"
+            ).update({"runnable_status": "runnable_intentional_diagnostic"}),
+            "check_drift": lambda catalog: next(
+                item
+                for item in catalog["checks"]
+                if item["check_id"] == "reasoning_constraint_stress_v1"
+            ).update({"status": "available"}),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                catalog = deepcopy(load_capability_catalog())
+                mutate(catalog)
+
+                failures = validate_benchmark_legitimacy_metadata(catalog)
+
+                self.assertTrue(
+                    any("quarantin" in item for item in failures),
+                    failures,
+                )
 
     def test_catalog_legitimacy_validation_blocks_catalog_only_planned_promotion(self):
         mutated = deepcopy(load_capability_catalog())
@@ -714,14 +742,15 @@ class BenchmarkCatalogTests(unittest.TestCase):
             tier="standard",
             benchmark_group_ids=["reasoning_headroom_diagnostic"],
         )
-        normalize_request_selection(request)
+        with self.assertRaisesRegex(
+            ValueError,
+            "^benchmark_quarantined:reasoning_constraint_stress_v1:"
+            "legacy_direct_no_think_v1_no_capability_validity_evidence$",
+        ):
+            normalize_request_selection(request)
 
         self.assertEqual(request.benchmark_group_ids, ["reasoning_headroom_diagnostic"])
-        self.assertEqual(request.benchmark_check_ids, ["reasoning_constraint_stress_v1"])
-        self.assertEqual(
-            capability_benchmark_ids_for_request(request),
-            ["reasoning_constraint_stress_v1"],
-        )
+        self.assertEqual(request.benchmark_check_ids, [])
         check = next(
             item
             for item in load_capability_catalog()["checks"]

@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from infergrade import __version__
 from infergrade.benchmark_catalog import (
+    benchmark_quarantine_reason,
     capability_benchmark_ids_for_request,
     resolve_request_selection,
     selection_metadata_for_request,
@@ -84,6 +85,13 @@ _MMLU_EMPTY_THINK_PREFIX = re.compile(r"^\s*<think>\s*</think>\s*", re.IGNORECAS
 CAPABILITY_CONTAINER_POLICY_VERSION = "capability_container_isolation_v1"
 _CAPABILITY_CONTAINER_MEMORY = "4g"
 _CAPABILITY_CONTAINER_PIDS_LIMIT = 256
+NATIVE_SCORED_MODEL_OUTPUT_BENCHMARKS = {
+    "assistant_compositional_instruction_v2",
+    "coding_static_repair_v1",
+    "reasoning_exact_answer_v1",
+    "reasoning_constraint_stress_v1",
+    "context_retrieval_reference_v1",
+}
 
 
 def _released_capability_image(image_name: str) -> str:
@@ -543,11 +551,85 @@ def summarize_capability_execution(
     completed_at: Optional[str] = None,
 ) -> Dict[str, Any]:
     selection = selection_metadata_for_request(request)
-    planned_benchmark_ids = list(execution.benchmark_check_ids or capability_benchmark_ids_for_request(request))
+    raw_planned_benchmark_ids = list(
+        execution.benchmark_check_ids or capability_benchmark_ids_for_request(request)
+    )
+    raw_benchmark_results = dict(execution.benchmark_results or {})
+    raw_component_scores = dict(execution.component_scores or {})
+    raw_artifacts = dict(execution.artifacts or {})
+    quarantined_benchmark_ids = {
+        benchmark_id
+        for benchmark_id in set(
+            raw_planned_benchmark_ids
+            + list(raw_benchmark_results)
+            + list(raw_component_scores)
+            + list(raw_artifacts)
+        )
+        if benchmark_quarantine_reason(benchmark_id)
+    }
+    quarantined_benchmark_ids.update(
+        str(result.get("benchmark_id") or "")
+        for result in raw_benchmark_results.values()
+        if isinstance(result, dict)
+        and benchmark_quarantine_reason(result.get("benchmark_id"))
+    )
+    planned_benchmark_ids = [
+        benchmark_id
+        for benchmark_id in raw_planned_benchmark_ids
+        if benchmark_id not in quarantined_benchmark_ids
+    ]
     benchmark_registry = _capability_registry_for_benchmark_ids(planned_benchmark_ids)
-    benchmark_results = dict(execution.benchmark_results or {})
+    benchmark_results = {
+        benchmark_id: result
+        for benchmark_id, result in raw_benchmark_results.items()
+        if benchmark_id not in quarantined_benchmark_ids
+        and not benchmark_quarantine_reason(
+            result.get("benchmark_id") if isinstance(result, dict) else None
+        )
+    }
+    component_scores = {
+        benchmark_id: score
+        for benchmark_id, score in raw_component_scores.items()
+        if benchmark_id not in quarantined_benchmark_ids
+    }
+    artifacts = {
+        benchmark_id: artifact
+        for benchmark_id, artifact in raw_artifacts.items()
+        if benchmark_id not in quarantined_benchmark_ids
+    }
+    sanitized_execution = execution
+    if quarantined_benchmark_ids:
+        score_details = score_for_use_case(
+            execution.use_case or request.use_case,
+            component_scores,
+            benchmark_tier=execution.benchmark_tier or request.tier,
+        )
+        sanitized_execution = CapabilityExecution(
+            use_case=execution.use_case,
+            suite_id=execution.suite_id,
+            suite_ids=list(execution.suite_ids or []),
+            benchmark_tier=execution.benchmark_tier,
+            benchmark_group_ids=list(execution.benchmark_group_ids or []),
+            benchmark_check_ids=planned_benchmark_ids,
+            components=[
+                CAPABILITY_BENCHMARKS[benchmark_id].display_name
+                for benchmark_id in planned_benchmark_ids
+                if benchmark_id in CAPABILITY_BENCHMARKS
+            ],
+            score=score_details.get("score"),
+            score_method=score_details.get("score_method"),
+            component_scores=component_scores,
+            confidence=None,
+            status=execution.status if planned_benchmark_ids else "not_comparable",
+            benchmark_results=benchmark_results,
+            artifacts=artifacts,
+            score_details=score_details,
+            # Aggregate task-performance counters cannot be subtracted safely
+            # once an input benchmark has been quarantined.
+            task_performance={},
+        )
     simulated_scored_ids = [
-        benchmark_id for benchmark_id in planned_benchmark_ids if benchmark_id in dict(execution.component_scores or {})
+        benchmark_id for benchmark_id in planned_benchmark_ids if benchmark_id in component_scores
     ]
     executed_benchmark_ids = [
         benchmark_id for benchmark_id in planned_benchmark_ids if benchmark_id in benchmark_results or benchmark_id in simulated_scored_ids
@@ -563,10 +645,16 @@ def summarize_capability_execution(
     scored_count = len(scored_benchmark_ids)
     coverage_fraction = round(scored_count / float(planned_count), 4) if planned_count else 0.0
     coverage_state = "complete" if planned_count and scored_count == planned_count else ("partial" if scored_count else "missing")
-    state = _capability_state_for_request(request, execution, None, scored_count)
-    reason_codes = _capability_reason_codes(request, execution, None, scored_count, planned_count)
+    state = _capability_state_for_request(request, sanitized_execution, None, scored_count)
+    reason_codes = _capability_reason_codes(
+        request, sanitized_execution, None, scored_count, planned_count
+    )
+    if quarantined_benchmark_ids:
+        reason_codes.append("quarantined_benchmark_evidence_excluded")
     component_reports = [
-        _component_report_for_benchmark(request, benchmark_id, benchmark_results.get(benchmark_id), execution.component_scores)
+        _component_report_for_benchmark(
+            request, benchmark_id, benchmark_results.get(benchmark_id), component_scores
+        )
         for benchmark_id in planned_benchmark_ids
     ]
     return {
@@ -576,25 +664,30 @@ def summarize_capability_execution(
         "benchmark_tier": execution.benchmark_tier or request.tier,
         "benchmark_group_ids": list(execution.benchmark_group_ids or selection.get("benchmark_group_ids") or []),
         "benchmark_selection": selection,
-        "selected_benchmark_check_ids": list(execution.benchmark_check_ids or selection.get("benchmark_check_ids") or []),
-        "benchmark_components": list(execution.components or []),
+        "selected_benchmark_check_ids": planned_benchmark_ids,
+        "benchmark_components": list(sanitized_execution.components or []),
         "benchmark_registry_version": CAPABILITY_REGISTRY_VERSION,
         "benchmark_registry": benchmark_registry,
         "benchmark_results": benchmark_results,
         "benchmark_protocol_identity": _capability_protocol_identity(benchmark_results, scored_benchmark_ids),
-        "capability_score": execution.score,
-        "capability_score_method": execution.score_method,
-        "capability_score_details": dict(execution.score_details or {}),
-        "capability_component_scores": dict(execution.component_scores or {}),
+        "capability_score": sanitized_execution.score,
+        "capability_score_method": sanitized_execution.score_method,
+        "capability_score_details": dict(sanitized_execution.score_details or {}),
+        "capability_component_scores": component_scores,
         "capability_component_reports": component_reports,
-        "capability_confidence": execution.confidence,
-        "capability_artifacts": dict(execution.artifacts or {}),
-        "capability_run_count": 1 if execution.status not in ("skipped", "failed") or scored_count else 0,
-        "capability_timestamp": completed_at if execution.status not in ("skipped", "failed") else None,
-        "capability_status": execution.status,
+        "capability_confidence": sanitized_execution.confidence,
+        "capability_artifacts": artifacts,
+        "capability_run_count": 1
+        if sanitized_execution.status not in ("skipped", "failed", "not_comparable")
+        or scored_count
+        else 0,
+        "capability_timestamp": completed_at
+        if sanitized_execution.status not in ("skipped", "failed", "not_comparable")
+        else None,
+        "capability_status": sanitized_execution.status,
         "capability_state": state,
         "capability_reason_codes": reason_codes,
-        "task_performance": dict(execution.task_performance or {}),
+        "task_performance": dict(sanitized_execution.task_performance or {}),
         "benchmark_coverage": {
             "planned_benchmark_ids": planned_benchmark_ids,
             "executed_benchmark_ids": executed_benchmark_ids,
@@ -1904,7 +1997,7 @@ def _write_native_capability_run_artifact(
         case = _case_by_id(cases, case_id)
         case_score = task_scores.get(case_id, {})
         generation_status = str(prediction.get("generation_status") or "")
-        task_error_class = _native_task_error_class(generation_status, case_score)
+        task_error_class = _native_task_error_class(generation_status, case_score, prediction)
         task_state = "failed" if task_error_class else ("scored" if case_score.get("score") is not None else "failed")
         scored_output_diagnostic = (
             str(case_score.get("error_class") or "")
@@ -1923,6 +2016,14 @@ def _write_native_capability_run_artifact(
                 "output_artifact": "predictions.jsonl#%s" % case_id,
                 "error_class": scored_output_diagnostic if task_state == "scored" else (task_error_class or "scoring_failed"),
                 **_task_performance_fields(prediction),
+                **(
+                    {
+                        "format_valid": case_score.get("format_valid"),
+                        "format_violation": case_score.get("error_class"),
+                    }
+                    if "format_valid" in case_score
+                    else {}
+                ),
                 **(
                     {
                         "context_bucket_tokens": case.get("context_bucket_tokens"),
@@ -1957,6 +2058,7 @@ def _write_native_capability_run_artifact(
                 ),
             }
         )
+    task_counts = _native_artifact_task_counts(tasks)
     artifact = {
         "artifact_spec_version": CAPABILITY_RUN_ARTIFACT_SPEC_VERSION,
         "artifact_kind": "capability_run",
@@ -2029,27 +2131,19 @@ def _write_native_capability_run_artifact(
                 else {}
             ),
             "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
-            "passed_count": (
-                summary.get("metrics", {}).get("correct_count")
-                if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
-                else summary.get("metrics", {}).get("passed_constraints")
-            ),
-            "failed_count": (
-                (
-                    int(summary.get("metrics", {}).get("total_count") or 0)
-                    - int(summary.get("metrics", {}).get("correct_count") or 0)
-                    + int(summary.get("generation_failure_count") or 0)
-                )
-                if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
-                else summary.get("generation_failure_count")
-            ),
-            "partial_count": (
-                0
-                if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
-                else summary.get("metrics", {}).get("malformed_output_count", 0)
-            ),
+            "passed_count": task_counts["passed_count"],
+            "failed_count": task_counts["failed_count"],
+            "partial_count": task_counts["partial_count"],
             "skipped_count": 0,
-            "not_comparable_count": 0,
+            "not_comparable_count": task_counts["not_comparable_count"],
+            "malformed_output_count": summary.get("metrics", {}).get("malformed_output_count", 0),
+            "format_invalid_count": summary.get("metrics", {}).get("format_invalid_count", 0),
+            "model_output_diagnostic_count": summary.get("metrics", {}).get(
+                "model_output_diagnostic_count", 0
+            ),
+            "token_budget_exhaustion_count": summary.get("metrics", {}).get(
+                "token_budget_exhaustion_count", 0
+            ),
             **_artifact_summary_performance(summary.get("task_performance")),
             **(
                 {"context_bucket_metrics": dict(summary.get("metrics", {}).get("context_bucket_metrics") or {})}
@@ -2100,12 +2194,38 @@ def _write_native_capability_run_artifact(
     return path
 
 
-def _native_task_error_class(generation_status: str, case_score: Dict[str, Any]) -> Optional[str]:
+def _native_task_error_class(
+    generation_status: str,
+    case_score: Dict[str, Any],
+    prediction: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     if generation_status != "completed":
+        if (prediction or {}).get("token_budget_exhausted") is True:
+            return "token_budget_exhausted"
         return "generation_failed"
     if str(case_score.get("state") or "") == "failed":
         return str(case_score.get("error_class") or "scoring_failed")
     return None
+
+
+def _native_artifact_task_counts(tasks: List[Dict[str, Any]]) -> Dict[str, int]:
+    """Partition native task rows into mutually exclusive artifact buckets."""
+    scored = [task for task in tasks if task.get("state") == "scored"]
+    return {
+        "passed_count": len([task for task in scored if task.get("score") == 1.0]),
+        "failed_count": len([task for task in scored if task.get("score") != 1.0]),
+        "partial_count": len(
+            [
+                task
+                for task in tasks
+                if task.get("state") in {"failed", "partial"}
+                and task.get("score") is None
+            ]
+        ),
+        "not_comparable_count": len(
+            [task for task in tasks if task.get("state") == "not_comparable"]
+        ),
+    }
 
 
 def _container_fixture_revision(
@@ -3127,24 +3247,25 @@ def _reasoning_constraint_stress_artifact_claim_boundary(state: str) -> Dict[str
         "This is not a replacement reasoning score or evidence that the saturated v1 component has been repaired in place.",
         "This synthetic fixture is not a global reasoning, intelligence, expert-knowledge, leaderboard, or contamination-free benchmark.",
         "A high score does not establish headroom until cross-family, independently replicated ceiling evidence clears the catalog gate.",
+        "This legacy direct-no-think v1 artifact is quarantined from runnable, readiness, recommendation, and release evidence pending a reasoning-capable successor protocol.",
     ]
     if state == "scored":
         supported = [
-            "This setup completed the pinned reasoning constraint-stress fixture selected for this tier.",
+            "This legacy direct-no-think v1 artifact records completion of the pinned reasoning constraint-stress fixture selected for this tier.",
             "The artifact reports exact-answer accuracy and category slices for six deterministic reasoning task types.",
         ]
     elif state == "partial":
         supported = [
-            "This setup attempted the pinned reasoning constraint-stress fixture with partial generation failures.",
+            "This legacy direct-no-think v1 artifact records an attempt at the pinned reasoning constraint-stress fixture with partial generation failures.",
             "Scored and failed task rows remain separate in the artifact.",
         ]
     elif state == "failed":
         supported = [
-            "This setup attempted the pinned reasoning constraint-stress fixture.",
+            "This legacy direct-no-think v1 artifact records an attempt at the pinned reasoning constraint-stress fixture.",
             "Generation failures remain failed evidence rather than zero-valued reasoning scores.",
         ]
     else:
-        supported = ["This artifact records that the reasoning constraint-stress fixture was not yet scored."]
+        supported = ["This legacy direct-no-think v1 artifact records that the reasoning constraint-stress fixture was not yet scored."]
     return {"supported_claims": supported, "unsupported_claims": unsupported}
 
 
@@ -3729,20 +3850,30 @@ def _generate_predictions(
         protocol_recovery = None
         try:
             generation_prompt = _generation_prompt_for_case(spec, case)
-            generated = adapter.generate_text(
-                request=request,
-                prompt=generation_prompt,
-                max_tokens=adaptive_max_tokens,
+            generated = dict(
+                adapter.generate_text(
+                    request=request,
+                    prompt=generation_prompt,
+                    max_tokens=adaptive_max_tokens,
+                )
+                or {}
             )
+            if _non_negative_integer(generated.get("output_token_budget")) is None:
+                generated["output_token_budget"] = adaptive_max_tokens
             if not protocol_canary_complete and _supports_direct_answer_recovery(request):
                 recovery_reason = _direct_answer_recovery_reason(spec, generated)
                 if recovery_reason:
                     initial = dict(generated)
-                    generated = adapter.generate_text(
-                        request=request,
-                        prompt=generation_prompt,
-                        max_tokens=_DIRECT_ANSWER_RECOVERY_MAX_TOKENS,
+                    generated = dict(
+                        adapter.generate_text(
+                            request=request,
+                            prompt=generation_prompt,
+                            max_tokens=_DIRECT_ANSWER_RECOVERY_MAX_TOKENS,
+                        )
+                        or {}
                     )
+                    if _non_negative_integer(generated.get("output_token_budget")) is None:
+                        generated["output_token_budget"] = _DIRECT_ANSWER_RECOVERY_MAX_TOKENS
                     recovered = _direct_answer_recovery_reason(spec, generated) is None
                     protocol_recovery = {
                         "policy_id": "direct_answer_protocol_recovery_v1",
@@ -3780,7 +3911,15 @@ def _generate_predictions(
             status = "failed"
             error = str(exc)
             generation_failure_kind = "runtime"
-            performance = _task_performance_fields({})
+            budget_exhausted = "exhausted max_tokens" in str(exc).lower()
+            performance = _task_performance_fields(
+                {
+                    "output_token_budget": adaptive_max_tokens,
+                    "stop_type": "length" if budget_exhausted else None,
+                    "natural_stop": False if budget_exhausted else None,
+                    "token_budget_exhausted": True if budget_exhausted else None,
+                }
+            )
         if status != "completed" and generation_failure_kind is None:
             generation_failure_kind = "generation"
         record = {
@@ -3862,6 +4001,17 @@ def _generate_stateful_tool_loop_prediction(
             generation_status = "failed"
             generation_error = str(exc)
             generation_failure_kind = "runtime"
+            budget_exhausted = "exhausted max_tokens" in str(exc).lower()
+            turn_performance.append(
+                _task_performance_fields(
+                    {
+                        "output_token_budget": spec.generation_max_tokens,
+                        "stop_type": "length" if budget_exhausted else None,
+                        "natural_stop": False if budget_exhausted else None,
+                        "token_budget_exhausted": True if budget_exhausted else None,
+                    }
+                )
+            )
             break
         turn_performance.append(_task_performance_fields(generated))
         last_response = str(generated.get("text") or "")
@@ -3918,14 +4068,46 @@ def _aggregate_stateful_turn_performance(rows: List[Dict[str, Any]]) -> Dict[str
     latencies = _numeric_values(rows, "latency_ms")
     input_tokens = _integer_values(rows, "input_tokens")
     output_tokens = _integer_values(rows, "output_tokens")
+    output_budgets = _integer_values(rows, "output_token_budget")
     ttft = _numeric_values(rows, "time_to_first_token_ms")
     sources = sorted({str(item.get("measurement_source")) for item in rows if item.get("measurement_source")})
+    stop_type_counts: Dict[str, int] = {}
+    for item in rows:
+        stop_type = str(item.get("stop_type") or "").strip()
+        if stop_type:
+            stop_type_counts[stop_type] = stop_type_counts.get(stop_type, 0) + 1
+    natural_stop_reported_count = len(
+        [item for item in rows if isinstance(item.get("natural_stop"), bool)]
+    )
+    natural_stop_count = len([item for item in rows if item.get("natural_stop") is True])
+    token_budget_exhaustion_reported_count = len(
+        [item for item in rows if isinstance(item.get("token_budget_exhausted"), bool)]
+    )
+    token_budget_exhaustion_count = len(
+        [item for item in rows if item.get("token_budget_exhausted") is True]
+    )
+    natural_stop_rate = _known_boolean_rate(rows, "natural_stop")
+    token_budget_exhaustion_rate = _known_boolean_rate(rows, "token_budget_exhausted")
     return {
         "latency_ms": round(sum(latencies), 6) if latencies else None,
         "time_to_first_token_ms": _percentile_numeric(ttft, 0.5),
         "tokens_per_second": None,
         "input_tokens": sum(input_tokens) if input_tokens else None,
         "output_tokens": sum(output_tokens) if output_tokens else None,
+        "stop_type_counts": stop_type_counts,
+        "natural_stop_count": natural_stop_count,
+        "natural_stop_reported_count": natural_stop_reported_count,
+        "natural_stop_rate": natural_stop_rate,
+        "token_budget_exhaustion_count": token_budget_exhaustion_count,
+        "token_budget_exhaustion_reported_count": token_budget_exhaustion_reported_count,
+        "token_budget_exhaustion_rate": token_budget_exhaustion_rate,
+        "output_token_budget": (
+            output_budgets[0]
+            if output_budgets and len(set(output_budgets)) == 1
+            else None
+        ),
+        "output_token_budget_min": min(output_budgets) if output_budgets else None,
+        "output_token_budget_max": max(output_budgets) if output_budgets else None,
         "measurement_source": (
             "stateful_tool_loop_turn_aggregate_v1:%s" % "+".join(sources)
             if sources
@@ -4145,6 +4327,17 @@ def _contains_function_definition(code: str, entry_point: str) -> bool:
 
 
 def _task_performance_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
+    natural_stop = payload.get("natural_stop")
+    if not isinstance(natural_stop, bool):
+        natural_stop = None
+    token_budget_exhausted = payload.get("token_budget_exhausted")
+    if not isinstance(token_budget_exhausted, bool):
+        token_budget_exhausted = None
+    stop_type = payload.get("stop_type")
+    if isinstance(stop_type, str):
+        stop_type = stop_type.strip()[:64] or None
+    else:
+        stop_type = None
     return {
         "latency_ms": _non_negative_number(payload.get("latency_ms")),
         "time_to_first_token_ms": _non_negative_number(payload.get("time_to_first_token_ms")),
@@ -4152,6 +4345,10 @@ def _task_performance_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
         "input_tokens": _non_negative_integer(payload.get("input_tokens")),
         "output_tokens": _non_negative_integer(payload.get("output_tokens")),
         "measurement_source": str(payload.get("measurement_source") or "") or None,
+        "stop_type": stop_type,
+        "natural_stop": natural_stop,
+        "token_budget_exhausted": token_budget_exhausted,
+        "output_token_budget": _non_negative_integer(payload.get("output_token_budget")),
     }
 
 
@@ -4184,6 +4381,24 @@ def _summarize_task_performance_rows(rows: List[Dict[str, Any]]) -> Dict[str, An
     decode_tps = _numeric_values(completed_rows, "tokens_per_second")
     input_tokens = _integer_values(completed_rows, "input_tokens")
     output_tokens = _integer_values(completed_rows, "output_tokens")
+    output_budgets = _integer_values(rows, "output_token_budget")
+    stop_type_counts: Dict[str, int] = {}
+    for item in rows:
+        stop_type = str(item.get("stop_type") or "").strip()
+        if stop_type:
+            stop_type_counts[stop_type] = stop_type_counts.get(stop_type, 0) + 1
+    natural_stop_reported_count = len(
+        [item for item in rows if isinstance(item.get("natural_stop"), bool)]
+    )
+    natural_stop_count = len([item for item in rows if item.get("natural_stop") is True])
+    token_budget_exhaustion_reported_count = len(
+        [item for item in rows if isinstance(item.get("token_budget_exhausted"), bool)]
+    )
+    token_budget_exhaustion_count = len(
+        [item for item in rows if item.get("token_budget_exhausted") is True]
+    )
+    natural_stop_rate = _known_boolean_rate(rows, "natural_stop")
+    token_budget_exhaustion_rate = _known_boolean_rate(rows, "token_budget_exhausted")
     sources = sorted({str(item.get("measurement_source")) for item in completed_rows if item.get("measurement_source")})
     return {
         "attempted_task_count": attempted_count,
@@ -4202,6 +4417,21 @@ def _summarize_task_performance_rows(rows: List[Dict[str, Any]]) -> Dict[str, An
         "total_elapsed_seconds": round(sum(latencies_ms) / 1000.0, 6) if latencies_ms else None,
         "total_input_tokens": sum(input_tokens) if input_tokens else None,
         "total_output_tokens": sum(output_tokens) if output_tokens else None,
+        "stop_type_counts": stop_type_counts,
+        "natural_stop_count": natural_stop_count,
+        "natural_stop_reported_count": natural_stop_reported_count,
+        "natural_stop_rate": natural_stop_rate,
+        "token_budget_exhaustion_count": token_budget_exhaustion_count,
+        "token_budget_exhaustion_reported_count": token_budget_exhaustion_reported_count,
+        "token_budget_exhaustion_rate": token_budget_exhaustion_rate,
+        "output_token_budget": (
+            output_budgets[0]
+            if output_budgets and len(set(output_budgets)) == 1
+            else None
+        ),
+        "output_token_budget_min": min(output_budgets) if output_budgets else None,
+        "output_token_budget_max": max(output_budgets) if output_budgets else None,
+        "output_token_budget_task_count": len(output_budgets),
         "measurement_sources": sources,
         "aggregation_method": "task_observation_percentiles_v1",
         "measurement_status": "measured" if latencies_ms or output_tokens else "not_reported_by_backend",
@@ -4216,6 +4446,19 @@ def _artifact_summary_performance(performance: Dict[str, Any]) -> Dict[str, Any]
         "tokens_per_second": performance.get("decode_tokens_per_second_median"),
         "input_tokens": performance.get("total_input_tokens"),
         "output_tokens": performance.get("total_output_tokens"),
+        "stop_type_counts": dict(performance.get("stop_type_counts") or {}),
+        "natural_stop_count": performance.get("natural_stop_count"),
+        "natural_stop_reported_count": performance.get("natural_stop_reported_count"),
+        "natural_stop_rate": performance.get("natural_stop_rate"),
+        "token_budget_exhaustion_count": performance.get("token_budget_exhaustion_count"),
+        "token_budget_exhaustion_reported_count": performance.get(
+            "token_budget_exhaustion_reported_count"
+        ),
+        "token_budget_exhaustion_rate": performance.get("token_budget_exhaustion_rate"),
+        "output_token_budget": performance.get("output_token_budget"),
+        "output_token_budget_min": performance.get("output_token_budget_min"),
+        "output_token_budget_max": performance.get("output_token_budget_max"),
+        "output_token_budget_task_count": performance.get("output_token_budget_task_count", 0),
         "task_performance": performance,
     }
 
@@ -4236,6 +4479,18 @@ def _integer_values(rows: List[Dict[str, Any]], key: str) -> List[int]:
         if value is not None:
             values.append(value)
     return values
+
+
+def _known_boolean_rate(
+    rows: List[Dict[str, Any]],
+    key: str,
+    precision: int = 6,
+) -> Optional[float]:
+    """Compute a boolean rate without treating missing metadata as false."""
+    known = [row.get(key) for row in rows if isinstance(row.get(key), bool)]
+    if not known:
+        return None
+    return round(sum(value is True for value in known) / float(len(known)), precision)
 
 
 def _non_negative_number(value: Any) -> Optional[float]:
@@ -4305,17 +4560,24 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
         )
         checks = list(case.get("checks") or [])
         response = str(prediction.get("response") or prediction.get("completion") or "")
+        generation_diagnostics = _task_performance_fields(prediction)
         if prediction.get("generation_status") != "completed":
             # Runtime/transport failures are missing evidence, not model misses.
             # Preserve their task rows, but exclude them from score denominators.
+            generation_error_class = (
+                "token_budget_exhausted"
+                if prediction.get("token_budget_exhausted") is True
+                else "generation_failed"
+            )
             case_results.append(
                 {
                     "case_id": case_id,
                     "state": "failed",
-                    "error_class": "generation_failed",
+                    "error_class": generation_error_class,
                     "passed_constraints": 0,
                     "total_constraints": len(checks) if checks else 1,
                     "score": None,
+                    **generation_diagnostics,
                     **diagnostic_metadata,
                 }
             )
@@ -4354,11 +4616,21 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                 {
                     "case_id": case_id,
                     "state": "scored",
-                    "error_class": "format_violation" if format_violation else "malformed_output" if malformed else None,
+                    "error_class": (
+                        "format_violation"
+                        if format_violation
+                        else "token_budget_exhausted"
+                        if malformed and prediction.get("token_budget_exhausted") is True
+                        else "malformed_output"
+                        if malformed
+                        else None
+                    ),
                     "passed_constraints": 1 if passed else 0,
                     "total_constraints": 1,
                     "score": 1.0 if passed else 0.0,
                     "semantic_score": 1.0 if semantic_passed else 0.0,
+                    "format_valid": not malformed and not format_violation,
+                    **generation_diagnostics,
                 }
             )
             continue
@@ -4375,6 +4647,16 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                 and passed
                 and _normalize_exact_answer(response) != extracted_answer
             )
+            format_valid = extracted_answer is not None and not format_violation
+            error_class = (
+                "format_violation"
+                if format_violation
+                else "token_budget_exhausted"
+                if extracted_answer is None and prediction.get("token_budget_exhausted") is True
+                else "malformed_output"
+                if extracted_answer is None
+                else None
+            )
             if passed:
                 passed_constraints += 1
                 semantic_correct_count += 1
@@ -4384,11 +4666,12 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                 {
                     "case_id": case_id,
                     "state": "scored",
-                    "error_class": "format_violation" if format_violation else None,
+                    "error_class": error_class,
                     "passed_constraints": 1 if passed else 0,
                     "total_constraints": 1,
                     "score": 1.0 if passed else 0.0,
-                    "format_valid": not format_violation,
+                    "format_valid": format_valid,
+                    **generation_diagnostics,
                     **diagnostic_metadata,
                     **(
                         {
@@ -4411,10 +4694,16 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                     {
                         "case_id": case_id,
                         "state": "scored",
-                        "error_class": "malformed_output",
+                        "error_class": (
+                            "token_budget_exhausted"
+                            if prediction.get("token_budget_exhausted") is True
+                            else "malformed_output"
+                        ),
                         "passed_constraints": 0,
                         "total_constraints": len(checks),
                         "score": 0.0,
+                        "format_valid": False,
+                        **generation_diagnostics,
                     }
                 )
                 continue
@@ -4444,21 +4733,75 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                 "passed_constraints": case_passed,
                 "total_constraints": len(checks),
                 "score": round(case_passed / float(len(checks)), 6) if checks else None,
+                **generation_diagnostics,
             }
         )
+    # An otherwise parseable answer is still an incomplete terminal protocol
+    # when the backend reports that its bounded output budget was exhausted.
+    # Keep completed output in the denominator as a deterministic zero; runtime
+    # failures remain unscored because their case rows already carry score=None.
+    for case_result in case_results:
+        if (
+            case_result.get("score") is not None
+            and case_result.get("token_budget_exhausted") is True
+        ):
+            case_result["error_class"] = "token_budget_exhausted"
+            case_result["passed_constraints"] = 0
+            case_result["score"] = 0.0
+            case_result["format_valid"] = False
+            if "semantic_score" in case_result:
+                case_result["semantic_score"] = 0.0
+    passed_constraints = sum(
+        int(item.get("passed_constraints") or 0) for item in case_results
+    )
+    semantic_correct_count = len(
+        [item for item in case_results if item.get("semantic_score") == 1.0]
+    )
     score = round(passed_constraints / float(total_constraints), 6) if total_constraints else None
-    malformed_output_count = len([item for item in case_results if item.get("error_class") == "malformed_output"])
+    malformed_output_count = len(
+        [
+            item
+            for item in case_results
+            if item.get("error_class") == "malformed_output"
+        ]
+    )
+    format_invalid_count = len(
+        [item for item in case_results if item.get("format_valid") is False]
+    )
+    token_budget_exhaustion_count = len(
+        [item for item in case_results if item.get("token_budget_exhausted") is True]
+    )
+    model_output_diagnostic_count = len(
+        [
+            item
+            for item in case_results
+            if item.get("error_class")
+            in {"malformed_output", "token_budget_exhausted", "format_violation"}
+        ]
+    )
     correct_count = len([item for item in case_results if item.get("score") == 1.0])
     scored_case_results = [item for item in case_results if item.get("score") is not None]
+    unscored_failure_count = len(
+        [
+            item
+            for item in case_results
+            if item.get("score") is None and item.get("state") in {"failed", "partial"}
+        ]
+    )
     # A completed response that violates a deterministic output contract is a
     # model-output miss, not absent evidence. Its constraints are already in the
     # denominator and score zero above. Transport/generation failures remain
     # unscored and can still make the enclosing execution partial.
-    scored_malformed_output = spec.benchmark_id in {
-        "assistant_compositional_instruction_v2",
-        "coding_static_repair_v1",
-    }
-    status = "partial" if malformed_output_count and not scored_malformed_output else "completed"
+    scored_malformed_output = spec.benchmark_id in NATIVE_SCORED_MODEL_OUTPUT_BENCHMARKS
+    status = (
+        "partial"
+        if unscored_failure_count
+        or (
+            (malformed_output_count or token_budget_exhaustion_count)
+            and not scored_malformed_output
+        )
+        else "completed"
+    )
     metrics = {
         spec.primary_metric_name: score,
         "passed_constraints": passed_constraints,
@@ -4466,6 +4809,9 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
         "correct_count": correct_count,
         "total_count": len(scored_case_results),
         "malformed_output_count": malformed_output_count,
+        "format_invalid_count": format_invalid_count,
+        "model_output_diagnostic_count": model_output_diagnostic_count,
+        "token_budget_exhaustion_count": token_budget_exhaustion_count,
         "case_accuracy": round(
             len([item for item in scored_case_results if item.get("score") == 1.0])
             / float(len(scored_case_results)),
@@ -4570,6 +4916,7 @@ def _evaluate_stateful_tool_loop_benchmark(
                     "total_constraints": expected_turn_count,
                     "score": None,
                     "attempted_turn_count": len(trajectory),
+                    **_task_performance_fields(prediction),
                 }
             )
             continue
@@ -4590,6 +4937,7 @@ def _evaluate_stateful_tool_loop_benchmark(
                 "attempted_turn_count": len(trajectory),
                 "tool_execution_count": len([item for item in trajectory if item.get("tool_executed")]),
                 "format_valid": not malformed,
+                **_task_performance_fields(prediction),
             }
         )
     scored_rows = [item for item in case_results if item.get("score") is not None]

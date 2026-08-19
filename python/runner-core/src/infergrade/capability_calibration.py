@@ -12,7 +12,12 @@ from collections import Counter
 from statistics import mean, median
 from typing import Any, Dict, Iterable, List, Optional
 
-from infergrade.benchmark_catalog import check_index, load_capability_catalog, surface_score_policy_index
+from infergrade.benchmark_catalog import (
+    benchmark_quarantine_reason,
+    check_index,
+    load_capability_catalog,
+    surface_score_policy_index,
+)
 from infergrade.capability_contract import (
     CAPABILITY_SURFACES,
     capability_run_admission_error_summary,
@@ -74,10 +79,19 @@ def extract_calibration_observations(
     rejected_capability_runs: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     observations: List[Dict[str, Any]] = []
-    checks = check_index(catalog) if catalog else {}
+    payload = catalog or load_capability_catalog()
+    checks = check_index(payload)
     for document in documents:
         source = str(document.get("_source") or "")
         if document.get("artifact_kind") == "capability_run":
+            raw_protocol = document.get("protocol")
+            raw_benchmark_id = (
+                raw_protocol.get("task_version")
+                if isinstance(raw_protocol, dict)
+                else None
+            )
+            if benchmark_quarantine_reason(raw_benchmark_id, payload):
+                continue
             admission_errors = validate_current_capability_run_artifact(document)
             if admission_errors:
                 protocol = document.get("protocol")
@@ -135,11 +149,21 @@ def extract_calibration_observations(
                 checks.get(str(protocol.get("task_version") or "")),
             )
             if observation:
+                observation["components"] = [
+                    component
+                    for component in list(observation.get("components") or [])
+                    if not benchmark_quarantine_reason(component.get("benchmark_id"), payload)
+                ]
                 observations.append(observation)
             continue
         if document.get("artifact_kind") == "capability_summary":
-            for surface in list(document.get("surfaces") or []):
-                observation = _surface_observation(surface, document, source)
+            raw_surfaces = document.get("surfaces")
+            if not isinstance(raw_surfaces, list):
+                continue
+            for surface in raw_surfaces:
+                if not isinstance(surface, dict):
+                    continue
+                observation = _surface_observation(surface, document, source, payload)
                 if observation:
                     observations.append(observation)
             continue
@@ -162,25 +186,31 @@ def extract_calibration_observations(
         family = _nested(document, "ontology", "model_family", "family_name") or document.get("model_family")
         scale = _nested(document, "ontology", "model_family", "parameter_scale") or document.get("parameter_scale")
         checkpoint_name = _nested(document, "ontology", "checkpoint", "checkpoint_name") or document.get("checkpoint_name")
-        observations.append(
-            {
-                "observation_id": observation_id,
-                "score_version": version,
-                "surface_id": details.get("surface_id") or document.get("capability_score_surface_id"),
-                "score": score,
-                "model_family": str(family or "unknown"),
-                "parameter_band": _parameter_band(scale or checkpoint_name),
-                "model_identities": sorted(_model_identities(document.get("model_id"), document.get("model"), checkpoint_name)),
-                "quantization_scheme": str(
-                    _nested(document, "ontology", "quantization", "quantization_scheme")
-                    or document.get("quantization_scheme")
-                    or ""
-                ).lower(),
-                **_evidence_group_observation(document),
-                "components": _component_score_observations(document, capability),
-                "source": source,
-            }
-        )
+        generic_observation = {
+            "observation_id": observation_id,
+            "score_version": version,
+            "surface_id": details.get("surface_id") or document.get("capability_score_surface_id"),
+            "score": score,
+            "model_family": str(family or "unknown"),
+            "parameter_band": _parameter_band(scale or checkpoint_name),
+            "model_identities": sorted(
+                _model_identities(document.get("model_id"), document.get("model"), checkpoint_name)
+            ),
+            "quantization_scheme": str(
+                _nested(document, "ontology", "quantization", "quantization_scheme")
+                or document.get("quantization_scheme")
+                or ""
+            ).lower(),
+            **_evidence_group_observation(document),
+            "components": _component_score_observations(document, capability),
+            "source": source,
+        }
+        generic_observation["components"] = [
+            component
+            for component in list(generic_observation.get("components") or [])
+            if not benchmark_quarantine_reason(component.get("benchmark_id"), payload)
+        ]
+        observations.append(generic_observation)
     rejected_observations = [
         item for item in observations if item.get("admission_status") == "rejected"
     ]
@@ -303,14 +333,38 @@ def _duplicate_integrity_conflicts(left: Dict[str, Any], right: Dict[str, Any]) 
     return conflicts
 
 
-def _surface_observation(surface: Dict[str, Any], document: Dict[str, Any], source: str) -> Optional[Dict[str, Any]]:
+def _surface_observation(
+    surface: Dict[str, Any],
+    document: Dict[str, Any],
+    source: str,
+    catalog: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
     version = str(surface.get("score_version") or "")
     score = _number(surface.get("score_raw_attainment"))
     if score is None:
         score = _number(surface.get("score_observed"))
     if not version or score is None or surface.get("score_ready") is not True:
         return None
-    artifacts = list(surface.get("capability_artifacts") or document.get("capability_artifacts") or [])
+    surface_artifacts = surface.get("capability_artifacts")
+    if surface_artifacts not in (None, []) and not isinstance(surface_artifacts, list):
+        return None
+    raw_artifacts = (
+        surface_artifacts
+        if isinstance(surface_artifacts, list) and surface_artifacts
+        else document.get("capability_artifacts") or []
+    )
+    if not isinstance(raw_artifacts, list):
+        return None
+    artifacts = list(raw_artifacts)
+    if any(
+        isinstance(artifact, dict)
+        and benchmark_quarantine_reason(artifact.get("benchmark_id"), catalog)
+        for artifact in artifacts
+    ):
+        # Legacy summaries carry an already-aggregated score, so a quarantined
+        # input cannot be subtracted safely after the fact. Fail closed rather
+        # than admitting a forged or stale aggregate into calibration.
+        return None
     subject_model = ""
     for artifact in artifacts:
         subject_model = str(_nested(artifact, "subject", "model", "model") or "")
@@ -416,18 +470,45 @@ def _declared_saturation_slices(
     return slices
 
 
+def _observation_contains_quarantined_evidence(
+    observation: Dict[str, Any],
+    catalog: Dict[str, Any],
+) -> bool:
+    if benchmark_quarantine_reason(observation.get("benchmark_id"), catalog):
+        return True
+    for field in ("components", "capability_artifacts"):
+        evidence_items = observation.get(field)
+        if not isinstance(evidence_items, list):
+            continue
+        if any(
+            isinstance(item, dict)
+            and benchmark_quarantine_reason(item.get("benchmark_id"), catalog)
+            for item in evidence_items
+        ):
+            return True
+    return False
+
+
 def audit_capability_observations(
     observations: Iterable[Dict[str, Any]],
     score_version: str,
     policy: Optional[Dict[str, Any]] = None,
     catalog: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    relevant = [item for item in observations if item.get("score_version") == score_version]
+    payload = catalog or load_capability_catalog()
+    observations = list(observations)
+    relevant = [
+        item
+        for item in observations
+        if item.get("score_version") == score_version
+        and not _observation_contains_quarantined_evidence(item, payload)
+    ]
     rejected = [
         item
         for item in observations
         if item.get("admission_status") == "rejected"
         and item.get("score_version") in (None, score_version)
+        and not _observation_contains_quarantined_evidence(item, payload)
     ]
     matching = [
         item
@@ -441,14 +522,14 @@ def audit_capability_observations(
     selected = [item for item in eligible if int(item.get("task_count") or 0) >= minimum_task_count]
     current_targets = [
         item
-        for item in list((catalog or {}).get("coverage_expansion_priorities") or [])
+        for item in list(payload.get("coverage_expansion_priorities") or [])
         if item.get("calibration_campaign_eligible") is True
         and item.get("model_freshness") in {"current_generation", "recent_generation"}
     ]
     headroom_challenge_targets = [
         item for item in current_targets
         if item.get("headroom_challenge_eligible") is True
-        and _priority_matches_score_surface(item, selected, score_version, catalog)
+        and _priority_matches_score_surface(item, selected, score_version, payload)
     ]
     selected = [dict(item) for item in selected]
     for observation in selected:

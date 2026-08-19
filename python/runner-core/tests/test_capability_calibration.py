@@ -1102,6 +1102,124 @@ class CapabilityCalibrationTests(unittest.TestCase):
         self.assertEqual(observation["score"], 0.458333)
         self.assertEqual(observation["task_count"], 24)
 
+    def test_quarantined_current_run_is_ignored_without_explicit_catalog(self):
+        for artifact_spec_version in ("0.1.1", "0.1.0"):
+            with self.subTest(artifact_spec_version=artifact_spec_version):
+                artifact = _current_capability_run()
+                artifact["artifact_spec_version"] = artifact_spec_version
+                artifact["protocol"]["task_version"] = "reasoning_constraint_stress_v1"
+
+                observations = extract_calibration_observations([artifact])
+
+                self.assertEqual(observations, [])
+
+    def test_forged_summary_backed_by_quarantined_artifact_is_ignored(self):
+        for pointer_location in ("surface", "summary"):
+            with self.subTest(pointer_location=pointer_location):
+                pointer = {
+                    "benchmark_id": "reasoning_constraint_stress_v1",
+                    "score": 1.0,
+                }
+                surface = {
+                    "surface": "local_reasoning_capability",
+                    "score_version": "local_reasoning_score_v2",
+                    "score_raw_attainment": 1.0,
+                    "score_ready": True,
+                }
+                summary = {
+                    "artifact_kind": "capability_summary",
+                    "bundle_id": "forged-summary",
+                    "surfaces": [surface],
+                }
+                if pointer_location == "surface":
+                    surface["capability_artifacts"] = [pointer]
+                else:
+                    summary["capability_artifacts"] = [pointer]
+
+                self.assertEqual(extract_calibration_observations([summary]), [])
+
+    def test_malformed_summary_shapes_fail_closed_without_crashing(self):
+        base = {
+            "artifact_kind": "capability_summary",
+            "bundle_id": "malformed-summary",
+            "surfaces": [
+                {
+                    "surface": "local_reasoning_capability",
+                    "score_version": "local_reasoning_score_v2",
+                    "score_raw_attainment": 1.0,
+                    "score_ready": True,
+                }
+            ],
+        }
+        mutations = (
+            lambda item: item.update({"surfaces": {"private": "value"}}),
+            lambda item: item.update({"surfaces": ["private"]}),
+            lambda item: item["surfaces"][0].update(
+                {"capability_artifacts": {"private": "value"}}
+            ),
+            lambda item: item.update({"capability_artifacts": {"private": "value"}}),
+        )
+        for mutate in mutations:
+            with self.subTest(mutation=mutate):
+                summary = json.loads(json.dumps(base))
+                mutate(summary)
+                self.assertEqual(extract_calibration_observations([summary]), [])
+
+    def test_audit_ignores_direct_quarantined_observations_and_components(self):
+        observations = [
+            {
+                "observation_id": "direct-quarantine",
+                "score_version": "local_reasoning_score_v2",
+                "benchmark_id": "reasoning_constraint_stress_v1",
+                "score": 1.0,
+                "model_family": "forged",
+                "parameter_band": "20b_plus",
+            },
+            {
+                "observation_id": "composite-quarantine",
+                "score_version": "local_reasoning_score_v2",
+                "score": 1.0,
+                "model_family": "forged",
+                "parameter_band": "20b_plus",
+                "components": [
+                    {
+                        "benchmark_id": "reasoning_constraint_stress_v1",
+                        "score": 1.0,
+                    }
+                ],
+            },
+            {
+                "observation_id": "artifact-quarantine",
+                "score_version": "local_reasoning_score_v2",
+                "score": 1.0,
+                "model_family": "forged",
+                "parameter_band": "20b_plus",
+                "capability_artifacts": [
+                    {
+                        "benchmark_id": "reasoning_constraint_stress_v1",
+                        "score": 1.0,
+                    }
+                ],
+            },
+            {
+                "observation_id": "rejected-quarantine",
+                "score_version": "local_reasoning_score_v2",
+                "benchmark_id": "reasoning_constraint_stress_v1",
+                "admission_status": "rejected",
+            },
+        ]
+
+        report = audit_capability_observations(
+            observations,
+            "local_reasoning_score_v2",
+        )
+
+        self.assertEqual(report["metrics"]["observation_count"], 0)
+        self.assertEqual(report["metrics"]["rejected_capability_run_count"], 0)
+        self.assertEqual(report["metrics"]["maximum"], None)
+        self.assertFalse(report["headline_ready"])
+        self.assertNotIn("capability_run_admission_rejected", report["blockers"])
+
     def test_rejected_metadata_is_bounded_and_container_values_are_not_reflected(self):
         artifact = _current_capability_run()
         artifact["artifact_spec_version"] = ["0.1.1"]

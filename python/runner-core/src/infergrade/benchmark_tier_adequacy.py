@@ -7,7 +7,12 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from infergrade.benchmark_catalog import check_index, load_capability_catalog
+from infergrade.benchmark_catalog import (
+    benchmark_quarantine_reason,
+    check_index,
+    is_benchmark_quarantined,
+    load_capability_catalog,
+)
 from infergrade.capabilities import CAPABILITY_BENCHMARKS, _native_benchmark_cases
 from infergrade.longbench_selection import load_longbench_selection_manifest
 from infergrade.selection_identity import (
@@ -133,15 +138,26 @@ def audit_benchmark_tier_adequacy(
                 "tiers": [],
                 "errors": [],
             }
-        errors.extend(
-            "%s:%s" % (benchmark_id, error)
-            for error in benchmark_errors
-        )
+        quarantined = is_benchmark_quarantined(benchmark_id, payload)
+        if not quarantined:
+            errors.extend(
+                "%s:%s" % (benchmark_id, error)
+                for error in benchmark_errors
+            )
         benchmark_reports.append(
             {
                 "benchmark_id": benchmark_id,
-                "status": "ready" if not benchmark_errors else "invalid",
-                "ready": not benchmark_errors,
+                "status": (
+                    "quarantined"
+                    if quarantined
+                    else "ready"
+                    if not benchmark_errors
+                    else "invalid"
+                ),
+                "ready": not benchmark_errors and not quarantined,
+                "runnable": not quarantined,
+                "excluded_from_readiness": quarantined,
+                "quarantine_reason_code": benchmark_quarantine_reason(benchmark_id, payload),
                 "case_limits": case_limits,
                 "strategy": strategy or None,
                 "stratification_fields": list(fields) if isinstance(fields, list) else [],
@@ -163,47 +179,58 @@ def audit_benchmark_tier_adequacy(
         "materialized_native_fixture_count": sum(
             1
             for item in benchmark_reports
+            if not item["excluded_from_readiness"]
             if item["fixture_verification"]["status"] == "materialized_verified"
         ),
         "native_tier_coverage_contract_count": sum(
             1
             for item in benchmark_reports
+            if not item["excluded_from_readiness"]
             if item["fixture_verification"]["tier_coverage_contract"]
             and item["fixture_verification"]["status"] == "materialized_verified"
         ),
         "verified_static_fixture_manifest_count": sum(
             1
             for item in benchmark_reports
+            if not item["excluded_from_readiness"]
             if item["fixture_verification"]["status"]
             in {"source_fixture_verified", "source_manifest_verified"}
         ),
         "verified_prompt_free_selection_manifest_count": sum(
             1
             for item in benchmark_reports
+            if not item["excluded_from_readiness"]
             if item["fixture_verification"]["status"] == "selection_manifest_verified"
         ),
         "verified_tier_coverage_contract_count": sum(
             1
             for item in benchmark_reports
+            if not item["excluded_from_readiness"]
             if item["fixture_verification"]["tier_coverage_contract"]
             and item["fixture_verification"]["ready"]
         ),
         "declared_selection_digest_algorithm_count": sum(
             1
             for item in benchmark_reports
+            if not item["excluded_from_readiness"]
             if item["selection_digest_algorithm"] in SELECTION_DIGEST_ALGORITHMS
         ),
         "materialized_selection_digest_verified_count": sum(
             1
             for item in benchmark_reports
+            if not item["excluded_from_readiness"]
             if item["fixture_verification"]["selection_digest_verified"]
         ),
         "runtime_only_selection_digest_contract_count": sum(
             1
             for item in benchmark_reports
+            if not item["excluded_from_readiness"]
             if item["fixture_verification"]["status"]
             == "external_runtime_not_materialized"
             and item["selection_digest_algorithm"] in SELECTION_DIGEST_ALGORITHMS
+        ),
+        "quarantined_benchmark_count": sum(
+            1 for item in benchmark_reports if item["excluded_from_readiness"]
         ),
         "benchmarks": benchmark_reports,
         "errors": errors,
@@ -215,7 +242,8 @@ def audit_benchmark_tier_adequacy(
             "manifest and, in source checkouts, against the container fixture itself. The prompt-free LongBench "
             "manifest verifies raw upstream IDs, tier prefixes, and the public domain/difficulty/length projection; "
             "its image remains responsible for source bytes and prompts. Structural coverage does not prove empirical difficulty, "
-            "score reliability, source representativeness, or absence of benchmark leakage."
+            "score reliability, source representativeness, or absence of benchmark leakage. Quarantined fixtures remain "
+            "visible for forensic integrity checks but are excluded from runnable readiness counts."
         ),
     }
 
