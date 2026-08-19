@@ -54,7 +54,7 @@ if [ -z "$deb_executable" ] || [ -z "$deb_sidecar" ] || [ -z "$deb_runner_core" 
   exit 1
 fi
 
-sudo apt-get install -y "$deb_path"
+sudo timeout --kill-after=15s 180s apt-get install -y "$deb_path"
 installed_executable="$(command -v infergrade_desktop_runner || true)"
 if [ -z "$installed_executable" ]; then
   installed_executable="$(find /usr/bin /usr/lib /opt -type f -name 'infergrade_desktop_runner' -print -quit 2>/dev/null || true)"

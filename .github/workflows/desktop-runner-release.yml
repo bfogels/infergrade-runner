@@ -428,37 +428,70 @@ jobs:
               printf '%s\n' 'https://archive.ubuntu.com/ubuntu' \
                 | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
             fi
-            sudo sed -i \
-              's|http://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
-              /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
-            sudo apt-get \
+            for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+              if [ -f "$source_file" ]; then
+                sudo sed -i \
+                  -e 's|http://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
+                  -e 's|https://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
+                  "$source_file"
+              fi
+            done
+            sudo timeout --kill-after=15s 240s apt-get \
               -o Acquire::Retries=3 \
-              -o Acquire::http::Timeout=60 \
-              -o Acquire::https::Timeout=60 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
               update
           fi
 
       - name: Install Tauri and launch-smoke dependencies
-        timeout-minutes: 20
+        timeout-minutes: 30
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=60 \
-            -o Acquire::https::Timeout=60 \
-            install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            xvfb \
+          packages=(
+            libwebkit2gtk-4.1-dev
+            build-essential
+            curl
+            wget
+            file
+            libxdo-dev
+            libssl-dev
+            libayatana-appindicator3-dev
+            librsvg2-dev
+            xvfb
             dbus-x11
+          )
+          install_packages() {
+            local deadline_seconds="$1"
+            local retries="$2"
+            sudo timeout --kill-after=15s "${deadline_seconds}s" apt-get \
+              -o "Acquire::Retries=${retries}" \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              install -y "${packages[@]}"
+          }
+          if ! install_packages 480 1; then
+            echo "Hosted mirror stalled during release dependency download; retrying against the official Ubuntu archive."
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf '%s\n' 'https://archive.ubuntu.com/ubuntu' \
+                | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            fi
+            for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+              if [ -f "$source_file" ]; then
+                sudo sed -i \
+                  -e 's|http://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
+                  -e 's|https://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
+                  "$source_file"
+              fi
+            done
+            sudo timeout --kill-after=15s 240s apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              update
+            sudo timeout --kill-after=15s 120s dpkg --configure -a
+            install_packages 720 3
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
