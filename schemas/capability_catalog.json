@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-19-integrity-quarantine",
+  "catalog_version": "2026-08-19-reasoning-constraint-stress-v2-foundation",
   "quarantined_benchmarks": {
     "reasoning_constraint_stress_v1": {
       "reason_code": "legacy_direct_no_think_v1_no_capability_validity_evidence",
@@ -908,6 +908,46 @@
       ]
     },
     {
+      "check_id": "reasoning_constraint_stress_v2",
+      "surface_id": "local_reasoning_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "planned",
+      "runnable_status": "canary_only_unreviewed",
+      "default_inclusion_status": "excluded_canary_only",
+      "status": "canary_only_unreviewed",
+      "evidence_kind": "capability",
+      "runner_target": "reasoning_constraint_stress_v2",
+      "fixture_or_dataset_revision_status": "pinned_runner_fixture_foundation_only",
+      "harness_status": "fixture_and_parser_foundation_only",
+      "scoring_policy_id": "reasoning_constraint_stress_v2_exact_signed_integer_v1",
+      "generation_constraint_id": "final_answer_integer_v1",
+      "generation_policy_id": "reasoning_constraint_stress_thinking_v2",
+      "sample_policy": "Six fresh, independent synthetic cases with new identities and a locked task-id digest; fixture and parser foundation only, with no adapter or runtime execution claim.",
+      "expected_duration_token_volume_status": "not_estimated_foundation_only",
+      "sandbox_requirement": "none_fixture_only",
+      "claim_boundary": "Foundation identity only; no benchmark, capability, score, readiness, recommendation, or release-evidence claim.",
+      "promotion_blockers": [
+        "Complete independent review of the fixture, parser, generation policy, and runtime adapter contract.",
+        "Run representative cross-family canary evidence and inspect malformed-output behavior before any runnable claim.",
+        "Add an adapter only in a separately reviewed change that binds the immutable policy and parser to observed receipts."
+      ],
+      "canary_only": true,
+      "allowed_tiers": ["canary"],
+      "attestation_state": "unreviewed",
+      "fixture_revision": "2026-08-reasoning-constraint-stress-v2",
+      "fixture_sha256": "899960f108683f21f531772e791441c9912c25569f8c080c0ad61095af022762",
+      "expected_answer_vector": ["-6", "22", "4", "126", "15", "4133"],
+      "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
+      "selection_sha256": "7d384656457dfeab9c61e25af798c4ed5db19321a04ae088b9ba2bdc4a5b02e0",
+      "score_policy_id": "reasoning_constraint_stress_v2_exact_signed_integer_v1",
+      "excluded_from_default_groups": true,
+      "excluded_from_suites": true,
+      "excluded_from_weighted_score": true,
+      "excluded_from_readiness": true,
+      "excluded_from_recommendation": true,
+      "excluded_from_release_evidence": true
+    },
+    {
       "check_id": "mmlu_pro_reference_v1",
       "surface_id": "local_reasoning_capability",
       "evidence_lane_id": "reference",
@@ -1304,6 +1344,12 @@
       "display_name": "Reasoning constraint exact answer with diagnostic slices",
       "description": "Score completed cases by deterministic exact-answer matching and report category and structural-tier accuracy slices; generation failures remain unscored partial evidence.",
       "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "reasoning_constraint_stress_v2_exact_signed_integer_v1",
+      "display_name": "Reasoning constraint stress v2 terminal integer",
+      "description": "Foundation scoring identity for the six-case v2 fixture; no adapter or runtime execution is claimed.",
+      "score_method": "terminal_signed_integer_exact_match_v1"
     },
     {
       "score_policy_id": "deterministic_context_key_retrieval_v1",
@@ -2322,6 +2368,60 @@
       ],
       "fixture_revision": "2026-08-reasoning-constraint-stress-v1",
       "source": "infergrade_synthetic_fixture"
+    },
+    {
+      "check_id": "reasoning_constraint_stress_v2",
+      "display_name": "Reasoning constraint stress v2 foundation",
+      "description": "Foundation identity only; no benchmark, capability, score, readiness, recommendation, or release-evidence claim.",
+      "capability_facets": [
+        "constraint_reasoning_stress_v2"
+      ],
+      "temporal_scope": "static_pinned",
+      "evidence_kind": "capability",
+      "group_id": null,
+      "surface_id": "local_reasoning_capability",
+      "runner_target": "reasoning_constraint_stress_v2",
+      "status": "canary_only_unreviewed",
+      "suite_scope": "reference",
+      "evidence_lane_id": "reference",
+      "effort_level": "short",
+      "expected_duration_band": "not estimated",
+      "token_volume_band": "not estimated",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "fixture_parser_foundation_only",
+      "selection_guidance": "Foundation identity only; no benchmark, capability, score, readiness, recommendation, or release-evidence claim.",
+      "score_dimension": "constraint_reasoning_stress_v2",
+      "primary_score_metric": "exact_signed_integer_accuracy",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "score_role": "diagnostic_only",
+      "discrimination_status": "unreviewed",
+      "higher_is_better": true,
+      "score_policy_id": "reasoning_constraint_stress_v2_exact_signed_integer_v1",
+      "generation_constraint_id": "final_answer_integer_v1",
+      "generation_policy_id": "reasoning_constraint_stress_thinking_v2",
+      "score_breakdown_fields": [
+        "correct_count",
+        "total_count",
+        "case_accuracy",
+        "parser_code_counts"
+      ],
+      "fixture_revision": "2026-08-reasoning-constraint-stress-v2",
+      "fixture_sha256": "899960f108683f21f531772e791441c9912c25569f8c080c0ad61095af022762",
+      "expected_answer_vector": ["-6", "22", "4", "126", "15", "4133"],
+      "claim_boundary": "Foundation identity only; no benchmark, capability, score, readiness, recommendation, or release-evidence claim.",
+      "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
+      "selection_sha256": "7d384656457dfeab9c61e25af798c4ed5db19321a04ae088b9ba2bdc4a5b02e0",
+      "source": "infergrade_synthetic_fixture",
+      "canary_only": true,
+      "allowed_tiers": ["canary"],
+      "attestation_state": "unreviewed",
+      "excluded_from_default_groups": true,
+      "excluded_from_suites": true,
+      "excluded_from_weighted_score": true,
+      "excluded_from_readiness": true,
+      "excluded_from_recommendation": true,
+      "excluded_from_release_evidence": true
     },
     {
       "check_id": "coding_static_repair_v1",

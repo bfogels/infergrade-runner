@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from infergrade import __version__
 from infergrade.benchmark_catalog import (
-    benchmark_quarantine_reason,
+    benchmark_evidence_exclusion_reason,
     capability_benchmark_ids_for_request,
     resolve_request_selection,
     selection_metadata_for_request,
@@ -565,13 +565,13 @@ def summarize_capability_execution(
             + list(raw_component_scores)
             + list(raw_artifacts)
         )
-        if benchmark_quarantine_reason(benchmark_id)
+        if benchmark_evidence_exclusion_reason(benchmark_id)
     }
     quarantined_benchmark_ids.update(
         str(result.get("benchmark_id") or "")
         for result in raw_benchmark_results.values()
         if isinstance(result, dict)
-        and benchmark_quarantine_reason(result.get("benchmark_id"))
+        and benchmark_evidence_exclusion_reason(result.get("benchmark_id"))
     )
     planned_benchmark_ids = [
         benchmark_id
@@ -583,7 +583,7 @@ def summarize_capability_execution(
         benchmark_id: result
         for benchmark_id, result in raw_benchmark_results.items()
         if benchmark_id not in quarantined_benchmark_ids
-        and not benchmark_quarantine_reason(
+        and not benchmark_evidence_exclusion_reason(
             result.get("benchmark_id") if isinstance(result, dict) else None
         )
     }

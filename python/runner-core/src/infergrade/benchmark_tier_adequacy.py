@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from infergrade.benchmark_catalog import (
-    benchmark_quarantine_reason,
+    benchmark_evidence_exclusion_reason,
     check_index,
-    is_benchmark_quarantined,
+    is_benchmark_excluded_from_evidence,
     load_capability_catalog,
 )
 from infergrade.capabilities import CAPABILITY_BENCHMARKS, _native_benchmark_cases
@@ -138,7 +138,7 @@ def audit_benchmark_tier_adequacy(
                 "tiers": [],
                 "errors": [],
             }
-        quarantined = is_benchmark_quarantined(benchmark_id, payload)
+        quarantined = is_benchmark_excluded_from_evidence(benchmark_id, payload)
         if not quarantined:
             errors.extend(
                 "%s:%s" % (benchmark_id, error)
@@ -157,7 +157,7 @@ def audit_benchmark_tier_adequacy(
                 "ready": not benchmark_errors and not quarantined,
                 "runnable": not quarantined,
                 "excluded_from_readiness": quarantined,
-                "quarantine_reason_code": benchmark_quarantine_reason(benchmark_id, payload),
+                "quarantine_reason_code": benchmark_evidence_exclusion_reason(benchmark_id, payload),
                 "case_limits": case_limits,
                 "strategy": strategy or None,
                 "stratification_fields": list(fields) if isinstance(fields, list) else [],

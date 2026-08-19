@@ -13,7 +13,7 @@ from statistics import mean, median
 from typing import Any, Dict, Iterable, List, Optional
 
 from infergrade.benchmark_catalog import (
-    benchmark_quarantine_reason,
+    benchmark_evidence_exclusion_reason,
     check_index,
     load_capability_catalog,
     surface_score_policy_index,
@@ -90,7 +90,7 @@ def extract_calibration_observations(
                 if isinstance(raw_protocol, dict)
                 else None
             )
-            if benchmark_quarantine_reason(raw_benchmark_id, payload):
+            if benchmark_evidence_exclusion_reason(raw_benchmark_id, payload):
                 continue
             admission_errors = validate_current_capability_run_artifact(document)
             if admission_errors:
@@ -152,7 +152,7 @@ def extract_calibration_observations(
                 observation["components"] = [
                     component
                     for component in list(observation.get("components") or [])
-                    if not benchmark_quarantine_reason(component.get("benchmark_id"), payload)
+                    if not benchmark_evidence_exclusion_reason(component.get("benchmark_id"), payload)
                 ]
                 observations.append(observation)
             continue
@@ -208,7 +208,7 @@ def extract_calibration_observations(
         generic_observation["components"] = [
             component
             for component in list(generic_observation.get("components") or [])
-            if not benchmark_quarantine_reason(component.get("benchmark_id"), payload)
+            if not benchmark_evidence_exclusion_reason(component.get("benchmark_id"), payload)
         ]
         observations.append(generic_observation)
     rejected_observations = [
@@ -358,7 +358,7 @@ def _surface_observation(
     artifacts = list(raw_artifacts)
     if any(
         isinstance(artifact, dict)
-        and benchmark_quarantine_reason(artifact.get("benchmark_id"), catalog)
+        and benchmark_evidence_exclusion_reason(artifact.get("benchmark_id"), catalog)
         for artifact in artifacts
     ):
         # Legacy summaries carry an already-aggregated score, so a quarantined
@@ -474,7 +474,7 @@ def _observation_contains_quarantined_evidence(
     observation: Dict[str, Any],
     catalog: Dict[str, Any],
 ) -> bool:
-    if benchmark_quarantine_reason(observation.get("benchmark_id"), catalog):
+    if benchmark_evidence_exclusion_reason(observation.get("benchmark_id"), catalog):
         return True
     for field in ("components", "capability_artifacts"):
         evidence_items = observation.get(field)
@@ -482,7 +482,7 @@ def _observation_contains_quarantined_evidence(
             continue
         if any(
             isinstance(item, dict)
-            and benchmark_quarantine_reason(item.get("benchmark_id"), catalog)
+            and benchmark_evidence_exclusion_reason(item.get("benchmark_id"), catalog)
             for item in evidence_items
         ):
             return True

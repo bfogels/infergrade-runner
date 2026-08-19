@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from infergrade.benchmark_catalog import (
     check_index,
-    is_benchmark_quarantined,
+    is_benchmark_excluded_from_evidence,
     load_capability_catalog,
     surface_score_policy_index,
 )
@@ -281,7 +281,7 @@ def _surface_adequacy(
     supporting = [
         checks[check_id]
         for check_id in policy.get("supporting_check_ids") or []
-        if check_id in checks and not is_benchmark_quarantined(check_id, catalog)
+        if check_id in checks and not is_benchmark_excluded_from_evidence(check_id, catalog)
     ]
     planned_checks = [planned[check_id] for check_id in policy.get("planned_check_ids") or [] if check_id in planned]
     headline = [
