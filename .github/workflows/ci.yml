@@ -29,11 +29,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require develop to contain released main ancestry
+      - name: Require prospective develop merge to contain released main ancestry
         if: github.event_name == 'pull_request' && github.base_ref == 'develop'
         run: |
-          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main +refs/heads/develop:refs/remotes/origin/develop
-          test "$(python3 scripts/branch_sync_plan.py)" = "already_synced"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor origin/main HEAD
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -125,11 +125,25 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=60 \
-            -o Acquire::https::Timeout=60 \
-            update
+          if ! sudo timeout --kill-after=15s 180s apt-get \
+              -o Acquire::Retries=2 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              update; then
+            echo "Hosted mirror stalled; retrying against the official Ubuntu archive."
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf '%s\n' 'https://archive.ubuntu.com/ubuntu' \
+                | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            fi
+            sudo sed -i \
+              's|http://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
+              /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+            sudo apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              update
+          fi
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'

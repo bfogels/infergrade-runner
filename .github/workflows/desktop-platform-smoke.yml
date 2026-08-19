@@ -131,11 +131,25 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=60 \
-            -o Acquire::https::Timeout=60 \
-            update
+          if ! sudo timeout --kill-after=15s 180s apt-get \
+              -o Acquire::Retries=2 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              update; then
+            echo "Hosted mirror stalled; retrying against the official Ubuntu archive."
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf '%s\n' 'https://archive.ubuntu.com/ubuntu' \
+                | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            fi
+            sudo sed -i \
+              's|http://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
+              /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+            sudo apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              update
+          fi
 
       - name: Install Tauri and launch-smoke dependencies
         timeout-minutes: 20
