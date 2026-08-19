@@ -637,6 +637,7 @@ def _standalone_component_documents(surface_id, check_id, fixture_revision="fixt
             "artifact_kind": "capability_run",
             "capability_run_id": "%s-standalone-%d" % (surface_id, index),
             "created_at": "2026-08-19T12:00:00Z",
+            "runner": {"name": "infergrade-runner", "version": "test"},
             "protocol": {
                 "task_family": "readiness_fixture",
                 "task_version": check_id,
@@ -656,7 +657,12 @@ def _standalone_component_documents(surface_id, check_id, fixture_revision="fixt
             "subject": {
                 "model": {
                     "model": "models/%s-%d" % (surface_id, index % 10),
-                }
+                    "model_family": "family-%d" % (index % 5),
+                    "parameter_scale": bands[index % len(bands)],
+                    "quantization_scheme": "q4_k_m",
+                },
+                "runtime": {"backend": "llama.cpp"},
+                "hardware": {"source": "test"},
             },
             "evidence": {
                 "lane": "decision",
@@ -664,16 +670,18 @@ def _standalone_component_documents(surface_id, check_id, fixture_revision="fixt
                 "grade": "thin_local_sample",
                 "experimental": True,
                 "confidence_label": "thin_local_sample",
+                "evidence_group_id": "group-%d" % (index // 10),
+                "evidence_group_provenance": "trusted_corpus_operator_v1",
             },
             "claim_boundary": {
                 "supported_claims": ["Pinned standalone fixture evidence."],
                 "unsupported_claims": ["Not a global model ranking."],
             },
-            "model_family": "family-%d" % (index % 5),
-            "parameter_scale": bands[index % len(bands)],
-            "quantization_scheme": "q4_k_m",
-            "evidence_group_id": "group-%d" % (index // 10),
-            "evidence_group_provenance": "trusted_corpus_operator_v1",
+            "artifacts": {
+                "manifest": "capability_run.json",
+                "raw_outputs": [],
+                "scoring_outputs": [],
+            },
         })
     return documents
 
@@ -701,6 +709,7 @@ def _scored_capability_tasks(check_id, count):
             "score": 1.0,
             "scorer_type": "exact_match",
             "scoring_policy": "readiness_fixture_policy",
+            "output_artifact": None,
         }
         for index in range(count)
     ]

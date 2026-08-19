@@ -935,10 +935,14 @@ def _number(value: Any) -> Optional[float]:
 
 def _evidence_group_observation(document: Dict[str, Any]) -> Dict[str, Any]:
     """Accept grouping only when a trusted corpus operator assigned it."""
-    claimed = str(document.get("evidence_group_id") or "").strip()
+    evidence = document.get("evidence")
+    evidence = evidence if isinstance(evidence, dict) else {}
+    group_source = evidence if document.get("artifact_kind") == "capability_run" else document
+    claimed = str(group_source.get("evidence_group_id") or "").strip()
     verified = bool(
         claimed
-        and document.get("evidence_group_provenance") == TRUSTED_EVIDENCE_GROUP_PROVENANCE
+        and group_source.get("evidence_group_provenance")
+        == TRUSTED_EVIDENCE_GROUP_PROVENANCE
     )
     return {
         "evidence_group_id": claimed if verified else "",

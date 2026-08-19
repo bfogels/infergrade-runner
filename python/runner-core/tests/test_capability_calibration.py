@@ -1076,6 +1076,25 @@ class CapabilityCalibrationTests(unittest.TestCase):
 
                 self.assertEqual(observation["admission_status"], "rejected")
 
+    def test_schema_invalid_current_artifacts_are_not_extracted_as_scores(self):
+        mutations = {
+            "missing_runner": lambda item: item.pop("runner"),
+            "missing_artifacts": lambda item: item.pop("artifacts"),
+            "missing_output_artifact": lambda item: item["tasks"][0].pop(
+                "output_artifact"
+            ),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                artifact = _current_capability_run()
+                mutate(artifact)
+
+                observation = extract_calibration_observations([artifact])[0]
+
+                self.assertEqual(observation["admission_status"], "rejected")
+                self.assertNotIn("score", observation)
+                self.assertNotIn("task_count", observation)
+
     def test_valid_current_capability_run_is_admitted(self):
         observation = extract_calibration_observations([_current_capability_run()])[0]
 
@@ -1132,6 +1151,7 @@ def _current_capability_run():
             "score": 1.0,
             "scorer_type": "strict_json_equality",
             "scoring_policy": "structured_compositional_accuracy_v1",
+            "output_artifact": None,
         }
         for index in range(24)
     ]
@@ -1141,6 +1161,7 @@ def _current_capability_run():
         "artifact_kind": "capability_run",
         "capability_run_id": "caprun-1",
         "created_at": "2026-08-19T12:00:00Z",
+        "runner": {"name": "infergrade-runner", "version": "test"},
         "protocol": {
             "task_family": "assistant_compositional_instruction",
             "task_version": "assistant_compositional_instruction_v2",
@@ -1157,7 +1178,16 @@ def _current_capability_run():
         },
         "summary": {"score": 0.458333, "state": "scored"},
         "tasks": tasks,
-        "subject": {"model": {"model": "Qwen/Qwen3.5-9B"}},
+        "subject": {
+            "model": {
+                "model": "Qwen/Qwen3.5-9B",
+                "model_family": "Qwen3.5",
+                "parameter_scale": "9B",
+                "quantization_scheme": "q4_k_m",
+            },
+            "runtime": {"backend": "llama.cpp"},
+            "hardware": {"source": "test"},
+        },
         "evidence": {
             "lane": "decision",
             "surface": "local_assistant_capability",
@@ -1169,9 +1199,11 @@ def _current_capability_run():
             "supported_claims": ["Pinned standalone fixture evidence."],
             "unsupported_claims": ["Not a global model ranking."],
         },
-        "model_family": "Qwen3.5",
-        "parameter_scale": "9B",
-        "quantization_scheme": "q4_k_m",
+        "artifacts": {
+            "manifest": "capability_run.json",
+            "raw_outputs": [],
+            "scoring_outputs": [],
+        },
     }
 
 

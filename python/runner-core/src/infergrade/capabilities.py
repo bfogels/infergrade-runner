@@ -14,7 +14,7 @@ from infergrade.benchmark_catalog import (
     resolve_request_selection,
     selection_metadata_for_request,
 )
-from infergrade.capability_contract import validate_capability_run_artifact
+from infergrade.capability_contract import validate_current_capability_run_artifact
 from infergrade.capability_scoring import score_for_use_case
 from infergrade.capability_summary import write_capability_summary_artifact
 from infergrade.contracts import load_contract_manifest
@@ -1807,7 +1807,7 @@ def _write_quant_fidelity_capability_run_artifact(
             ],
         },
     }
-    errors = validate_capability_run_artifact(artifact)
+    errors = validate_current_capability_run_artifact(artifact)
     if errors:
         raise ValueError("Invalid capability_run artifact: %s" % "; ".join(errors))
     path = os.path.join(benchmark_dir, "capability_run.json")
@@ -2086,7 +2086,7 @@ def _write_native_capability_run_artifact(
         },
         "claim_boundary": _native_artifact_claim_boundary(spec, summary_state),
     }
-    errors = validate_capability_run_artifact(artifact)
+    errors = validate_current_capability_run_artifact(artifact)
     if errors:
         raise ValueError("Invalid capability_run artifact: %s" % "; ".join(errors))
     path = os.path.join(benchmark_dir, "capability_run.json")
@@ -2373,7 +2373,7 @@ def _write_multiple_choice_capability_run_artifact(
             else _multiple_choice_artifact_claim_boundary(spec.benchmark_id, summary_state)
         ),
     }
-    errors = validate_capability_run_artifact(artifact)
+    errors = validate_current_capability_run_artifact(artifact)
     if errors:
         raise ValueError("Invalid capability_run artifact: %s" % "; ".join(errors))
     path = os.path.join(benchmark_dir, "capability_run.json")
@@ -2558,7 +2558,7 @@ def _write_repository_edit_capability_run_artifact(
         },
         "claim_boundary": _repository_edit_artifact_claim_boundary(summary_state),
     }
-    errors = validate_capability_run_artifact(artifact)
+    errors = validate_current_capability_run_artifact(artifact)
     if errors:
         raise ValueError("Invalid capability_run artifact: %s" % "; ".join(errors))
     path = os.path.join(benchmark_dir, "capability_run.json")
@@ -2742,7 +2742,7 @@ def _write_evalplus_capability_run_artifact(
         },
         "claim_boundary": _evalplus_artifact_claim_boundary(spec.benchmark_id, summary_state),
     }
-    errors = validate_capability_run_artifact(artifact)
+    errors = validate_current_capability_run_artifact(artifact)
     if errors:
         raise ValueError("Invalid capability_run artifact: %s" % "; ".join(errors))
     path = os.path.join(benchmark_dir, "capability_run.json")

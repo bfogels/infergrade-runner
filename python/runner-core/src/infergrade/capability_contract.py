@@ -2,10 +2,12 @@
 
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from infergrade.paths import runner_root
+from infergrade.json_schema_subset import validate_json_schema
 from infergrade.selection_identity import SELECTION_DIGEST_ALGORITHMS, selection_digest
 
 EVIDENCE_LANES = ("smoke", "decision", "reference", "gold")
@@ -61,6 +63,7 @@ SELECTION_PROTOCOL_FIELDS = (
     "case_count",
 )
 CAPABILITY_RUN_ADMISSION_ERROR_LIMIT = 20
+CAPABILITY_RUN_ADMISSION_ERROR_MAX_LENGTH = 256
 
 
 def repo_root() -> Path:
@@ -214,7 +217,8 @@ def validate_capability_run_artifact(artifact: Any) -> List[str]:
 
 def validate_current_capability_run_artifact(artifact: Any) -> List[str]:
     """Return errors unless an artifact is valid current capability evidence."""
-    errors = validate_capability_run_artifact(artifact)
+    errors = validate_capability_run_schema_artifact(artifact)
+    errors.extend(validate_capability_run_artifact(artifact))
     artifact_spec_version = (
         artifact.get("artifact_spec_version") if isinstance(artifact, dict) else None
     )
@@ -226,13 +230,30 @@ def validate_current_capability_run_artifact(artifact: Any) -> List[str]:
     return errors
 
 
+def validate_capability_run_schema_artifact(artifact: Any) -> List[str]:
+    """Validate a capability run against the canonical JSON Schema."""
+    return validate_json_schema(
+        artifact,
+        _cached_capability_run_schema(),
+        capability_run_schema_path(),
+    )
+
+
 def capability_run_admission_error_summary(errors: List[str]) -> Dict[str, Any]:
     """Bound rejection diagnostics before they enter shareable artifacts."""
     return {
-        "admission_errors": list(errors[:CAPABILITY_RUN_ADMISSION_ERROR_LIMIT]),
+        "admission_errors": [
+            str(error)[:CAPABILITY_RUN_ADMISSION_ERROR_MAX_LENGTH]
+            for error in errors[:CAPABILITY_RUN_ADMISSION_ERROR_LIMIT]
+        ],
         "admission_error_count": len(errors),
         "admission_errors_truncated": len(errors) > CAPABILITY_RUN_ADMISSION_ERROR_LIMIT,
     }
+
+
+@lru_cache(maxsize=1)
+def _cached_capability_run_schema() -> Dict[str, Any]:
+    return load_capability_run_schema()
 
 
 def _validate_optional_selection_fields(protocol: Dict[str, Any], errors: List[str]) -> None:

@@ -107,8 +107,14 @@ class CapabilitySummaryTests(unittest.TestCase):
         self.assertEqual(assistant["task_count"], 0)
         self.assertEqual(validate_capability_summary_artifact(summary), [])
 
-    def test_forged_or_duplicate_selection_is_quarantined(self):
-        for mutation in ("forged_digest", "duplicate_task"):
+    def test_forged_duplicate_or_schema_invalid_current_artifact_is_quarantined(self):
+        for mutation in (
+            "forged_digest",
+            "duplicate_task",
+            "missing_runner",
+            "missing_artifacts",
+            "missing_output_artifact",
+        ):
             with self.subTest(mutation=mutation):
                 path = self._write_capability_run(
                     "multiturn_chat_memory_v1",
@@ -121,8 +127,14 @@ class CapabilitySummaryTests(unittest.TestCase):
                     artifact = json.load(handle)
                 if mutation == "forged_digest":
                     artifact["protocol"]["selection_sha256"] = "0" * 64
-                else:
+                elif mutation == "duplicate_task":
                     artifact["tasks"][1]["task_id"] = artifact["tasks"][0]["task_id"]
+                elif mutation == "missing_runner":
+                    artifact.pop("runner")
+                elif mutation == "missing_artifacts":
+                    artifact.pop("artifacts")
+                else:
+                    artifact["tasks"][0].pop("output_artifact")
                 write_json(path, artifact)
 
                 summary = build_capability_summary_artifact(
@@ -542,6 +554,7 @@ class CapabilitySummaryTests(unittest.TestCase):
                         else {}
                     ),
                     "error_class": None if task_state == "scored" else "generation_failed",
+                    "output_artifact": None,
                     "latency_ms": metrics.get("latency_ms"),
                     "time_to_first_token_ms": metrics.get("time_to_first_token_ms"),
                     "tokens_per_second": metrics.get("tokens_per_second"),

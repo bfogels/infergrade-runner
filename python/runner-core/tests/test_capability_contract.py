@@ -9,10 +9,12 @@ from infergrade.capability_contract import (
     CONFIDENCE_LABELS,
     EVIDENCE_LANES,
     capability_run_schema_path,
+    capability_run_admission_error_summary,
     capability_summary_schema_path,
     load_capability_run_schema,
     load_capability_summary_schema,
     validate_capability_run_artifact,
+    validate_capability_run_schema_artifact,
     validate_capability_summary_artifact,
     validate_current_capability_run_artifact,
 )
@@ -155,6 +157,7 @@ class CapabilityContractTests(unittest.TestCase):
         )
 
         self.assertEqual(validate_capability_run_artifact(artifact), [])
+        self.assertEqual(validate_capability_run_schema_artifact(artifact), [])
         self.assertEqual(validate_current_capability_run_artifact(artifact), [])
 
         missing = dict(artifact)
@@ -272,6 +275,55 @@ class CapabilityContractTests(unittest.TestCase):
                         "protocol.selection_digest_algorithm must be a supported selection digest algorithm",
                         errors,
                     )
+
+    def test_admission_error_summary_bounds_count_and_message_length(self):
+        summary = capability_run_admission_error_summary(
+            ["x" * 1000 for _ in range(25)]
+        )
+
+        self.assertEqual(len(summary["admission_errors"]), 20)
+        self.assertTrue(
+            all(len(error) == 256 for error in summary["admission_errors"])
+        )
+        self.assertEqual(summary["admission_error_count"], 25)
+        self.assertTrue(summary["admission_errors_truncated"])
+
+    def test_current_admission_rejects_schema_only_structural_mutations(self):
+        artifact = _artifact()
+        artifact["artifact_spec_version"] = "0.1.1"
+        artifact["protocol"].update(
+            {
+                "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                "selection_sha256": selection_digest(
+                    ["assistant_fixture_001"],
+                    SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                ),
+                "case_count": 1,
+            }
+        )
+        mutations = {
+            "missing_runner": lambda item: item.pop("runner"),
+            "missing_artifacts": lambda item: item.pop("artifacts"),
+            "missing_output_artifact": lambda item: item["tasks"][0].pop(
+                "output_artifact"
+            ),
+            "malformed_subject_runtime": lambda item: item["subject"].update(
+                {"runtime": []}
+            ),
+            "malformed_task_performance": lambda item: item["summary"].update(
+                {"task_performance": {"attempted_task_count": []}}
+            ),
+        }
+
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                candidate = json.loads(json.dumps(artifact))
+                mutate(candidate)
+
+                schema_errors = validate_capability_run_schema_artifact(candidate)
+
+                self.assertTrue(schema_errors)
+                self.assertTrue(validate_current_capability_run_artifact(candidate))
 
     def test_v011_schema_conditionally_requires_selection_provenance(self):
         schema = load_capability_run_schema()
