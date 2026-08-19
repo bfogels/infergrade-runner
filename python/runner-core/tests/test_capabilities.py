@@ -23,7 +23,6 @@ from infergrade.longbench_selection import (
     SELECTION_DIGEST_CONVENTION as LONGBENCH_SELECTION_DIGEST_CONVENTION,
     load_longbench_selection_manifest,
 )
-from infergrade.reasoning_constraint_stress import reasoning_constraint_stress_cases
 from infergrade.selection_identity import (
     SORTED_JSON_STRING_ARRAY_SHA256_V1,
     SORTED_UTF8_NEWLINE_SHA256_V1,
@@ -37,6 +36,7 @@ from infergrade.capabilities import (
     _case_benchmark_protocol_identity,
     _container_fixture_revision,
     _evaluate_benchmark,
+    _evaluate_native_benchmark,
     _generate_predictions,
     _generation_prompt_for_case,
     _host_mount_path,
@@ -48,6 +48,7 @@ from infergrade.capabilities import (
     _repository_edit_output_shape_gate,
     _selected_fixture_revision,
     _run_capability_container,
+    _summarize_task_performance_rows,
     _structured_tool_use_output_shape_gate,
     _write_multiple_choice_capability_run_artifact,
     _write_evalplus_capability_run_artifact,
@@ -2291,19 +2292,6 @@ class CapabilityTests(unittest.TestCase):
         self.assertIn("partial generation failures", artifact["claim_boundary"]["supported_claims"][0])
 
     def test_reasoning_constraint_stress_reports_balanced_diagnostic_slices(self):
-        answers_by_prompt = {
-            case["prompt"]: case["expected_answers"][0]
-            for case in reasoning_constraint_stress_cases()
-        }
-
-        class _PassingStressAdapter(object):
-            def generate_text(self, request, prompt, max_tokens):
-                return {
-                    "text": answers_by_prompt[prompt],
-                    "status": "completed",
-                    "error": None,
-                }
-
         request = RunRequest(
             model="Qwen/Qwen3.5-9B",
             backend="llama.cpp",
@@ -2313,16 +2301,102 @@ class CapabilityTests(unittest.TestCase):
             simulate=False,
         )
 
-        with mock.patch("infergrade.capabilities._run_capability_container") as container_mock:
-            execution = execute_capability_suite(_PassingStressAdapter(), request)
+        with self.assertRaisesRegex(
+            ValueError,
+            "^benchmark_quarantined:reasoning_constraint_stress_v1:"
+            "legacy_direct_no_think_v1_no_capability_validity_evidence$",
+        ):
+            execute_capability_suite(object(), request)
 
-        container_mock.assert_not_called()
-        self.assertEqual(execution.status, "completed")
-        self.assertIsNone(execution.score)
-        result = execution.benchmark_results["reasoning_constraint_stress_v1"]
-        self.assertEqual(result["primary_metric"], {"name": "exact_answer_accuracy", "value": 1.0})
+    def test_summary_excludes_injected_quarantined_execution_evidence(self):
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="reasoning",
+            benchmark_check_ids=["reasoning_exact_answer_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        execution = CapabilityExecution(
+            use_case="reasoning",
+            suite_id=None,
+            suite_ids=[],
+            benchmark_tier="canary",
+            benchmark_group_ids=[],
+            benchmark_check_ids=["reasoning_constraint_stress_v1"],
+            components=["Reasoning constraint stress"],
+            score=1.0,
+            score_method="forged",
+            component_scores={"reasoning_constraint_stress_v1": 1.0},
+            confidence=1.0,
+            status="completed",
+            benchmark_results={
+                "reasoning_constraint_stress_v1": {
+                    "benchmark_id": "reasoning_constraint_stress_v1",
+                    "status": "completed",
+                    "primary_metric": {"name": "constraint_accuracy", "value": 1.0},
+                }
+            },
+            artifacts={
+                "reasoning_constraint_stress_v1": {
+                    "capability_run_path": "/private/quarantined.json"
+                }
+            },
+            score_details={"score_ready": True, "score": 1.0},
+            task_performance={
+                "phase_timings": {
+                    "benchmarks": {"reasoning_constraint_stress_v1": {"total_wall_seconds": 1.0}}
+                }
+            },
+        )
+
+        summary = summarize_capability_execution(request, execution)
+
+        self.assertEqual(summary["selected_benchmark_check_ids"], [])
+        self.assertEqual(summary["benchmark_results"], {})
+        self.assertEqual(summary["capability_component_scores"], {})
+        self.assertEqual(summary["capability_artifacts"], {})
+        self.assertEqual(summary["task_performance"], {})
+        self.assertEqual(summary["capability_component_reports"], [])
+        self.assertIsNone(summary["capability_score"])
+        self.assertNotEqual(summary["capability_score_method"], "forged")
+        self.assertIsNone(summary["capability_confidence"])
+        self.assertEqual(summary["capability_status"], "not_comparable")
+        self.assertEqual(summary["capability_run_count"], 0)
+        self.assertIn(
+            "quarantined_benchmark_evidence_excluded",
+            summary["capability_reason_codes"],
+        )
+        self.assertNotIn(
+            "reasoning_constraint_stress_v1", json.dumps(summary, sort_keys=True)
+        )
+
+    def test_legacy_stress_scorer_remains_available_for_forensic_fixture_checks(self):
+        spec = CAPABILITY_BENCHMARKS["reasoning_constraint_stress_v1"]
+        cases = _native_benchmark_cases(spec)[:24]
+        benchmark_dir = os.path.join(self.tempdir, "legacy-stress")
+        os.makedirs(benchmark_dir)
+        with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+            for case in cases:
+                handle.write(json.dumps(case) + "\n")
+        with open(os.path.join(benchmark_dir, "predictions.jsonl"), "w", encoding="utf-8") as handle:
+            for case in cases:
+                handle.write(
+                    json.dumps(
+                        {
+                            "case_id": case["case_id"],
+                            "generation_status": "completed",
+                            "completion": case["expected_answers"][0],
+                        }
+                    )
+                    + "\n"
+                )
+
+        result = _evaluate_native_benchmark(spec, benchmark_dir)
+
+        self.assertEqual(result["status"], "completed")
         self.assertEqual(result["metrics"]["total_count"], 24)
-        self.assertEqual(result["primary_metric_uncertainty"]["observation_count"], 24)
         self.assertEqual(
             {key: value["total_count"] for key, value in result["metrics"]["category_metrics"].items()},
             {
@@ -2338,59 +2412,228 @@ class CapabilityTests(unittest.TestCase):
             set(result["metrics"]["structural_tier_metrics"]),
             {"foundation", "intermediate", "hard", "stress"},
         )
-        capability_run_path = execution.artifacts["reasoning_constraint_stress_v1"][
-            "capability_run_path"
+
+    def test_native_exact_answer_misses_are_scored_and_budget_exhaustion_is_distinct(self):
+        spec = CAPABILITY_BENCHMARKS["reasoning_exact_answer_v1"]
+        cases = _native_benchmark_cases(spec) + [
+            {
+                "case_id": "reasoning-exact-diagnostic-correct",
+                "task_id": "reasoning_exact_answer_v1/diagnostic-correct",
+                "prompt": "Answer only the number. What is 3 + 4?",
+                "expected_answers": ["7"],
+            },
+            {
+                "case_id": "reasoning-exact-diagnostic-exhausted-correct",
+                "task_id": "reasoning_exact_answer_v1/diagnostic-exhausted-correct",
+                "prompt": "Answer only the number. What is 3 + 4?",
+                "expected_answers": ["7"],
+            },
         ]
-        with open(capability_run_path, "r", encoding="utf-8") as handle:
-            artifact = json.load(handle)
-        self.assertEqual(artifact["evidence"]["lane"], "reference")
-        self.assertEqual(artifact["summary"]["score_dimension"], "constraint_reasoning_stress")
-        self.assertEqual(len(artifact["summary"]["category_metrics"]), 6)
-        self.assertTrue(all(task.get("category") for task in artifact["tasks"]))
-        self.assertTrue(all(task.get("structural_tier") for task in artifact["tasks"]))
-        self.assertIn(
-            "This is not a replacement reasoning score",
-            artifact["claim_boundary"]["unsupported_claims"][0],
-        )
+        benchmark_dir = os.path.join(self.tempdir, "exact-answer-diagnostics")
+        os.makedirs(benchmark_dir)
+        with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+            for case in cases:
+                handle.write(json.dumps(case) + "\n")
+        predictions = [
+            {
+                "case_id": cases[0]["case_id"],
+                "generation_status": "completed",
+                "completion": "yes",
+                "output_token_budget": 64,
+                "output_tokens": 1,
+                "natural_stop": True,
+                "token_budget_exhausted": False,
+                "stop_type": "stop",
+            },
+            {
+                "case_id": cases[1]["case_id"],
+                "generation_status": "completed",
+                "completion": "Either 6 or 7.",
+                "output_token_budget": 64,
+                "output_tokens": 5,
+                "natural_stop": True,
+                "token_budget_exhausted": False,
+                "stop_type": "stop",
+            },
+            {
+                "case_id": cases[2]["case_id"],
+                "generation_status": "completed",
+                "completion": "<think>unfinished",
+                "output_token_budget": 64,
+                "output_tokens": 64,
+                "natural_stop": False,
+                "token_budget_exhausted": True,
+                "stop_type": "length",
+            },
+            {
+                "case_id": cases[3]["case_id"],
+                "generation_status": "completed",
+                "completion": "7",
+                "output_token_budget": 64,
+                "output_tokens": 1,
+                "natural_stop": True,
+                "token_budget_exhausted": False,
+                "stop_type": "stop",
+            },
+            {
+                "case_id": cases[4]["case_id"],
+                "generation_status": "completed",
+                "completion": "7",
+                "output_token_budget": 1,
+                "output_tokens": 1,
+                "natural_stop": False,
+                "token_budget_exhausted": True,
+                "stop_type": "length",
+            },
+        ]
+        with open(os.path.join(benchmark_dir, "predictions.jsonl"), "w", encoding="utf-8") as handle:
+            for prediction in predictions:
+                handle.write(json.dumps(prediction) + "\n")
 
-    def test_native_generation_failures_are_excluded_from_stress_score_population(self):
-        cases = reasoning_constraint_stress_cases()
-        answers_by_prompt = {case["prompt"]: case["expected_answers"][0] for case in cases}
-        failed_prompt = cases[0]["prompt"]
+        result = _evaluate_native_benchmark(spec, benchmark_dir)
 
-        class _PartiallyFailingStressAdapter(object):
-            def generate_text(self, request, prompt, max_tokens):
-                if prompt == failed_prompt:
-                    raise RuntimeError("stress generation failed")
-                return {
-                    "text": answers_by_prompt[prompt],
-                    "status": "completed",
-                    "error": None,
-                }
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["metrics"]["correct_count"], 1)
+        self.assertEqual(result["metrics"]["total_count"], 5)
+        self.assertEqual(result["metrics"]["malformed_output_count"], 1)
+        self.assertEqual(result["metrics"]["model_output_diagnostic_count"], 3)
+        self.assertEqual(result["metrics"]["token_budget_exhaustion_count"], 2)
+        rows = {item["case_id"]: item for item in result["case_results"]}
+        self.assertEqual(rows[cases[0]["case_id"]]["error_class"], None)
+        self.assertTrue(rows[cases[0]["case_id"]]["format_valid"])
+        self.assertEqual(rows[cases[1]["case_id"]]["error_class"], "malformed_output")
+        self.assertFalse(rows[cases[1]["case_id"]]["format_valid"])
+        self.assertEqual(rows[cases[2]["case_id"]]["error_class"], "token_budget_exhausted")
+        self.assertFalse(rows[cases[2]["case_id"]]["format_valid"])
+        self.assertEqual(rows[cases[4]["case_id"]]["error_class"], "token_budget_exhausted")
+        self.assertEqual(rows[cases[4]["case_id"]]["score"], 0.0)
+        self.assertFalse(rows[cases[4]["case_id"]]["format_valid"])
 
         request = RunRequest(
-            model="Qwen/Qwen3.5-9B",
+            model="fixture/model",
             backend="llama.cpp",
             tier="standard",
-            benchmark_check_ids=["reasoning_constraint_stress_v1"],
+            use_case="reasoning",
+            benchmark_check_ids=["reasoning_exact_answer_v1"],
             output_dir=self.tempdir,
             simulate=False,
         )
+        artifact_path = _write_native_capability_run_artifact(
+            request,
+            spec,
+            benchmark_dir,
+            cases,
+            predictions,
+            {**result, "task_performance": {}},
+        )
+        with open(artifact_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["summary"]["passed_count"], 1)
+        self.assertEqual(artifact["summary"]["failed_count"], 4)
+        self.assertEqual(artifact["summary"]["partial_count"], 0)
+        self.assertEqual(artifact["summary"]["model_output_diagnostic_count"], 3)
 
-        execution = execute_capability_suite(_PartiallyFailingStressAdapter(), request)
+    def test_native_generation_failures_are_excluded_from_stress_score_population(self):
+        spec = CAPABILITY_BENCHMARKS["reasoning_constraint_stress_v1"]
+        cases = _native_benchmark_cases(spec)[:24]
+        benchmark_dir = os.path.join(self.tempdir, "legacy-stress-partial")
+        os.makedirs(benchmark_dir)
+        with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+            for case in cases:
+                handle.write(json.dumps(case) + "\n")
+        predictions = []
+        for index, case in enumerate(cases):
+            predictions.append(
+                {
+                    "case_id": case["case_id"],
+                    "generation_status": "failed" if index == 0 else "completed",
+                    "completion": None if index == 0 else case["expected_answers"][0],
+                    "generation_error": "stress generation failed" if index == 0 else None,
+                }
+            )
+        with open(os.path.join(benchmark_dir, "predictions.jsonl"), "w", encoding="utf-8") as handle:
+            for prediction in predictions:
+                handle.write(json.dumps(prediction) + "\n")
 
-        self.assertEqual(execution.status, "partial")
-        result = execution.benchmark_results["reasoning_constraint_stress_v1"]
+        result = _evaluate_native_benchmark(spec, benchmark_dir)
+
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["primary_metric"]["value"], 1.0)
         self.assertEqual(result["metrics"]["correct_count"], 23)
         self.assertEqual(result["metrics"]["total_count"], 23)
-        self.assertEqual(result["primary_metric_uncertainty"]["observation_count"], 23)
-        self.assertEqual(result["primary_metric_uncertainty"]["excluded_unscored_count"], 1)
         self.assertEqual(result["metrics"]["category_metrics"]["state_tracking"]["total_count"], 3)
         failed_rows = [row for row in result["case_results"] if row["state"] == "failed"]
         self.assertEqual(len(failed_rows), 1)
         self.assertIsNone(failed_rows[0]["score"])
+        self.assertEqual(failed_rows[0]["error_class"], "generation_failed")
+
+    def test_task_completion_metadata_rates_ignore_unknown_values(self):
+        summary = _summarize_task_performance_rows(
+            [
+                {
+                    "generation_status": "completed",
+                    "natural_stop": True,
+                    "token_budget_exhausted": False,
+                },
+                {
+                    "generation_status": "completed",
+                    "natural_stop": None,
+                    "token_budget_exhausted": None,
+                },
+                {
+                    "generation_status": "completed",
+                    "natural_stop": False,
+                    "token_budget_exhausted": True,
+                },
+            ]
+        )
+
+        self.assertEqual(summary["natural_stop_count"], 1)
+        self.assertEqual(summary["natural_stop_reported_count"], 2)
+        self.assertEqual(summary["natural_stop_rate"], 0.5)
+        self.assertEqual(summary["token_budget_exhaustion_count"], 1)
+        self.assertEqual(summary["token_budget_exhaustion_reported_count"], 2)
+        self.assertEqual(summary["token_budget_exhaustion_rate"], 0.5)
+
+    def test_task_completion_metadata_rates_are_null_when_unreported(self):
+        summary = _summarize_task_performance_rows(
+            [
+                {"generation_status": "completed"},
+                {
+                    "generation_status": "failed",
+                    "natural_stop": None,
+                    "token_budget_exhausted": None,
+                },
+            ]
+        )
+
+        self.assertEqual(summary["natural_stop_count"], 0)
+        self.assertEqual(summary["natural_stop_reported_count"], 0)
+        self.assertIsNone(summary["natural_stop_rate"])
+        self.assertEqual(summary["token_budget_exhaustion_count"], 0)
+        self.assertEqual(summary["token_budget_exhaustion_reported_count"], 0)
+        self.assertIsNone(summary["token_budget_exhaustion_rate"])
+
+    def test_task_completion_metadata_zero_exhaustion_uses_reported_denominator(self):
+        summary = _summarize_task_performance_rows(
+            [
+                {
+                    "generation_status": "completed",
+                    "natural_stop": True,
+                    "token_budget_exhausted": False,
+                },
+                {
+                    "generation_status": "completed",
+                    "natural_stop": True,
+                    "token_budget_exhausted": False,
+                },
+                {"generation_status": "failed"},
+            ]
+        )
+
+        self.assertEqual(summary["token_budget_exhaustion_count"], 0)
+        self.assertEqual(summary["token_budget_exhaustion_reported_count"], 2)
+        self.assertEqual(summary["token_budget_exhaustion_rate"], 0.0)
 
     def test_native_reasoning_exact_answer_extracts_common_answer_formats(self):
         request = RunRequest(
@@ -2427,6 +2670,22 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(execution.score_details["observed_weighted_score"], 0.0)
         result = execution.benchmark_results["reasoning_exact_answer_v1"]
         self.assertEqual(result["metrics"]["correct_count"], 0)
+        self.assertEqual(result["metrics"]["total_count"], 3)
+        self.assertEqual(result["metrics"]["malformed_output_count"], 3)
+        self.assertEqual(result["metrics"]["format_invalid_count"], 3)
+        self.assertEqual(result["metrics"]["model_output_diagnostic_count"], 3)
+        self.assertTrue(
+            all(item["format_valid"] is False for item in result["case_results"])
+        )
+        capability_run_path = execution.artifacts["reasoning_exact_answer_v1"]["capability_run_path"]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["summary"]["passed_count"], 0)
+        self.assertEqual(artifact["summary"]["failed_count"], 3)
+        self.assertEqual(artifact["summary"]["partial_count"], 0)
+        self.assertTrue(
+            all(task["state"] == "scored" and task["score"] == 0.0 for task in artifact["tasks"])
+        )
 
     def test_execute_capability_suite_aggregates_primary_scores(self):
         def fake_prepare(spec, benchmark_dir, tier):

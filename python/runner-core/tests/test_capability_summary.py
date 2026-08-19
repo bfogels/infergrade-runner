@@ -107,6 +107,32 @@ class CapabilitySummaryTests(unittest.TestCase):
         self.assertEqual(assistant["task_count"], 0)
         self.assertEqual(validate_capability_summary_artifact(summary), [])
 
+    def test_quarantined_protocol_cannot_hide_behind_execution_key(self):
+        path = self._write_capability_run(
+            "reasoning_exact_answer_v1",
+            surface="local_reasoning_capability",
+            state="scored",
+            score=1.0,
+            task_states=["scored"],
+        )
+        with open(path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        artifact["protocol"]["task_version"] = "reasoning_constraint_stress_v1"
+        write_json(path, artifact)
+
+        summary = build_capability_summary_artifact(
+            self._request(),
+            self._execution({"reasoning_exact_answer_v1": path}),
+            self.tempdir,
+        )
+
+        self.assertEqual(summary["capability_artifacts"], [])
+        reasoning = {item["surface"]: item for item in summary["surfaces"]}[
+            "local_reasoning_capability"
+        ]
+        self.assertEqual(reasoning["state"], "not_yet_benchmarked")
+        self.assertEqual(reasoning["task_count"], 0)
+
     def test_forged_duplicate_or_schema_invalid_current_artifact_is_quarantined(self):
         for mutation in (
             "forged_digest",
