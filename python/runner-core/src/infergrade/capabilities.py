@@ -2858,33 +2858,119 @@ def _prediction_rows_for_cases(
     cases: List[Dict[str, Any]],
     predictions: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Return one canonical prediction row per loaded case, including aborted cases."""
-    by_identity = {}
-    for item in predictions:
-        row = dict(item)
-        for identity in (row.get("case_id"), row.get("task_id")):
-            if str(identity or ""):
-                by_identity[str(identity)] = row
+    """Return one prediction row per loaded case, failing closed on identity drift."""
+    loaded = []
+    canonical_to_index = {}
+    alias_to_indices = {}
+    for index, case in enumerate(cases):
+        if not isinstance(case, dict):
+            raise ValueError("Capability loaded case %d must be an object." % index)
+        case_id = _nonempty_identity(case.get("case_id"))
+        task_id = _nonempty_identity(case.get("task_id"))
+        canonical_id = task_id or case_id
+        if canonical_id is None:
+            raise ValueError(
+                "Capability loaded case %d has no non-empty task_id or case_id."
+                % index
+            )
+        if canonical_id in canonical_to_index:
+            raise ValueError(
+                "Capability loaded cases contain duplicate canonical identity: %s"
+                % canonical_id
+            )
+        canonical_to_index[canonical_id] = index
+        aliases = {identity for identity in (case_id, task_id) if identity is not None}
+        for alias in aliases:
+            alias_to_indices.setdefault(alias, set()).add(index)
+        loaded.append(
+            {
+                "case_id": case_id or canonical_id,
+                "task_id": task_id or canonical_id,
+                "canonical_id": canonical_id,
+            }
+        )
+
+    ambiguous_aliases = sorted(
+        alias for alias, indices in alias_to_indices.items() if len(indices) > 1
+    )
+    if ambiguous_aliases:
+        raise ValueError(
+            "Capability loaded cases contain ambiguous identity aliases: %s"
+            % ", ".join(ambiguous_aliases)
+        )
+
+    matched = {}
+    for prediction_index, prediction in enumerate(predictions):
+        if not isinstance(prediction, dict):
+            raise ValueError(
+                "Capability prediction row %d must be an object." % prediction_index
+            )
+        identities = []
+        for identity_field in ("case_id", "task_id"):
+            if identity_field not in prediction:
+                continue
+            identity = _nonempty_identity(prediction.get(identity_field))
+            if identity is None:
+                raise ValueError(
+                    "Capability prediction row %d has an empty %s."
+                    % (prediction_index, identity_field)
+                )
+            identities.append((identity_field, identity))
+        if not identities:
+            raise ValueError(
+                "Capability prediction row %d has no case_id or task_id."
+                % prediction_index
+            )
+
+        resolved_indices = set()
+        for identity_field, identity in identities:
+            indices = alias_to_indices.get(identity)
+            if not indices:
+                raise ValueError(
+                    "Capability prediction row %d references foreign %s: %s"
+                    % (prediction_index, identity_field, identity)
+                )
+            resolved_indices.update(indices)
+        if len(resolved_indices) != 1:
+            raise ValueError(
+                "Capability prediction row %d has aliases for multiple loaded cases."
+                % prediction_index
+            )
+        case_index = next(iter(resolved_indices))
+        if case_index in matched:
+            raise ValueError(
+                "Capability predictions contain duplicate rows for canonical identity: %s"
+                % loaded[case_index]["canonical_id"]
+            )
+        row = dict(prediction)
+        # Normalize both aliases to the loaded canonical pair. Native
+        # generation commonly persists only case_id; container writers use
+        # task_id, and neither should let an alias choice change task identity.
+        row["case_id"] = loaded[case_index]["case_id"]
+        row["task_id"] = loaded[case_index]["task_id"]
+        matched[case_index] = row
+
     rows = []
-    for case in cases:
-        case_id = str(case.get("case_id") or case.get("task_id") or "")
-        task_id = str(case.get("task_id") or case_id)
-        row = by_identity.get(case_id) or by_identity.get(task_id)
+    for index, identity in enumerate(loaded):
+        row = matched.get(index)
         if row is None:
             row = {
-                "case_id": case_id,
-                "task_id": task_id,
+                "case_id": identity["case_id"],
+                "task_id": identity["task_id"],
                 "generation_status": "failed",
                 "generation_failure_kind": "generation_not_attempted",
                 "generation_error": "No prediction was recorded before the benchmark stopped.",
                 "prediction_missing": True,
             }
-        else:
-            row = dict(row)
-            row.setdefault("case_id", case_id)
-            row.setdefault("task_id", task_id)
         rows.append(row)
     return rows
+
+
+def _nonempty_identity(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    identity = str(value)
+    return identity if identity.strip() else None
 
 
 def _read_optional_json(path: str) -> Dict[str, Any]:

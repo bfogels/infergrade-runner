@@ -32,6 +32,7 @@ from infergrade.capabilities import (
     _multiple_choice_output_shape_gate,
     _normalize_evalplus_completion,
     _native_benchmark_cases,
+    _prediction_rows_for_cases,
     _repository_edit_output_shape_gate,
     _selected_fixture_revision,
     _run_capability_container,
@@ -544,6 +545,50 @@ class CapabilityTests(unittest.TestCase):
             ["perplexity_reference_v1"],
             SORTED_JSON_STRING_ARRAY_SHA256_V1,
         )
+
+    def test_prediction_rows_fail_closed_on_identity_drift_and_synthesize_abort_rows(self):
+        cases = [
+            {"case_id": "case-a", "task_id": "task-a"},
+            {"case_id": "case-b", "task_id": "task-b"},
+        ]
+
+        rows = _prediction_rows_for_cases(cases, [{"case_id": "case-a"}])
+        self.assertEqual(rows[0]["case_id"], "case-a")
+        self.assertEqual(rows[0]["task_id"], "task-a")
+        self.assertTrue(rows[1]["prediction_missing"])
+
+        with self.assertRaisesRegex(ValueError, "duplicate canonical identity"):
+            _prediction_rows_for_cases(
+                [
+                    {"case_id": "case-a", "task_id": "task-a"},
+                    {"case_id": "case-b", "task_id": "task-a"},
+                ],
+                [],
+            )
+
+        with self.assertRaisesRegex(ValueError, "ambiguous identity aliases"):
+            _prediction_rows_for_cases(
+                [
+                    {"case_id": "shared", "task_id": "task-a"},
+                    {"case_id": "case-b", "task_id": "shared"},
+                ],
+                [],
+            )
+
+        with self.assertRaisesRegex(ValueError, "duplicate rows"):
+            _prediction_rows_for_cases(
+                cases,
+                [{"case_id": "case-a"}, {"task_id": "task-a"}],
+            )
+
+        with self.assertRaisesRegex(ValueError, "foreign task_id"):
+            _prediction_rows_for_cases(cases, [{"task_id": "foreign"}])
+
+        with self.assertRaisesRegex(ValueError, "multiple loaded cases"):
+            _prediction_rows_for_cases(
+                cases,
+                [{"case_id": "case-a", "task_id": "task-b"}],
+            )
 
     def test_resolve_capability_suite_includes_benchmark_ids(self):
         suite = resolve_capability_suite("agentic_coding", "gold")

@@ -18,7 +18,7 @@
     "claim_boundary"
   ],
   "properties": {
-    "artifact_spec_version": { "type": "string", "minLength": 1 },
+    "artifact_spec_version": { "enum": ["0.1.0", "0.1.1"] },
     "artifact_kind": { "const": "capability_run" },
     "capability_run_id": { "type": "string", "minLength": 1 },
     "created_at": { "type": "string", "minLength": 1 },

@@ -16,6 +16,10 @@ from infergrade.capability_contract import (
     validate_capability_summary_artifact,
 )
 from infergrade.contracts import load_contract_manifest
+from infergrade.selection_identity import (
+    SORTED_JSON_STRING_ARRAY_SHA256_V1,
+    selection_digest,
+)
 
 
 def _artifact():
@@ -97,6 +101,10 @@ def _artifact():
 class CapabilityContractTests(unittest.TestCase):
     def test_capability_run_schema_is_declared_in_contract_manifest(self):
         schema = load_capability_run_schema()
+        self.assertEqual(
+            schema["properties"]["artifact_spec_version"]["enum"],
+            ["0.1.0", "0.1.1"],
+        )
         self.assertEqual(schema["properties"]["artifact_kind"]["const"], "capability_run")
         self.assertEqual(schema["properties"]["evidence"]["properties"]["lane"]["enum"], list(EVIDENCE_LANES))
         self.assertIn("repeated_local_sample", schema["properties"]["evidence"]["properties"]["confidence_label"]["enum"])
@@ -133,8 +141,10 @@ class CapabilityContractTests(unittest.TestCase):
         artifact["artifact_spec_version"] = "0.1.1"
         artifact["protocol"].update(
             {
-                "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
-                "selection_sha256": "a" * 64,
+                "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                "selection_sha256": selection_digest(
+                    ["assistant_fixture_001"], SORTED_JSON_STRING_ARRAY_SHA256_V1
+                ),
                 "case_count": 1,
             }
         )
@@ -169,6 +179,68 @@ class CapabilityContractTests(unittest.TestCase):
             errors,
         )
         self.assertIn("protocol.case_count must equal len(tasks)", errors)
+
+    def test_capability_run_rejects_unknown_artifact_spec_version(self):
+        artifact = _artifact()
+        artifact["artifact_spec_version"] = "0.2.0"
+
+        errors = validate_capability_run_artifact(artifact)
+
+        self.assertIn(
+            "artifact_spec_version must be one of: 0.1.0, 0.1.1",
+            errors,
+        )
+
+    def test_v011_rejects_forged_digest_and_duplicate_or_empty_task_ids(self):
+        artifact = _artifact()
+        artifact["artifact_spec_version"] = "0.1.1"
+        artifact["protocol"].update(
+            {
+                "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                "selection_sha256": "0" * 64,
+                "case_count": 1,
+            }
+        )
+        self.assertIn(
+            "protocol.selection_sha256 must match task IDs",
+            validate_capability_run_artifact(artifact),
+        )
+
+        duplicate = dict(artifact)
+        duplicate["protocol"] = dict(artifact["protocol"])
+        duplicate["tasks"] = [dict(artifact["tasks"][0]), dict(artifact["tasks"][0])]
+        duplicate["protocol"]["case_count"] = 2
+        errors = validate_capability_run_artifact(duplicate)
+        self.assertIn("tasks[1].task_id must be unique", errors)
+
+        empty = dict(artifact)
+        empty["protocol"] = dict(artifact["protocol"])
+        empty["tasks"] = [dict(artifact["tasks"][0])]
+        empty["tasks"][0]["task_id"] = "  "
+        errors = validate_capability_run_artifact(empty)
+        self.assertIn("tasks[0].task_id must be a non-empty string", errors)
+
+    def test_legacy_optional_selection_fields_use_schema_shapes(self):
+        artifact = _artifact()
+        artifact["protocol"].update(
+            {
+                "selection_digest_algorithm": "unsupported_v1",
+                "selection_sha256": "A" * 64,
+                "case_count": -1,
+            }
+        )
+
+        errors = validate_capability_run_artifact(artifact)
+
+        self.assertIn(
+            "protocol.selection_digest_algorithm must be a supported selection digest algorithm",
+            errors,
+        )
+        self.assertIn(
+            "protocol.selection_sha256 must be a lowercase SHA-256 hex digest",
+            errors,
+        )
+        self.assertIn("protocol.case_count must be an integer >= 0", errors)
 
     def test_v011_schema_conditionally_requires_selection_provenance(self):
         schema = load_capability_run_schema()

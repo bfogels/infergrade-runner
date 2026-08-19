@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from infergrade.paths import runner_root
-from infergrade.selection_identity import SELECTION_DIGEST_ALGORITHMS
+from infergrade.selection_identity import SELECTION_DIGEST_ALGORITHMS, selection_digest
 
 EVIDENCE_LANES = ("smoke", "decision", "reference", "gold")
 CAPABILITY_SURFACES = (
@@ -44,7 +44,17 @@ SCORER_TYPES = (
     "manual_review",
 )
 CAPABILITY_ARTIFACT_POINTER_KINDS = ("capability_run", "benchmark_summary", "unreadable_capability_run")
+LEGACY_CAPABILITY_RUN_ARTIFACT_SPEC_VERSION = "0.1.0"
 CAPABILITY_RUN_ARTIFACT_SPEC_VERSION = "0.1.1"
+CAPABILITY_RUN_ARTIFACT_SPEC_VERSIONS = (
+    LEGACY_CAPABILITY_RUN_ARTIFACT_SPEC_VERSION,
+    CAPABILITY_RUN_ARTIFACT_SPEC_VERSION,
+)
+SELECTION_PROTOCOL_FIELDS = (
+    "selection_digest_algorithm",
+    "selection_sha256",
+    "case_count",
+)
 
 
 def repo_root() -> Path:
@@ -79,6 +89,7 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
     errors: List[str] = []
     artifact_spec_version = artifact.get("artifact_spec_version")
     _require(artifact, "artifact_spec_version", errors)
+    _enum(artifact, "artifact_spec_version", CAPABILITY_RUN_ARTIFACT_SPEC_VERSIONS, errors)
     if artifact.get("artifact_kind") != "capability_run":
         errors.append("artifact_kind must be capability_run")
     _require(artifact, "capability_run_id", errors)
@@ -113,21 +124,11 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
         if not isinstance(repetitions, int) or repetitions < 1:
             errors.append("protocol.repetitions must be an integer >= 1")
 
-        if artifact_spec_version == CAPABILITY_RUN_ARTIFACT_SPEC_VERSION:
-            _require(protocol, "selection_digest_algorithm", errors, prefix="protocol.")
-            _require(protocol, "selection_sha256", errors, prefix="protocol.")
-            _require(protocol, "case_count", errors, prefix="protocol.")
-            algorithm = protocol.get("selection_digest_algorithm")
-            if algorithm not in SELECTION_DIGEST_ALGORITHMS:
-                errors.append(
-                    "protocol.selection_digest_algorithm must be a supported selection digest algorithm"
-                )
-            digest = protocol.get("selection_sha256")
-            if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-                errors.append("protocol.selection_sha256 must be a lowercase SHA-256 hex digest")
-            case_count = protocol.get("case_count")
-            if isinstance(case_count, bool) or not isinstance(case_count, int) or case_count < 0:
-                errors.append("protocol.case_count must be an integer >= 0")
+        current_spec = artifact_spec_version == CAPABILITY_RUN_ARTIFACT_SPEC_VERSION
+        if current_spec:
+            for field in SELECTION_PROTOCOL_FIELDS:
+                _require(protocol, field, errors, prefix="protocol.")
+        _validate_optional_selection_fields(protocol, errors)
 
     summary = artifact.get("summary")
     if not isinstance(summary, dict):
@@ -149,6 +150,25 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
             case_count = protocol.get("case_count") if isinstance(protocol, dict) else None
             if isinstance(case_count, int) and not isinstance(case_count, bool) and case_count != len(tasks):
                 errors.append("protocol.case_count must equal len(tasks)")
+            task_ids = []
+            seen_task_ids = set()
+            task_ids_valid = True
+            for index, task in enumerate(tasks):
+                task_id = task.get("task_id") if isinstance(task, dict) else None
+                if not isinstance(task_id, str) or not task_id.strip():
+                    errors.append("tasks[%d].task_id must be a non-empty string" % index)
+                    task_ids_valid = False
+                    continue
+                if task_id in seen_task_ids:
+                    errors.append("tasks[%d].task_id must be unique" % index)
+                seen_task_ids.add(task_id)
+                task_ids.append(task_id)
+            algorithm = protocol.get("selection_digest_algorithm") if isinstance(protocol, dict) else None
+            digest = protocol.get("selection_sha256") if isinstance(protocol, dict) else None
+            if task_ids_valid and algorithm in SELECTION_DIGEST_ALGORITHMS and isinstance(digest, str):
+                expected_digest = selection_digest(task_ids, algorithm)
+                if digest != expected_digest:
+                    errors.append("protocol.selection_sha256 must match task IDs")
         for index, task in enumerate(tasks):
             if not isinstance(task, dict):
                 errors.append("tasks[%d] must be an object" % index)
@@ -178,6 +198,24 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
                 errors.append("claim_boundary.%s must be a non-empty string array" % key)
 
     return errors
+
+
+def _validate_optional_selection_fields(protocol: Dict[str, Any], errors: List[str]) -> None:
+    """Validate selection provenance shapes, including optional legacy fields."""
+    if "selection_digest_algorithm" in protocol:
+        algorithm = protocol.get("selection_digest_algorithm")
+        if algorithm not in SELECTION_DIGEST_ALGORITHMS:
+            errors.append(
+                "protocol.selection_digest_algorithm must be a supported selection digest algorithm"
+            )
+    if "selection_sha256" in protocol:
+        digest = protocol.get("selection_sha256")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            errors.append("protocol.selection_sha256 must be a lowercase SHA-256 hex digest")
+    if "case_count" in protocol:
+        case_count = protocol.get("case_count")
+        if isinstance(case_count, bool) or not isinstance(case_count, int) or case_count < 0:
+            errors.append("protocol.case_count must be an integer >= 0")
 
 
 def validate_capability_summary_artifact(artifact: Dict[str, Any]) -> List[str]:
