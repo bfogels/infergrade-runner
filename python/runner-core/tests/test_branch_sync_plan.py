@@ -55,6 +55,39 @@ class BranchSyncPlanTests(unittest.TestCase):
 
 
 class BranchSyncWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.repo = Path(self.temp_dir.name)
+        self._git("init", "--initial-branch=main")
+        self._git("config", "user.email", "tests@infergrade.local")
+        self._git("config", "user.name", "InferGrade Tests")
+        (self.repo / "state.txt").write_text("base\n", encoding="utf-8")
+        self._git("add", "state.txt")
+        self._git("commit", "-m", "base")
+        self.base_commit = self._git("rev-parse", "HEAD").stdout.strip()
+        self._git("branch", "develop")
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def _git(self, *args, check=True):
+        return subprocess.run(
+            ["git", *args],
+            cwd=self.repo,
+            check=check,
+            capture_output=True,
+            text=True,
+        )
+
+    def _main_ancestry_status(self):
+        return self._git(
+            "merge-base",
+            "--is-ancestor",
+            "origin/main",
+            "HEAD",
+            check=False,
+        ).returncode
+
     def test_workflow_preserves_long_lived_branches_and_dispatches_protected_checks(self):
         workflow = Path(".github/workflows/sync-main-to-develop.yml").read_text(encoding="utf-8")
         self.assertIn("branches: [main]", workflow)
@@ -75,11 +108,39 @@ class BranchSyncWorkflowTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", ci)
         self.assertIn("workflow_dispatch:", secret_scan)
 
-    def test_ci_rejects_feature_work_on_a_stale_develop_base(self):
+    def test_ci_requires_prospective_merge_head_to_contain_main(self):
         ci = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-        self.assertIn("Require develop to contain released main ancestry", ci)
+        self.assertIn("Require prospective develop merge to contain released main ancestry", ci)
         self.assertIn("github.base_ref == 'develop'", ci)
-        self.assertIn('= "already_synced"', ci)
+        self.assertIn(
+            "git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main",
+            ci,
+        )
+        self.assertIn("git merge-base --is-ancestor origin/main HEAD", ci)
+        self.assertNotIn("refs/heads/develop:refs/remotes/origin/develop", ci)
+        self.assertNotIn("scripts/branch_sync_plan.py", ci)
+        self.assertNotIn('= "already_synced"', ci)
+
+    def test_ci_ancestry_check_accepts_sync_merge_and_rejects_stale_feature(self):
+        self._git("checkout", "main")
+        (self.repo / "release.txt").write_text("released main\n", encoding="utf-8")
+        self._git("add", "release.txt")
+        self._git("commit", "-m", "release main")
+        self._git("update-ref", "refs/remotes/origin/main", "main")
+
+        self._git("checkout", "develop")
+        (self.repo / "feature.txt").write_text("develop feature\n", encoding="utf-8")
+        self._git("add", "feature.txt")
+        self._git("commit", "-m", "develop feature")
+        self._git("merge", "--no-ff", "--no-edit", "main")
+        self.assertEqual(self._main_ancestry_status(), 0)
+
+        self._git("branch", "stale-feature", self.base_commit)
+        self._git("checkout", "stale-feature")
+        (self.repo / "stale.txt").write_text("stale feature\n", encoding="utf-8")
+        self._git("add", "stale.txt")
+        self._git("commit", "-m", "stale feature")
+        self.assertEqual(self._main_ancestry_status(), 1)
 
 
 if __name__ == "__main__":

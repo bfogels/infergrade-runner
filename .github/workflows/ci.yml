@@ -29,11 +29,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require develop to contain released main ancestry
+      - name: Require prospective develop merge to contain released main ancestry
         if: github.event_name == 'pull_request' && github.base_ref == 'develop'
         run: |
-          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main +refs/heads/develop:refs/remotes/origin/develop
-          test "$(python3 scripts/branch_sync_plan.py)" = "already_synced"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor origin/main HEAD
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
