@@ -8,7 +8,7 @@ Runner-owned surface policy has enough weighted benchmark coverage.
 from typing import Any, Dict, List, Optional
 
 from infergrade.benchmark_catalog import (
-    benchmark_quarantine_reason,
+    is_benchmark_excluded_from_evidence,
     check_index,
     load_capability_catalog,
     surface_score_policy_index,
@@ -65,7 +65,7 @@ def score_capability_surface(
     for benchmark_id, check in checks.items():
         if check.get("surface_id") != surface_id or check.get("evidence_kind") != "capability":
             continue
-        if benchmark_quarantine_reason(benchmark_id, payload):
+        if is_benchmark_excluded_from_evidence(benchmark_id, payload):
             continue
         weight = _positive_float(check.get("primary_score_weight"))
         if weight is None:

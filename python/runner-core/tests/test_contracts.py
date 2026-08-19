@@ -10,6 +10,15 @@ from infergrade.cuda import windows_cuda_preflight
 from infergrade.releases import export_release_bundle, load_release_manifest
 
 
+def _reject_duplicate_json_keys(pairs):
+    payload = {}
+    for key, value in pairs:
+        if key in payload:
+            raise ValueError("duplicate JSON key: %s" % key)
+        payload[key] = value
+    return payload
+
+
 def _matches_schema_type(value, schema_type):
     types = schema_type if isinstance(schema_type, list) else [schema_type]
     for item in types:
@@ -103,6 +112,15 @@ def _schema_subset_matches(value, schema, path):
 
 
 class ContractExportTests(unittest.TestCase):
+    def test_schema_json_files_have_no_duplicate_object_keys(self):
+        root = repo_root()
+        for path in sorted((root / "schemas").rglob("*.json")):
+            with self.subTest(path=path.relative_to(root)):
+                json.loads(
+                    path.read_text(encoding="utf-8"),
+                    object_pairs_hook=_reject_duplicate_json_keys,
+                )
+
     def test_contract_declares_artifact_memory_fit_policy_schema_and_docs(self):
         manifest = load_contract_manifest()
         self.assertIn("schemas/json/artifact_memory_fit.schema.json", manifest["schema_files"])
@@ -139,7 +157,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.32")
+        self.assertEqual(manifest["contract_version"], "0.3.33")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_run_request_contract_accepts_authorized_artifact_download_size(self):

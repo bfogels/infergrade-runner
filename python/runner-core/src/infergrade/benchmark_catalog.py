@@ -6,9 +6,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from infergrade.constants import DEFAULT_GENERATION_PRESET
+from infergrade.generation_policies import REASONING_CONSTRAINT_STRESS_THINKING_POLICY_ID
 from infergrade.models import RunRequest
 from infergrade.paths import runner_root
 from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
+from infergrade.reasoning_constraint_stress_v2 import (
+    EXPECTED_ANSWER_VECTOR,
+    FINAL_ANSWER_PARSER_ID,
+    FIXTURE_REVISION,
+    FIXTURE_SHA256,
+    SCORING_POLICY,
+    SELECTION_DIGEST_ALGORITHM,
+    SELECTION_DIGEST_SHA256,
+)
 
 FALLBACK_METADATA_ORDERING = {
     "effort_level": ["short", "low", "balanced", "medium", "deep", "high"],
@@ -42,6 +52,58 @@ QUARANTINED_BENCHMARK_REASON_CODES = {
     "reasoning_constraint_stress_v1": "legacy_direct_no_think_v1_no_capability_validity_evidence",
 }
 BENCHMARK_SELECTION_QUARANTINE_PREFIX = "benchmark_quarantined"
+BENCHMARK_CANARY_ONLY_PREFIX = "benchmark_canary_only"
+FOUNDATION_CANARY_METADATA_ERROR = "metadata_invalid"
+FOUNDATION_CANARY_DISPLAY_NAME = "Reasoning constraint stress v2 foundation"
+FOUNDATION_CANARY_DESCRIPTION = (
+    "Foundation identity only; no benchmark, capability, score, readiness, "
+    "recommendation, or release-evidence claim."
+)
+FOUNDATION_CANARY_NO_CLAIM_BOUNDARY = FOUNDATION_CANARY_DESCRIPTION
+FOUNDATION_CANARY_SELECTION_GUIDANCE = FOUNDATION_CANARY_DESCRIPTION
+FOUNDATION_CANARY_BENCHMARKS = {
+    "reasoning_constraint_stress_v2": {
+        "display_name": FOUNDATION_CANARY_DISPLAY_NAME,
+        "description": FOUNDATION_CANARY_DESCRIPTION,
+        "selection_guidance": FOUNDATION_CANARY_SELECTION_GUIDANCE,
+        "claim_boundary": FOUNDATION_CANARY_NO_CLAIM_BOUNDARY,
+        "canary_only": True,
+        "allowed_tiers": ["canary"],
+        "attestation_state": "unreviewed",
+        "status": "canary_only_unreviewed",
+        "runnable_status": "canary_only_unreviewed",
+        "maturity": "planned",
+        "default_inclusion_status": "excluded_canary_only",
+        "sample_policy": (
+            "Six fresh, independent synthetic cases with new identities and a locked task-id digest; "
+            "fixture and parser foundation only, with no adapter or runtime execution claim."
+        ),
+        "fixture_revision": FIXTURE_REVISION,
+        "fixture_sha256": FIXTURE_SHA256,
+        "expected_answer_vector": list(EXPECTED_ANSWER_VECTOR),
+        "selection_digest_algorithm": SELECTION_DIGEST_ALGORITHM,
+        "selection_sha256": SELECTION_DIGEST_SHA256,
+        "evidence_kind": "capability",
+        "runner_target": "reasoning_constraint_stress_v2",
+        "score_policy_id": SCORING_POLICY,
+        "scoring_policy_id": SCORING_POLICY,
+        "generation_constraint_id": FINAL_ANSWER_PARSER_ID,
+        "generation_policy_id": REASONING_CONSTRAINT_STRESS_THINKING_POLICY_ID,
+        "primary_score_weight": 0.0,
+        "score_role": "diagnostic_only",
+        "excluded_from_default_groups": True,
+        "excluded_from_suites": True,
+        "excluded_from_weighted_score": True,
+        "excluded_from_readiness": True,
+        "excluded_from_recommendation": True,
+        "excluded_from_release_evidence": True,
+    }
+}
+
+
+def _foundation_field_matches(actual: Any, expected: Any) -> bool:
+    """Require exact JSON scalar/container types for foundation identity fields."""
+    return type(actual) is type(expected) and actual == expected
 
 
 def repo_root() -> Path:
@@ -76,7 +138,11 @@ def group_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str,
 def check_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
     """Return checks keyed by check id."""
     payload = catalog or load_capability_catalog()
-    return {str(item["check_id"]): dict(item) for item in list(payload.get("checks") or [])}
+    return {
+        str(item.get("check_id")): dict(item)
+        for item in list(payload.get("checks") or [])
+        if isinstance(item, dict) and item.get("check_id")
+    }
 
 
 def shortcut_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
@@ -100,7 +166,179 @@ def benchmark_maturity_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[s
 def benchmark_status_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
     """Return benchmark legitimacy status metadata keyed by check id."""
     payload = catalog or load_capability_catalog()
-    return {str(item["check_id"]): dict(item) for item in list(payload.get("benchmark_status_matrix") or [])}
+    return {
+        str(item.get("check_id")): dict(item)
+        for item in list(payload.get("benchmark_status_matrix") or [])
+        if isinstance(item, dict) and item.get("check_id")
+    }
+
+
+def _foundation_canary_placement_error(
+    check_id: str,
+    catalog: Dict[str, Any],
+) -> Optional[str]:
+    """Reject foundation identities that become reachable through defaults."""
+    def contains(values: Any) -> bool:
+        return isinstance(values, list) and check_id in values
+
+    groups = list(catalog.get("benchmark_groups") or [])
+    group_ids = set()
+    for item in groups:
+        if not isinstance(item, dict):
+            continue
+        group_id = item.get("group_id")
+        if contains(item.get("check_ids")) or contains(item.get("default_check_ids")):
+            return FOUNDATION_CANARY_METADATA_ERROR
+        if group_id:
+            group_ids.add(str(group_id))
+
+    suites = list(catalog.get("suites") or [])
+    suite_ids = set()
+    for item in suites:
+        if not isinstance(item, dict):
+            continue
+        suite_id = item.get("suite_id")
+        if contains(item.get("check_ids")) or contains(item.get("default_check_ids")):
+            return FOUNDATION_CANARY_METADATA_ERROR
+        referenced_groups = item.get("default_group_ids") or item.get("group_ids")
+        if isinstance(referenced_groups, list):
+            for group in groups:
+                if not isinstance(group, dict) or group.get("group_id") not in referenced_groups:
+                    continue
+                if contains(group.get("check_ids")) or contains(group.get("default_check_ids")):
+                    return FOUNDATION_CANARY_METADATA_ERROR
+        if suite_id:
+            suite_ids.add(str(suite_id))
+
+    for item in list(catalog.get("shortcuts") or []):
+        if not isinstance(item, dict):
+            continue
+        if contains(item.get("check_ids")) or contains(item.get("default_check_ids")):
+            return FOUNDATION_CANARY_METADATA_ERROR
+        if any(str(suite_id) in suite_ids for suite_id in list(item.get("suite_ids") or [])):
+            for suite in suites:
+                if not isinstance(suite, dict) or suite.get("suite_id") not in item.get("suite_ids", []):
+                    continue
+                if contains(suite.get("check_ids")) or contains(suite.get("default_check_ids")):
+                    return FOUNDATION_CANARY_METADATA_ERROR
+
+    defaults = catalog.get("legacy_tier_defaults")
+    if isinstance(defaults, dict):
+        for use_case_defaults in defaults.values():
+            if not isinstance(use_case_defaults, dict):
+                continue
+            for tier_defaults in use_case_defaults.values():
+                if not isinstance(tier_defaults, dict):
+                    continue
+                if contains(tier_defaults.get("check_ids")) or contains(tier_defaults.get("default_check_ids")):
+                    return FOUNDATION_CANARY_METADATA_ERROR
+                if any(str(group_id) in group_ids for group_id in list(tier_defaults.get("group_ids") or [])):
+                    for group in groups:
+                        if not isinstance(group, dict) or group.get("group_id") not in tier_defaults.get("group_ids", []):
+                            continue
+                        if contains(group.get("check_ids")) or contains(group.get("default_check_ids")):
+                            return FOUNDATION_CANARY_METADATA_ERROR
+                if any(str(suite_id) in suite_ids for suite_id in list(tier_defaults.get("suite_ids") or [])):
+                    for suite in suites:
+                        if not isinstance(suite, dict) or suite.get("suite_id") not in tier_defaults.get("suite_ids", []):
+                            continue
+                        if contains(suite.get("check_ids")) or contains(suite.get("default_check_ids")):
+                            return FOUNDATION_CANARY_METADATA_ERROR
+    return None
+
+
+def _foundation_canary_metadata_error(
+    check_id: str,
+    catalog: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Return a stable error when code-registered canary metadata is malformed."""
+    expected = FOUNDATION_CANARY_BENCHMARKS.get(str(check_id or "").strip())
+    if expected is None:
+        return None
+    payload = catalog or load_capability_catalog()
+    check = check_index(payload).get(str(check_id).strip())
+    status = benchmark_status_index(payload).get(str(check_id).strip())
+    if not isinstance(check, dict) or not isinstance(status, dict):
+        return FOUNDATION_CANARY_METADATA_ERROR
+    check_fields = (
+        "display_name",
+        "description",
+        "selection_guidance",
+        "claim_boundary",
+        "canary_only",
+        "allowed_tiers",
+        "attestation_state",
+        "status",
+        "evidence_kind",
+        "runner_target",
+        "fixture_revision",
+        "selection_digest_algorithm",
+        "selection_sha256",
+        "score_policy_id",
+        "generation_constraint_id",
+        "generation_policy_id",
+        "primary_score_weight",
+        "score_role",
+        "excluded_from_default_groups",
+        "excluded_from_suites",
+        "excluded_from_weighted_score",
+        "excluded_from_readiness",
+        "excluded_from_recommendation",
+        "excluded_from_release_evidence",
+    )
+    for field in check_fields:
+        if not _foundation_field_matches(check.get(field), expected[field]):
+            return FOUNDATION_CANARY_METADATA_ERROR
+    for field in ("fixture_sha256", "expected_answer_vector"):
+        if not _foundation_field_matches(check.get(field), expected[field]):
+            return FOUNDATION_CANARY_METADATA_ERROR
+    status_fields = (
+        "status",
+        "evidence_kind",
+        "runner_target",
+        "canary_only",
+        "allowed_tiers",
+        "attestation_state",
+        "runnable_status",
+        "maturity",
+        "default_inclusion_status",
+        "claim_boundary",
+        "sample_policy",
+        "fixture_revision",
+        "selection_digest_algorithm",
+        "selection_sha256",
+        "scoring_policy_id",
+        "score_policy_id",
+        "generation_constraint_id",
+        "generation_policy_id",
+        "excluded_from_default_groups",
+        "excluded_from_suites",
+        "excluded_from_weighted_score",
+        "excluded_from_readiness",
+        "excluded_from_recommendation",
+        "excluded_from_release_evidence",
+    )
+    for field in status_fields:
+        if not _foundation_field_matches(status.get(field), expected[field]):
+            return FOUNDATION_CANARY_METADATA_ERROR
+    for field in ("fixture_sha256", "expected_answer_vector"):
+        if not _foundation_field_matches(status.get(field), expected[field]):
+            return FOUNDATION_CANARY_METADATA_ERROR
+    if _foundation_canary_placement_error(str(check_id).strip(), payload):
+        return FOUNDATION_CANARY_METADATA_ERROR
+    return None
+
+
+def _raise_on_malformed_foundation_canary_metadata(
+    catalog: Optional[Dict[str, Any]] = None,
+) -> None:
+    payload = catalog or load_capability_catalog()
+    for check_id in FOUNDATION_CANARY_BENCHMARKS:
+        if _foundation_canary_metadata_error(check_id, payload):
+            raise ValueError(
+                "%s:%s:%s"
+                % (BENCHMARK_CANARY_ONLY_PREFIX, check_id, FOUNDATION_CANARY_METADATA_ERROR)
+            )
 
 
 def benchmark_quarantine_reason(
@@ -129,6 +367,47 @@ def is_benchmark_quarantined(
     return benchmark_quarantine_reason(check_id, catalog) is not None
 
 
+def benchmark_canary_only_reason(
+    check_id: str,
+    catalog: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Return the stable exclusion reason for an unreviewed canary-only check."""
+    payload = catalog or load_capability_catalog()
+    check_key = str(check_id or "").strip()
+    metadata_error = _foundation_canary_metadata_error(check_key, payload)
+    if metadata_error:
+        return metadata_error
+    check = check_index(payload).get(check_key, {})
+    if check.get("canary_only") is not True:
+        return None
+    if check.get("allowed_tiers") != ["canary"] or check.get("attestation_state") != "unreviewed":
+        return FOUNDATION_CANARY_METADATA_ERROR
+    return str(check.get("attestation_state") or "unreviewed").strip() or "unreviewed"
+
+
+def benchmark_evidence_exclusion_reason(
+    check_id: str,
+    catalog: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Return why a check cannot enter score/readiness/recommendation evidence."""
+    payload = catalog or load_capability_catalog()
+    quarantined = benchmark_quarantine_reason(check_id, payload)
+    if quarantined:
+        return quarantined
+    canary_only = benchmark_canary_only_reason(check_id, payload)
+    if canary_only:
+        return "%s:%s" % (BENCHMARK_CANARY_ONLY_PREFIX, canary_only)
+    return None
+
+
+def is_benchmark_excluded_from_evidence(
+    check_id: str,
+    catalog: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Return whether a check is excluded from score and public evidence paths."""
+    return benchmark_evidence_exclusion_reason(check_id, catalog) is not None
+
+
 def reject_quarantined_benchmarks(
     check_ids: List[str],
     catalog: Optional[Dict[str, Any]] = None,
@@ -145,6 +424,51 @@ def reject_quarantined_benchmarks(
         raise ValueError(
             "%s:%s:%s" % (BENCHMARK_SELECTION_QUARANTINE_PREFIX, benchmark_id, reason)
         )
+
+
+def reject_tier_restricted_benchmarks(
+    check_ids: List[str],
+    requested_tier: str,
+    *,
+    tier_was_explicit: bool = False,
+    group_ids: Optional[List[str]] = None,
+    suite_ids: Optional[List[str]] = None,
+    catalog: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Reject canary-only checks after explicit and inferred tier derivation."""
+    payload = catalog or load_capability_catalog()
+    _raise_on_malformed_foundation_canary_metadata(payload)
+    checks = check_index(payload)
+    derived_tier = derive_tier_from_selection(
+        check_ids,
+        group_ids=group_ids,
+        suite_ids=suite_ids,
+        catalog=payload,
+    )
+    tiers = {derived_tier}
+    if tier_was_explicit:
+        tiers.add(str(requested_tier or ""))
+    for check_id in _dedupe_strings(check_ids):
+        metadata_error = _foundation_canary_metadata_error(check_id, payload)
+        if metadata_error:
+            raise ValueError(
+                "%s:%s:%s"
+                % (BENCHMARK_CANARY_ONLY_PREFIX, check_id, metadata_error)
+            )
+        check = checks.get(check_id, {})
+        if check.get("canary_only") is not True:
+            continue
+        allowed_tiers = check.get("allowed_tiers")
+        if not isinstance(allowed_tiers, list) or not allowed_tiers:
+            raise ValueError(
+                "%s:%s:allowed_tiers_missing" % (BENCHMARK_CANARY_ONLY_PREFIX, check_id)
+            )
+        disallowed = sorted(tier for tier in tiers if tier not in set(map(str, allowed_tiers)))
+        if disallowed:
+            raise ValueError(
+                "%s:%s:tier_not_allowed:%s"
+                % (BENCHMARK_CANARY_ONLY_PREFIX, check_id, disallowed[0])
+            )
 
 
 def capability_surface_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
@@ -166,11 +490,18 @@ def coverage_expansion_priorities(catalog: Optional[Dict[str, Any]] = None) -> L
     for item in list(payload.get("coverage_expansion_priorities") or []):
         priority = dict(item)
         check_ids = _dedupe_strings(priority.get("benchmark_check_ids"))
-        quarantined = [
-            check_id for check_id in check_ids if benchmark_quarantine_reason(check_id, payload)
+        excluded = [
+            check_id
+            for check_id in check_ids
+            if benchmark_evidence_exclusion_reason(check_id, payload)
         ]
         priority["benchmark_check_ids"] = [
-            check_id for check_id in check_ids if check_id not in quarantined
+            check_id for check_id in check_ids if check_id not in excluded
+        ]
+        if excluded:
+            priority["excluded_benchmark_check_ids"] = excluded
+        quarantined = [
+            check_id for check_id in excluded if benchmark_quarantine_reason(check_id, payload)
         ]
         if quarantined:
             priority["excluded_quarantined_benchmark_check_ids"] = quarantined
@@ -227,6 +558,11 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         for item in list(payload.get("checks") or [])
         if isinstance(item, dict) and item.get("check_id")
     }
+    for check_id in FOUNDATION_CANARY_BENCHMARKS:
+        if _foundation_canary_metadata_error(check_id, payload):
+            failures.append(
+                f"{check_id}: code-registered foundation canary metadata must match its paired check/status contract"
+            )
     for check_id, declaration in quarantine_payload.items():
         if check_id not in declared_checks:
             failures.append(f"{check_id}: quarantined benchmark must be a declared check")
@@ -332,6 +668,71 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
             failures.append(f"{check_id}: check lane and status matrix lane disagree")
         if status and check.get("surface_id") != status.get("surface_id"):
             failures.append(f"{check_id}: check surface and status matrix surface disagree")
+        if check.get("canary_only") is True:
+            if check.get("allowed_tiers") != ["canary"]:
+                failures.append(f"{check_id}: canary-only check must allow exactly canary")
+            if check.get("attestation_state") != "unreviewed":
+                failures.append(f"{check_id}: canary-only check must declare unreviewed attestation")
+            if check.get("group_id") not in (None, ""):
+                failures.append(f"{check_id}: canary-only check must not declare a benchmark group")
+            weight = check.get("primary_score_weight")
+            if (
+                isinstance(weight, bool)
+                or not isinstance(weight, (int, float))
+                or float(weight) != 0.0
+            ):
+                failures.append(f"{check_id}: canary-only check must have zero score weight")
+            if check.get("score_role") != "diagnostic_only":
+                failures.append(f"{check_id}: canary-only check must be diagnostic_only")
+            for field in (
+                "excluded_from_default_groups",
+                "excluded_from_suites",
+                "excluded_from_weighted_score",
+                "excluded_from_readiness",
+                "excluded_from_recommendation",
+                "excluded_from_release_evidence",
+            ):
+                if check.get(field) is not True:
+                    failures.append(f"{check_id}: canary-only {field} must be true")
+            if status.get("canary_only") is not True:
+                failures.append(f"{check_id}: status matrix must preserve canary_only")
+            if status.get("allowed_tiers") != ["canary"]:
+                failures.append(f"{check_id}: status matrix must allow exactly canary")
+            if status.get("attestation_state") != "unreviewed":
+                failures.append(f"{check_id}: status matrix must declare unreviewed attestation")
+            for field in (
+                "excluded_from_default_groups",
+                "excluded_from_suites",
+                "excluded_from_weighted_score",
+                "excluded_from_readiness",
+                "excluded_from_recommendation",
+                "excluded_from_release_evidence",
+            ):
+                if status.get(field) is not True:
+                    failures.append(f"{check_id}: status matrix {field} must be true")
+            if any(
+                check_id in list(item.get("default_check_ids") or [])
+                for item in list(payload.get("benchmark_groups") or [])
+            ):
+                failures.append(f"{check_id}: canary-only check must not be in a benchmark group")
+            if any(
+                check_id in list(item.get("check_ids") or [])
+                or check_id in list(item.get("default_check_ids") or [])
+                for item in list(payload.get("shortcuts") or [])
+            ):
+                failures.append(f"{check_id}: canary-only check must not be in a shortcut")
+            if any(
+                check_id in list(item.get("default_check_ids") or [])
+                for item in list(payload.get("suites") or [])
+            ):
+                failures.append(f"{check_id}: canary-only check must not be in a suite")
+            for use_case_defaults in (payload.get("legacy_tier_defaults") or {}).values():
+                if any(
+                    check_id in list(tier_defaults.get("check_ids") or [])
+                    for tier_defaults in (use_case_defaults or {}).values()
+                    if isinstance(tier_defaults, dict)
+                ):
+                    failures.append(f"{check_id}: canary-only check must not be in legacy defaults")
     for item in coverage_expansion_priorities(payload):
         priority_id = str(item.get("priority_id") or "").strip()
         if not priority_id:
@@ -524,6 +925,7 @@ def derive_tier_from_selection(
 def resolve_request_selection(request: RunRequest, catalog: Optional[Dict[str, Any]] = None) -> Dict[str, List[str]]:
     """Resolve explicit suite/group/check selections for a request."""
     payload = catalog or load_capability_catalog()
+    _raise_on_malformed_foundation_canary_metadata(payload)
     suites = suite_index(payload)
     groups = group_index(payload)
     checks = check_index(payload)
@@ -581,6 +983,14 @@ def resolve_request_selection(request: RunRequest, catalog: Optional[Dict[str, A
         "check_ids": check_ids,
     }
     reject_quarantined_benchmarks(selection["check_ids"], payload)
+    reject_tier_restricted_benchmarks(
+        selection["check_ids"],
+        request.tier,
+        tier_was_explicit=request.tier_was_explicit,
+        group_ids=selection["group_ids"],
+        suite_ids=selection["suite_ids"],
+        catalog=payload,
+    )
     return selection
 
 
@@ -602,6 +1012,15 @@ def normalize_request_selection(request: RunRequest, catalog: Optional[Dict[str,
 
     if check_ids and not request.tier_was_explicit:
         request.tier = derive_tier_from_selection(check_ids, group_ids=group_ids, suite_ids=suite_ids, catalog=payload)
+
+    reject_tier_restricted_benchmarks(
+        check_ids,
+        request.tier,
+        tier_was_explicit=request.tier_was_explicit,
+        group_ids=group_ids,
+        suite_ids=suite_ids,
+        catalog=payload,
+    )
 
     if not request.use_case:
         for suite_id in suite_ids:
@@ -639,6 +1058,7 @@ def capability_benchmark_ids_for_request(
         item
         for item in _dedupe_strings(selection.get("check_ids"))
         if checks.get(item, {}).get("evidence_kind") == "capability"
+        and not is_benchmark_excluded_from_evidence(item, payload)
     ]
 
 
@@ -654,6 +1074,7 @@ def deployment_profile_ids_for_request(
         str(checks[item]["runner_target"])
         for item in _dedupe_strings(selection.get("check_ids"))
         if checks.get(item, {}).get("evidence_kind") == "deployment"
+        and not is_benchmark_excluded_from_evidence(item, payload)
     ]
 
 
@@ -665,7 +1086,11 @@ def fidelity_enabled_for_request(
     payload = catalog or load_capability_catalog()
     checks = check_index(payload)
     selection = resolve_request_selection(request, payload)
-    return any(checks.get(item, {}).get("evidence_kind") == "fidelity" for item in _dedupe_strings(selection.get("check_ids")))
+    return any(
+        checks.get(item, {}).get("evidence_kind") == "fidelity"
+        and not is_benchmark_excluded_from_evidence(item, payload)
+        for item in _dedupe_strings(selection.get("check_ids"))
+    )
 
 
 def benchmark_scope_summary_for_selection(
@@ -674,9 +1099,20 @@ def benchmark_scope_summary_for_selection(
 ) -> Dict[str, Any]:
     """Summarize whether a selected benchmark set is decision-sized or reference-sized."""
     payload = catalog or load_capability_catalog()
+    _raise_on_malformed_foundation_canary_metadata(payload)
     checks = check_index(payload)
-    selected = [checks[item] for item in _dedupe_strings(check_ids) if item in checks]
-    if not selected:
+    selected_ids = [item for item in _dedupe_strings(check_ids) if item in checks]
+    selected = [checks[item] for item in selected_ids]
+    excluded_ids = [
+        item for item in selected_ids if is_benchmark_excluded_from_evidence(item, payload)
+    ]
+    eligible_ids = [item for item in selected_ids if item not in excluded_ids]
+    selected = [checks[item] for item in eligible_ids]
+    exclusion_reasons = {
+        item: benchmark_evidence_exclusion_reason(item, payload)
+        for item in excluded_ids
+    }
+    if not selected_ids:
         decision_lane = _evidence_lane_payload(payload, "decision")
         return {
             "scope": "decision",
@@ -694,6 +1130,24 @@ def benchmark_scope_summary_for_selection(
             "execution_patterns": [],
             "resumability_boundaries": [],
             "reference_checks_included": False,
+        }
+    if not selected:
+        return {
+            "scope": "identity_only",
+            "scope_label": "Foundation identity only",
+            "identity_only": True,
+            "eligible_benchmark_check_ids": [],
+            "identity_only_benchmark_check_ids": excluded_ids,
+            "excluded_benchmark_check_ids": excluded_ids,
+            "evidence_exclusion_reasons": exclusion_reasons,
+            "selection_guidance": FOUNDATION_CANARY_SELECTION_GUIDANCE,
+            "effort_level": "short",
+            "expected_duration_band": "not estimated",
+            "token_volume_band": "not estimated",
+            "metadata_sources": _metadata_sources(payload, []),
+            "metadata_confidence": _metadata_confidence(_metadata_sources(payload, [])),
+            "execution_patterns": [],
+            "resumability_boundaries": [],
         }
 
     scopes = _dedupe_strings([item.get("suite_scope") for item in selected])
@@ -721,6 +1175,10 @@ def benchmark_scope_summary_for_selection(
         "execution_patterns": _dedupe_strings([item.get("execution_pattern") for item in selected]),
         "resumability_boundaries": _dedupe_strings([item.get("resumability_boundary") for item in selected]),
         "reference_checks_included": scope == "reference",
+        "eligible_benchmark_check_ids": eligible_ids,
+        "identity_only_benchmark_check_ids": excluded_ids,
+        "excluded_benchmark_check_ids": excluded_ids,
+        "evidence_exclusion_reasons": exclusion_reasons,
     }
 
 
@@ -730,9 +1188,14 @@ def capability_coverage_guidance_for_selection(
 ) -> Dict[str, Any]:
     """Return user-facing coverage guidance without treating unknown as failure."""
     payload = catalog or load_capability_catalog()
+    _raise_on_malformed_foundation_canary_metadata(payload)
     checks = check_index(payload)
     selected_ids = [item for item in _dedupe_strings(check_ids) if item in checks]
-    selected_checks = [checks[item] for item in selected_ids]
+    excluded_ids = [
+        item for item in selected_ids if is_benchmark_excluded_from_evidence(item, payload)
+    ]
+    eligible_ids = [item for item in selected_ids if item not in excluded_ids]
+    selected_checks = [checks[item] for item in eligible_ids]
     selected_kinds = set(_dedupe_strings([item.get("evidence_kind") for item in selected_checks]))
     selected_decision = [item["check_id"] for item in selected_checks if item.get("suite_scope") == "decision"]
     selected_reference = [item["check_id"] for item in selected_checks if item.get("suite_scope") == "reference"]
@@ -743,7 +1206,7 @@ def capability_coverage_guidance_for_selection(
         if check.get("suite_scope") == "reference"
         and check_id not in selected_ids
         and check.get("status", "available") != "planned"
-        and not is_benchmark_quarantined(check_id, payload)
+        and not is_benchmark_excluded_from_evidence(check_id, payload)
     ]
     planned = [
         _planned_benchmark_candidate_payload(payload, item)
@@ -783,6 +1246,14 @@ def capability_coverage_guidance_for_selection(
         "selected_evidence_lane_ids": selected_lane_ids,
         "selected_decision_check_ids": selected_decision,
         "selected_reference_check_ids": selected_reference,
+        "selected_benchmark_check_ids": selected_ids,
+        "eligible_benchmark_check_ids": eligible_ids,
+        "identity_only_benchmark_check_ids": excluded_ids,
+        "excluded_benchmark_check_ids": excluded_ids,
+        "evidence_exclusion_reasons": {
+            item: benchmark_evidence_exclusion_reason(item, payload)
+            for item in excluded_ids
+        },
         "available_reference_check_ids": available_reference,
         "missing_core_evidence": missing_core,
         "planned_benchmark_candidates": planned,
@@ -802,6 +1273,14 @@ def selection_metadata_for_request(
     normalized = resolve_request_selection(request, payload)
     benchmark_scope = benchmark_scope_summary_for_selection(normalized["check_ids"], payload)
     coverage_guidance = capability_coverage_guidance_for_selection(normalized["check_ids"], payload)
+    excluded_ids = [
+        item
+        for item in normalized["check_ids"]
+        if is_benchmark_excluded_from_evidence(item, payload)
+    ]
+    eligible_ids = [
+        item for item in normalized["check_ids"] if item not in excluded_ids
+    ]
     return {
         "catalog_version": payload.get("catalog_version"),
         "shortcut_id": request.benchmark_shortcut_id,
@@ -810,6 +1289,9 @@ def selection_metadata_for_request(
         "capability_suite_ids": list(normalized["suite_ids"]),
         "benchmark_group_ids": list(normalized["group_ids"]),
         "benchmark_check_ids": list(normalized["check_ids"]),
+        "eligible_benchmark_check_ids": eligible_ids,
+        "identity_only_benchmark_check_ids": excluded_ids,
+        "excluded_benchmark_check_ids": excluded_ids,
         "capability_suites": [
             {
                 "suite_id": suite_id,
@@ -862,27 +1344,29 @@ def _selected_score_policies(check_ids: List[str], catalog: Dict[str, Any]) -> L
 
 
 def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dict[str, Any]) -> Dict[str, Any]:
-    lane_id = _evidence_lane_id_for_item(catalog, check)
-    lane = _evidence_lane_payload(catalog, lane_id)
+    excluded = is_benchmark_excluded_from_evidence(check_id, catalog)
+    foundation = FOUNDATION_CANARY_BENCHMARKS.get(check_id) if excluded else None
+    lane_id = None if excluded else _evidence_lane_id_for_item(catalog, check)
+    lane = {} if excluded else _evidence_lane_payload(catalog, lane_id)
     legitimacy_status = benchmark_status_index(catalog).get(check_id, {})
     return {
         "check_id": check_id,
-        "display_name": check.get("display_name"),
-        "description": check.get("description"),
+        "display_name": foundation.get("display_name") if foundation else check.get("display_name"),
+        "description": foundation.get("description") if foundation else check.get("description"),
         "evidence_kind": check.get("evidence_kind"),
         "surface_id": check.get("surface_id"),
         "evidence_lane_id": lane_id,
         "evidence_lane_label": lane.get("display_name"),
         "claim_strength": lane.get("claim_strength"),
-        "claim_boundary": lane.get("claim_boundary"),
+        "claim_boundary": foundation.get("claim_boundary") if foundation else lane.get("claim_boundary"),
         "group_id": check.get("group_id"),
-        "suite_scope": check.get("suite_scope"),
+        "suite_scope": None if excluded else check.get("suite_scope"),
         "effort_level": check.get("effort_level"),
         "expected_duration_band": check.get("expected_duration_band"),
         "token_volume_band": check.get("token_volume_band"),
         "resumability_boundary": check.get("resumability_boundary"),
         "execution_pattern": check.get("execution_pattern"),
-        "selection_guidance": check.get("selection_guidance"),
+        "selection_guidance": foundation.get("selection_guidance") if foundation else check.get("selection_guidance"),
         "status": check.get("status", "available"),
         "score_dimension": check.get("score_dimension"),
         "primary_score_metric": check.get("primary_score_metric"),
@@ -906,9 +1390,18 @@ def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dic
         "fixture_or_dataset_revision_status": legitimacy_status.get("fixture_or_dataset_revision_status"),
         "harness_status": legitimacy_status.get("harness_status"),
         "sample_policy": legitimacy_status.get("sample_policy"),
-        "benchmark_claim_boundary": legitimacy_status.get("claim_boundary"),
+        "benchmark_claim_boundary": (
+            foundation.get("claim_boundary")
+            if foundation
+            else legitimacy_status.get("claim_boundary")
+        ),
         "quarantine_reason_code": benchmark_quarantine_reason(check_id, catalog),
-        "runnable_evidence": not is_benchmark_quarantined(check_id, catalog),
+        "evidence_exclusion_reason": benchmark_evidence_exclusion_reason(check_id, catalog),
+        "runnable_evidence": not excluded,
+        "identity_only": excluded,
+        "canary_only": bool(check.get("canary_only")),
+        "allowed_tiers": list(check.get("allowed_tiers") or []),
+        "attestation_state": check.get("attestation_state"),
         "expected_duration_token_volume_status": legitimacy_status.get("expected_duration_token_volume_status"),
         "sandbox_requirement": legitimacy_status.get("sandbox_requirement"),
         "promotion_blockers": list(legitimacy_status.get("promotion_blockers") or []),
