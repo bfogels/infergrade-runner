@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import shutil
@@ -17,6 +18,7 @@ from infergrade.capabilities import (
     _capability_container_policy,
     _case_benchmark_protocol_identity,
     _container_fixture_revision,
+    _evaluate_benchmark,
     _generate_predictions,
     _generation_prompt_for_case,
     _host_mount_path,
@@ -1254,6 +1256,49 @@ class CapabilityTests(unittest.TestCase):
         unsupported = " ".join(artifact["claim_boundary"]["unsupported_claims"])
         self.assertIn("zero headline-score weight", unsupported)
 
+        model_output_summary = {
+            **summary,
+            "primary_metric": {"name": "task_success_rate", "value": 0.0},
+            "metrics": {
+                **summary["metrics"],
+                "passed_count": 0,
+                "malformed_patch_count": 1,
+            },
+            "case_results": [
+                {
+                    "task_id": "repository_edit/simple",
+                    "category": "repair",
+                    "score": 0.0,
+                    "passed": False,
+                    "error_class": "malformed_patch",
+                }
+            ],
+            "generation_failure_severity": "all_failed",
+            "unscored_generation_failure_severity": "none",
+            "unscored_generation_failure_count": 0,
+        }
+        model_output_path = _write_repository_edit_capability_run_artifact(
+            request,
+            CAPABILITY_BENCHMARKS["repository_edit_smoke_v1"],
+            benchmark_dir,
+            cases,
+            [
+                {
+                    "task_id": "repository_edit/simple",
+                    "generation_status": "failed",
+                    "generation_failure_kind": "model_output",
+                    "completion": "",
+                }
+            ],
+            model_output_summary,
+        )
+        with open(model_output_path, encoding="utf-8") as handle:
+            model_output_artifact = json.load(handle)
+        self.assertEqual(model_output_artifact["summary"]["state"], "scored")
+        self.assertEqual(model_output_artifact["summary"]["score"], 0.0)
+        self.assertEqual(model_output_artifact["tasks"][0]["state"], "scored")
+        self.assertEqual(model_output_artifact["tasks"][0]["score"], 0.0)
+
     def test_gpqa_claim_boundary_names_gpqa_instead_of_mmlu_pro(self):
         boundary = _multiple_choice_artifact_claim_boundary(
             "gpqa_diamond_reference_v1",
@@ -1858,7 +1903,7 @@ class CapabilityTests(unittest.TestCase):
             with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
                 handle.write(json.dumps({"case_id": "case-1", "task_id": "Task/1", "prompt": "Write code"}) + "\n")
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             score = 0.8 if spec.benchmark_id == "evalplus_humaneval" else 0.6
             return {
                 "benchmark_id": spec.benchmark_id,
@@ -1896,6 +1941,164 @@ class CapabilityTests(unittest.TestCase):
         self.assertIn("capability_run_path", execution.artifacts["evalplus_humaneval"])
         self.assertIn("capability_run_path", execution.artifacts["evalplus_mbpp"])
 
+    def test_execute_repository_edit_normalizes_model_output_and_runtime_failures(self):
+        module_path = os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "..",
+                "containers",
+                "capability-repo-edit",
+                "runner.py",
+            )
+        )
+        module_spec = importlib.util.spec_from_file_location(
+            "repository_edit_integration_runner_test_module", module_path
+        )
+        repository_edit_runner = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(repository_edit_runner)
+        fixtures = [
+            {
+                "task_id": str(index),
+                "category": "repair",
+                "issue": "Fix it.",
+                "editable_files": ["value.py"],
+                "files": {"value.py": "def value():\n    return 0\n"},
+                "tests": {"tests/test_value.py": "# hidden\n"},
+            }
+            for index in range(4)
+        ]
+        cases = [repository_edit_runner._public_case(fixture) for fixture in fixtures]
+        predictions = [
+            {"task_id": cases[0]["task_id"], "generation_status": "completed", "completion": "passing patch"},
+            {
+                "task_id": cases[1]["task_id"],
+                "generation_status": "failed",
+                "generation_failure_kind": "model_output",
+                "completion": "",
+            },
+            {"task_id": cases[2]["task_id"], "generation_status": "completed", "completion": "passing patch"},
+            {
+                "task_id": cases[3]["task_id"],
+                "generation_status": "failed",
+                "generation_failure_kind": "runtime",
+                "completion": "",
+            },
+        ]
+        def fake_score(_fixture, completion):
+            return {
+                "passed": bool(completion),
+                "failure_class": None if completion else "malformed_patch",
+            }
+
+        def fake_prepare(spec, benchmark_dir, tier):
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for case in cases:
+                    handle.write(json.dumps(case) + "\n")
+            with open(os.path.join(benchmark_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+                json.dump(repository_edit_runner._benchmark_metadata(fixtures), handle)
+
+        def fake_evaluate(spec, benchmark_dir, expected_count):
+            self.assertEqual(expected_count, 2)
+            with mock.patch.object(
+                repository_edit_runner, "_load_fixtures", return_value=fixtures
+            ), mock.patch.object(
+                repository_edit_runner, "_score_patch", side_effect=fake_score
+            ), mock.patch.object(
+                repository_edit_runner, "_validate_case_manifest", return_value=None
+            ):
+                repository_edit_runner.evaluate(benchmark_dir, expected_count=4)
+            with open(
+                os.path.join(benchmark_dir, "summary.json"), encoding="utf-8"
+            ) as handle:
+                return json.load(handle)
+
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="agentic_coding",
+            output_dir=self.tempdir,
+            benchmark_check_ids=["repository_edit_smoke_v1"],
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._generate_predictions", return_value=predictions):
+                with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                    with mock.patch("infergrade.capabilities.container_image_identity", return_value={}):
+                        execution = execute_capability_suite(_FakeAdapter(), request)
+
+        result = execution.benchmark_results["repository_edit_smoke_v1"]
+        self.assertEqual(execution.status, "partial")
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["metrics"]["total_count"], 3)
+        self.assertEqual(result["generation_failure_count"], 2)
+        self.assertEqual(result["model_output_failure_count"], 1)
+        self.assertEqual(result["unscored_generation_failure_count"], 1)
+        self.assertEqual(result["completed_cases"], 2)
+        self.assertEqual(result["total_cases"], 4)
+        with open(
+            execution.artifacts["repository_edit_smoke_v1"]["predictions_path"],
+            encoding="utf-8",
+        ) as handle:
+            written_predictions = [json.loads(line) for line in handle if line.strip()]
+        self.assertEqual(
+            {
+                row["task_id"]: row.get("generation_failure_kind")
+                for row in written_predictions
+                if row.get("generation_status") == "failed"
+            },
+            {
+                cases[1]["task_id"]: "model_output",
+                cases[3]["task_id"]: "runtime",
+            },
+        )
+        with open(
+            execution.artifacts["repository_edit_smoke_v1"]["capability_run_path"],
+            encoding="utf-8",
+        ) as handle:
+            artifact = json.load(handle)
+        artifact_summary = artifact["summary"]
+        self.assertEqual(artifact_summary["state"], "partial")
+        self.assertEqual(artifact_summary["passed_count"], 2)
+        self.assertEqual(artifact_summary["failed_count"], 1)
+        self.assertEqual(artifact_summary["partial_count"], 1)
+        self.assertEqual(
+            artifact_summary["passed_count"]
+            + artifact_summary["failed_count"]
+            + artifact_summary["partial_count"],
+            len(cases),
+        )
+        tasks = {task["task_id"]: task for task in artifact["tasks"]}
+        self.assertEqual(tasks[cases[1]["task_id"]]["state"], "scored")
+        self.assertEqual(tasks[cases[1]["task_id"]]["score"], 0.0)
+        self.assertEqual(tasks[cases[1]["task_id"]]["error_class"], "model_output")
+        self.assertEqual(tasks[cases[3]["task_id"]]["state"], "partial")
+        self.assertIsNone(tasks[cases[3]["task_id"]]["score"])
+        self.assertEqual(tasks[cases[3]["task_id"]]["error_class"], "runtime")
+        self.assertEqual(
+            len([task for task in artifact["tasks"] if task["state"] == "scored"]),
+            3,
+        )
+        self.assertEqual(
+            len([task for task in artifact["tasks"] if task["state"] == "failed"]),
+            0,
+        )
+        with open(
+            execution.artifacts["_summary"]["capability_summary_path"],
+            encoding="utf-8",
+        ) as handle:
+            capability_summary = json.load(handle)
+        pointer = next(
+            item
+            for item in capability_summary["capability_artifacts"]
+            if item.get("benchmark_id") == "repository_edit_smoke_v1"
+        )
+        self.assertEqual(pointer["failure_count"], 0)
+        self.assertEqual(pointer["partial_count"], 1)
+        self.assertEqual(pointer["repeatability"]["failure_rate"], 0.25)
+
     def test_execute_evalplus_humaneval_emits_valid_reference_capability_run_artifact(self):
         def fake_prepare(spec, benchmark_dir, tier):
             cases = [
@@ -1917,7 +2120,7 @@ class CapabilityTests(unittest.TestCase):
                     handle,
                 )
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             with open(os.path.join(benchmark_dir, "predictions.jsonl"), "r", encoding="utf-8") as handle:
                 predictions = [json.loads(line) for line in handle if line.strip()]
             self.assertEqual(len(predictions), 2)
@@ -2016,7 +2219,7 @@ class CapabilityTests(unittest.TestCase):
                 for case in cases:
                     handle.write(json.dumps(case) + "\n")
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             with open(os.path.join(benchmark_dir, "predictions.jsonl"), "r", encoding="utf-8") as handle:
                 predictions = [json.loads(line) for line in handle if line.strip()]
             self.assertEqual(predictions[0]["generation_status"], "completed")
@@ -2078,7 +2281,7 @@ class CapabilityTests(unittest.TestCase):
                     handle,
                 )
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             with open(os.path.join(benchmark_dir, "predictions.jsonl"), "r", encoding="utf-8") as handle:
                 predictions = [json.loads(line) for line in handle if line.strip()]
             self.assertEqual(len(predictions), 2)
@@ -2182,7 +2385,7 @@ class CapabilityTests(unittest.TestCase):
                 return {"text": "", "status": "failed", "error": "backend stopped"}
             return {"text": "def solution():\n    return 1", "status": "completed", "error": None}
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             return {
                 "benchmark_id": "evalplus_humaneval",
                 "display_name": "EvalPlus HumanEval+",
@@ -2260,7 +2463,7 @@ class CapabilityTests(unittest.TestCase):
                     handle,
                 )
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             with open(os.path.join(benchmark_dir, "predictions.jsonl"), "r", encoding="utf-8") as handle:
                 predictions = [json.loads(line) for line in handle if line.strip()]
             case_results = [
@@ -2493,7 +2696,7 @@ class CapabilityTests(unittest.TestCase):
                     handle,
                 )
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             return {
                 "benchmark_id": spec.benchmark_id,
                 "display_name": spec.display_name,
@@ -2594,7 +2797,7 @@ class CapabilityTests(unittest.TestCase):
                 for case in cases:
                     handle.write(json.dumps(case) + "\n")
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             return {
                 "benchmark_id": spec.benchmark_id,
                 "display_name": spec.display_name,
@@ -2821,7 +3024,7 @@ class CapabilityTests(unittest.TestCase):
                 return {"text": "I am not sure.", "status": "completed", "error": None}
             return {"text": "", "status": "failed", "error": "runtime stopped"}
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             return {
                 "benchmark_id": "mmlu_pro_reference_v1",
                 "display_name": "MMLU-Pro reference",
@@ -2890,7 +3093,7 @@ class CapabilityTests(unittest.TestCase):
             with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
                 handle.write(json.dumps({"case_id": "case-1", "task_id": "Task/1", "prompt": "Write code"}) + "\n")
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             if spec.benchmark_id == "evalplus_mbpp":
                 raise RuntimeError("mbpp failed")
             return {
@@ -3179,6 +3382,45 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(policy["generated_code_user"], "nobody:65534")
         self.assertIn("irreversibly drop", policy["capability_exception_reason"])
 
+    def test_evaluate_benchmark_propagates_trusted_count_only_to_bound_scorers(self):
+        repository_spec = CAPABILITY_BENCHMARKS["repository_edit_smoke_v1"]
+        evalplus_spec = CAPABILITY_BENCHMARKS["evalplus_humaneval"]
+        with mock.patch(
+            "infergrade.capabilities._run_capability_container"
+        ) as container_mock, mock.patch(
+            "infergrade.capabilities.read_json", return_value={}
+        ):
+            _evaluate_benchmark(repository_spec, self.tempdir, 6)
+            _evaluate_benchmark(evalplus_spec, self.tempdir, 6)
+
+        self.assertEqual(
+            container_mock.call_args_list[0],
+            mock.call(
+                repository_spec.container_image,
+                self.tempdir,
+                [
+                    "evaluate",
+                    "--output-dir",
+                    "/work",
+                    "--expected-count",
+                    "6",
+                ],
+            ),
+        )
+        self.assertEqual(
+            container_mock.call_args_list[1],
+            mock.call(
+                evalplus_spec.container_image,
+                self.tempdir,
+                [
+                    "evaluate",
+                    "--output-dir",
+                    "/work",
+                    "--dataset",
+                    "humaneval",
+                ],
+            ),
+        )
     def test_execute_capability_suite_reports_benchmark_progress(self):
         events = []
 
@@ -3189,7 +3431,7 @@ class CapabilityTests(unittest.TestCase):
                         json.dumps({"case_id": "case-%d" % index, "task_id": "Task/%d" % index, "prompt": "Write code"}) + "\n"
                     )
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             return {
                 "benchmark_id": spec.benchmark_id,
                 "display_name": spec.display_name,
@@ -3222,7 +3464,7 @@ class CapabilityTests(unittest.TestCase):
             with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
                 handle.write(json.dumps({"case_id": "case-1", "task_id": "IFEval/1", "prompt": "Follow the instruction"}) + "\n")
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             score = 0.84 if spec.benchmark_id == "ifeval" else 0.9
             return {
                 "benchmark_id": spec.benchmark_id,
@@ -3259,7 +3501,7 @@ class CapabilityTests(unittest.TestCase):
                 for index in range(3):
                     handle.write(json.dumps({"case_id": "case-%d" % index, "task_id": "IFEval/%d" % index, "prompt": "Follow"}) + "\n")
 
-        def fake_evaluate(spec, benchmark_dir):
+        def fake_evaluate(spec, benchmark_dir, expected_count):
             return {
                 "benchmark_id": spec.benchmark_id,
                 "display_name": spec.display_name,
