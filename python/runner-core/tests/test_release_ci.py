@@ -361,7 +361,11 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("python3 ./scripts/check_version_bump.py --base-ref origin/main", workflow)
 
     def test_linux_package_index_updates_have_bounded_official_mirror_fallbacks(self):
-        for filename in ("ci.yml", "desktop-platform-smoke.yml"):
+        for filename in (
+            "ci.yml",
+            "desktop-platform-smoke.yml",
+            "desktop-runner-release.yml",
+        ):
             workflow = (ROOT / ".github" / "workflows" / filename).read_text(encoding="utf-8")
             with self.subTest(filename=filename):
                 self.assertIn("timeout --kill-after=15s 180s apt-get", workflow)
