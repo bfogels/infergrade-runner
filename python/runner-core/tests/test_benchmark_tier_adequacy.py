@@ -24,7 +24,7 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
         self.assertTrue(report["ready"])
         self.assertEqual(report["status"], "ready")
         self.assertEqual(report["artifact_spec_version"], "0.4.0")
-        self.assertEqual(report["catalog_version"], "2026-08-19-reasoning-constraint-stress-v2-foundation")
+        self.assertEqual(report["catalog_version"], "2026-08-19-reasoning-constraint-stress-v2-content-v1")
         self.assertEqual(report["varying_tier_benchmark_count"], 15)
         self.assertEqual(report["materialized_native_fixture_count"], 6)
         self.assertEqual(report["native_tier_coverage_contract_count"], 2)
