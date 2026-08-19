@@ -13,7 +13,13 @@ from statistics import mean, median
 from typing import Any, Dict, Iterable, List, Optional
 
 from infergrade.benchmark_catalog import check_index, load_capability_catalog, surface_score_policy_index
+from infergrade.capability_contract import (
+    CAPABILITY_SURFACES,
+    capability_run_admission_error_summary,
+    validate_current_capability_run_artifact,
+)
 from infergrade.statistical_bounds import wilson_score_upper_bound
+from infergrade.utils import stable_hash
 
 
 DEFAULT_POLICY = {
@@ -65,12 +71,63 @@ def extract_calibration_observations(
     score_version: Optional[str] = None,
     benchmark_id: Optional[str] = None,
     catalog: Optional[Dict[str, Any]] = None,
+    rejected_capability_runs: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     observations: List[Dict[str, Any]] = []
     checks = check_index(catalog) if catalog else {}
     for document in documents:
         source = str(document.get("_source") or "")
         if document.get("artifact_kind") == "capability_run":
+            admission_errors = validate_current_capability_run_artifact(document)
+            if admission_errors:
+                protocol = document.get("protocol")
+                protocol = protocol if isinstance(protocol, dict) else {}
+                rejected_benchmark_id = _bounded_identifier(
+                    protocol.get("task_version")
+                )
+                rejected_fixture_revision = _bounded_identifier(
+                    protocol.get("fixture_revision")
+                ) or "unknown"
+                check = checks.get(rejected_benchmark_id) or {}
+                evidence = document.get("evidence")
+                evidence = evidence if isinstance(evidence, dict) else {}
+                source_fingerprint = stable_hash(source) if source else None
+                artifact_fingerprint = stable_hash(document, length=16)
+                artifact_spec_version = _bounded_identifier(
+                    document.get("artifact_spec_version"),
+                    maximum_length=32,
+                )
+                rejected_surface = check.get("surface_id")
+                if rejected_surface not in CAPABILITY_SURFACES:
+                    candidate_surface = evidence.get("surface")
+                    rejected_surface = (
+                        candidate_surface
+                        if candidate_surface in CAPABILITY_SURFACES
+                        else None
+                    )
+                rejected = {
+                    "observation_id": "rejected_%s" % artifact_fingerprint,
+                    "score_version": (
+                        "benchmark:%s:%s"
+                        % (
+                            rejected_benchmark_id,
+                            rejected_fixture_revision,
+                        )
+                        if rejected_benchmark_id
+                        else None
+                    ),
+                    "benchmark_id": rejected_benchmark_id,
+                    "surface_id": rejected_surface,
+                    "admission_status": "rejected",
+                    **capability_run_admission_error_summary(admission_errors),
+                    "artifact_spec_version": artifact_spec_version,
+                    "artifact_fingerprint": artifact_fingerprint,
+                    "source_fingerprint": source_fingerprint,
+                }
+                observations.append(rejected)
+                if rejected_capability_runs is not None:
+                    rejected_capability_runs.append(dict(rejected))
+                continue
             protocol = dict(document.get("protocol") or {})
             observation = _component_observation(
                 document,
@@ -124,9 +181,15 @@ def extract_calibration_observations(
                 "source": source,
             }
         )
+    rejected_observations = [
+        item for item in observations if item.get("admission_status") == "rejected"
+    ]
+    admitted_observations = [
+        item for item in observations if item.get("admission_status") != "rejected"
+    ]
     deduplicated_by_key: Dict[Any, Dict[str, Any]] = {}
     key_order = []
-    for item in observations:
+    for item in admitted_observations:
         key = (item.get("score_version"), _observation_scope(str(item.get("source") or "")) or item.get("observation_id"))
         existing = deduplicated_by_key.get(key)
         if existing is None:
@@ -146,12 +209,41 @@ def extract_calibration_observations(
         if conflicts:
             existing = dict(existing, integrity_conflicts=conflicts)
         deduplicated_by_key[key] = existing
-    deduplicated = [deduplicated_by_key[key] for key in key_order]
+    deduplicated = [deduplicated_by_key[key] for key in key_order] + rejected_observations
     if score_version:
-        return [item for item in deduplicated if item.get("score_version") == score_version]
+        return [
+            item
+            for item in deduplicated
+            if item.get("score_version") == score_version
+            or (
+                item.get("admission_status") == "rejected"
+                and item.get("score_version") is None
+            )
+        ]
     if benchmark_id:
-        return [item for item in deduplicated if item.get("benchmark_id") == benchmark_id]
+        return [
+            item
+            for item in deduplicated
+            if item.get("benchmark_id") == benchmark_id
+            or (
+                item.get("admission_status") == "rejected"
+                and item.get("benchmark_id") is None
+            )
+        ]
     return deduplicated
+
+
+def _bounded_identifier(value: Any, maximum_length: int = 128) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if (
+        not normalized
+        or len(normalized) > maximum_length
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]*", normalized)
+    ):
+        return None
+    return normalized
 
 
 def _observation_detail_rank(observation: Dict[str, Any]) -> tuple:
@@ -262,6 +354,7 @@ def _component_observation(
     )
     return {
         "observation_id": str(document.get("capability_run_id") or source),
+        "admission_status": "current_verified",
         "score_version": "benchmark:%s:%s" % (benchmark_id, protocol.get("fixture_revision") or "unknown"),
         "benchmark_id": benchmark_id,
         "surface_id": _nested(document, "evidence", "surface"),
@@ -329,7 +422,19 @@ def audit_capability_observations(
     policy: Optional[Dict[str, Any]] = None,
     catalog: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    matching = [item for item in observations if item.get("score_version") == score_version and _number(item.get("score")) is not None]
+    relevant = [item for item in observations if item.get("score_version") == score_version]
+    rejected = [
+        item
+        for item in observations
+        if item.get("admission_status") == "rejected"
+        and item.get("score_version") in (None, score_version)
+    ]
+    matching = [
+        item
+        for item in relevant
+        if item.get("admission_status") != "rejected"
+        and _number(item.get("score")) is not None
+    ]
     integrity_conflicts = [item for item in matching if item.get("integrity_conflicts")]
     eligible = [item for item in matching if not item.get("integrity_conflicts")]
     minimum_task_count = int((policy or {}).get("minimum_task_count") or 0)
@@ -428,6 +533,7 @@ def audit_capability_observations(
     metrics = {
         "observation_count": count,
         "integrity_conflict_count": len(integrity_conflicts),
+        "rejected_capability_run_count": len(rejected),
         "excluded_below_minimum_task_count": len(eligible) - len(selected),
         "model_family_count": len([name for name in families if name != "unknown"]),
         "parameter_band_count": len([name for name in bands if name != "unknown"]),
@@ -478,6 +584,8 @@ def audit_capability_observations(
     blockers = []
     if integrity_conflicts:
         blockers.append("duplicate_observation_integrity_conflict")
+    if rejected:
+        blockers.append("capability_run_admission_rejected")
     _minimum_gate(blockers, metrics, effective_policy, "observation_count", "minimum_observations")
     _minimum_gate(blockers, metrics, effective_policy, "model_family_count", "minimum_model_families")
     _minimum_gate(blockers, metrics, effective_policy, "parameter_band_count", "minimum_parameter_bands")
@@ -602,7 +710,7 @@ def audit_capability_observations(
     insufficient = any(item.startswith("insufficient_") for item in blockers)
     status = (
         "evidence_integrity_risk"
-        if integrity_conflicts
+        if integrity_conflicts or rejected
         else ("insufficient_calibration" if insufficient else ("saturation_or_concentration_risk" if blockers else "calibrated_headroom"))
     )
     return {
@@ -827,10 +935,14 @@ def _number(value: Any) -> Optional[float]:
 
 def _evidence_group_observation(document: Dict[str, Any]) -> Dict[str, Any]:
     """Accept grouping only when a trusted corpus operator assigned it."""
-    claimed = str(document.get("evidence_group_id") or "").strip()
+    evidence = document.get("evidence")
+    evidence = evidence if isinstance(evidence, dict) else {}
+    group_source = evidence if document.get("artifact_kind") == "capability_run" else document
+    claimed = str(group_source.get("evidence_group_id") or "").strip()
     verified = bool(
         claimed
-        and document.get("evidence_group_provenance") == TRUSTED_EVIDENCE_GROUP_PROVENANCE
+        and group_source.get("evidence_group_provenance")
+        == TRUSTED_EVIDENCE_GROUP_PROVENANCE
     )
     return {
         "evidence_group_id": claimed if verified else "",

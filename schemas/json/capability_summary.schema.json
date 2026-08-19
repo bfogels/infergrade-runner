@@ -167,7 +167,7 @@
       "type": "object",
       "required": ["artifact_kind", "benchmark_id", "surface", "state", "lane", "confidence_label", "path"],
       "properties": {
-        "artifact_kind": { "enum": ["capability_run", "benchmark_summary", "unreadable_capability_run"] },
+        "artifact_kind": { "enum": ["capability_run", "benchmark_summary", "unreadable_capability_run", "inadmissible_capability_run"] },
         "benchmark_id": { "type": "string", "minLength": 1 },
         "surface": { "$ref": "#/$defs/surface_id" },
         "state": { "$ref": "#/$defs/state" },
