@@ -8,12 +8,16 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Dict, Iterable, List, Optional, Tuple
 
 
 FIXTURE_PATH = Path(os.environ.get("INFERGRADE_REPOSITORY_EDIT_FIXTURES", "/opt/infergrade/repository-edit/fixtures.json"))
 FIXTURE_REVISION = "2026-08-repository-edit-v1"
+CASE_LIMITS = (2, 6, 8)
+SELECTION_DIGEST_ALGORITHM = "sorted_utf8_newline_sha256_v1"
+GENERATION_FAILURE_KINDS = frozenset(("generation", "model_output", "runtime"))
 MAX_PATCH_BYTES = 32768
 TEST_TIMEOUT_SECONDS = 10
 PATCH_FENCE = re.compile(r"\A\s*```(?:diff|patch)?\s*\n(.*?)\n```\s*\Z", re.DOTALL | re.IGNORECASE)
@@ -33,6 +37,149 @@ def _write_jsonl(path: Path, rows: Iterable[dict]) -> None:
 def _read_jsonl(path: Path) -> List[dict]:
     with path.open("r", encoding="utf-8") as handle:
         return [json.loads(line) for line in handle if line.strip()]
+
+
+def _read_json(path: Path) -> dict:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("Expected an object in %s" % path)
+    return payload
+
+
+def _case_task_ids(cases: Iterable[dict]) -> List[str]:
+    task_ids = [str(case.get("task_id") or "").strip() for case in cases]
+    duplicate_ids = sorted(
+        task_id for task_id, count in Counter(task_ids).items() if task_id and count > 1
+    )
+    if any(not task_id for task_id in task_ids) or duplicate_ids:
+        details = []
+        if any(not task_id for task_id in task_ids):
+            details.append("empty task id")
+        if duplicate_ids:
+            details.append("duplicates=%s" % ",".join(duplicate_ids[:10]))
+        raise ValueError(
+            "Repository-edit selected cases require non-empty unique task ids: %s"
+            % "; ".join(details)
+        )
+    return task_ids
+
+
+def _prediction_state(prediction: dict) -> Tuple[str, Optional[str]]:
+    status = (
+        "completed"
+        if "generation_status" not in prediction
+        else prediction.get("generation_status")
+    )
+    if status not in {"completed", "failed"}:
+        raise ValueError("Repository-edit prediction has invalid generation_status: %r" % status)
+    failure_kind = (
+        prediction.get("generation_failure_kind")
+        if "generation_failure_kind" in prediction
+        else None
+    )
+    if status == "completed" and failure_kind is not None:
+        raise ValueError(
+            "Repository-edit completed prediction cannot have generation_failure_kind: %r"
+            % failure_kind
+        )
+    if status == "failed" and failure_kind not in GENERATION_FAILURE_KINDS:
+        raise ValueError(
+            "Repository-edit failed prediction requires a recognized generation_failure_kind: %r"
+            % failure_kind
+        )
+    return status, failure_kind
+
+
+def _validate_prediction_coverage(predictions: List[dict], expected_cases: Iterable[dict]) -> None:
+    """Require exactly one prediction row for every selected case.
+
+    Generation-failure rows remain valid evidence. Model-output failures are
+    scored as deterministic malformed outputs; runtime/backend failures remain
+    unscored. Missing, duplicate, or unexpected rows are instead a malformed
+    prediction artifact and must not redefine the selected-case population.
+    """
+    expected_ids = _case_task_ids(expected_cases)
+    prediction_ids = [
+        str(row.get("task_id") or row.get("case_id") or "") for row in predictions
+    ]
+    duplicate_ids = sorted(
+        task_id for task_id, count in Counter(prediction_ids).items() if count > 1
+    )
+    missing_ids = sorted(set(expected_ids) - set(prediction_ids))
+    unexpected_ids = sorted(set(prediction_ids) - set(expected_ids))
+    if duplicate_ids or missing_ids or unexpected_ids:
+        details = []
+        if missing_ids:
+            details.append("missing=%s" % ",".join(missing_ids[:10]))
+        if unexpected_ids:
+            details.append("unexpected=%s" % ",".join(unexpected_ids[:10]))
+        if duplicate_ids:
+            details.append("duplicates=%s" % ",".join(duplicate_ids[:10]))
+        raise ValueError(
+            "Repository-edit prediction coverage does not match the selected cases: %s"
+            % "; ".join(details)
+        )
+    for prediction in predictions:
+        _prediction_state(prediction)
+
+
+def _selection_digest(task_ids: Iterable[str]) -> str:
+    return hashlib.sha256(
+        "\n".join(sorted(str(task_id) for task_id in task_ids)).encode("utf-8")
+    ).hexdigest()
+
+
+def _case_selection_digest(cases: Iterable[dict]) -> str:
+    prefix = "repository_edit/"
+    return _selection_digest(
+        task_id[len(prefix):] if task_id.startswith(prefix) else task_id
+        for task_id in _case_task_ids(cases)
+    )
+
+
+def _validate_case_manifest(
+    cases: List[dict], metadata: dict, fixtures: List[dict], expected_count: int
+) -> None:
+    _case_task_ids(cases)
+    if expected_count not in CASE_LIMITS:
+        raise ValueError("Repository-edit expected count must be one of 2, 6, or 8")
+    if len(cases) != expected_count:
+        raise ValueError(
+            "Repository-edit cases.jsonl count does not match trusted expected count: expected=%d actual=%d"
+            % (expected_count, len(cases))
+        )
+    declared_count = metadata.get("case_count")
+    if (
+        isinstance(declared_count, bool)
+        or not isinstance(declared_count, int)
+        or declared_count != len(cases)
+    ):
+        raise ValueError(
+            "Repository-edit cases.jsonl count does not match benchmark metadata: declared=%r actual=%d"
+            % (declared_count, len(cases))
+        )
+    algorithm = metadata.get("selection_digest_algorithm")
+    if algorithm != SELECTION_DIGEST_ALGORITHM:
+        raise ValueError(
+            "Repository-edit benchmark metadata has invalid selection digest algorithm: %r"
+            % algorithm
+        )
+    declared_selection = metadata.get("selection_sha256")
+    actual_selection = _case_selection_digest(cases)
+    if declared_selection != actual_selection:
+        raise ValueError(
+            "Repository-edit cases.jsonl selection does not match benchmark metadata: declared=%r actual=%s"
+            % (declared_selection, actual_selection)
+        )
+    selected = fixtures[: len(cases)]
+    if cases != [_public_case(fixture) for fixture in selected]:
+        raise ValueError(
+            "Repository-edit cases.jsonl does not match the pinned fixture prefix"
+        )
+    if metadata != _benchmark_metadata(selected):
+        raise ValueError(
+            "Repository-edit benchmark metadata does not match the pinned fixture selection"
+        )
 
 
 def _load_fixtures(path: Optional[Path] = None) -> List[dict]:
@@ -93,38 +240,41 @@ def _render_prompt(fixture: dict) -> str:
     )
 
 
+def _public_case(fixture: dict) -> dict:
+    return {
+        "case_id": "repository_edit/%s" % fixture["task_id"],
+        "task_id": "repository_edit/%s" % fixture["task_id"],
+        "category": fixture["category"],
+        "prompt": _render_prompt(fixture),
+        "editable_files": list(fixture["editable_files"]),
+        "fixture_revision": FIXTURE_REVISION,
+    }
+
+
+def _benchmark_metadata(selected: List[dict]) -> dict:
+    return {
+        "benchmark_id": "repository_edit_smoke_v1",
+        "display_name": "Repository edit diagnostic",
+        "case_count": len(selected),
+        "fixture_revision": FIXTURE_REVISION,
+        "sample_policy": "pinned_fixture_order_%d_v1" % len(selected),
+        "selection_digest_algorithm": SELECTION_DIGEST_ALGORITHM,
+        "selection_sha256": _selection_digest(item["task_id"] for item in selected),
+        "scoring_policy": "repo_edit_task_success_v1",
+    }
+
+
 def prepare(output_dir: str, limit: Optional[int] = None) -> None:
+    if limit is not None and limit not in CASE_LIMITS:
+        raise ValueError("Repository-edit limit must be one of 2, 6, or 8")
     fixtures = _load_fixtures()
     selected = fixtures[:limit] if limit else fixtures
-    cases = [
-        {
-            "case_id": "repository_edit/%s" % fixture["task_id"],
-            "task_id": "repository_edit/%s" % fixture["task_id"],
-            "category": fixture["category"],
-            "prompt": _render_prompt(fixture),
-            "editable_files": list(fixture["editable_files"]),
-            "fixture_revision": FIXTURE_REVISION,
-        }
-        for fixture in selected
-    ]
+    if len(selected) not in CASE_LIMITS:
+        raise ValueError("Repository-edit fixture count must be one of 2, 6, or 8")
+    cases = [_public_case(fixture) for fixture in selected]
     root = Path(output_dir)
-    selection_sha256 = hashlib.sha256(
-        "\n".join(sorted(str(item["task_id"]) for item in selected)).encode("utf-8")
-    ).hexdigest()
     _write_jsonl(root / "cases.jsonl", cases)
-    _write_json(
-        root / "benchmark_metadata.json",
-        {
-            "benchmark_id": "repository_edit_smoke_v1",
-            "display_name": "Repository edit diagnostic",
-            "case_count": len(cases),
-            "fixture_revision": FIXTURE_REVISION,
-            "sample_policy": "pinned_fixture_order_v1",
-            "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
-            "selection_sha256": selection_sha256,
-            "scoring_policy": "repo_edit_task_success_v1",
-        },
-    )
+    _write_json(root / "benchmark_metadata.json", _benchmark_metadata(selected))
 
 
 def _normalized_patch(completion: str) -> Tuple[Optional[str], Optional[str]]:
@@ -272,11 +422,20 @@ def _score_patch(fixture: dict, completion: str) -> dict:
         shutil.rmtree(workspace, ignore_errors=True)
 
 
-def evaluate(output_dir: str) -> None:
+def evaluate(output_dir: str, expected_count: int) -> None:
     root = Path(output_dir)
-    fixtures = {"repository_edit/%s" % item["task_id"]: item for item in _load_fixtures()}
-    cases = {str(item["task_id"]): item for item in _read_jsonl(root / "cases.jsonl")}
+    fixture_rows = _load_fixtures()
+    case_rows = _read_jsonl(root / "cases.jsonl")
+    benchmark_metadata = _read_json(root / "benchmark_metadata.json")
+    _validate_case_manifest(
+        case_rows, benchmark_metadata, fixture_rows, expected_count
+    )
+    fixtures = {
+        "repository_edit/%s" % item["task_id"]: item for item in fixture_rows
+    }
+    cases = {str(item["task_id"]): item for item in case_rows}
     predictions = _read_jsonl(root / "predictions.jsonl")
+    _validate_prediction_coverage(predictions, case_rows)
     results = []
     counts = {
         "passed_count": 0,
@@ -287,13 +446,19 @@ def evaluate(output_dir: str) -> None:
     }
     seen = set()
     for prediction in predictions:
-        if str(prediction.get("generation_status") or "completed") != "completed":
-            continue
         task_id = str(prediction.get("task_id") or prediction.get("case_id") or "")
         if task_id in seen or task_id not in cases or task_id not in fixtures:
             raise ValueError("Prediction contains an unknown or duplicate repository-edit task: %s" % task_id)
         seen.add(task_id)
-        scored = _score_patch(fixtures[task_id], str(prediction.get("completion") or ""))
+        generation_status, generation_failure_kind = _prediction_state(prediction)
+        if generation_status != "completed" and generation_failure_kind != "model_output":
+            continue
+        completion = (
+            str(prediction.get("completion") or "")
+            if generation_status == "completed"
+            else ""
+        )
+        scored = _score_patch(fixtures[task_id], completion)
         failure_class = scored.get("failure_class")
         counts["passed_count"] += int(bool(scored["passed"]))
         if failure_class == "malformed_patch":
@@ -317,19 +482,24 @@ def evaluate(output_dir: str) -> None:
         )
     total = len(results)
     success_rate = round(counts["passed_count"] / float(total), 6) if total else None
-    _write_json(
-        root / "summary.json",
-        {
-            "benchmark_id": "repository_edit_smoke_v1",
-            "display_name": "Repository edit diagnostic",
-            "status": "completed" if total else "failed",
-            "primary_metric": {"name": "task_success_rate", "value": success_rate},
-            "metrics": {"task_success_rate": success_rate, "total_count": total, **counts},
-            "case_results": results,
-            "scoring_policy": "repo_edit_task_success_v1",
-            "fixture_revision": FIXTURE_REVISION,
-        },
-    )
+    status = "completed" if total == len(cases) else ("partial" if total else "failed")
+    summary = {
+        "benchmark_id": "repository_edit_smoke_v1",
+        "display_name": "Repository edit diagnostic",
+        "status": status,
+        "primary_metric": {"name": "task_success_rate", "value": success_rate},
+        "metrics": {"task_success_rate": success_rate, "total_count": total, **counts},
+        "case_results": results,
+        "scoring_policy": "repo_edit_task_success_v1",
+        "fixture_revision": FIXTURE_REVISION,
+    }
+    if status == "partial":
+        summary["warning"] = (
+            "Some generations failed before scoring; the primary metric excludes those unscored cases."
+        )
+    elif status == "failed":
+        summary["error"] = "No completed generations were available for scoring."
+    _write_json(root / "summary.json", summary)
 
 
 def main() -> int:
@@ -340,12 +510,13 @@ def main() -> int:
     prepare_parser.add_argument("--limit", type=int)
     evaluate_parser = commands.add_parser("evaluate")
     evaluate_parser.add_argument("--output-dir", required=True)
+    evaluate_parser.add_argument("--expected-count", required=True, type=int)
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
     if args.command == "prepare":
         prepare(args.output_dir, limit=args.limit)
     else:
-        evaluate(args.output_dir)
+        evaluate(args.output_dir, expected_count=args.expected_count)
     return 0
 
 

@@ -12,7 +12,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
@@ -29,6 +29,8 @@ DEFAULT_METADATA_PATH = Path(
 )
 EXPECTED_SELECTION_SHA256 = "caafbae85c53215efdeb6299e22a6fb46aca158d94b124fbf73212b312cd0f5c"
 EXPECTED_SNAPSHOT_SHA256 = "ff6f7d15528d110e1bb6846336dcc312feba11395202672eddb3df7c7bbc69e0"
+SELECTION_DIGEST_ALGORITHM = "sorted_utf8_newline_sha256_v1"
+GENERATION_FAILURE_KINDS = frozenset(("generation", "model_output", "runtime"))
 CASE_LIMITS = (6, 18, 48)
 MAX_CODE_BYTES = 131072
 PER_TEST_TIMEOUT_SECONDS = 6.0
@@ -128,6 +130,83 @@ def _read_jsonl(path: Path) -> List[dict]:
         return [json.loads(line) for line in handle if line.strip()]
 
 
+def _case_task_ids(cases: Iterable[dict]) -> List[str]:
+    task_ids = [str(case.get("task_id") or "").strip() for case in cases]
+    duplicate_ids = sorted(
+        task_id for task_id, count in Counter(task_ids).items() if task_id and count > 1
+    )
+    if any(not task_id for task_id in task_ids) or duplicate_ids:
+        details = []
+        if any(not task_id for task_id in task_ids):
+            details.append("empty task id")
+        if duplicate_ids:
+            details.append("duplicates=%s" % ",".join(duplicate_ids[:10]))
+        raise ValueError(
+            "LiveCodeBench selected cases require non-empty unique task ids: %s"
+            % "; ".join(details)
+        )
+    return task_ids
+
+
+def _prediction_state(prediction: dict) -> Tuple[str, Optional[str]]:
+    status = (
+        "completed"
+        if "generation_status" not in prediction
+        else prediction.get("generation_status")
+    )
+    if status not in {"completed", "failed"}:
+        raise ValueError("LiveCodeBench prediction has invalid generation_status: %r" % status)
+    failure_kind = (
+        prediction.get("generation_failure_kind")
+        if "generation_failure_kind" in prediction
+        else None
+    )
+    if status == "completed" and failure_kind is not None:
+        raise ValueError(
+            "LiveCodeBench completed prediction cannot have generation_failure_kind: %r"
+            % failure_kind
+        )
+    if status == "failed" and failure_kind not in GENERATION_FAILURE_KINDS:
+        raise ValueError(
+            "LiveCodeBench failed prediction requires a recognized generation_failure_kind: %r"
+            % failure_kind
+        )
+    return status, failure_kind
+
+
+def _validate_prediction_coverage(predictions: List[dict], expected_cases: Iterable[dict]) -> None:
+    """Require exactly one prediction row for every selected case.
+
+    Generation-failure rows remain valid evidence. Model-output failures are
+    scored as deterministic malformed outputs; runtime/backend failures remain
+    unscored. Missing, duplicate, or unexpected rows are instead a malformed
+    prediction artifact and must not redefine the selected-case population.
+    """
+    expected_ids = _case_task_ids(expected_cases)
+    prediction_ids = [
+        str(row.get("task_id") or row.get("case_id") or "") for row in predictions
+    ]
+    duplicate_ids = sorted(
+        task_id for task_id, count in Counter(prediction_ids).items() if count > 1
+    )
+    missing_ids = sorted(set(expected_ids) - set(prediction_ids))
+    unexpected_ids = sorted(set(prediction_ids) - set(expected_ids))
+    if duplicate_ids or missing_ids or unexpected_ids:
+        details = []
+        if missing_ids:
+            details.append("missing=%s" % ",".join(missing_ids[:10]))
+        if unexpected_ids:
+            details.append("unexpected=%s" % ",".join(unexpected_ids[:10]))
+        if duplicate_ids:
+            details.append("duplicates=%s" % ",".join(duplicate_ids[:10]))
+        raise ValueError(
+            "LiveCodeBench prediction coverage does not match the selected cases: %s"
+            % "; ".join(details)
+        )
+    for prediction in predictions:
+        _prediction_state(prediction)
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -138,9 +217,77 @@ def _file_sha256(path: Path) -> str:
             digest.update(chunk)
 
 
+def _selection_digest_for_ids(question_ids: Iterable[str]) -> str:
+    return hashlib.sha256(
+        "\n".join(sorted(str(question_id) for question_id in question_ids)).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
 def _selection_digest(rows: List[dict]) -> str:
-    ids = sorted(str(row.get("question_id")) for row in rows)
-    return hashlib.sha256("\n".join(ids).encode("utf-8")).hexdigest()
+    return _selection_digest_for_ids(row.get("question_id") for row in rows)
+
+
+def _case_selection_digest(cases: Iterable[dict]) -> str:
+    prefix = "livecodebench_v6/"
+    question_ids = []
+    for task_id in _case_task_ids(cases):
+        if not task_id.startswith(prefix) or not task_id[len(prefix):]:
+            raise ValueError(
+                "LiveCodeBench selected case has invalid task id: %s" % task_id
+            )
+        question_ids.append(task_id[len(prefix):])
+    return _selection_digest_for_ids(question_ids)
+
+
+def _validate_case_manifest(
+    cases: List[dict],
+    metadata: dict,
+    snapshot: List[dict],
+    source_metadata: dict,
+    expected_count: int,
+) -> None:
+    _case_task_ids(cases)
+    if expected_count not in CASE_LIMITS:
+        raise ValueError("LiveCodeBench expected count must be one of 6, 18, or 48")
+    if len(cases) != expected_count:
+        raise ValueError(
+            "LiveCodeBench cases.jsonl count does not match trusted expected count: expected=%d actual=%d"
+            % (expected_count, len(cases))
+        )
+    declared_count = metadata.get("case_count")
+    if (
+        isinstance(declared_count, bool)
+        or not isinstance(declared_count, int)
+        or declared_count != len(cases)
+    ):
+        raise ValueError(
+            "LiveCodeBench cases.jsonl count does not match benchmark metadata: declared=%r actual=%d"
+            % (declared_count, len(cases))
+        )
+    algorithm = metadata.get("selection_digest_algorithm")
+    if algorithm != SELECTION_DIGEST_ALGORITHM:
+        raise ValueError(
+            "LiveCodeBench benchmark metadata has invalid selection digest algorithm: %r"
+            % algorithm
+        )
+    declared_selection = metadata.get("selection_sha256")
+    actual_selection = _case_selection_digest(cases)
+    if declared_selection != actual_selection:
+        raise ValueError(
+            "LiveCodeBench cases.jsonl selection does not match benchmark metadata: declared=%r actual=%s"
+            % (declared_selection, actual_selection)
+        )
+    selected = snapshot[: len(cases)]
+    if cases != [_public_case(row) for row in selected]:
+        raise ValueError(
+            "LiveCodeBench cases.jsonl does not match the verified snapshot prefix"
+        )
+    if metadata != _benchmark_metadata(selected, source_metadata):
+        raise ValueError(
+            "LiveCodeBench benchmark metadata does not match the verified snapshot selection"
+        )
 
 
 def _verified_snapshot(data_path: Path, metadata_path: Path) -> Tuple[List[dict], dict]:
@@ -191,6 +338,51 @@ def _public_case(row: dict) -> dict:
     }
 
 
+def _benchmark_metadata(selected: List[dict], source_metadata: dict) -> dict:
+    cases = [_public_case(row) for row in selected]
+    return {
+        "benchmark_id": BENCHMARK_ID,
+        "display_name": "LiveCodeBench v6 local reference",
+        "case_count": len(cases),
+        "platform_count": len({case["platform"] for case in cases}),
+        "difficulty_count": len({case["difficulty"] for case in cases}),
+        "month_count": len({case["contest_month"] for case in cases}),
+        "test_interface_counts": {
+            interface: len(
+                [case for case in cases if case["test_interface"] == interface]
+            )
+            for interface in ("stdin", "functional")
+        },
+        "dataset": source_metadata["dataset"],
+        "dataset_file": source_metadata["dataset_file"],
+        "dataset_revision": source_metadata["dataset_revision"],
+        "dataset_sha256": source_metadata["dataset_sha256"],
+        "upstream_code_revision": source_metadata["upstream_code_revision"],
+        "dataset_license_status": source_metadata["dataset_license_status"],
+        "dataset_card_license_value": source_metadata.get("dataset_card_license_value"),
+        "dataset_loader_license_notice": source_metadata.get(
+            "dataset_loader_license_notice"
+        ),
+        "snapshot_sha256": source_metadata["snapshot_sha256"],
+        "selected_test_count": sum(len(row["tests"]) for row in selected),
+        "maximum_test_input_bytes": max(
+            len(test["input"].encode("utf-8"))
+            for row in selected
+            for test in row["tests"]
+        ),
+        "maximum_test_output_bytes": max(
+            len(test["output"].encode("utf-8"))
+            for row in selected
+            for test in row["tests"]
+        ),
+        "sample_policy": "platform_difficulty_temporal_balanced_%d_v1" % len(cases),
+        "selection_digest_algorithm": SELECTION_DIGEST_ALGORITHM,
+        "selection_sha256": _selection_digest(selected),
+        "scoring_policy": "livecodebench_v6_local_pass_at_1_v1",
+        "repetitions": 1,
+    }
+
+
 def prepare(
     output_dir: str,
     limit: Optional[int] = None,
@@ -206,47 +398,7 @@ def prepare(
     _write_jsonl(root / "cases.jsonl", cases)
     _write_json(
         root / "benchmark_metadata.json",
-        {
-            "benchmark_id": BENCHMARK_ID,
-            "display_name": "LiveCodeBench v6 local reference",
-            "case_count": len(cases),
-            "platform_count": len({case["platform"] for case in cases}),
-            "difficulty_count": len({case["difficulty"] for case in cases}),
-            "month_count": len({case["contest_month"] for case in cases}),
-            "test_interface_counts": {
-                interface: len([case for case in cases if case["test_interface"] == interface])
-                for interface in ("stdin", "functional")
-            },
-            "dataset": source_metadata["dataset"],
-            "dataset_file": source_metadata["dataset_file"],
-            "dataset_revision": source_metadata["dataset_revision"],
-            "dataset_sha256": source_metadata["dataset_sha256"],
-            "upstream_code_revision": source_metadata["upstream_code_revision"],
-            "dataset_license_status": source_metadata["dataset_license_status"],
-            "dataset_card_license_value": source_metadata.get(
-                "dataset_card_license_value"
-            ),
-            "dataset_loader_license_notice": source_metadata.get(
-                "dataset_loader_license_notice"
-            ),
-            "snapshot_sha256": source_metadata["snapshot_sha256"],
-            "selected_test_count": sum(len(row["tests"]) for row in selected),
-            "maximum_test_input_bytes": max(
-                len(test["input"].encode("utf-8"))
-                for row in selected
-                for test in row["tests"]
-            ),
-            "maximum_test_output_bytes": max(
-                len(test["output"].encode("utf-8"))
-                for row in selected
-                for test in row["tests"]
-            ),
-            "sample_policy": "platform_difficulty_temporal_balanced_%d_v1" % len(cases),
-            "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
-            "selection_sha256": _selection_digest(selected),
-            "scoring_policy": "livecodebench_v6_local_pass_at_1_v1",
-            "repetitions": 1,
-        },
+        _benchmark_metadata(selected, source_metadata),
     )
 
 
@@ -448,16 +600,27 @@ def _group_metrics(results: List[dict], field: str) -> dict:
 
 def evaluate(
     output_dir: str,
+    expected_count: int,
     data_path: Path = DEFAULT_DATA_PATH,
     metadata_path: Path = DEFAULT_METADATA_PATH,
 ) -> None:
     root = Path(output_dir)
-    snapshot, _source_metadata = _verified_snapshot(Path(data_path), Path(metadata_path))
+    snapshot, source_metadata = _verified_snapshot(Path(data_path), Path(metadata_path))
     private = {
         "livecodebench_v6/%s" % row["question_id"]: row for row in snapshot
     }
-    cases = {str(row["task_id"]): row for row in _read_jsonl(root / "cases.jsonl")}
+    case_rows = _read_jsonl(root / "cases.jsonl")
+    benchmark_metadata = _read_json(root / "benchmark_metadata.json")
+    _validate_case_manifest(
+        case_rows,
+        benchmark_metadata,
+        snapshot,
+        source_metadata,
+        expected_count,
+    )
+    cases = {str(row["task_id"]): row for row in case_rows}
     predictions = _read_jsonl(root / "predictions.jsonl")
+    _validate_prediction_coverage(predictions, case_rows)
     results = []
     seen = set()
     failure_counts = {
@@ -468,8 +631,6 @@ def evaluate(
         "sandbox_failure_count": 0,
     }
     for prediction in predictions:
-        if str(prediction.get("generation_status") or "completed") != "completed":
-            continue
         task_id = str(prediction.get("task_id") or prediction.get("case_id") or "")
         if task_id in seen or task_id not in cases or task_id not in private:
             raise ValueError(
@@ -477,7 +638,15 @@ def evaluate(
                 % task_id
             )
         seen.add(task_id)
-        scored = _score_code(private[task_id], str(prediction.get("completion") or ""))
+        generation_status, generation_failure_kind = _prediction_state(prediction)
+        if generation_status != "completed" and generation_failure_kind != "model_output":
+            continue
+        completion = (
+            str(prediction.get("completion") or "")
+            if generation_status == "completed"
+            else ""
+        )
+        scored = _score_code(private[task_id], completion)
         failure_class = scored["failure_class"]
         if failure_class:
             key = "%s_count" % failure_class
@@ -504,55 +673,60 @@ def evaluate(
     total = len(results)
     passed_count = sum(int(result["passed"]) for result in results)
     pass_at_1 = round(passed_count / float(total), 6) if total else None
-    _write_json(
-        root / "summary.json",
-        {
-            "benchmark_id": BENCHMARK_ID,
-            "display_name": "LiveCodeBench v6 local reference",
-            "status": "completed" if total else "failed",
-            "primary_metric": {"name": "pass_at_1", "value": pass_at_1},
-            "metrics": {
-                "pass_at_1": pass_at_1,
-                "passed_count": passed_count,
-                "failed_count": total - passed_count,
-                "total_count": total,
-                "executed_test_count": sum(result["tests_executed"] for result in results),
-                "selected_test_count": sum(result["test_count"] for result in results),
-                **failure_counts,
-            },
-            "platform_metrics": _group_metrics(results, "platform"),
-            "difficulty_metrics": _group_metrics(results, "difficulty"),
-            "month_metrics": _group_metrics(results, "contest_month"),
-            "test_interface_metrics": _group_metrics(results, "test_interface"),
-            "case_results": results,
-            "scoring_policy": "livecodebench_v6_local_pass_at_1_v1",
-            "repetitions": 1,
-            "sandbox_policy": {
-                "policy_id": "livecodebench_generated_python_subprocess_v1",
-                "root_supervisor_capabilities": ["SETUID", "SETGID", "KILL"],
-                "generated_code_user": "nobody:65534",
-                "generated_child_capabilities": "cleared_after_setuid",
-                "per_test_timeout_seconds": PER_TEST_TIMEOUT_SECONDS,
-                "per_task_timeout_seconds": PER_TASK_TIMEOUT_SECONDS,
-                "child_memory_bytes": CHILD_MEMORY_BYTES,
-                "child_cpu_limit_seconds": 7,
-                "maximum_captured_result_bytes": MAX_CAPTURE_BYTES,
-                "hidden_expected_outputs_exposed_to_child": False,
-            },
-            "claim_boundary": {
-                "can_claim": [
-                    "pinned LiveCodeBench v6-derived local Python pass@1 reference"
-                ],
-                "cannot_claim": [
-                    "official LiveCodeBench leaderboard score",
-                    "LiveCodeBench pass@10 or multi-sample score",
-                    "SWE-bench or repository-edit capability",
-                    "general software-engineering capability",
-                    "contamination-free evidence for models trained after April 2025",
-                ],
-            },
+    status = "completed" if total == len(cases) else ("partial" if total else "failed")
+    summary = {
+        "benchmark_id": BENCHMARK_ID,
+        "display_name": "LiveCodeBench v6 local reference",
+        "status": status,
+        "primary_metric": {"name": "pass_at_1", "value": pass_at_1},
+        "metrics": {
+            "pass_at_1": pass_at_1,
+            "passed_count": passed_count,
+            "failed_count": total - passed_count,
+            "total_count": total,
+            "executed_test_count": sum(result["tests_executed"] for result in results),
+            "selected_test_count": sum(result["test_count"] for result in results),
+            **failure_counts,
         },
-    )
+        "platform_metrics": _group_metrics(results, "platform"),
+        "difficulty_metrics": _group_metrics(results, "difficulty"),
+        "month_metrics": _group_metrics(results, "contest_month"),
+        "test_interface_metrics": _group_metrics(results, "test_interface"),
+        "case_results": results,
+        "scoring_policy": "livecodebench_v6_local_pass_at_1_v1",
+        "repetitions": 1,
+        "sandbox_policy": {
+            "policy_id": "livecodebench_generated_python_subprocess_v1",
+            "root_supervisor_capabilities": ["SETUID", "SETGID", "KILL"],
+            "generated_code_user": "nobody:65534",
+            "generated_child_capabilities": "cleared_after_setuid",
+            "per_test_timeout_seconds": PER_TEST_TIMEOUT_SECONDS,
+            "per_task_timeout_seconds": PER_TASK_TIMEOUT_SECONDS,
+            "child_memory_bytes": CHILD_MEMORY_BYTES,
+            "child_cpu_limit_seconds": 7,
+            "maximum_captured_result_bytes": MAX_CAPTURE_BYTES,
+            "hidden_expected_outputs_exposed_to_child": False,
+        },
+        "claim_boundary": {
+            "can_claim": [
+                "pinned LiveCodeBench v6-derived local Python pass@1 reference"
+            ],
+            "cannot_claim": [
+                "official LiveCodeBench leaderboard score",
+                "LiveCodeBench pass@10 or multi-sample score",
+                "SWE-bench or repository-edit capability",
+                "general software-engineering capability",
+                "contamination-free evidence for models trained after April 2025",
+            ],
+        },
+    }
+    if status == "partial":
+        summary["warning"] = (
+            "Some generations failed before scoring; the primary metric excludes those unscored cases."
+        )
+    elif status == "failed":
+        summary["error"] = "No completed generations were available for scoring."
+    _write_json(root / "summary.json", summary)
 
 
 def main() -> int:
@@ -565,6 +739,7 @@ def main() -> int:
     prepare_parser.add_argument("--metadata-path", type=Path, default=DEFAULT_METADATA_PATH)
     evaluate_parser = commands.add_parser("evaluate")
     evaluate_parser.add_argument("--output-dir", required=True)
+    evaluate_parser.add_argument("--expected-count", required=True, type=int)
     evaluate_parser.add_argument("--data-path", type=Path, default=DEFAULT_DATA_PATH)
     evaluate_parser.add_argument("--metadata-path", type=Path, default=DEFAULT_METADATA_PATH)
     args = parser.parse_args()
@@ -579,6 +754,7 @@ def main() -> int:
     else:
         evaluate(
             args.output_dir,
+            expected_count=args.expected_count,
             data_path=args.data_path,
             metadata_path=args.metadata_path,
         )
