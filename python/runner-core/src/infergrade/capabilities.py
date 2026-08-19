@@ -1231,7 +1231,11 @@ def execute_capability_suite(
             task_performance_rows.extend(predictions)
             _write_jsonl(os.path.join(benchmark_dir, "predictions.jsonl"), predictions)
             phase_started = time.perf_counter()
-            summary = _evaluate_benchmark(spec, benchmark_dir)
+            summary = _evaluate_benchmark(
+                spec,
+                benchmark_dir,
+                spec.case_limits.get(request.tier),
+            )
             phase_timings["scoring_seconds"] = round(time.perf_counter() - phase_started, 6)
             phase_timings["total_wall_seconds"] = round(time.perf_counter() - benchmark_started, 6)
             summary["phase_timings"] = dict(phase_timings)
@@ -2362,7 +2366,9 @@ def _write_repository_edit_capability_run_artifact(
     primary_metric = dict(summary.get("primary_metric") or {})
     score = primary_metric.get("value")
     summary_state = _capability_artifact_state(
-        summary.get("status"), score, summary.get("generation_failure_severity")
+        summary.get("status"),
+        score,
+        summary.get("unscored_generation_failure_severity"),
     )
     case_results = {
         str(item.get("task_id") or item.get("case_id") or ""): dict(item)
@@ -2381,8 +2387,17 @@ def _write_repository_edit_capability_run_artifact(
         case = _case_by_task_id(cases, task_id)
         result = case_results.get(task_id, {})
         generation_status = str(prediction.get("generation_status") or "")
-        if generation_status != "completed":
-            task_state, task_score, error_class = "failed", None, "generation_failed"
+        generation_failure_kind = str(
+            prediction.get("generation_failure_kind") or ""
+        )
+        if generation_status != "completed" and generation_failure_kind == "model_output":
+            task_state, task_score, error_class = "scored", 0.0, "model_output"
+        elif generation_status != "completed":
+            task_state, task_score, error_class = (
+                "partial",
+                None,
+                generation_failure_kind or "generation_failed",
+            )
         elif gate_blocked:
             task_state, task_score, error_class = (
                 "not_comparable",
@@ -2497,7 +2512,7 @@ def _write_repository_edit_capability_run_artifact(
                 and isinstance(metrics.get("passed_count"), int)
                 else None
             ),
-            "partial_count": summary.get("generation_failure_count") or 0,
+            "partial_count": summary.get("unscored_generation_failure_count") or 0,
             "skipped_count": 0,
             "not_comparable_count": len([task for task in tasks if task["state"] == "not_comparable"]),
             **_artifact_summary_performance(summary.get("task_performance")),
@@ -3160,11 +3175,24 @@ def _prepare_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir: str, 
     _run_capability_container(spec.container_image, benchmark_dir, command)
 
 
-def _evaluate_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str) -> Dict[str, Any]:
+def _evaluate_benchmark(
+    spec: CapabilityBenchmarkSpec,
+    benchmark_dir: str,
+    expected_count: Optional[int],
+) -> Dict[str, Any]:
     if spec.execution_mode == "native":
         return _evaluate_native_benchmark(spec, benchmark_dir)
     command = ["evaluate", "--output-dir", "/work"]
     command.extend(spec.container_args)
+    if spec.benchmark_id in {
+        "livecodebench_reference_v1",
+        "repository_edit_smoke_v1",
+    }:
+        if expected_count is None:
+            raise ValueError(
+                "Trusted expected case count is required for %s" % spec.benchmark_id
+            )
+        command.extend(["--expected-count", str(expected_count)])
     _run_capability_container(spec.container_image, benchmark_dir, command)
     summary_path = os.path.join(benchmark_dir, "summary.json")
     return read_json(summary_path)
