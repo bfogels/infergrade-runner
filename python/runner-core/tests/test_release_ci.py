@@ -369,9 +369,62 @@ class ReleaseCiTests(unittest.TestCase):
             workflow = (ROOT / ".github" / "workflows" / filename).read_text(encoding="utf-8")
             with self.subTest(filename=filename):
                 self.assertIn("timeout --kill-after=15s 180s apt-get", workflow)
+                self.assertIn("timeout --kill-after=15s 240s apt-get", workflow)
                 self.assertIn("/etc/apt/apt-mirrors.txt", workflow)
+                self.assertIn("/etc/apt/sources.list", workflow)
+                self.assertIn("/etc/apt/sources.list.d/ubuntu.sources", workflow)
+                self.assertIn(
+                    "for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources",
+                    workflow,
+                )
+                self.assertIn('if [ -f "$source_file" ]; then', workflow)
                 self.assertIn("https://archive.ubuntu.com/ubuntu", workflow)
                 self.assertIn("Hosted mirror stalled", workflow)
+
+    def test_ci_linux_dependency_install_has_its_own_bounded_mirror_fallback(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("timeout-minutes: 30", workflow)
+        self.assertIn("install_packages 480 1", workflow)
+        self.assertIn("install_packages 720 3", workflow)
+        self.assertIn("Hosted mirror stalled during package download", workflow)
+        self.assertIn("timeout --kill-after=15s 240s apt-get", workflow)
+        self.assertIn("timeout --kill-after=15s 120s dpkg --configure -a", workflow)
+
+    def test_desktop_smoke_dependency_install_has_bounded_mirror_fallback(self):
+        workflow = (ROOT / ".github" / "workflows" / "desktop-platform-smoke.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("timeout-minutes: 30", workflow)
+        self.assertIn("install_packages 480 1", workflow)
+        self.assertIn("install_packages 720 3", workflow)
+        self.assertIn("Hosted mirror stalled during desktop dependency download", workflow)
+        self.assertIn("timeout --kill-after=15s 240s apt-get", workflow)
+        self.assertIn("timeout --kill-after=15s 120s dpkg --configure -a", workflow)
+
+    def test_desktop_release_dependency_install_has_bounded_mirror_fallback(self):
+        workflow = (ROOT / ".github" / "workflows" / "desktop-runner-release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("timeout-minutes: 30", workflow)
+        self.assertIn("install_packages 480 1", workflow)
+        self.assertIn("install_packages 720 3", workflow)
+        self.assertIn("Hosted mirror stalled during release dependency download", workflow)
+        self.assertIn("timeout --kill-after=15s 240s apt-get", workflow)
+        self.assertIn("timeout --kill-after=15s 120s dpkg --configure -a", workflow)
+
+    def test_linux_package_install_smoke_bounds_local_deb_install(self):
+        script = (ROOT / "scripts" / "smoke_desktop_linux_packages.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'timeout --kill-after=15s 180s apt-get install -y "$deb_path"',
+            script,
+        )
 
     def test_release_version_guard_requires_strict_semver_forward_progress(self):
         self.assertEqual(parse_release_version("0.3.36"), (0, 3, 36))
