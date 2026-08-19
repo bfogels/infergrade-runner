@@ -10,7 +10,19 @@ from unittest import mock
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade import __version__
-from infergrade.capability_contract import validate_capability_run_artifact
+from infergrade.capability_contract import (
+    validate_capability_run_artifact,
+    validate_current_capability_run_artifact,
+    validate_capability_run_schema_artifact,
+)
+from infergrade.longbench_selection import (
+    ARTIFACT_SPEC_VERSION as LONGBENCH_SELECTION_ARTIFACT_SPEC_VERSION,
+    BENCHMARK_ID as LONGBENCH_SELECTION_BENCHMARK_ID,
+    RECEIPT_ARTIFACT_KIND as LONGBENCH_SELECTION_RECEIPT_KIND,
+    SELECTION_DIGEST_ALGORITHM as LONGBENCH_SELECTION_DIGEST_ALGORITHM,
+    SELECTION_DIGEST_CONVENTION as LONGBENCH_SELECTION_DIGEST_CONVENTION,
+    load_longbench_selection_manifest,
+)
 from infergrade.reasoning_constraint_stress import reasoning_constraint_stress_cases
 from infergrade.selection_identity import (
     SORTED_JSON_STRING_ARRAY_SHA256_V1,
@@ -544,6 +556,205 @@ class CapabilityTests(unittest.TestCase):
             quant_path,
             ["perplexity_reference_v1"],
             SORTED_JSON_STRING_ARRAY_SHA256_V1,
+        )
+
+    def test_longbench_capability_run_rebinds_receipt_metadata_and_task_digest(self):
+        spec = CAPABILITY_BENCHMARKS[LONGBENCH_SELECTION_BENCHMARK_ID]
+        manifest = load_longbench_selection_manifest()
+        rows = manifest["selection_projection"][:6]
+        raw_ids = [row["_id"] for row in rows]
+        task_ids = ["longbench_v2/%s" % raw_id for raw_id in raw_ids]
+        benchmark_dir = os.path.join(self.tempdir, "longbench")
+        os.makedirs(benchmark_dir)
+        cases = [
+            {
+                "case_id": task_id,
+                "task_id": task_id,
+                "question_id": row["_id"],
+                "category": row["domain"],
+                "sub_domain": row["sub_domain"],
+                "difficulty": row["difficulty"],
+                "length": row["length"],
+                "context_word_count": 20 + index,
+                "nominal_context_bucket_tokens": 16384,
+                "answer": "A",
+            }
+            for index, (row, task_id) in enumerate(zip(rows, task_ids))
+        ]
+        with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+            for case in cases:
+                handle.write(json.dumps(case) + "\n")
+        raw_selection_sha256 = selection_digest(raw_ids, LONGBENCH_SELECTION_DIGEST_ALGORITHM)
+        receipt = {
+            "artifact_kind": LONGBENCH_SELECTION_RECEIPT_KIND,
+            "artifact_spec_version": LONGBENCH_SELECTION_ARTIFACT_SPEC_VERSION,
+            "benchmark_id": LONGBENCH_SELECTION_BENCHMARK_ID,
+            "dataset": manifest["dataset"],
+            "dataset_revision": manifest["dataset_revision"],
+            "dataset_sha256": manifest["dataset_sha256"],
+            "dataset_license": manifest["dataset_license"],
+            "source_case_count": manifest["source_case_count"],
+            "source_short_case_count": manifest["source_short_case_count"],
+            "source_context_fit_case_count": manifest["source_context_fit_case_count"],
+            "maximum_estimated_context_tokens": manifest["maximum_estimated_context_tokens"],
+            "domain_count": manifest["domain_count"],
+            "difficulty_count": manifest["difficulty_count"],
+            "length_scope": manifest["length_scope"],
+            "selection_policy": manifest["selection_policy"],
+            "selection_digest_algorithm": LONGBENCH_SELECTION_DIGEST_ALGORITHM,
+            "selection_digest_convention": LONGBENCH_SELECTION_DIGEST_CONVENTION,
+            "snapshot_sha256": manifest["snapshot_sha256"],
+            "tier": "canary",
+            "case_count": 6,
+            "selected_ids": raw_ids,
+            "prepared_ids": raw_ids,
+            "selection_projection": rows,
+            "selection_sha256": raw_selection_sha256,
+        }
+        with open(os.path.join(benchmark_dir, "selection_receipt.json"), "w", encoding="utf-8") as handle:
+            json.dump(receipt, handle)
+        with open(os.path.join(benchmark_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "benchmark_id": LONGBENCH_SELECTION_BENCHMARK_ID,
+                    "display_name": "LongBench v2 local reference",
+                    "case_count": 6,
+                    "category_count": 6,
+                    "difficulty_count": 2,
+                    "length_scope": "short",
+                    "minimum_context_word_count": 20,
+                    "maximum_context_word_count": 25,
+                    "context_bucket_counts": {"16384": 6},
+                    "dataset": manifest["dataset"],
+                    "dataset_revision": manifest["dataset_revision"],
+                    "dataset_sha256": manifest["dataset_sha256"],
+                    "dataset_license": manifest["dataset_license"],
+                    "snapshot_sha256": manifest["snapshot_sha256"],
+                    "sample_policy": "short_domain_balanced_difficulty_mixed_6_v1",
+                    "selection_digest_algorithm": LONGBENCH_SELECTION_DIGEST_ALGORITHM,
+                    "selection_digest_convention": LONGBENCH_SELECTION_DIGEST_CONVENTION,
+                    "selection_sha256": raw_selection_sha256,
+                },
+                handle,
+            )
+        predictions = [
+            {
+                "case_id": case["case_id"],
+                "task_id": case["task_id"],
+                "generation_status": "completed",
+                "completion": "A",
+            }
+            for case in cases
+        ]
+        summary = {
+            "status": "completed",
+            "primary_metric": {"name": "accuracy", "value": 1.0},
+            "metrics": {"correct_count": 6, "total_count": 6},
+            "case_results": [
+                {
+                    "case_id": case["case_id"],
+                    "task_id": case["task_id"],
+                    "expected": "A",
+                    "predicted": "A",
+                    "correct": True,
+                    "category": case["category"],
+                    "sub_domain": case["sub_domain"],
+                    "difficulty": case["difficulty"],
+                    "length": case["length"],
+                }
+                for case in cases
+            ],
+            "scoring_policy": "exact_multiple_choice_letter_accuracy_v4",
+            "container_runtime": {
+                "container_image": "fixture/image",
+                "container_image_id": "sha256:fixture",
+                "container_repo_digests": [],
+            },
+        }
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=[LONGBENCH_SELECTION_BENCHMARK_ID],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        path = _write_multiple_choice_capability_run_artifact(
+            request, spec, benchmark_dir, cases, predictions, summary
+        )
+        with open(path, encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(validate_current_capability_run_artifact(artifact), [])
+        self.assertEqual(artifact["protocol"]["benchmark_tier"], "canary")
+        self.assertEqual(artifact["protocol"]["case_count"], 6)
+        self.assertEqual(
+            artifact["protocol"]["selection_sha256"],
+            selection_digest(task_ids, SORTED_UTF8_NEWLINE_SHA256_V1),
+        )
+        self.assertNotEqual(artifact["protocol"]["selection_sha256"], raw_selection_sha256)
+        self.assertIn("selection_receipt.json", artifact["artifacts"]["supporting_files"])
+        wrong_tier = json.loads(json.dumps(artifact))
+        wrong_tier["protocol"]["benchmark_tier"] = "standard"
+        self.assertTrue(
+            any("LongBench protocol.case_count must match the catalog tier" in error
+                for error in validate_current_capability_run_artifact(wrong_tier))
+        )
+        wrong_digest = json.loads(json.dumps(artifact))
+        wrong_digest["protocol"]["selection_sha256"] = raw_selection_sha256
+        self.assertIn(
+            "protocol.selection_sha256 must match task IDs",
+            validate_current_capability_run_artifact(wrong_digest),
+        )
+        missing_receipt_pointer = json.loads(json.dumps(artifact))
+        missing_receipt_pointer["artifacts"]["supporting_files"].remove("selection_receipt.json")
+        missing_receipt_errors = validate_current_capability_run_artifact(missing_receipt_pointer)
+        self.assertIn(
+            "LongBench capability_run artifacts must include selection_receipt.json",
+            missing_receipt_errors,
+        )
+        self.assertTrue(validate_capability_run_schema_artifact(missing_receipt_pointer))
+
+        with open(os.path.join(benchmark_dir, "benchmark_metadata.json"), encoding="utf-8") as handle:
+            tampered_metadata = json.load(handle)
+        tampered_metadata["dataset_revision"] = "attacker-revision"
+        tampered_metadata["unexpected"] = "SECRET"
+        with open(os.path.join(benchmark_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+            json.dump(tampered_metadata, handle)
+        with self.assertRaises(ValueError) as raised:
+            _write_multiple_choice_capability_run_artifact(
+                request, spec, benchmark_dir, cases, predictions, summary
+            )
+        self.assertNotIn("SECRET", str(raised.exception))
+
+    def test_longbench_receipt_verifies_before_generation(self):
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=[LONGBENCH_SELECTION_BENCHMARK_ID],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases") as prepare_mock:
+            with mock.patch(
+                "infergrade.capabilities._verify_longbench_selection_receipt",
+                side_effect=ValueError("selection receipt rejected"),
+            ) as verify_mock:
+                with mock.patch("infergrade.capabilities._generate_predictions") as generate_mock:
+                    execution = execute_capability_suite(_FakeAdapter(), request)
+
+        prepare_mock.assert_called_once()
+        verify_mock.assert_called_once()
+        generate_mock.assert_not_called()
+        self.assertEqual(
+            execution.benchmark_results[LONGBENCH_SELECTION_BENCHMARK_ID]["status"],
+            "failed",
+        )
+        self.assertIn(
+            "selection receipt rejected",
+            execution.benchmark_results[LONGBENCH_SELECTION_BENCHMARK_ID]["error"],
         )
 
     def test_prediction_rows_fail_closed_on_identity_drift_and_synthesize_abort_rows(self):

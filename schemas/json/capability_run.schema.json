@@ -104,6 +104,9 @@
           "type": "integer",
           "minimum": 0
         },
+        "benchmark_tier": {
+          "enum": ["canary", "standard", "gold"]
+        },
         "scorer_type": {
           "enum": ["exact_match", "regex", "json_schema", "strict_json_equality", "unit_test", "static_check", "multiple_choice", "perplexity", "metric_only", "manual_review"]
         },
@@ -234,6 +237,35 @@
               "selection_sha256",
               "case_count"
             ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "artifact_spec_version": { "const": "0.1.1" },
+          "protocol": {
+            "properties": {
+              "task_version": { "const": "longbench_v2_local_reference_v1" }
+            },
+            "required": ["task_version"]
+          }
+        },
+        "required": ["artifact_spec_version", "protocol"]
+      },
+      "then": {
+        "properties": {
+          "protocol": {
+            "required": ["benchmark_tier"]
+          },
+          "artifacts": {
+            "required": ["supporting_files"],
+            "properties": {
+              "supporting_files": {
+                "contains": { "const": "selection_receipt.json" }
+              }
+            }
           }
         }
       }

@@ -119,6 +119,65 @@ class CapabilityContractTests(unittest.TestCase):
         manifest = load_contract_manifest()
         self.assertIn("schemas/json/capability_run.schema.json", manifest["schema_files"])
 
+    def test_longbench_schema_requires_allowlisted_tier_and_receipt_pointer(self):
+        artifact = _artifact()
+        artifact["artifact_spec_version"] = "0.1.1"
+        artifact["protocol"].update(
+            {
+                "task_version": "longbench_v2_local_reference_v1",
+                "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                "selection_sha256": selection_digest(
+                    ["assistant_fixture_001"], SORTED_JSON_STRING_ARRAY_SHA256_V1
+                ),
+                "case_count": 1,
+                "benchmark_tier": "canary",
+            }
+        )
+        artifact["artifacts"]["supporting_files"] = ["selection_receipt.json"]
+        self.assertEqual(validate_capability_run_schema_artifact(artifact), [])
+
+        missing_tier = json.loads(json.dumps(artifact))
+        del missing_tier["protocol"]["benchmark_tier"]
+        self.assertTrue(
+            any("benchmark_tier" in error for error in validate_capability_run_schema_artifact(missing_tier))
+        )
+
+        invalid_tier = json.loads(json.dumps(artifact))
+        invalid_tier["protocol"]["benchmark_tier"] = "unsupported"
+        self.assertTrue(
+            any("benchmark_tier" in error for error in validate_capability_run_schema_artifact(invalid_tier))
+        )
+
+        missing_receipt = json.loads(json.dumps(artifact))
+        missing_receipt["artifacts"]["supporting_files"] = []
+        self.assertTrue(validate_capability_run_schema_artifact(missing_receipt))
+
+    def test_longbench_malformed_truthy_artifacts_are_rejected_without_semantic_crashes(self):
+        artifact = _artifact()
+        artifact["artifact_spec_version"] = "0.1.1"
+        artifact["protocol"].update(
+            {
+                "task_version": "longbench_v2_local_reference_v1",
+                "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                "selection_sha256": selection_digest(
+                    ["assistant_fixture_001"], SORTED_JSON_STRING_ARRAY_SHA256_V1
+                ),
+                "case_count": 1,
+                "benchmark_tier": "canary",
+            }
+        )
+
+        for malformed_artifacts in (["not-an-object"], "not-an-object", 1, True):
+            with self.subTest(artifacts=repr(malformed_artifacts)):
+                candidate = json.loads(json.dumps(artifact))
+                candidate["artifacts"] = malformed_artifacts
+                schema_errors = validate_capability_run_schema_artifact(candidate)
+                semantic_errors = validate_capability_run_artifact(candidate)
+                current_errors = validate_current_capability_run_artifact(candidate)
+                self.assertTrue(schema_errors)
+                self.assertTrue(semantic_errors)
+                self.assertTrue(current_errors)
+
     def test_capability_summary_schema_is_declared_in_contract_manifest(self):
         schema = load_capability_summary_schema()
         self.assertEqual(schema["properties"]["artifact_kind"]["const"], "capability_summary")

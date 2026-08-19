@@ -137,6 +137,11 @@ def _validate(
             raise SchemaValidationError("%s has fewer than minItems" % value_path)
         if "maxItems" in schema and len(value) > int(schema["maxItems"]):
             raise SchemaValidationError("%s has more than maxItems" % value_path)
+        if "contains" in schema and not any(
+            _matches(item, schema["contains"], root_schema, schema_path, value_path)
+            for item in value
+        ):
+            raise SchemaValidationError("%s must contain a matching item" % value_path)
         if schema.get("uniqueItems") is True:
             encoded = [
                 json.dumps(item, sort_keys=True, separators=(",", ":"))

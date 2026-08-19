@@ -26,6 +26,12 @@ TERMINAL_MARKERS = ("[end of text]", "<|end_of_text|>", "<|endoftext|>", "</s>")
 EMPTY_THINK_PREFIX = re.compile(r"^\s*<think>\s*</think>\s*", re.IGNORECASE)
 EXPECTED_SELECTION_SHA256 = "1a5f48517a31dc80083700955b92d9524cba2d863448209956e2cf1b423079a3"
 EXPECTED_SNAPSHOT_SHA256 = "677ac38dc799b0bbe61816f1d0c245bb93f01dd535a71ecfde6fa619d3eb86db"
+SELECTION_DIGEST_ALGORITHM = "sorted_utf8_newline_sha256_v1"
+SELECTION_DIGEST_CONVENTION = (
+    "sha256 of sorted raw LongBench _id values joined by one UTF-8 newline, "
+    "with no trailing newline"
+)
+SUPPORTED_TIER_PREFIXES = {"canary": 6, "standard": 12, "gold": 23}
 CONTEXT_BUCKETS = (16384, 32768, 65536, 131072)
 
 
@@ -57,6 +63,66 @@ def _read_json(path: str) -> dict:
 def _selection_digest(rows: List[dict]) -> str:
     ids = sorted(str(row.get("_id")) for row in rows)
     return hashlib.sha256("\n".join(ids).encode("utf-8")).hexdigest()
+
+
+def _selection_projection(row: dict) -> dict:
+    """Return the prompt-free public identity projection for one selected row."""
+    return {
+        "_id": str(row["_id"]),
+        "domain": str(row["domain"]),
+        "sub_domain": str(row["sub_domain"]),
+        "difficulty": str(row["difficulty"]),
+        "length": str(row["length"]),
+    }
+
+
+def _tier_for_limit(limit: Optional[int]) -> tuple:
+    if limit is None:
+        return "gold", SUPPORTED_TIER_PREFIXES["gold"]
+    if limit not in SUPPORTED_TIER_PREFIXES.values():
+        raise ValueError(
+            "Unsupported LongBench tier limit %r; expected one of %s"
+            % (limit, sorted(SUPPORTED_TIER_PREFIXES.values()))
+        )
+    return next(tier for tier, count in SUPPORTED_TIER_PREFIXES.items() if count == limit), limit
+
+
+def _validate_source_metadata(full_rows: List[dict], source_metadata: dict, snapshot_sha256: str) -> None:
+    expected = {
+        "benchmark_id": "longbench_v2_local_reference_v1",
+        "dataset": "zai-org/LongBench-v2",
+        "dataset_revision": "2b48e494f2c7a2f0af81aae178e05c7e1dde0fe9",
+        "dataset_sha256": "15d61c22d92c96900b3c4948b6aeea218d3214b676a65df48e7b8555604c7fe2",
+        "dataset_license": "Apache-2.0",
+        "case_count": 23,
+        "source_case_count": 503,
+        "source_short_case_count": 180,
+        "source_context_fit_case_count": 177,
+        "maximum_estimated_context_tokens": 131072,
+        "domain_count": 6,
+        "difficulty_count": 2,
+        "length_scope": "short",
+        "selection_policy": "short_domain_difficulty_hash_rank_balanced_tier_blocks_v1",
+        "selection_digest_algorithm": SELECTION_DIGEST_ALGORITHM,
+        "selection_digest_convention": SELECTION_DIGEST_CONVENTION,
+        "snapshot_sha256": snapshot_sha256,
+    }
+    for field, expected_value in expected.items():
+        if source_metadata.get(field) != expected_value:
+            raise ValueError("LongBench v2 snapshot metadata mismatch: %s" % field)
+    selected_ids = [str(row.get("_id") or "") for row in full_rows]
+    if any(not item for item in selected_ids):
+        raise ValueError("LongBench v2 snapshot contains a missing raw _id")
+    if len(selected_ids) != len(set(selected_ids)):
+        raise ValueError("LongBench v2 snapshot contains duplicate raw _id values")
+    if source_metadata.get("selected_ids") != selected_ids:
+        raise ValueError("LongBench v2 snapshot metadata selected_ids order mismatch")
+    if source_metadata.get("selection_sha256") != _selection_digest(full_rows):
+        raise ValueError("LongBench v2 snapshot metadata selection digest mismatch")
+    if source_metadata.get("selection_projection") != [
+        _selection_projection(row) for row in full_rows
+    ]:
+        raise ValueError("LongBench v2 snapshot metadata selection projection mismatch")
 
 
 def _nominal_context_bucket_tokens(context: str) -> int:
@@ -145,10 +211,10 @@ def prepare(
     full_rows = _read_jsonl(data_path)
     if len(full_rows) != 23:
         raise ValueError("Expected 23 LongBench v2 snapshot rows, found %d" % len(full_rows))
-    rows = full_rows[:limit] if limit else full_rows
+    tier, expected_count = _tier_for_limit(limit)
+    rows = full_rows[:expected_count]
     if not rows:
         raise ValueError("LongBench v2 selection cannot be empty")
-    cases = [_case_from_row(row) for row in rows]
     source_metadata = _read_json(metadata_path)
     actual_selection_sha256 = _selection_digest(full_rows)
     with open(data_path, "rb") as snapshot_handle:
@@ -157,11 +223,39 @@ def prepare(
         raise ValueError("LongBench v2 selected case identity does not match the reviewed snapshot")
     if actual_snapshot_sha256 != EXPECTED_SNAPSHOT_SHA256:
         raise ValueError("LongBench v2 snapshot content does not match the reviewed snapshot")
-    if source_metadata.get("selection_sha256") != actual_selection_sha256:
-        raise ValueError("LongBench v2 metadata selection identity does not match snapshot rows")
-    if source_metadata.get("snapshot_sha256") != actual_snapshot_sha256:
-        raise ValueError("LongBench v2 metadata content identity does not match snapshot bytes")
+    _validate_source_metadata(full_rows, source_metadata, actual_snapshot_sha256)
+    cases = [_case_from_row(row) for row in rows]
     _write_jsonl(os.path.join(output_dir, "cases.jsonl"), cases)
+    selected_ids = [str(row["_id"]) for row in rows]
+    _write_json(
+        os.path.join(output_dir, "selection_receipt.json"),
+        {
+            "artifact_kind": "longbench_selection_receipt",
+            "artifact_spec_version": "0.1.0",
+            "benchmark_id": source_metadata["benchmark_id"],
+            "dataset": source_metadata["dataset"],
+            "dataset_revision": source_metadata["dataset_revision"],
+            "dataset_sha256": source_metadata["dataset_sha256"],
+            "dataset_license": source_metadata["dataset_license"],
+            "source_case_count": source_metadata["source_case_count"],
+            "source_short_case_count": source_metadata["source_short_case_count"],
+            "source_context_fit_case_count": source_metadata["source_context_fit_case_count"],
+            "maximum_estimated_context_tokens": source_metadata["maximum_estimated_context_tokens"],
+            "domain_count": source_metadata["domain_count"],
+            "difficulty_count": source_metadata["difficulty_count"],
+            "length_scope": source_metadata["length_scope"],
+            "selection_policy": source_metadata["selection_policy"],
+            "selection_digest_algorithm": SELECTION_DIGEST_ALGORITHM,
+            "selection_digest_convention": SELECTION_DIGEST_CONVENTION,
+            "snapshot_sha256": actual_snapshot_sha256,
+            "tier": tier,
+            "case_count": len(cases),
+            "selected_ids": selected_ids,
+            "prepared_ids": [str(case["question_id"]) for case in cases],
+            "selection_projection": [_selection_projection(row) for row in rows],
+            "selection_sha256": _selection_digest(rows),
+        },
+    )
     _write_json(
         os.path.join(output_dir, "benchmark_metadata.json"),
         {
@@ -198,6 +292,7 @@ def prepare(
                 else "short_domain_difficulty_balanced_%d_v1" % len(cases)
             ),
             "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
+            "selection_digest_convention": SELECTION_DIGEST_CONVENTION,
             "selection_sha256": _selection_digest(rows),
         },
     )
