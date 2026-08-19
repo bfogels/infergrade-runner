@@ -7,7 +7,12 @@ from typing import Any, Dict, List, Optional
 
 from infergrade import __version__
 from infergrade.benchmark_catalog import selection_metadata_for_request
-from infergrade.capability_contract import CAPABILITY_SURFACES, validate_capability_summary_artifact
+from infergrade.capability_contract import (
+    CAPABILITY_SURFACES,
+    capability_run_admission_error_summary,
+    validate_capability_summary_artifact,
+    validate_current_capability_run_artifact,
+)
 from infergrade.capability_scoring import score_capability_surface
 from infergrade.contracts import load_contract_manifest
 from infergrade.models import CapabilityExecution, RunRequest
@@ -132,6 +137,7 @@ def _discover_capability_run_artifacts(execution: CapabilityExecution, output_di
         capability_run_path = paths.get("capability_run_path")
         if not capability_run_path:
             continue
+        artifact_benchmark_ids.add(benchmark_id)
         try:
             artifact = _read_json(capability_run_path)
         except (OSError, ValueError):
@@ -155,6 +161,31 @@ def _discover_capability_run_artifacts(execution: CapabilityExecution, output_di
                 }
             )
             continue
+        admission_errors = validate_current_capability_run_artifact(artifact)
+        if admission_errors:
+            metadata = _check_metadata_from_execution(execution, benchmark_id)
+            surface = metadata.get("surface_id")
+            if surface not in SUMMARY_SURFACES:
+                continue
+            pointers.append(
+                {
+                    "artifact_kind": "inadmissible_capability_run",
+                    "benchmark_id": benchmark_id,
+                    "surface": surface,
+                    "state": "not_comparable",
+                    "lane": metadata.get("evidence_lane_id") or "decision",
+                    "confidence_label": _confidence_for_lane(
+                        metadata.get("evidence_lane_id") or "decision"
+                    ),
+                    "path": _relative_path(capability_run_path, output_dir),
+                    "score": None,
+                    "task_count": 0,
+                    "failure_count": 0,
+                    "error_class": "artifact_not_current_admissible",
+                    **capability_run_admission_error_summary(admission_errors),
+                }
+            )
+            continue
         evidence = dict(artifact.get("evidence") or {})
         summary = dict(artifact.get("summary") or {})
         protocol = dict(artifact.get("protocol") or {})
@@ -162,7 +193,6 @@ def _discover_capability_run_artifacts(execution: CapabilityExecution, output_di
         state = str(summary.get("state") or "not_comparable")
         lane = evidence.get("lane") or "decision"
         repetition_count = int(protocol.get("repetitions") or 1)
-        artifact_benchmark_ids.add(benchmark_id)
         confidence_label = _confidence_from_artifact(
             lane=lane,
             label=evidence.get("confidence_label"),

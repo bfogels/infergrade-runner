@@ -2,10 +2,13 @@
 
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from infergrade.paths import runner_root
+from infergrade.json_schema_subset import validate_json_schema
+from infergrade.selection_identity import SELECTION_DIGEST_ALGORITHMS, selection_digest
 
 EVIDENCE_LANES = ("smoke", "decision", "reference", "gold")
 CAPABILITY_SURFACES = (
@@ -42,7 +45,25 @@ SCORER_TYPES = (
     "metric_only",
     "manual_review",
 )
-CAPABILITY_ARTIFACT_POINTER_KINDS = ("capability_run", "benchmark_summary", "unreadable_capability_run")
+CAPABILITY_ARTIFACT_POINTER_KINDS = (
+    "capability_run",
+    "benchmark_summary",
+    "unreadable_capability_run",
+    "inadmissible_capability_run",
+)
+LEGACY_CAPABILITY_RUN_ARTIFACT_SPEC_VERSION = "0.1.0"
+CAPABILITY_RUN_ARTIFACT_SPEC_VERSION = "0.1.1"
+CAPABILITY_RUN_ARTIFACT_SPEC_VERSIONS = (
+    LEGACY_CAPABILITY_RUN_ARTIFACT_SPEC_VERSION,
+    CAPABILITY_RUN_ARTIFACT_SPEC_VERSION,
+)
+SELECTION_PROTOCOL_FIELDS = (
+    "selection_digest_algorithm",
+    "selection_sha256",
+    "case_count",
+)
+CAPABILITY_RUN_ADMISSION_ERROR_LIMIT = 20
+CAPABILITY_RUN_ADMISSION_ERROR_MAX_LENGTH = 256
 
 
 def repo_root() -> Path:
@@ -72,10 +93,14 @@ def load_capability_summary_schema(root: Optional[Path] = None) -> Dict[str, Any
     return json.loads(capability_summary_schema_path(root).read_text(encoding="utf-8"))
 
 
-def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
+def validate_capability_run_artifact(artifact: Any) -> List[str]:
     """Return validation errors for the v1 capability run artifact semantics."""
+    if not isinstance(artifact, dict):
+        return ["capability_run artifact must be an object"]
     errors: List[str] = []
+    artifact_spec_version = artifact.get("artifact_spec_version")
     _require(artifact, "artifact_spec_version", errors)
+    _enum(artifact, "artifact_spec_version", CAPABILITY_RUN_ARTIFACT_SPEC_VERSIONS, errors)
     if artifact.get("artifact_kind") != "capability_run":
         errors.append("artifact_kind must be capability_run")
     _require(artifact, "capability_run_id", errors)
@@ -110,6 +135,12 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
         if not isinstance(repetitions, int) or repetitions < 1:
             errors.append("protocol.repetitions must be an integer >= 1")
 
+        current_spec = artifact_spec_version == CAPABILITY_RUN_ARTIFACT_SPEC_VERSION
+        if current_spec:
+            for field in SELECTION_PROTOCOL_FIELDS:
+                _require(protocol, field, errors, prefix="protocol.")
+        _validate_optional_selection_fields(protocol, errors)
+
     summary = artifact.get("summary")
     if not isinstance(summary, dict):
         errors.append("summary must be an object")
@@ -125,6 +156,34 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
     if not isinstance(tasks, list):
         errors.append("tasks must be an array")
     else:
+        if artifact_spec_version == CAPABILITY_RUN_ARTIFACT_SPEC_VERSION:
+            protocol = artifact.get("protocol")
+            case_count = protocol.get("case_count") if isinstance(protocol, dict) else None
+            if isinstance(case_count, int) and not isinstance(case_count, bool) and case_count != len(tasks):
+                errors.append("protocol.case_count must equal len(tasks)")
+            task_ids = []
+            seen_task_ids = set()
+            task_ids_valid = True
+            for index, task in enumerate(tasks):
+                task_id = task.get("task_id") if isinstance(task, dict) else None
+                if not isinstance(task_id, str) or not task_id.strip():
+                    errors.append("tasks[%d].task_id must be a non-empty string" % index)
+                    task_ids_valid = False
+                    continue
+                if task_id in seen_task_ids:
+                    errors.append("tasks[%d].task_id must be unique" % index)
+                seen_task_ids.add(task_id)
+                task_ids.append(task_id)
+            algorithm = protocol.get("selection_digest_algorithm") if isinstance(protocol, dict) else None
+            digest = protocol.get("selection_sha256") if isinstance(protocol, dict) else None
+            if (
+                task_ids_valid
+                and _is_supported_selection_digest_algorithm(algorithm)
+                and isinstance(digest, str)
+            ):
+                expected_digest = selection_digest(task_ids, algorithm)
+                if digest != expected_digest:
+                    errors.append("protocol.selection_sha256 must match task IDs")
         for index, task in enumerate(tasks):
             if not isinstance(task, dict):
                 errors.append("tasks[%d] must be an object" % index)
@@ -154,6 +213,69 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
                 errors.append("claim_boundary.%s must be a non-empty string array" % key)
 
     return errors
+
+
+def validate_current_capability_run_artifact(artifact: Any) -> List[str]:
+    """Return errors unless an artifact is valid current capability evidence."""
+    errors = validate_capability_run_schema_artifact(artifact)
+    errors.extend(validate_capability_run_artifact(artifact))
+    artifact_spec_version = (
+        artifact.get("artifact_spec_version") if isinstance(artifact, dict) else None
+    )
+    if artifact_spec_version != CAPABILITY_RUN_ARTIFACT_SPEC_VERSION:
+        errors.append(
+            "artifact_spec_version must be current-admissible: %s"
+            % CAPABILITY_RUN_ARTIFACT_SPEC_VERSION
+        )
+    return errors
+
+
+def validate_capability_run_schema_artifact(artifact: Any) -> List[str]:
+    """Validate a capability run against the canonical JSON Schema."""
+    return validate_json_schema(
+        artifact,
+        _cached_capability_run_schema(),
+        capability_run_schema_path(),
+    )
+
+
+def capability_run_admission_error_summary(errors: List[str]) -> Dict[str, Any]:
+    """Bound rejection diagnostics before they enter shareable artifacts."""
+    return {
+        "admission_errors": [
+            str(error)[:CAPABILITY_RUN_ADMISSION_ERROR_MAX_LENGTH]
+            for error in errors[:CAPABILITY_RUN_ADMISSION_ERROR_LIMIT]
+        ],
+        "admission_error_count": len(errors),
+        "admission_errors_truncated": len(errors) > CAPABILITY_RUN_ADMISSION_ERROR_LIMIT,
+    }
+
+
+@lru_cache(maxsize=1)
+def _cached_capability_run_schema() -> Dict[str, Any]:
+    return load_capability_run_schema()
+
+
+def _validate_optional_selection_fields(protocol: Dict[str, Any], errors: List[str]) -> None:
+    """Validate selection provenance shapes, including optional legacy fields."""
+    if "selection_digest_algorithm" in protocol:
+        algorithm = protocol.get("selection_digest_algorithm")
+        if not _is_supported_selection_digest_algorithm(algorithm):
+            errors.append(
+                "protocol.selection_digest_algorithm must be a supported selection digest algorithm"
+            )
+    if "selection_sha256" in protocol:
+        digest = protocol.get("selection_sha256")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            errors.append("protocol.selection_sha256 must be a lowercase SHA-256 hex digest")
+    if "case_count" in protocol:
+        case_count = protocol.get("case_count")
+        if isinstance(case_count, bool) or not isinstance(case_count, int) or case_count < 0:
+            errors.append("protocol.case_count must be an integer >= 0")
+
+
+def _is_supported_selection_digest_algorithm(value: Any) -> bool:
+    return isinstance(value, str) and value in SELECTION_DIGEST_ALGORITHMS
 
 
 def validate_capability_summary_artifact(artifact: Dict[str, Any]) -> List[str]:

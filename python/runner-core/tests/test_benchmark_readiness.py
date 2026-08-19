@@ -3,6 +3,10 @@ from copy import deepcopy
 
 from infergrade.benchmark_catalog import load_capability_catalog
 from infergrade.benchmark_readiness import audit_benchmark_readiness
+from infergrade.selection_identity import (
+    SORTED_JSON_STRING_ARRAY_SHA256_V1,
+    selection_digest,
+)
 
 
 class BenchmarkReadinessTests(unittest.TestCase):
@@ -28,6 +32,48 @@ class BenchmarkReadinessTests(unittest.TestCase):
                 "calibration:insufficient_observation_count",
                 surface["scoped_claim_blockers"],
             )
+
+    def test_rejected_capability_run_is_visible_and_globally_blocks_readiness(self):
+        for rejected in (
+            _legacy_standalone_capability_run(),
+            {
+                "artifact_kind": "capability_run",
+                "capability_run_id": "malformed",
+                "_source": "/Users/example/private/capability_run.json",
+            },
+        ):
+            with self.subTest(capability_run_id=rejected["capability_run_id"]):
+                catalog = load_capability_catalog()
+                documents = _calibrated_documents(catalog)
+                documents.append(rejected)
+
+                report = audit_benchmark_readiness(documents, catalog)
+
+                self.assertEqual(report["rejected_capability_run_count"], 1)
+                self.assertEqual(report["calibration_observation_count"], 60)
+                self.assertFalse(report["scoped_claim_ready"])
+                quarantined = report["rejected_capability_runs"][0]
+                self.assertEqual(quarantined["admission_status"], "rejected")
+                self.assertNotIn("source", quarantined)
+                self.assertNotIn("score", quarantined)
+                self.assertNotIn("task_count", quarantined)
+                for surface in report["surfaces"]:
+                    self.assertIn(
+                        "calibration:capability_run_admission_rejected",
+                        surface["scoped_claim_blockers"],
+                    )
+
+    def test_valid_current_standalone_capability_run_is_admitted(self):
+        catalog = load_capability_catalog()
+        documents = _standalone_component_documents(
+            "local_assistant_capability",
+            "stateful_tool_loop_diagnostic_v1",
+        )
+
+        report = audit_benchmark_readiness(documents, catalog)
+
+        self.assertEqual(report["rejected_capability_run_count"], 0)
+        self.assertEqual(report["calibration_observation_count"], 20)
 
     def test_empirical_headroom_cannot_override_catalog_breadth_gaps(self):
         catalog = load_capability_catalog()
@@ -258,7 +304,7 @@ class BenchmarkReadinessTests(unittest.TestCase):
         catalog = _structurally_broad_catalog_with_stateful_diagnostic()
         documents = _stateful_component_documents()
         for document in documents:
-            document["tasks"] = [{} for _ in range(8)]
+            _replace_scored_tasks(document, 8)
 
         report = audit_benchmark_readiness(documents, catalog)
 
@@ -302,7 +348,7 @@ class BenchmarkReadinessTests(unittest.TestCase):
         catalog = _structurally_broad_catalog_with_stateful_diagnostic()
         documents = _stateful_component_documents()
         for document in documents:
-            document["tasks"] = [{} for _ in range(16)]
+            _replace_scored_tasks(document, 16)
 
         report = audit_benchmark_readiness(documents, catalog)
 
@@ -582,34 +628,101 @@ def _add_component_observations(documents, surface_id, check_id, score=None):
 
 def _standalone_component_documents(surface_id, check_id, fixture_revision="fixture-v1"):
     bands = ("1B", "4B", "9B")
-    return [
-        {
+    documents = []
+    for index in range(20):
+        tasks = _scored_capability_tasks(check_id, 8)
+        revision = fixture_revision(index) if callable(fixture_revision) else fixture_revision
+        documents.append({
+            "artifact_spec_version": "0.1.1",
             "artifact_kind": "capability_run",
             "capability_run_id": "%s-standalone-%d" % (surface_id, index),
+            "created_at": "2026-08-19T12:00:00Z",
+            "runner": {"name": "infergrade-runner", "version": "test"},
             "protocol": {
+                "task_family": "readiness_fixture",
                 "task_version": check_id,
-                "fixture_revision": (
-                    fixture_revision(index)
-                    if callable(fixture_revision)
-                    else fixture_revision
+                "fixture_revision": revision,
+                "scorer_type": "exact_match",
+                "scoring_policy": "readiness_fixture_policy",
+                "repetitions": 1,
+                "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                "selection_sha256": selection_digest(
+                    [task["task_id"] for task in tasks],
+                    SORTED_JSON_STRING_ARRAY_SHA256_V1,
                 ),
+                "case_count": len(tasks),
             },
             "summary": {"score": 0.2 + index / 100.0, "state": "scored"},
-            "tasks": [{} for _ in range(8)],
+            "tasks": tasks,
             "subject": {
                 "model": {
                     "model": "models/%s-%d" % (surface_id, index % 10),
-                }
+                    "model_family": "family-%d" % (index % 5),
+                    "parameter_scale": bands[index % len(bands)],
+                    "quantization_scheme": "q4_k_m",
+                },
+                "runtime": {"backend": "llama.cpp"},
+                "hardware": {"source": "test"},
             },
-            "evidence": {"surface": surface_id},
-            "model_family": "family-%d" % (index % 5),
-            "parameter_scale": bands[index % len(bands)],
-            "quantization_scheme": "q4_k_m",
-            "evidence_group_id": "group-%d" % (index // 10),
-            "evidence_group_provenance": "trusted_corpus_operator_v1",
+            "evidence": {
+                "lane": "decision",
+                "surface": surface_id,
+                "grade": "thin_local_sample",
+                "experimental": True,
+                "confidence_label": "thin_local_sample",
+                "evidence_group_id": "group-%d" % (index // 10),
+                "evidence_group_provenance": "trusted_corpus_operator_v1",
+            },
+            "claim_boundary": {
+                "supported_claims": ["Pinned standalone fixture evidence."],
+                "unsupported_claims": ["Not a global model ranking."],
+            },
+            "artifacts": {
+                "manifest": "capability_run.json",
+                "raw_outputs": [],
+                "scoring_outputs": [],
+            },
+        })
+    return documents
+
+
+def _legacy_standalone_capability_run():
+    document = deepcopy(
+        _standalone_component_documents(
+            "local_assistant_capability",
+            "stateful_tool_loop_diagnostic_v1",
+        )[0]
+    )
+    document["artifact_spec_version"] = "0.1.0"
+    document["_source"] = "/Users/example/private/legacy-capability-run.json"
+    for field in ("selection_digest_algorithm", "selection_sha256", "case_count"):
+        document["protocol"].pop(field)
+    return document
+
+
+def _scored_capability_tasks(check_id, count):
+    return [
+        {
+            "task_id": "%s_%d" % (check_id, index),
+            "task_family": "readiness_fixture",
+            "state": "scored",
+            "score": 1.0,
+            "scorer_type": "exact_match",
+            "scoring_policy": "readiness_fixture_policy",
+            "output_artifact": None,
         }
-        for index in range(20)
+        for index in range(count)
     ]
+
+
+def _replace_scored_tasks(document, count):
+    check_id = document["protocol"]["task_version"]
+    document["tasks"] = _scored_capability_tasks(check_id, count)
+    document["protocol"]["case_count"] = count
+    document["protocol"]["selection_sha256"] = selection_digest(
+        [task["task_id"] for task in document["tasks"]],
+        SORTED_JSON_STRING_ARRAY_SHA256_V1,
+    )
 
 
 def _stateful_component_documents(saturated_slice=None):
@@ -623,7 +736,7 @@ def _stateful_component_documents(saturated_slice=None):
         "noop": (0.25, 0.375, 0.5, 0.625),
     }
     for index, document in enumerate(documents):
-        document["tasks"] = [{} for _ in range(24)]
+        _replace_scored_tasks(document, 24)
         document["summary"]["variant_metrics"] = {}
         for slice_id, scores in base_scores.items():
             score = 1.0 if slice_id == saturated_slice else scores[index % len(scores)]

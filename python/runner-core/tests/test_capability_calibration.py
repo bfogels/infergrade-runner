@@ -1,9 +1,14 @@
+import json
 import unittest
 
 from infergrade.capability_calibration import (
     audit_capability_observations,
     extract_calibration_observations,
     policy_for_score_version,
+)
+from infergrade.selection_identity import (
+    SORTED_JSON_STRING_ARRAY_SHA256_V1,
+    selection_digest,
 )
 from infergrade.benchmark_catalog import load_capability_catalog
 
@@ -1015,22 +1020,9 @@ class CapabilityCalibrationTests(unittest.TestCase):
         self.assertEqual(observations[0]["quantization_scheme"], "q4_k_m")
 
     def test_extracts_component_observation_without_mislabeling_it_as_full_score(self):
+        artifact = _current_capability_run()
         observations = extract_calibration_observations(
-            [{
-                "artifact_kind": "capability_run",
-                "capability_run_id": "caprun-1",
-                "protocol": {
-                    "task_version": "assistant_compositional_instruction_v2",
-                    "fixture_revision": "2026-07-assistant-compositional-v2",
-                },
-                "summary": {"score": 0.458333, "state": "scored"},
-                "tasks": [{} for _ in range(24)],
-                "subject": {"model": {"model": "Qwen/Qwen3.5-9B"}},
-                "evidence": {"surface": "local_assistant_capability"},
-                "model_family": "Qwen3.5",
-                "parameter_scale": "9B",
-                "quantization_scheme": "q4_k_m",
-            }],
+            [artifact],
             benchmark_id="assistant_compositional_instruction_v2",
         )
 
@@ -1040,6 +1032,179 @@ class CapabilityCalibrationTests(unittest.TestCase):
         self.assertEqual(observations[0]["parameter_band"], "8b_to_under_20b")
         self.assertEqual(observations[0]["quantization_scheme"], "q4_k_m")
         self.assertEqual(observations[0]["score_version"], "benchmark:assistant_compositional_instruction_v2:2026-07-assistant-compositional-v2")
+
+    def test_legacy_and_invalid_capability_runs_are_visible_but_non_scoring(self):
+        legacy = _current_capability_run()
+        legacy["artifact_spec_version"] = "0.1.0"
+        for field in ("selection_digest_algorithm", "selection_sha256", "case_count"):
+            legacy["protocol"].pop(field)
+        malformed = {"artifact_kind": "capability_run", "capability_run_id": "malformed"}
+        rejected = []
+
+        observations = extract_calibration_observations(
+            [legacy, malformed],
+            benchmark_id="assistant_compositional_instruction_v2",
+            rejected_capability_runs=rejected,
+        )
+
+        self.assertEqual(len(observations), 2)
+        self.assertEqual(len(rejected), 2)
+        for observation in observations:
+            self.assertEqual(observation["admission_status"], "rejected")
+            self.assertNotIn("score", observation)
+            self.assertNotIn("task_count", observation)
+            self.assertNotIn("source", observation)
+        report = audit_capability_observations(
+            observations,
+            "benchmark:assistant_compositional_instruction_v2:2026-07-assistant-compositional-v2",
+            policy={"minimum_observations": 0},
+        )
+        self.assertEqual(report["status"], "evidence_integrity_risk")
+        self.assertEqual(report["metrics"]["rejected_capability_run_count"], 2)
+        self.assertIn("capability_run_admission_rejected", report["blockers"])
+
+    def test_forged_digest_and_duplicate_task_ids_are_rejected(self):
+        for mutation in ("forged_digest", "duplicate_task"):
+            with self.subTest(mutation=mutation):
+                artifact = _current_capability_run()
+                if mutation == "forged_digest":
+                    artifact["protocol"]["selection_sha256"] = "0" * 64
+                else:
+                    artifact["tasks"][1]["task_id"] = artifact["tasks"][0]["task_id"]
+
+                observation = extract_calibration_observations([artifact])[0]
+
+                self.assertEqual(observation["admission_status"], "rejected")
+
+    def test_schema_invalid_current_artifacts_are_not_extracted_as_scores(self):
+        mutations = {
+            "missing_runner": lambda item: item.pop("runner"),
+            "missing_artifacts": lambda item: item.pop("artifacts"),
+            "missing_output_artifact": lambda item: item["tasks"][0].pop(
+                "output_artifact"
+            ),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                artifact = _current_capability_run()
+                mutate(artifact)
+
+                observation = extract_calibration_observations([artifact])[0]
+
+                self.assertEqual(observation["admission_status"], "rejected")
+                self.assertNotIn("score", observation)
+                self.assertNotIn("task_count", observation)
+
+    def test_valid_current_capability_run_is_admitted(self):
+        observation = extract_calibration_observations([_current_capability_run()])[0]
+
+        self.assertEqual(observation["admission_status"], "current_verified")
+        self.assertEqual(observation["score"], 0.458333)
+        self.assertEqual(observation["task_count"], 24)
+
+    def test_rejected_metadata_is_bounded_and_container_values_are_not_reflected(self):
+        artifact = _current_capability_run()
+        artifact["artifact_spec_version"] = ["0.1.1"]
+        artifact["capability_run_id"] = {"private": "x" * 1000}
+        artifact["protocol"]["task_version"] = ["private-task" * 100]
+        artifact["protocol"]["fixture_revision"] = {
+            "private": "revision" * 100
+        }
+        artifact["protocol"]["selection_digest_algorithm"] = {
+            "private": "algorithm" * 100
+        }
+        artifact["evidence"]["surface"] = {"private": "surface" * 100}
+        artifact["tasks"] = [None for _ in range(50)]
+
+        rejected = extract_calibration_observations([artifact])[0]
+
+        self.assertRegex(rejected["observation_id"], r"^rejected_[0-9a-f]{16}$")
+        self.assertIsNone(rejected["benchmark_id"])
+        self.assertIsNone(rejected["surface_id"])
+        self.assertIsNone(rejected["artifact_spec_version"])
+        self.assertEqual(len(rejected["admission_errors"]), 20)
+        self.assertGreater(rejected["admission_error_count"], 20)
+        self.assertTrue(rejected["admission_errors_truncated"])
+        encoded = json.dumps(rejected)
+        self.assertNotIn("private-task", encoded)
+        self.assertNotIn("algorithmalgorithm", encoded)
+        self.assertNotIn("surfacesurface", encoded)
+        self.assertLess(len(encoded), 4096)
+
+        artifact["protocol"]["task_version"] = (
+            "assistant_compositional_instruction_v2"
+        )
+        revision_rejected = extract_calibration_observations([artifact])[0]
+        self.assertEqual(
+            revision_rejected["score_version"],
+            "benchmark:assistant_compositional_instruction_v2:unknown",
+        )
+        self.assertNotIn("revisionrevision", json.dumps(revision_rejected))
+
+
+def _current_capability_run():
+    tasks = [
+        {
+            "task_id": "assistant_compositional_%d" % index,
+            "task_family": "assistant_compositional_instruction",
+            "state": "scored",
+            "score": 1.0,
+            "scorer_type": "strict_json_equality",
+            "scoring_policy": "structured_compositional_accuracy_v1",
+            "output_artifact": None,
+        }
+        for index in range(24)
+    ]
+    task_ids = [task["task_id"] for task in tasks]
+    return {
+        "artifact_spec_version": "0.1.1",
+        "artifact_kind": "capability_run",
+        "capability_run_id": "caprun-1",
+        "created_at": "2026-08-19T12:00:00Z",
+        "runner": {"name": "infergrade-runner", "version": "test"},
+        "protocol": {
+            "task_family": "assistant_compositional_instruction",
+            "task_version": "assistant_compositional_instruction_v2",
+            "fixture_revision": "2026-07-assistant-compositional-v2",
+            "scorer_type": "strict_json_equality",
+            "scoring_policy": "structured_compositional_accuracy_v1",
+            "repetitions": 1,
+            "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+            "selection_sha256": selection_digest(
+                task_ids,
+                SORTED_JSON_STRING_ARRAY_SHA256_V1,
+            ),
+            "case_count": len(tasks),
+        },
+        "summary": {"score": 0.458333, "state": "scored"},
+        "tasks": tasks,
+        "subject": {
+            "model": {
+                "model": "Qwen/Qwen3.5-9B",
+                "model_family": "Qwen3.5",
+                "parameter_scale": "9B",
+                "quantization_scheme": "q4_k_m",
+            },
+            "runtime": {"backend": "llama.cpp"},
+            "hardware": {"source": "test"},
+        },
+        "evidence": {
+            "lane": "decision",
+            "surface": "local_assistant_capability",
+            "grade": "thin_local_sample",
+            "experimental": True,
+            "confidence_label": "thin_local_sample",
+        },
+        "claim_boundary": {
+            "supported_claims": ["Pinned standalone fixture evidence."],
+            "unsupported_claims": ["Not a global model ranking."],
+        },
+        "artifacts": {
+            "manifest": "capability_run.json",
+            "raw_outputs": [],
+            "scoring_outputs": [],
+        },
+    }
 
 
 if __name__ == "__main__":

@@ -9,13 +9,20 @@ from infergrade.capability_contract import (
     CONFIDENCE_LABELS,
     EVIDENCE_LANES,
     capability_run_schema_path,
+    capability_run_admission_error_summary,
     capability_summary_schema_path,
     load_capability_run_schema,
     load_capability_summary_schema,
     validate_capability_run_artifact,
+    validate_capability_run_schema_artifact,
     validate_capability_summary_artifact,
+    validate_current_capability_run_artifact,
 )
 from infergrade.contracts import load_contract_manifest
+from infergrade.selection_identity import (
+    SORTED_JSON_STRING_ARRAY_SHA256_V1,
+    selection_digest,
+)
 
 
 def _artifact():
@@ -97,6 +104,10 @@ def _artifact():
 class CapabilityContractTests(unittest.TestCase):
     def test_capability_run_schema_is_declared_in_contract_manifest(self):
         schema = load_capability_run_schema()
+        self.assertEqual(
+            schema["properties"]["artifact_spec_version"]["enum"],
+            ["0.1.0", "0.1.1"],
+        )
         self.assertEqual(schema["properties"]["artifact_kind"]["const"], "capability_run")
         self.assertEqual(schema["properties"]["evidence"]["properties"]["lane"]["enum"], list(EVIDENCE_LANES))
         self.assertIn("repeated_local_sample", schema["properties"]["evidence"]["properties"]["confidence_label"]["enum"])
@@ -121,6 +132,213 @@ class CapabilityContractTests(unittest.TestCase):
 
     def test_valid_capability_run_artifact_passes_semantic_validation(self):
         self.assertEqual(validate_capability_run_artifact(_artifact()), [])
+
+    def test_legacy_capability_run_artifact_remains_readable_without_selection_provenance(self):
+        artifact = _artifact()
+
+        self.assertEqual(artifact["artifact_spec_version"], "0.1.0")
+        self.assertEqual(validate_capability_run_artifact(artifact), [])
+        self.assertIn(
+            "artifact_spec_version must be current-admissible: 0.1.1",
+            validate_current_capability_run_artifact(artifact),
+        )
+
+    def test_v011_capability_run_requires_valid_selection_provenance(self):
+        artifact = _artifact()
+        artifact["artifact_spec_version"] = "0.1.1"
+        artifact["protocol"].update(
+            {
+                "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                "selection_sha256": selection_digest(
+                    ["assistant_fixture_001"], SORTED_JSON_STRING_ARRAY_SHA256_V1
+                ),
+                "case_count": 1,
+            }
+        )
+
+        self.assertEqual(validate_capability_run_artifact(artifact), [])
+        self.assertEqual(validate_capability_run_schema_artifact(artifact), [])
+        self.assertEqual(validate_current_capability_run_artifact(artifact), [])
+
+        missing = dict(artifact)
+        missing["protocol"] = dict(artifact["protocol"])
+        del missing["protocol"]["selection_sha256"]
+        errors = validate_capability_run_artifact(missing)
+        self.assertIn("protocol.selection_sha256 is required", errors)
+
+    def test_v011_selection_provenance_rejects_algorithm_digest_and_count_drift(self):
+        artifact = _artifact()
+        artifact["artifact_spec_version"] = "0.1.1"
+        artifact["protocol"].update(
+            {
+                "selection_digest_algorithm": "unsupported_v1",
+                "selection_sha256": "A" * 64,
+                "case_count": 2,
+            }
+        )
+
+        errors = validate_capability_run_artifact(artifact)
+
+        self.assertIn(
+            "protocol.selection_digest_algorithm must be a supported selection digest algorithm",
+            errors,
+        )
+        self.assertIn(
+            "protocol.selection_sha256 must be a lowercase SHA-256 hex digest",
+            errors,
+        )
+        self.assertIn("protocol.case_count must equal len(tasks)", errors)
+
+    def test_capability_run_rejects_unknown_artifact_spec_version(self):
+        artifact = _artifact()
+        artifact["artifact_spec_version"] = "0.2.0"
+
+        errors = validate_capability_run_artifact(artifact)
+
+        self.assertIn(
+            "artifact_spec_version must be one of: 0.1.0, 0.1.1",
+            errors,
+        )
+
+    def test_v011_rejects_forged_digest_and_duplicate_or_empty_task_ids(self):
+        artifact = _artifact()
+        artifact["artifact_spec_version"] = "0.1.1"
+        artifact["protocol"].update(
+            {
+                "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                "selection_sha256": "0" * 64,
+                "case_count": 1,
+            }
+        )
+        self.assertIn(
+            "protocol.selection_sha256 must match task IDs",
+            validate_capability_run_artifact(artifact),
+        )
+
+        duplicate = dict(artifact)
+        duplicate["protocol"] = dict(artifact["protocol"])
+        duplicate["tasks"] = [dict(artifact["tasks"][0]), dict(artifact["tasks"][0])]
+        duplicate["protocol"]["case_count"] = 2
+        errors = validate_capability_run_artifact(duplicate)
+        self.assertIn("tasks[1].task_id must be unique", errors)
+
+        empty = dict(artifact)
+        empty["protocol"] = dict(artifact["protocol"])
+        empty["tasks"] = [dict(artifact["tasks"][0])]
+        empty["tasks"][0]["task_id"] = "  "
+        errors = validate_capability_run_artifact(empty)
+        self.assertIn("tasks[0].task_id must be a non-empty string", errors)
+
+    def test_legacy_optional_selection_fields_use_schema_shapes(self):
+        artifact = _artifact()
+        artifact["protocol"].update(
+            {
+                "selection_digest_algorithm": "unsupported_v1",
+                "selection_sha256": "A" * 64,
+                "case_count": -1,
+            }
+        )
+
+        errors = validate_capability_run_artifact(artifact)
+
+        self.assertIn(
+            "protocol.selection_digest_algorithm must be a supported selection digest algorithm",
+            errors,
+        )
+        self.assertIn(
+            "protocol.selection_sha256 must be a lowercase SHA-256 hex digest",
+            errors,
+        )
+        self.assertIn("protocol.case_count must be an integer >= 0", errors)
+
+    def test_selection_digest_algorithm_rejects_unhashable_json_values_without_crashing(self):
+        for artifact_spec_version in ("0.1.0", "0.1.1"):
+            for malformed in ([], {}):
+                with self.subTest(
+                    artifact_spec_version=artifact_spec_version,
+                    malformed=malformed,
+                ):
+                    artifact = _artifact()
+                    artifact["artifact_spec_version"] = artifact_spec_version
+                    artifact["protocol"]["selection_digest_algorithm"] = malformed
+                    if artifact_spec_version == "0.1.1":
+                        artifact["protocol"].update(
+                            {
+                                "selection_sha256": "0" * 64,
+                                "case_count": 1,
+                            }
+                        )
+
+                    errors = validate_capability_run_artifact(artifact)
+
+                    self.assertIn(
+                        "protocol.selection_digest_algorithm must be a supported selection digest algorithm",
+                        errors,
+                    )
+
+    def test_admission_error_summary_bounds_count_and_message_length(self):
+        summary = capability_run_admission_error_summary(
+            ["x" * 1000 for _ in range(25)]
+        )
+
+        self.assertEqual(len(summary["admission_errors"]), 20)
+        self.assertTrue(
+            all(len(error) == 256 for error in summary["admission_errors"])
+        )
+        self.assertEqual(summary["admission_error_count"], 25)
+        self.assertTrue(summary["admission_errors_truncated"])
+
+    def test_current_admission_rejects_schema_only_structural_mutations(self):
+        artifact = _artifact()
+        artifact["artifact_spec_version"] = "0.1.1"
+        artifact["protocol"].update(
+            {
+                "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                "selection_sha256": selection_digest(
+                    ["assistant_fixture_001"],
+                    SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                ),
+                "case_count": 1,
+            }
+        )
+        mutations = {
+            "missing_runner": lambda item: item.pop("runner"),
+            "missing_artifacts": lambda item: item.pop("artifacts"),
+            "missing_output_artifact": lambda item: item["tasks"][0].pop(
+                "output_artifact"
+            ),
+            "malformed_subject_runtime": lambda item: item["subject"].update(
+                {"runtime": []}
+            ),
+            "malformed_task_performance": lambda item: item["summary"].update(
+                {"task_performance": {"attempted_task_count": []}}
+            ),
+        }
+
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                candidate = json.loads(json.dumps(artifact))
+                mutate(candidate)
+
+                schema_errors = validate_capability_run_schema_artifact(candidate)
+
+                self.assertTrue(schema_errors)
+                self.assertTrue(validate_current_capability_run_artifact(candidate))
+
+    def test_v011_schema_conditionally_requires_selection_provenance(self):
+        schema = load_capability_run_schema()
+        conditional = next(
+            item
+            for item in schema["allOf"]
+            if item.get("if", {}).get("properties", {})
+            .get("artifact_spec_version", {})
+            .get("const")
+            == "0.1.1"
+        )
+        self.assertEqual(
+            conditional["then"]["properties"]["protocol"]["required"],
+            ["selection_digest_algorithm", "selection_sha256", "case_count"],
+        )
 
     def test_confidence_labels_use_v0_3_2_canonical_names_with_legacy_aliases_accepted(self):
         self.assertIn("repeated_local_sample", CONFIDENCE_LABELS)

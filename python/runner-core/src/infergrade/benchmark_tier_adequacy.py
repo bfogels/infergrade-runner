@@ -458,6 +458,14 @@ def _audit_fixture_cases(
             }
         )
 
+    expected_tier_selections = policy.get("expected_tier_selections")
+    expected_selection_errors = _audit_expected_tier_selections(
+        tier_reports,
+        expected_tier_selections,
+        identity_error_prefix,
+    )
+    errors.extend(expected_selection_errors)
+
     return {
         "status": success_status if not errors else invalid_status,
         "ready": not errors,
@@ -474,9 +482,56 @@ def _audit_fixture_cases(
             and len(case_ids) == len(set(case_ids))
             and len(cases) >= maximum_limit
         ),
+        "expected_tier_selections": expected_tier_selections,
+        "expected_tier_selections_verified": (
+            isinstance(expected_tier_selections, dict)
+            and not expected_selection_errors
+        ),
         "tiers": tier_reports,
         "errors": errors,
     }
+
+
+def _audit_expected_tier_selections(
+    tier_reports: list,
+    expected_tier_selections: Any,
+    identity_error_prefix: str,
+) -> list:
+    """Compare materialized tier identities with the catalog's pinned values."""
+    error_prefix = "%s_expected_tier_selection" % identity_error_prefix
+    if not isinstance(expected_tier_selections, dict):
+        return ["%s_missing" % error_prefix]
+
+    errors = []
+    actual_by_tier = {str(item.get("tier")): item for item in tier_reports}
+    for tier in TIER_NAMES:
+        if tier not in actual_by_tier:
+            continue
+        expected = expected_tier_selections.get(tier)
+        if not isinstance(expected, dict):
+            errors.append("%s_missing_tier:%s" % (error_prefix, tier))
+            continue
+        actual = actual_by_tier[tier]
+        expected_count = expected.get("case_count")
+        if (
+            isinstance(expected_count, bool)
+            or not isinstance(expected_count, int)
+            or expected_count != actual.get("selected_case_count")
+        ):
+            errors.append("%s_case_count_mismatch:%s" % (error_prefix, tier))
+        expected_algorithm = expected.get("selection_digest_algorithm")
+        if expected_algorithm != actual.get("selection_digest_algorithm"):
+            errors.append("%s_algorithm_mismatch:%s" % (error_prefix, tier))
+        expected_digest = expected.get("selection_sha256")
+        if expected_digest != actual.get("selection_sha256"):
+            errors.append("%s_digest_mismatch:%s" % (error_prefix, tier))
+
+    expected_unknown_tiers = sorted(set(expected_tier_selections) - set(actual_by_tier))
+    errors.extend(
+        "%s_unknown_tier:%s" % (error_prefix, tier)
+        for tier in expected_unknown_tiers
+    )
+    return errors
 
 
 def _json_scalar_identity(value: Any) -> str:

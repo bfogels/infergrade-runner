@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import sys
@@ -9,6 +10,10 @@ sys.path.insert(0, "python/runner-core/src")
 from infergrade.capability_contract import validate_capability_summary_artifact
 from infergrade.capability_summary import build_capability_summary_artifact
 from infergrade.models import CapabilityExecution, RunRequest
+from infergrade.selection_identity import (
+    SORTED_JSON_STRING_ARRAY_SHA256_V1,
+    selection_digest,
+)
 from infergrade.utils import write_json
 
 
@@ -66,6 +71,118 @@ class CapabilitySummaryTests(unittest.TestCase):
         self.assertEqual(len(summary["capability_artifacts"]), 2)
         self.assertTrue(summary["capability_artifacts"][0]["path"].startswith("artifacts/capability/"))
         self.assertIn("This summary is not a global intelligence score.", summary["unsupported_claim_summary"])
+
+    def test_legacy_capability_run_is_quarantined_without_contributing_current_evidence(self):
+        path = self._write_capability_run(
+            "multiturn_chat_memory_v1",
+            surface="local_assistant_capability",
+            state="scored",
+            score=1.0,
+            task_states=["scored"],
+        )
+        with open(path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        artifact["artifact_spec_version"] = "0.1.0"
+        for field in ("selection_digest_algorithm", "selection_sha256", "case_count"):
+            artifact["protocol"].pop(field)
+        write_json(path, artifact)
+
+        summary = build_capability_summary_artifact(
+            self._request(),
+            self._execution({"multiturn_chat_memory_v1": path}),
+            self.tempdir,
+        )
+
+        pointer = summary["capability_artifacts"][0]
+        assistant = {item["surface"]: item for item in summary["surfaces"]}[
+            "local_assistant_capability"
+        ]
+        self.assertEqual(pointer["artifact_kind"], "inadmissible_capability_run")
+        self.assertEqual(pointer["error_class"], "artifact_not_current_admissible")
+        self.assertIn("current-admissible", " ".join(pointer["admission_errors"]))
+        self.assertIsNone(pointer["score"])
+        self.assertEqual(pointer["task_count"], 0)
+        self.assertEqual(assistant["state"], "not_comparable")
+        self.assertIsNone(assistant["score"])
+        self.assertEqual(assistant["task_count"], 0)
+        self.assertEqual(validate_capability_summary_artifact(summary), [])
+
+    def test_forged_duplicate_or_schema_invalid_current_artifact_is_quarantined(self):
+        for mutation in (
+            "forged_digest",
+            "duplicate_task",
+            "missing_runner",
+            "missing_artifacts",
+            "missing_output_artifact",
+        ):
+            with self.subTest(mutation=mutation):
+                path = self._write_capability_run(
+                    "multiturn_chat_memory_v1",
+                    surface="local_assistant_capability",
+                    state="scored",
+                    score=1.0,
+                    task_states=["scored", "scored"],
+                )
+                with open(path, "r", encoding="utf-8") as handle:
+                    artifact = json.load(handle)
+                if mutation == "forged_digest":
+                    artifact["protocol"]["selection_sha256"] = "0" * 64
+                elif mutation == "duplicate_task":
+                    artifact["tasks"][1]["task_id"] = artifact["tasks"][0]["task_id"]
+                elif mutation == "missing_runner":
+                    artifact.pop("runner")
+                elif mutation == "missing_artifacts":
+                    artifact.pop("artifacts")
+                else:
+                    artifact["tasks"][0].pop("output_artifact")
+                write_json(path, artifact)
+
+                summary = build_capability_summary_artifact(
+                    self._request(),
+                    self._execution({"multiturn_chat_memory_v1": path}),
+                    self.tempdir,
+                )
+
+                self.assertEqual(
+                    summary["capability_artifacts"][0]["artifact_kind"],
+                    "inadmissible_capability_run",
+                )
+                self.assertEqual(summary["surfaces"][0]["task_count"], 0)
+
+    def test_malformed_capability_run_is_quarantined_without_trusting_its_fields(self):
+        benchmark_dir = os.path.join(
+            self.tempdir,
+            "artifacts",
+            "capability",
+            "multiturn_chat_memory_v1",
+        )
+        path = os.path.join(benchmark_dir, "capability_run.json")
+        write_json(
+            path,
+            {
+                "artifact_kind": "capability_run",
+                "capability_run_id": "malformed",
+                "evidence": {
+                    "surface": "local_coding_capability",
+                    "lane": "gold",
+                },
+                "summary": {"state": "scored", "score": 1.0},
+                "tasks": [{"task_id": "forged"}],
+            },
+        )
+
+        summary = build_capability_summary_artifact(
+            self._request(),
+            self._execution({"multiturn_chat_memory_v1": path}),
+            self.tempdir,
+        )
+
+        pointer = summary["capability_artifacts"][0]
+        self.assertEqual(pointer["artifact_kind"], "inadmissible_capability_run")
+        self.assertEqual(pointer["surface"], "local_assistant_capability")
+        self.assertEqual(pointer["lane"], "decision")
+        self.assertIsNone(pointer["score"])
+        self.assertEqual(pointer["task_count"], 0)
 
     def test_summary_recommends_missing_reasoning_after_assistant_and_coding_score(self):
         execution = self._execution(
@@ -428,14 +545,23 @@ class CapabilitySummaryTests(unittest.TestCase):
                     "task_family": "fixture",
                     "state": task_state,
                     "score": metrics.get("score") if "score" in metrics else (1.0 if task_state == "scored" else None),
+                    **(
+                        {
+                            "scorer_type": "exact_match",
+                            "scoring_policy": "summary_fixture_policy",
+                        }
+                        if task_state == "scored"
+                        else {}
+                    ),
                     "error_class": None if task_state == "scored" else "generation_failed",
+                    "output_artifact": None,
                     "latency_ms": metrics.get("latency_ms"),
                     "time_to_first_token_ms": metrics.get("time_to_first_token_ms"),
                     "tokens_per_second": metrics.get("tokens_per_second"),
                 }
             )
         payload = {
-            "artifact_spec_version": "0.1.0",
+            "artifact_spec_version": "0.1.1",
             "artifact_kind": "capability_run",
             "capability_run_id": "caprun_%s" % benchmark_id,
             "created_at": "2026-05-08T12:00:00Z",
@@ -458,6 +584,12 @@ class CapabilitySummaryTests(unittest.TestCase):
                 "scorer_type": "exact_match",
                 "scoring_policy": "summary_fixture_policy",
                 "repetitions": repetitions,
+                "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                "selection_sha256": selection_digest(
+                    [task["task_id"] for task in tasks],
+                    SORTED_JSON_STRING_ARRAY_SHA256_V1,
+                ),
+                "case_count": len(tasks),
             },
             "summary": {
                 "state": state,
