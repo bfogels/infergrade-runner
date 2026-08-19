@@ -126,10 +126,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Tauri and launch-smoke dependencies
+      - name: Update Tauri package indexes
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=60 \
+            -o Acquire::https::Timeout=60 \
+            update
+
+      - name: Install Tauri and launch-smoke dependencies
+        timeout-minutes: 20
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=60 \
+            -o Acquire::https::Timeout=60 \
+            install -y \
             libwebkit2gtk-4.1-dev \
             build-essential \
             curl \
