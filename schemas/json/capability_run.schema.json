@@ -100,6 +100,10 @@
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         },
+        "case_count": {
+          "type": "integer",
+          "minimum": 0
+        },
         "scorer_type": {
           "enum": ["exact_match", "regex", "json_schema", "strict_json_equality", "unit_test", "static_check", "multiple_choice", "perplexity", "metric_only", "manual_review"]
         },
@@ -214,6 +218,27 @@
       "additionalProperties": true
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "artifact_spec_version": { "const": "0.1.1" }
+        },
+        "required": ["artifact_spec_version"]
+      },
+      "then": {
+        "properties": {
+          "protocol": {
+            "required": [
+              "selection_digest_algorithm",
+              "selection_sha256",
+              "case_count"
+            ]
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "binomial_score_uncertainty": {
       "type": "object",

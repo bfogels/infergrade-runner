@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from infergrade.paths import runner_root
+from infergrade.selection_identity import SELECTION_DIGEST_ALGORITHMS
 
 EVIDENCE_LANES = ("smoke", "decision", "reference", "gold")
 CAPABILITY_SURFACES = (
@@ -43,6 +44,7 @@ SCORER_TYPES = (
     "manual_review",
 )
 CAPABILITY_ARTIFACT_POINTER_KINDS = ("capability_run", "benchmark_summary", "unreadable_capability_run")
+CAPABILITY_RUN_ARTIFACT_SPEC_VERSION = "0.1.1"
 
 
 def repo_root() -> Path:
@@ -75,6 +77,7 @@ def load_capability_summary_schema(root: Optional[Path] = None) -> Dict[str, Any
 def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
     """Return validation errors for the v1 capability run artifact semantics."""
     errors: List[str] = []
+    artifact_spec_version = artifact.get("artifact_spec_version")
     _require(artifact, "artifact_spec_version", errors)
     if artifact.get("artifact_kind") != "capability_run":
         errors.append("artifact_kind must be capability_run")
@@ -110,6 +113,22 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
         if not isinstance(repetitions, int) or repetitions < 1:
             errors.append("protocol.repetitions must be an integer >= 1")
 
+        if artifact_spec_version == CAPABILITY_RUN_ARTIFACT_SPEC_VERSION:
+            _require(protocol, "selection_digest_algorithm", errors, prefix="protocol.")
+            _require(protocol, "selection_sha256", errors, prefix="protocol.")
+            _require(protocol, "case_count", errors, prefix="protocol.")
+            algorithm = protocol.get("selection_digest_algorithm")
+            if algorithm not in SELECTION_DIGEST_ALGORITHMS:
+                errors.append(
+                    "protocol.selection_digest_algorithm must be a supported selection digest algorithm"
+                )
+            digest = protocol.get("selection_sha256")
+            if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                errors.append("protocol.selection_sha256 must be a lowercase SHA-256 hex digest")
+            case_count = protocol.get("case_count")
+            if isinstance(case_count, bool) or not isinstance(case_count, int) or case_count < 0:
+                errors.append("protocol.case_count must be an integer >= 0")
+
     summary = artifact.get("summary")
     if not isinstance(summary, dict):
         errors.append("summary must be an object")
@@ -125,6 +144,11 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
     if not isinstance(tasks, list):
         errors.append("tasks must be an array")
     else:
+        if artifact_spec_version == CAPABILITY_RUN_ARTIFACT_SPEC_VERSION:
+            protocol = artifact.get("protocol")
+            case_count = protocol.get("case_count") if isinstance(protocol, dict) else None
+            if isinstance(case_count, int) and not isinstance(case_count, bool) and case_count != len(tasks):
+                errors.append("protocol.case_count must equal len(tasks)")
         for index, task in enumerate(tasks):
             if not isinstance(task, dict):
                 errors.append("tasks[%d] must be an object" % index)

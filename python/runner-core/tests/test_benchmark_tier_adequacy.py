@@ -171,6 +171,53 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
             selection_digest(case_ids, SORTED_UTF8_NEWLINE_SHA256_V1),
         )
 
+    def test_pinned_materialized_selection_rejects_case_id_mutation(self):
+        catalog = deepcopy(load_capability_catalog())
+        spec = tier_adequacy.CAPABILITY_BENCHMARKS["reasoning_exact_answer_v1"]
+        cases = tier_adequacy._native_benchmark_cases(spec)
+        mutated = [dict(case) for case in cases]
+        mutated[0]["task_id"] = "reasoning_exact_answer_v1/mutated"
+
+        with mock.patch.object(tier_adequacy, "_native_benchmark_cases", return_value=mutated):
+            report = audit_benchmark_tier_adequacy(catalog)
+
+        self.assertIn(
+            "reasoning_exact_answer_v1:native_fixture_expected_tier_selection_digest_mismatch:canary",
+            report["errors"],
+        )
+
+    def test_pinned_materialized_selection_rejects_missing_tier_and_wrong_count(self):
+        catalog = deepcopy(load_capability_catalog())
+        expected = catalog["tier_sampling_policies"]["context_retrieval_reference_v1"][
+            "expected_tier_selections"
+        ]
+        expected.pop("standard")
+        expected["gold"]["case_count"] = 5
+
+        report = audit_benchmark_tier_adequacy(catalog)
+
+        self.assertIn(
+            "context_retrieval_reference_v1:native_fixture_expected_tier_selection_missing_tier:standard",
+            report["errors"],
+        )
+        self.assertIn(
+            "context_retrieval_reference_v1:native_fixture_expected_tier_selection_case_count_mismatch:gold",
+            report["errors"],
+        )
+
+    def test_pinned_materialized_selection_rejects_expected_digest_mutation(self):
+        catalog = deepcopy(load_capability_catalog())
+        catalog["tier_sampling_policies"]["repository_edit_smoke_v1"][
+            "expected_tier_selections"
+        ]["gold"]["selection_sha256"] = "0" * 64
+
+        report = audit_benchmark_tier_adequacy(catalog)
+
+        self.assertIn(
+            "repository_edit_smoke_v1:static_fixture_manifest_expected_tier_selection_digest_mismatch:gold",
+            report["errors"],
+        )
+
     def test_native_strata_require_executable_per_tier_coverage_contracts(self):
         catalog = deepcopy(load_capability_catalog())
         catalog["tier_sampling_policies"]["reasoning_constraint_stress_v1"].pop(

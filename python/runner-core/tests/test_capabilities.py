@@ -10,7 +10,13 @@ from unittest import mock
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade import __version__
+from infergrade.capability_contract import validate_capability_run_artifact
 from infergrade.reasoning_constraint_stress import reasoning_constraint_stress_cases
+from infergrade.selection_identity import (
+    SORTED_JSON_STRING_ARRAY_SHA256_V1,
+    SORTED_UTF8_NEWLINE_SHA256_V1,
+    selection_digest,
+)
 from infergrade.capabilities import (
     CAPABILITY_BENCHMARKS,
     _attach_primary_metric_uncertainty,
@@ -31,6 +37,9 @@ from infergrade.capabilities import (
     _run_capability_container,
     _structured_tool_use_output_shape_gate,
     _write_multiple_choice_capability_run_artifact,
+    _write_evalplus_capability_run_artifact,
+    _write_native_capability_run_artifact,
+    _write_quant_fidelity_capability_run_artifact,
     _write_repository_edit_capability_run_artifact,
     capability_images_for_request,
     execute_capability_suite,
@@ -38,7 +47,7 @@ from infergrade.capabilities import (
     resolve_capability_suite,
     summarize_capability_execution,
 )
-from infergrade.models import CapabilityExecution, RunRequest
+from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 
 
 class _FakeAdapter(object):
@@ -270,6 +279,271 @@ class CapabilityTests(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.tempdir)
+
+    def _assert_selection_provenance(self, path, case_ids, algorithm):
+        with open(path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        protocol = artifact["protocol"]
+        self.assertEqual(artifact["artifact_spec_version"], "0.1.1")
+        self.assertEqual(protocol["case_count"], len(artifact["tasks"]))
+        self.assertEqual(protocol["case_count"], len(case_ids))
+        self.assertEqual(protocol["selection_digest_algorithm"], algorithm)
+        self.assertEqual(protocol["selection_sha256"], selection_digest(case_ids, algorithm))
+        self.assertEqual(validate_capability_run_artifact(artifact), [])
+
+    def test_all_canonical_capability_run_writers_emit_loaded_selection_provenance(self):
+        native_spec = CAPABILITY_BENCHMARKS["multiturn_chat_memory_v1"]
+        native_cases = _native_benchmark_cases(native_spec)[:3]
+        native_ids = [str(case["task_id"]) for case in native_cases]
+        native_request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=[native_spec.benchmark_id],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        native_path = _write_native_capability_run_artifact(
+            native_request,
+            native_spec,
+            os.path.join(self.tempdir, "native"),
+            native_cases,
+            [
+                {
+                    "case_id": case["case_id"],
+                    "task_id": case["task_id"],
+                    "generation_status": "completed",
+                }
+                for case in native_cases
+            ],
+            {
+                "status": "completed",
+                "primary_metric": {"name": "accuracy", "value": 1.0},
+                "metrics": {
+                    "passed_constraints": len(native_cases),
+                    "total_constraints": len(native_cases),
+                },
+                "case_results": [
+                    {"case_id": case["case_id"], "score": 1.0}
+                    for case in native_cases
+                ],
+                "scoring_policy": "native_fixture_exact_match_v1",
+            },
+        )
+        self._assert_selection_provenance(
+            native_path, native_ids, SORTED_JSON_STRING_ARRAY_SHA256_V1
+        )
+
+        container_request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        container_runtime = {
+            "container_image": "fixture/image",
+            "container_image_id": "sha256:fixture",
+            "container_repo_digests": [],
+        }
+
+        multiple_spec = CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"]
+        multiple_dir = os.path.join(self.tempdir, "multiple-choice")
+        os.makedirs(multiple_dir)
+        multiple_cases = [
+            {"case_id": "mmlu/1", "task_id": "mmlu/1", "category": "math", "answer": "A"},
+            {"case_id": "mmlu/2", "task_id": "mmlu/2", "category": "other", "answer": "B"},
+        ]
+        with open(os.path.join(multiple_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "dataset_revision": "fixture-revision",
+                    "sample_policy": "pinned_fixture_order_v1",
+                    "category_count": 2,
+                },
+                handle,
+            )
+        multiple_path = _write_multiple_choice_capability_run_artifact(
+            container_request,
+            multiple_spec,
+            multiple_dir,
+            multiple_cases,
+            [
+                {
+                    "case_id": case["case_id"],
+                    "task_id": case["task_id"],
+                    "generation_status": "completed",
+                }
+                for case in multiple_cases
+            ],
+            {
+                "status": "completed",
+                "primary_metric": {"name": "accuracy", "value": 1.0},
+                "metrics": {"correct_count": 2, "total_count": 2},
+                "case_results": [
+                    {
+                        "case_id": case["case_id"],
+                        "task_id": case["task_id"],
+                        "expected": case["answer"],
+                        "predicted": case["answer"],
+                        "correct": True,
+                    }
+                    for case in multiple_cases
+                ],
+                "scoring_policy": "exact_multiple_choice_letter_accuracy_v4",
+                "container_runtime": container_runtime,
+            },
+        )
+        self._assert_selection_provenance(
+            multiple_path,
+            [case["task_id"] for case in multiple_cases],
+            SORTED_UTF8_NEWLINE_SHA256_V1,
+        )
+
+        repository_spec = CAPABILITY_BENCHMARKS["repository_edit_smoke_v1"]
+        repository_dir = os.path.join(self.tempdir, "repository-edit")
+        os.makedirs(repository_dir)
+        repository_cases = [
+            {"case_id": "repo/1", "task_id": "repo/1", "category": "repair"},
+            {"case_id": "repo/2", "task_id": "repo/2", "category": "repair"},
+        ]
+        with open(os.path.join(repository_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "fixture_revision": "fixture-revision",
+                    "sample_policy": "pinned_fixture_order_v1",
+                },
+                handle,
+            )
+        repository_path = _write_repository_edit_capability_run_artifact(
+            container_request,
+            repository_spec,
+            repository_dir,
+            repository_cases,
+            [
+                {
+                    "case_id": case["case_id"],
+                    "task_id": case["task_id"],
+                    "generation_status": "completed",
+                }
+                for case in repository_cases
+            ],
+            {
+                "status": "completed",
+                "primary_metric": {"name": "task_success_rate", "value": 1.0},
+                "metrics": {"passed_count": 2, "total_count": 2},
+                "case_results": [
+                    {
+                        "case_id": case["case_id"],
+                        "task_id": case["task_id"],
+                        "score": 1.0,
+                        "passed": True,
+                    }
+                    for case in repository_cases
+                ],
+                "scoring_policy": "repo_edit_task_success_v1",
+                "container_runtime": container_runtime,
+            },
+        )
+        self._assert_selection_provenance(
+            repository_path,
+            [case["task_id"] for case in repository_cases],
+            SORTED_UTF8_NEWLINE_SHA256_V1,
+        )
+
+        evalplus_spec = CAPABILITY_BENCHMARKS["evalplus_humaneval"]
+        evalplus_dir = os.path.join(self.tempdir, "evalplus")
+        os.makedirs(evalplus_dir)
+        evalplus_cases = [
+            {"case_id": "HumanEval/0", "task_id": "HumanEval/0", "entry_point": "add"},
+            {"case_id": "HumanEval/1", "task_id": "HumanEval/1", "entry_point": "sub"},
+        ]
+        with open(os.path.join(evalplus_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "dataset": "humaneval",
+                    "evalplus_revision": "fixture-revision",
+                    "sample_policy": "pinned_fixture_order_v1",
+                },
+                handle,
+            )
+        evalplus_path = _write_evalplus_capability_run_artifact(
+            container_request,
+            evalplus_spec,
+            evalplus_dir,
+            evalplus_cases,
+            [
+                {
+                    "case_id": case["case_id"],
+                    "task_id": case["task_id"],
+                    "generation_status": "completed",
+                    "completion": "def solution():\n    return 1",
+                }
+                for case in evalplus_cases
+            ],
+            {
+                "status": "completed",
+                "primary_metric": {"name": "pass_at_1_plus", "value": 1.0},
+                "metrics": {"passed_count": 2, "failed_count": 0},
+                "case_results": [
+                    {
+                        "case_id": case["case_id"],
+                        "task_id": case["task_id"],
+                        "passed": True,
+                        "base_passed": True,
+                        "plus_passed": True,
+                    }
+                    for case in evalplus_cases
+                ],
+                "scoring_policy": "evalplus_pass_at_1_normalized_v2",
+                "container_runtime": container_runtime,
+            },
+        )
+        self._assert_selection_provenance(
+            evalplus_path,
+            [case["task_id"] for case in evalplus_cases],
+            SORTED_UTF8_NEWLINE_SHA256_V1,
+        )
+
+        fidelity = FidelityExecution(
+            state="measured",
+            metrics={
+                "perplexity": {
+                    "value": 7.0,
+                    "corpus_id": "fixture-corpus",
+                    "corpus_revision": "fixture-revision",
+                    "protocol_id": "fixture-protocol",
+                    "protocol_parameters": {"max_tokens": 128},
+                }
+            },
+        )
+        quant_summary = {
+            "state": "scored",
+            "primary_metric": {"name": "perplexity", "value": 7.0},
+            "metrics": {"perplexity": 7.0},
+            "corpus_id": "fixture-corpus",
+            "corpus_revision": "fixture-revision",
+            "protocol_id": "fixture-protocol",
+            "protocol_parameters": {"max_tokens": 128},
+            "comparability_key": "fixture-comparability",
+        }
+        quant_path = _write_quant_fidelity_capability_run_artifact(
+            container_request,
+            fidelity,
+            quant_summary,
+            os.path.join(self.tempdir, "quant"),
+            {},
+            {},
+            {},
+            "fixture-backend",
+        )
+        self._assert_selection_provenance(
+            quant_path,
+            ["perplexity_reference_v1"],
+            SORTED_JSON_STRING_ARRAY_SHA256_V1,
+        )
 
     def test_resolve_capability_suite_includes_benchmark_ids(self):
         suite = resolve_capability_suite("agentic_coding", "gold")
@@ -1042,7 +1316,7 @@ class CapabilityTests(unittest.TestCase):
         )
         self.assertEqual(
             artifact["protocol"]["selection_sha256"],
-            "a" * 64,
+            selection_digest(["bfcl_v4/simple_1"], SORTED_UTF8_NEWLINE_SHA256_V1),
         )
         self.assertEqual(
             artifact["protocol"]["selection_digest_algorithm"],
@@ -2771,7 +3045,7 @@ class CapabilityTests(unittest.TestCase):
             artifact = json.load(handle)
         self.assertEqual(artifact["summary"]["state"], "not_comparable")
         self.assertIsNone(artifact["summary"]["score"])
-        self.assertEqual(artifact["summary"]["not_comparable_count"], 1)
+        self.assertEqual(artifact["summary"]["not_comparable_count"], 4)
         self.assertTrue(all(task["state"] == "not_comparable" for task in artifact["tasks"]))
         with open(execution.artifacts["_summary"]["capability_summary_path"], "r", encoding="utf-8") as handle:
             capability_summary = json.load(handle)

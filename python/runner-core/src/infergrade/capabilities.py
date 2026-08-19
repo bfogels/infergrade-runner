@@ -45,6 +45,7 @@ from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcn
 
 CAPABILITY_REGISTRY_VERSION = "2026-07-capability-protocol-3.1"
 BENCHMARK_PROTOCOL_IDENTITY_VERSION = "benchmark_protocol_identity_v1"
+CAPABILITY_RUN_ARTIFACT_SPEC_VERSION = "0.1.1"
 MULTITURN_MEMORY_FIXTURE_REVISION = "2026-04-multiturn-preview"
 ASSISTANT_COMPOSITIONAL_FIXTURE_REVISION = "2026-07-assistant-compositional-v2"
 CODING_STATIC_REPAIR_FIXTURE_REVISION = "2026-05-coding-static-preview"
@@ -1675,7 +1676,7 @@ def _write_quant_fidelity_capability_run_artifact(
     ))
     protocol_parameters = dict(summary.get("protocol_parameters") or {})
     artifact = {
-        "artifact_spec_version": "0.1.0",
+        "artifact_spec_version": CAPABILITY_RUN_ARTIFACT_SPEC_VERSION,
         "artifact_kind": "capability_run",
         "capability_run_id": "caprun_perplexity_reference_v1_%s" % stable_hash(
             {
@@ -1742,6 +1743,11 @@ def _write_quant_fidelity_capability_run_artifact(
             "scorer_type": "perplexity",
             "scoring_policy": "quant_fidelity_perplexity_v1",
             "repetitions": 1,
+            "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+            "selection_sha256": selection_digest(
+                ["perplexity_reference_v1"], SORTED_JSON_STRING_ARRAY_SHA256_V1
+            ),
+            "case_count": 1,
         },
         "summary": {
             "state": summary.get("state"),
@@ -1887,7 +1893,7 @@ def _write_native_capability_run_artifact(
         _native_fixture_revision(spec),
         cases,
     )
-    for prediction in predictions:
+    for prediction in _prediction_rows_for_cases(cases, predictions):
         case_id = str(prediction.get("case_id") or "")
         case = _case_by_id(cases, case_id)
         case_score = task_scores.get(case_id, {})
@@ -1946,7 +1952,7 @@ def _write_native_capability_run_artifact(
             }
         )
     artifact = {
-        "artifact_spec_version": "0.1.0",
+        "artifact_spec_version": CAPABILITY_RUN_ARTIFACT_SPEC_VERSION,
         "artifact_kind": "capability_run",
         "capability_run_id": "caprun_%s_%s" % (
             spec.benchmark_id,
@@ -2100,8 +2106,16 @@ def _container_fixture_revision(
     spec: CapabilityBenchmarkSpec,
     metadata: Dict[str, Any],
     summary: Dict[str, Any],
+    cases: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Bind a corpus observation to its source, sampling policy, and exact selection."""
+    selection_digest_algorithm = SORTED_UTF8_NEWLINE_SHA256_V1
+    loaded_case_count = len(cases) if cases is not None else None
+    loaded_selection_sha256 = (
+        _case_selection_digest(cases, selection_digest_algorithm)
+        if cases is not None
+        else None
+    )
     identity = {
         "benchmark_id": spec.benchmark_id,
         "dataset_revision": metadata.get("dataset_revision"),
@@ -2110,11 +2124,17 @@ def _container_fixture_revision(
         "upstream_revision": metadata.get("upstream_revision"),
         "source_snapshot_sha256": metadata.get("snapshot_sha256"),
         "sample_policy": metadata.get("sample_policy") or summary.get("sample_policy") or "unknown",
-        "case_count": metadata.get("case_count") or summary.get("case_count"),
-        "selection_digest_algorithm": metadata.get("selection_digest_algorithm")
+        "case_count": loaded_case_count
+        if loaded_case_count is not None
+        else metadata.get("case_count") or summary.get("case_count"),
+        "selection_digest_algorithm": selection_digest_algorithm
+        if cases is not None
+        else metadata.get("selection_digest_algorithm")
         or summary.get("selection_digest_algorithm")
-        or SORTED_UTF8_NEWLINE_SHA256_V1,
-        "selection_sha256": metadata.get("selection_sha256") or summary.get("selection_sha256"),
+        or selection_digest_algorithm,
+        "selection_sha256": loaded_selection_sha256
+        if loaded_selection_sha256 is not None
+        else metadata.get("selection_sha256") or summary.get("selection_sha256"),
     }
     return "%s_selection_%s" % (
         spec.benchmark_id,
@@ -2140,8 +2160,10 @@ def _write_multiple_choice_capability_run_artifact(
         for item in list(summary.get("case_results") or [])
     }
     metadata = _read_optional_json(os.path.join(benchmark_dir, "benchmark_metadata.json"))
+    selection_digest_algorithm = SORTED_UTF8_NEWLINE_SHA256_V1
+    selection_sha256 = _case_selection_digest(cases, selection_digest_algorithm)
     tasks = []
-    for prediction in predictions:
+    for prediction in _prediction_rows_for_cases(cases, predictions):
         task_id = str(prediction.get("task_id") or prediction.get("case_id") or "")
         case = _case_by_task_id(cases, task_id)
         result = case_results.get(task_id, {})
@@ -2149,7 +2171,11 @@ def _write_multiple_choice_capability_run_artifact(
         predicted = result.get("predicted")
         malformed = bool(result.get("malformed")) if structured_tool_use else predicted is None
         gate_blocked = str((summary.get("output_shape_gate") or {}).get("status")) == "blocked"
-        if generation_status != "completed":
+        if prediction.get("prediction_missing") and gate_blocked:
+            task_state = "not_comparable"
+            task_score = None
+            error_class = "systemic_output_protocol_mismatch"
+        elif generation_status != "completed":
             task_state = "failed"
             task_score = None
             error_class = "generation_failed"
@@ -2214,7 +2240,7 @@ def _write_multiple_choice_capability_run_artifact(
         )
     metrics = dict(summary.get("metrics") or {})
     artifact = {
-        "artifact_spec_version": "0.1.0",
+        "artifact_spec_version": CAPABILITY_RUN_ARTIFACT_SPEC_VERSION,
         "artifact_kind": "capability_run",
         "capability_run_id": "caprun_%s_%s" % (
             spec.benchmark_id,
@@ -2227,6 +2253,7 @@ def _write_multiple_choice_capability_run_artifact(
                         spec,
                         metadata,
                         summary,
+                        cases,
                     ),
                     "generation_preset_id": request.generation_preset,
                     "summary": summary,
@@ -2278,6 +2305,7 @@ def _write_multiple_choice_capability_run_artifact(
                 spec,
                 metadata,
                 summary,
+                cases,
             ),
             "dataset_revision": metadata.get("dataset_revision"),
             "scorer_type": "json_schema" if structured_tool_use else "multiple_choice",
@@ -2290,10 +2318,9 @@ def _write_multiple_choice_capability_run_artifact(
             "repetitions": 1,
             "sample_policy": metadata.get("sample_policy"),
             "category_count": metadata.get("category_count"),
-            "case_count": metadata.get("case_count") or metrics.get("total_count"),
-            "selection_digest_algorithm": metadata.get("selection_digest_algorithm")
-            or SORTED_UTF8_NEWLINE_SHA256_V1,
-            "selection_sha256": metadata.get("selection_sha256"),
+            "case_count": len(cases),
+            "selection_digest_algorithm": selection_digest_algorithm,
+            "selection_sha256": selection_sha256,
             "source_snapshot_sha256": metadata.get("snapshot_sha256"),
             "dataset_sha256": metadata.get("dataset_sha256"),
         },
@@ -2380,9 +2407,11 @@ def _write_repository_edit_capability_run_artifact(
         metadata.get("fixture_revision") or summary.get("fixture_revision") or "unknown",
         cases,
     )
+    selection_digest_algorithm = SORTED_UTF8_NEWLINE_SHA256_V1
+    selection_sha256 = _case_selection_digest(cases, selection_digest_algorithm)
     gate_blocked = str((summary.get("output_shape_gate") or {}).get("status")) == "blocked"
     tasks = []
-    for prediction in predictions:
+    for prediction in _prediction_rows_for_cases(cases, predictions):
         task_id = str(prediction.get("task_id") or prediction.get("case_id") or "")
         case = _case_by_task_id(cases, task_id)
         result = case_results.get(task_id, {})
@@ -2431,7 +2460,7 @@ def _write_repository_edit_capability_run_artifact(
         )
     metrics = dict(summary.get("metrics") or {})
     artifact = {
-        "artifact_spec_version": "0.1.0",
+        "artifact_spec_version": CAPABILITY_RUN_ARTIFACT_SPEC_VERSION,
         "artifact_kind": "capability_run",
         "capability_run_id": "caprun_%s_%s"
         % (
@@ -2485,16 +2514,14 @@ def _write_repository_edit_capability_run_artifact(
             "task_version": spec.benchmark_id,
             "fixture_revision": fixture_revision,
             "source_fixture_revision": metadata.get("fixture_revision") or summary.get("fixture_revision"),
-            "selection_digest_algorithm": metadata.get("selection_digest_algorithm")
-            or SORTED_UTF8_NEWLINE_SHA256_V1,
-            "selection_sha256": metadata.get("selection_sha256")
-            or _case_selection_digest(cases, SORTED_UTF8_NEWLINE_SHA256_V1),
+            "selection_digest_algorithm": selection_digest_algorithm,
+            "selection_sha256": selection_sha256,
             "dataset_revision": None,
             "scorer_type": "unit_test",
             "scoring_policy": summary.get("scoring_policy") or "repo_edit_task_success_v1",
             "repetitions": 1,
             "sample_policy": metadata.get("sample_policy"),
-            "case_count": metadata.get("case_count"),
+            "case_count": len(cases),
         },
         "summary": {
             "state": summary_state,
@@ -2556,8 +2583,10 @@ def _write_evalplus_capability_run_artifact(
         for item in list(summary.get("case_results") or [])
     }
     metadata = _read_optional_json(os.path.join(benchmark_dir, "benchmark_metadata.json"))
+    selection_digest_algorithm = SORTED_UTF8_NEWLINE_SHA256_V1
+    selection_sha256 = _case_selection_digest(cases, selection_digest_algorithm)
     tasks = []
-    for prediction in predictions:
+    for prediction in _prediction_rows_for_cases(cases, predictions):
         task_id = str(prediction.get("task_id") or prediction.get("case_id") or "")
         case = _case_by_task_id(cases, task_id)
         result = case_results.get(task_id, {})
@@ -2606,7 +2635,7 @@ def _write_evalplus_capability_run_artifact(
         )
     metrics = dict(summary.get("metrics") or {})
     artifact = {
-        "artifact_spec_version": "0.1.0",
+        "artifact_spec_version": CAPABILITY_RUN_ARTIFACT_SPEC_VERSION,
         "artifact_kind": "capability_run",
         "capability_run_id": "caprun_%s_%s" % (
             spec.benchmark_id,
@@ -2619,6 +2648,7 @@ def _write_evalplus_capability_run_artifact(
                         spec,
                         metadata,
                         summary,
+                        cases,
                     ),
                     "generation_preset_id": request.generation_preset,
                     "summary": summary,
@@ -2668,18 +2698,17 @@ def _write_evalplus_capability_run_artifact(
                 spec,
                 metadata,
                 summary,
+                cases,
             ),
             "dataset_revision": metadata.get("evalplus_revision") or summary.get("evalplus_revision"),
             "scorer_type": "unit_test",
             "scoring_policy": summary.get("scoring_policy") or "evalplus_pass_at_1_normalized_v2",
             "repetitions": 1,
             "sample_policy": metadata.get("sample_policy") or summary.get("sample_policy"),
-            "case_count": metadata.get("case_count") or summary.get("case_count"),
+            "case_count": len(cases),
             "dataset": metadata.get("dataset") or summary.get("dataset"),
-            "selection_digest_algorithm": metadata.get("selection_digest_algorithm")
-            or summary.get("selection_digest_algorithm")
-            or SORTED_UTF8_NEWLINE_SHA256_V1,
-            "selection_sha256": metadata.get("selection_sha256") or summary.get("selection_sha256"),
+            "selection_digest_algorithm": selection_digest_algorithm,
+            "selection_sha256": selection_sha256,
             "completion_normalization_policy": "evalplus_code_completion_v1",
         },
         "summary": {
@@ -2823,6 +2852,39 @@ def _case_by_task_id(cases: List[Dict[str, Any]], task_id: str) -> Dict[str, Any
         if str(case.get("task_id") or case.get("case_id") or "") == task_id:
             return dict(case)
     return {}
+
+
+def _prediction_rows_for_cases(
+    cases: List[Dict[str, Any]],
+    predictions: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return one canonical prediction row per loaded case, including aborted cases."""
+    by_identity = {}
+    for item in predictions:
+        row = dict(item)
+        for identity in (row.get("case_id"), row.get("task_id")):
+            if str(identity or ""):
+                by_identity[str(identity)] = row
+    rows = []
+    for case in cases:
+        case_id = str(case.get("case_id") or case.get("task_id") or "")
+        task_id = str(case.get("task_id") or case_id)
+        row = by_identity.get(case_id) or by_identity.get(task_id)
+        if row is None:
+            row = {
+                "case_id": case_id,
+                "task_id": task_id,
+                "generation_status": "failed",
+                "generation_failure_kind": "generation_not_attempted",
+                "generation_error": "No prediction was recorded before the benchmark stopped.",
+                "prediction_missing": True,
+            }
+        else:
+            row = dict(row)
+            row.setdefault("case_id", case_id)
+            row.setdefault("task_id", task_id)
+        rows.append(row)
+    return rows
 
 
 def _read_optional_json(path: str) -> Dict[str, Any]:

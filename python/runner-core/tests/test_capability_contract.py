@@ -122,6 +122,69 @@ class CapabilityContractTests(unittest.TestCase):
     def test_valid_capability_run_artifact_passes_semantic_validation(self):
         self.assertEqual(validate_capability_run_artifact(_artifact()), [])
 
+    def test_legacy_capability_run_artifact_remains_readable_without_selection_provenance(self):
+        artifact = _artifact()
+
+        self.assertEqual(artifact["artifact_spec_version"], "0.1.0")
+        self.assertEqual(validate_capability_run_artifact(artifact), [])
+
+    def test_v011_capability_run_requires_valid_selection_provenance(self):
+        artifact = _artifact()
+        artifact["artifact_spec_version"] = "0.1.1"
+        artifact["protocol"].update(
+            {
+                "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
+                "selection_sha256": "a" * 64,
+                "case_count": 1,
+            }
+        )
+
+        self.assertEqual(validate_capability_run_artifact(artifact), [])
+
+        missing = dict(artifact)
+        missing["protocol"] = dict(artifact["protocol"])
+        del missing["protocol"]["selection_sha256"]
+        errors = validate_capability_run_artifact(missing)
+        self.assertIn("protocol.selection_sha256 is required", errors)
+
+    def test_v011_selection_provenance_rejects_algorithm_digest_and_count_drift(self):
+        artifact = _artifact()
+        artifact["artifact_spec_version"] = "0.1.1"
+        artifact["protocol"].update(
+            {
+                "selection_digest_algorithm": "unsupported_v1",
+                "selection_sha256": "A" * 64,
+                "case_count": 2,
+            }
+        )
+
+        errors = validate_capability_run_artifact(artifact)
+
+        self.assertIn(
+            "protocol.selection_digest_algorithm must be a supported selection digest algorithm",
+            errors,
+        )
+        self.assertIn(
+            "protocol.selection_sha256 must be a lowercase SHA-256 hex digest",
+            errors,
+        )
+        self.assertIn("protocol.case_count must equal len(tasks)", errors)
+
+    def test_v011_schema_conditionally_requires_selection_provenance(self):
+        schema = load_capability_run_schema()
+        conditional = next(
+            item
+            for item in schema["allOf"]
+            if item.get("if", {}).get("properties", {})
+            .get("artifact_spec_version", {})
+            .get("const")
+            == "0.1.1"
+        )
+        self.assertEqual(
+            conditional["then"]["properties"]["protocol"]["required"],
+            ["selection_digest_algorithm", "selection_sha256", "case_count"],
+        )
+
     def test_confidence_labels_use_v0_3_2_canonical_names_with_legacy_aliases_accepted(self):
         self.assertIn("repeated_local_sample", CONFIDENCE_LABELS)
         self.assertIn("sampled_reference", CONFIDENCE_LABELS)

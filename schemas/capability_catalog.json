@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-14-selection-digest-provenance",
+  "catalog_version": "2026-08-18-selection-admissibility",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -641,16 +641,21 @@
     "ifeval": {"strategy": "coverage_balanced_hash_rank", "stratification_fields": ["instruction_id"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 541}},
     "evalplus_humaneval": {"strategy": "global_hash_rank", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "case_limits": {"canary": 20, "standard": 164, "gold": 164}},
     "evalplus_mbpp": {"strategy": "global_hash_rank", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 378}},
-    "multiturn_chat_memory_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "case_limits": {"canary": 3, "standard": 5, "gold": 5}},
-    "assistant_compositional_instruction_v2": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "case_limits": {"canary": 4, "standard": 24, "gold": 24}},
-    "coding_static_repair_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "case_limits": {"canary": 2, "standard": 3, "gold": 3}},
-    "reasoning_exact_answer_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "case_limits": {"canary": 2, "standard": 3, "gold": 3}},
+    "multiturn_chat_memory_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "case_limits": {"canary": 3, "standard": 5, "gold": 5}, "expected_tier_selections": {"canary": {"case_count": 3, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "d28570effbe0c6d3ec8ae3b744cb60a5bfd5dcbf0c9ddefa6d4b585fbdabd08c"}, "standard": {"case_count": 5, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "d93b5471db03aa51dec7ab9df2391cb4a402739aab8c46664d19d2bfa95632bf"}, "gold": {"case_count": 5, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "d93b5471db03aa51dec7ab9df2391cb4a402739aab8c46664d19d2bfa95632bf"}}},
+    "assistant_compositional_instruction_v2": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "case_limits": {"canary": 4, "standard": 24, "gold": 24}, "expected_tier_selections": {"canary": {"case_count": 4, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "e5068e024ef6eff44d2ab40934a77f03d359dd9aca169f137dd8caf5f8f6e6d7"}, "standard": {"case_count": 24, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "27a161b734c610629d6d2edcacb7335a8d285d1d1b9dfcce08872bc8f346e130"}, "gold": {"case_count": 24, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "27a161b734c610629d6d2edcacb7335a8d285d1d1b9dfcce08872bc8f346e130"}}},
+    "coding_static_repair_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "case_limits": {"canary": 2, "standard": 3, "gold": 3}, "expected_tier_selections": {"canary": {"case_count": 2, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "22a18428df51270a07cd07c24e7050f786070c659716e631385b5b4636456b20"}, "standard": {"case_count": 3, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "ecdb5ae016621292f56111b0e5269afc77b31281c152cad59c6cb1f40783a781"}, "gold": {"case_count": 3, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "ecdb5ae016621292f56111b0e5269afc77b31281c152cad59c6cb1f40783a781"}}},
+    "reasoning_exact_answer_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "case_limits": {"canary": 2, "standard": 3, "gold": 3}, "expected_tier_selections": {"canary": {"case_count": 2, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "bed4f94d70dec0f6f88fe3252ecb091fa2a4b9dbf88b8f50c4dbab0825fef0b3"}, "standard": {"case_count": 3, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "0ed66f6cd01b633a35215998284e03b7dc8d22097f8c7f3e634d59504cfe3a6a"}, "gold": {"case_count": 3, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "0ed66f6cd01b633a35215998284e03b7dc8d22097f8c7f3e634d59504cfe3a6a"}}},
     "reasoning_constraint_stress_v1": {
       "strategy": "balanced_tier_blocks",
       "stratification_fields": ["category", "structural_tier"],
       "selection_identity_policy": "exact_selected_case_ids_sha256_v1",
       "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
       "case_limits": {"canary": 6, "standard": 24, "gold": 48},
+      "expected_tier_selections": {
+        "canary": {"case_count": 6, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "f402cd5d122445f7eb34b87296baf60c8c7ff890eab8383483a28a0b80b3bd46"},
+        "standard": {"case_count": 24, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "0c7e13fdf4ef2e54b00330f08ecef6813fa220278b933c26e4622619c54c8ac3"},
+        "gold": {"case_count": 48, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "1a87c415ea359fe21a733f1e7e8f7eaa23807c33c79f8a8bcf4ce5b2df621cb1"}
+      },
       "tier_coverage_requirements": {
         "canary": {
           "category": {"required_values": ["state_tracking", "graph_planning", "modular_reasoning", "set_reasoning", "dependency_planning", "arrangement_counting"], "minimum_cases_per_required_value": 1},
@@ -676,6 +681,11 @@
       "selection_identity_policy": "exact_selected_case_ids_sha256_v1",
       "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
       "case_limits": {"canary": 8, "standard": 16, "gold": 24},
+      "expected_tier_selections": {
+        "canary": {"case_count": 8, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "9927c93765bf54d59d18aa63b7dba121c1055a8c4e71708d0aee34883bd0be13"},
+        "standard": {"case_count": 16, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "4ff3dd370180bd8bbc49e86baf49dd3e80ce2034b6e79c06b83e0d34fcc56ad6"},
+        "gold": {"case_count": 24, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "56a51488673df1919d457936720f6f48873657e07ad8cc718c3ded6fd3c29bdd"}
+      },
       "tier_coverage_requirements": {
         "canary": {
           "category": {"required_values": ["inventory", "access_control", "service_operations", "budgeting", "scheduling", "data_workflow", "communication", "release_safety"], "minimum_cases_per_required_value": 1},
@@ -697,6 +707,11 @@
       "selection_identity_policy": "exact_selected_case_ids_sha256_v1",
       "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
       "case_limits": {"canary": 2, "standard": 6, "gold": 8},
+      "expected_tier_selections": {
+        "canary": {"case_count": 2, "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "selection_sha256": "a9e0ad9e7b7fb9503c5f616fbb4e808a4217dd6c3f1aafa83d9ec108ef45101a"},
+        "standard": {"case_count": 6, "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "selection_sha256": "503709345718584fef4aeabeb6e43970a9c0bafb7c7e93b99e7e3260c512a7c3"},
+        "gold": {"case_count": 8, "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "selection_sha256": "48ce2a4dd37e98e8e9cb2fc75ccec247ed482f443aedb55a643f16eb0df2da99"}
+      },
       "tier_coverage_requirements": {
         "canary": {
           "category": {"required_values": ["state_and_time", "data_transformation"], "minimum_cases_per_required_value": 1}
@@ -715,6 +730,11 @@
       "selection_identity_policy": "exact_selected_case_ids_sha256_v1",
       "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
       "case_limits": {"canary": 1, "standard": 3, "gold": 6},
+      "expected_tier_selections": {
+        "canary": {"case_count": 1, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "8b5390350302427218479ad6c48182c82b8f3523a29d2a6d1957c4f20ecff896"},
+        "standard": {"case_count": 3, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "848ebe5a271259eea5a007631be8dd170ba807561e5edac41c72ba2c9161fefc"},
+        "gold": {"case_count": 6, "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "selection_sha256": "84f3d485d8e23d956e18e6eddd0d7cf056a8a0c75e61cd8e7a52b9c611364bdc"}
+      },
       "tier_coverage_requirements": {
         "canary": {
           "context_bucket_tokens": {"required_values": [4096], "minimum_cases_per_required_value": 1},
