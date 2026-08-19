@@ -15,12 +15,12 @@ class BenchmarkReadinessTests(unittest.TestCase):
 
         self.assertEqual(report["artifact_spec_version"], "0.8.0")
         self.assertTrue(report["catalog_tier_sampling_valid"])
-        self.assertEqual(report["materialized_native_fixture_count"], 7)
-        self.assertEqual(report["native_tier_coverage_contract_count"], 3)
+        self.assertEqual(report["materialized_native_fixture_count"], 6)
+        self.assertEqual(report["native_tier_coverage_contract_count"], 2)
         self.assertEqual(report["verified_static_fixture_manifest_count"], 1)
-        self.assertEqual(report["verified_tier_coverage_contract_count"], 5)
-        self.assertEqual(report["declared_selection_digest_algorithm_count"], 15)
-        self.assertEqual(report["materialized_selection_digest_verified_count"], 9)
+        self.assertEqual(report["verified_tier_coverage_contract_count"], 4)
+        self.assertEqual(report["declared_selection_digest_algorithm_count"], 14)
+        self.assertEqual(report["materialized_selection_digest_verified_count"], 8)
         self.assertEqual(report["runtime_only_selection_digest_contract_count"], 6)
         self.assertFalse(report["scoped_claim_ready"])
         self.assertFalse(report["broad_surface_ready"])
@@ -139,9 +139,9 @@ class BenchmarkReadinessTests(unittest.TestCase):
 
     def test_invalid_native_tier_coverage_blocks_claim_readiness(self):
         catalog = _structurally_broad_catalog()
-        catalog["tier_sampling_policies"]["reasoning_constraint_stress_v1"][
+        catalog["tier_sampling_policies"]["stateful_tool_loop_diagnostic_v1"][
             "tier_coverage_requirements"
-        ]["canary"]["category"]["required_values"].append("missing_category")
+        ]["canary"]["variant"]["required_values"].append("missing_variant")
 
         report = audit_benchmark_readiness(_calibrated_documents(catalog), catalog)
 
@@ -149,14 +149,14 @@ class BenchmarkReadinessTests(unittest.TestCase):
         self.assertFalse(report["catalog_tier_sampling_valid"])
         self.assertFalse(report["scoped_claim_ready"])
         self.assertIn(
-            "reasoning_constraint_stress_v1:tier_coverage_missing_required_values:canary:category",
+            "stateful_tool_loop_diagnostic_v1:tier_coverage_missing_required_values:canary:variant",
             report["catalog_tier_sampling_errors"],
         )
         self.assertTrue(
             any(
                 item.startswith("catalog_metadata:tier_sampling:")
                 for item in _surface(
-                    report, "local_reasoning_capability"
+                    report, "local_assistant_capability"
                 )["scoped_claim_blockers"]
             )
         )

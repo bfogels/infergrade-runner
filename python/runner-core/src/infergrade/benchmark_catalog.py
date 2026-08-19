@@ -35,6 +35,14 @@ DIRECT_ANSWER_PROTOCOL_CHECK_IDS = {
     "longbench_v2_local_reference_v1",
 }
 
+# Keep the legacy fixture and scorer available for forensic/unit-test use, but
+# make the known direct-answer reasoning protocol impossible to select as a
+# real benchmark until a reasoning-capable successor is qualified.
+QUARANTINED_BENCHMARK_REASON_CODES = {
+    "reasoning_constraint_stress_v1": "legacy_direct_no_think_v1_no_capability_validity_evidence",
+}
+BENCHMARK_SELECTION_QUARANTINE_PREFIX = "benchmark_quarantined"
+
 
 def repo_root() -> Path:
     """Return the repository root for the Runner workspace."""
@@ -95,6 +103,50 @@ def benchmark_status_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str
     return {str(item["check_id"]): dict(item) for item in list(payload.get("benchmark_status_matrix") or [])}
 
 
+def benchmark_quarantine_reason(
+    check_id: str,
+    catalog: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Return the stable quarantine reason for a benchmark, if any."""
+    payload = catalog or load_capability_catalog()
+    check_key = str(check_id or "").strip()
+    declared = dict((payload.get("quarantined_benchmarks") or {}).get(check_key) or {})
+    reason = str(declared.get("reason_code") or "").strip()
+    if reason:
+        return reason
+    if check_key in QUARANTINED_BENCHMARK_REASON_CODES:
+        status = benchmark_status_index(payload).get(check_key, {})
+        if str(status.get("runnable_status") or "") == "quarantined":
+            return QUARANTINED_BENCHMARK_REASON_CODES[check_key]
+    return None
+
+
+def is_benchmark_quarantined(
+    check_id: str,
+    catalog: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Return whether a benchmark is excluded from runnable evidence."""
+    return benchmark_quarantine_reason(check_id, catalog) is not None
+
+
+def reject_quarantined_benchmarks(
+    check_ids: List[str],
+    catalog: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Fail closed when a request explicitly resolves to quarantined checks."""
+    payload = catalog or load_capability_catalog()
+    blocked = []
+    for check_id in _dedupe_strings(check_ids):
+        reason = benchmark_quarantine_reason(check_id, payload)
+        if reason:
+            blocked.append((str(check_id), reason))
+    if blocked:
+        benchmark_id, reason = blocked[0]
+        raise ValueError(
+            "%s:%s:%s" % (BENCHMARK_SELECTION_QUARANTINE_PREFIX, benchmark_id, reason)
+        )
+
+
 def capability_surface_index(catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
     """Return capability surfaces keyed by surface id."""
     payload = catalog or load_capability_catalog()
@@ -110,7 +162,19 @@ def surface_score_policy_index(catalog: Optional[Dict[str, Any]] = None) -> Dict
 def coverage_expansion_priorities(catalog: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Return ordered coverage priorities that directly improve the answer loop."""
     payload = catalog or load_capability_catalog()
-    priorities = [dict(item) for item in list(payload.get("coverage_expansion_priorities") or [])]
+    priorities = []
+    for item in list(payload.get("coverage_expansion_priorities") or []):
+        priority = dict(item)
+        check_ids = _dedupe_strings(priority.get("benchmark_check_ids"))
+        quarantined = [
+            check_id for check_id in check_ids if benchmark_quarantine_reason(check_id, payload)
+        ]
+        priority["benchmark_check_ids"] = [
+            check_id for check_id in check_ids if check_id not in quarantined
+        ]
+        if quarantined:
+            priority["excluded_quarantined_benchmark_check_ids"] = quarantined
+        priorities.append(priority)
     return sorted(priorities, key=lambda item: int(item.get("rank") or 0))
 
 
@@ -154,6 +218,47 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         for item in list(payload.get("planned_benchmark_candidates") or [])
         if item.get("check_id")
     }
+    quarantine_payload = payload.get("quarantined_benchmarks")
+    if not isinstance(quarantine_payload, dict):
+        failures.append("quarantined_benchmarks must be an object")
+        quarantine_payload = {}
+    declared_checks = {
+        str(item.get("check_id")): item
+        for item in list(payload.get("checks") or [])
+        if isinstance(item, dict) and item.get("check_id")
+    }
+    for check_id, declaration in quarantine_payload.items():
+        if check_id not in declared_checks:
+            failures.append(f"{check_id}: quarantined benchmark must be a declared check")
+            continue
+        if not isinstance(declaration, dict):
+            failures.append(f"{check_id}: quarantine declaration must be an object")
+            continue
+        if not str(declaration.get("reason_code") or "").strip():
+            failures.append(f"{check_id}: quarantine reason_code must be non-empty")
+        expected_flags = {
+            "runnable": False,
+            "excluded_from_readiness": True,
+            "excluded_from_recommendation": True,
+            "excluded_from_release_evidence": True,
+        }
+        for field, expected in expected_flags.items():
+            if declaration.get(field) is not expected:
+                failures.append(
+                    f"{check_id}: quarantine {field} must be {str(expected).lower()}"
+                )
+        status = status_by_check.get(check_id, {})
+        if status.get("runnable_status") != "quarantined":
+            failures.append(f"{check_id}: quarantine status must be quarantined")
+        if status.get("default_inclusion_status") != "excluded_quarantined":
+            failures.append(
+                f"{check_id}: quarantined benchmark must be excluded by default"
+            )
+        if declared_checks[check_id].get("status") != "quarantined":
+            failures.append(f"{check_id}: declared check status must be quarantined")
+    for check_id, status in status_by_check.items():
+        if status.get("runnable_status") == "quarantined" and check_id not in quarantine_payload:
+            failures.append(f"{check_id}: quarantined status requires a quarantine declaration")
     for check_id in sorted(declared_check_ids & planned_check_ids):
         failures.append(f"{check_id}: benchmark cannot be both a declared check and planned candidate")
     for check_id in sorted(declared_check_ids | planned_check_ids):
@@ -470,11 +575,13 @@ def resolve_request_selection(request: RunRequest, catalog: Optional[Dict[str, A
                 derived_groups.append(str(group_id))
         group_ids = [item for item in _dedupe_strings(derived_groups) if item in groups]
 
-    return {
+    selection = {
         "suite_ids": suite_ids,
         "group_ids": group_ids,
         "check_ids": check_ids,
     }
+    reject_quarantined_benchmarks(selection["check_ids"], payload)
+    return selection
 
 
 def normalize_request_selection(request: RunRequest, catalog: Optional[Dict[str, Any]] = None) -> RunRequest:
@@ -633,7 +740,10 @@ def capability_coverage_guidance_for_selection(
     available_reference = [
         check_id
         for check_id, check in checks.items()
-        if check.get("suite_scope") == "reference" and check_id not in selected_ids and check.get("status", "available") != "planned"
+        if check.get("suite_scope") == "reference"
+        and check_id not in selected_ids
+        and check.get("status", "available") != "planned"
+        and not is_benchmark_quarantined(check_id, payload)
     ]
     planned = [
         _planned_benchmark_candidate_payload(payload, item)
@@ -797,6 +907,8 @@ def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dic
         "harness_status": legitimacy_status.get("harness_status"),
         "sample_policy": legitimacy_status.get("sample_policy"),
         "benchmark_claim_boundary": legitimacy_status.get("claim_boundary"),
+        "quarantine_reason_code": benchmark_quarantine_reason(check_id, catalog),
+        "runnable_evidence": not is_benchmark_quarantined(check_id, catalog),
         "expected_duration_token_volume_status": legitimacy_status.get("expected_duration_token_volume_status"),
         "sandbox_requirement": legitimacy_status.get("sandbox_requirement"),
         "promotion_blockers": list(legitimacy_status.get("promotion_blockers") or []),

@@ -31,9 +31,9 @@ InferGrade needs capability benchmarks that are:
   - InferGrade role: native local-friendly exact-answer reasoning check for thin local sample evidence.
 
 - `Reasoning constraint stress`
-  - Why: the weighted three-case exact-answer component is empirically saturated, so a broader six-category bank is needed to measure whether a successor can discriminate current models.
-  - InferGrade role: explicitly selected, zero-weight diagnostic with 48 pinned synthetic cases. Canary runs one case from every category; standard runs four per category; gold runs all eight per category.
-  - Claim boundary: structural tiers describe fixture construction, not validated model difficulty. The diagnostic is not a replacement score unless cross-family, independently replicated distribution and slice-headroom evidence supports a new score version.
+  - Why: the weighted three-case exact-answer component is empirically saturated, but the direct-no-think v1 protocol produced validity-confounded local floor observations.
+  - InferGrade role: `legacy_direct_no_think_v1`, quarantined from runnable selection, readiness, recommendation, and release evidence. The pinned 48-case fixture remains available for forensic and unit-test artifacts; its canary/standard/gold contracts remain 6/24/48.
+  - Claim boundary: the exact local observations are five admitted `0/6` canaries and one admitted `0/48` gold run, not a capability-floor claim. A reasoning-capable successor protocol with a bounded larger output budget must clear a one- or two-case proof before new evidence is collected.
 
 - `GPQA Diamond reference`
   - Why: harder expert-level multiple-choice evidence can add headroom where smaller reasoning checks cluster.
@@ -154,7 +154,7 @@ The currently implemented first-user catalog is:
 - group: `reasoning_exact_answer`
   - check: `reasoning_exact_answer_v1`
 - group: `reasoning_headroom_diagnostic`
-  - check: `reasoning_constraint_stress_v1` (intentional, zero-weight diagnostic)
+  - check: `reasoning_constraint_stress_v1` (legacy direct-no-think fixture; quarantined, forensic/unit-test use only)
 - group: `broad_reasoning_knowledge`
   - check: `mmlu_pro_reference_v1`
 - group: `deployment_chat`
@@ -277,7 +277,7 @@ The first executable coding reference artifact path is `evalplus_humaneval`: whe
 
 The first local reasoning artifact path is `reasoning_exact_answer_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. It checks a compact synthetic exact-answer fixture set. It does not use GPQA, does not replace MMLU-Pro reference evidence, and does not support broad reasoning, expert knowledge, or gold-evidence claims.
 
-`reasoning_constraint_stress_v1` is a separate diagnostic successor candidate, not an in-place rewrite of that historical score component. Its 48 cases interleave state tracking, graph planning, modular recurrence, set inclusion-exclusion, dependency planning, and constrained arrangement counting so every tier spans every category. Reports preserve per-category and structural-tier accuracy, and its category saturation gate requires at least four scored cases per slice. Completed scored outcomes form the accuracy and Wilson-interval population; runtime generation failures remain explicit unscored partial evidence. It has zero Capability protocol weight and is excluded from default suites until a cross-family distribution audit demonstrates discrimination and headroom.
+`reasoning_constraint_stress_v1` is retained as the `legacy_direct_no_think_v1` fixture/scorer, not as a runnable successor. Its 48 cases interleave state tracking, graph planning, modular recurrence, set inclusion-exclusion, dependency planning, and constrained arrangement counting so every tier spans every category. Reports preserve per-category and structural-tier accuracy, but the fixture is quarantined from runnable, readiness, recommendation, and release evidence until a reasoning-capable successor protocol is qualified. See [the 2026-08-19 integrity note](benchmark_integrity_2026-08-19.md) for the bounded `5x0/6` and `0/48` observations and v2 blocker.
 
 The first sampled reasoning reference artifact path is `mmlu_pro_reference_v1`: when intentionally selected, it emits a validated `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, `benchmark_metadata.json`, and `summary.json`. It preserves the pinned dataset revision, sample policy, category breakdowns, and reference-sample claim boundaries. It remains experimental reference evidence, not gold evidence or a public leaderboard claim.
 

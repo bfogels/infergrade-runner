@@ -29,11 +29,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require develop to contain released main ancestry
+      - name: Require prospective develop merge to contain released main ancestry
         if: github.event_name == 'pull_request' && github.base_ref == 'develop'
         run: |
-          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main +refs/heads/develop:refs/remotes/origin/develop
-          test "$(python3 scripts/branch_sync_plan.py)" = "already_synced"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor origin/main HEAD
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -125,33 +125,80 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=60 \
-            -o Acquire::https::Timeout=60 \
-            update
+          if ! sudo timeout --kill-after=15s 180s apt-get \
+              -o Acquire::Retries=2 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              update; then
+            echo "Hosted mirror stalled; retrying against the official Ubuntu archive."
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf '%s\n' 'https://archive.ubuntu.com/ubuntu' \
+                | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            fi
+            for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+              if [ -f "$source_file" ]; then
+                sudo sed -i \
+                  -e 's|http://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
+                  -e 's|https://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
+                  "$source_file"
+              fi
+            done
+            sudo timeout --kill-after=15s 240s apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              update
+          fi
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
-        timeout-minutes: 20
+        timeout-minutes: 30
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=60 \
-            -o Acquire::https::Timeout=60 \
-            install -y \
-            build-essential \
-            pkg-config \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev \
+          packages=(
+            build-essential
+            pkg-config
+            libssl-dev
+            libwebkit2gtk-4.1-dev
+            libgtk-3-dev
+            libayatana-appindicator3-dev
+            librsvg2-dev
+            libsoup-3.0-dev
+            libjavascriptcoregtk-4.1-dev
             libxdo-dev
+          )
+          install_packages() {
+            local deadline_seconds="$1"
+            local retries="$2"
+            sudo timeout --kill-after=15s "${deadline_seconds}s" apt-get \
+              -o "Acquire::Retries=${retries}" \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              install -y "${packages[@]}"
+          }
+          if ! install_packages 480 1; then
+            echo "Hosted mirror stalled during package download; retrying against the official Ubuntu archive."
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf '%s\n' 'https://archive.ubuntu.com/ubuntu' \
+                | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            fi
+            for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+              if [ -f "$source_file" ]; then
+                sudo sed -i \
+                  -e 's|http://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
+                  -e 's|https://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
+                  "$source_file"
+              fi
+            done
+            sudo timeout --kill-after=15s 240s apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              update
+            sudo timeout --kill-after=15s 120s dpkg --configure -a
+            install_packages 720 3
+          fi
 
       - name: cargo fmt --check
         run: cargo fmt --all -- --check

@@ -24,20 +24,34 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
         self.assertTrue(report["ready"])
         self.assertEqual(report["status"], "ready")
         self.assertEqual(report["artifact_spec_version"], "0.4.0")
-        self.assertEqual(report["catalog_version"], "2026-08-19-longbench-selection-receipt")
+        self.assertEqual(report["catalog_version"], "2026-08-19-integrity-quarantine")
         self.assertEqual(report["varying_tier_benchmark_count"], 15)
-        self.assertEqual(report["materialized_native_fixture_count"], 7)
-        self.assertEqual(report["native_tier_coverage_contract_count"], 3)
+        self.assertEqual(report["materialized_native_fixture_count"], 6)
+        self.assertEqual(report["native_tier_coverage_contract_count"], 2)
         self.assertEqual(report["verified_static_fixture_manifest_count"], 1)
         self.assertEqual(report["verified_prompt_free_selection_manifest_count"], 1)
-        self.assertEqual(report["verified_tier_coverage_contract_count"], 5)
-        self.assertEqual(report["declared_selection_digest_algorithm_count"], 15)
-        self.assertEqual(report["materialized_selection_digest_verified_count"], 9)
+        self.assertEqual(report["verified_tier_coverage_contract_count"], 4)
+        self.assertEqual(report["declared_selection_digest_algorithm_count"], 14)
+        self.assertEqual(report["materialized_selection_digest_verified_count"], 8)
         self.assertEqual(report["runtime_only_selection_digest_contract_count"], 6)
+        self.assertEqual(report["quarantined_benchmark_count"], 1)
         self.assertEqual(report["errors"], [])
-        self.assertTrue(all(item["ready"] for item in report["benchmarks"]))
         by_id = {item["benchmark_id"]: item for item in report["benchmarks"]}
-        reasoning = by_id["reasoning_constraint_stress_v1"]["fixture_verification"]
+        self.assertTrue(
+            all(
+                item["ready"]
+                for item in report["benchmarks"]
+                if not item["excluded_from_readiness"]
+            )
+        )
+        quarantined = by_id["reasoning_constraint_stress_v1"]
+        self.assertEqual(quarantined["status"], "quarantined")
+        self.assertFalse(quarantined["ready"])
+        self.assertEqual(
+            quarantined["quarantine_reason_code"],
+            "legacy_direct_no_think_v1_no_capability_validity_evidence",
+        )
+        reasoning = quarantined["fixture_verification"]
         self.assertEqual(reasoning["status"], "materialized_verified")
         self.assertEqual(reasoning["source_fixture_case_count"], 48)
         self.assertTrue(reasoning["tier_coverage_contract"])
@@ -48,6 +62,7 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
                 for requirement in tier["coverage_requirements"]
             )
         )
+
         repository_edit = by_id["repository_edit_smoke_v1"]["fixture_verification"]
         self.assertEqual(repository_edit["status"], "source_fixture_verified")
         self.assertEqual(repository_edit["source_fixture_case_count"], 8)
@@ -98,6 +113,23 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
                 for requirement in tier["coverage_requirements"]
             )
         )
+
+    def test_quarantined_fixture_errors_do_not_block_runnable_readiness(self):
+        catalog = deepcopy(load_capability_catalog())
+        policy = catalog["tier_sampling_policies"]["reasoning_constraint_stress_v1"]
+        policy["case_limits"] = {"canary": 1, "standard": 1, "gold": 1}
+
+        report = audit_benchmark_tier_adequacy(catalog)
+
+        self.assertTrue(report["ready"])
+        self.assertEqual(report["errors"], [])
+        quarantined = next(
+            item
+            for item in report["benchmarks"]
+            if item["benchmark_id"] == "reasoning_constraint_stress_v1"
+        )
+        self.assertEqual(quarantined["status"], "quarantined")
+        self.assertIn("case_limits_mismatch", quarantined["errors"])
 
     def test_repository_edit_source_fixture_matches_bundled_manifest(self):
         manifest = load_static_fixture_manifest("repository_edit_smoke_v1")
@@ -245,7 +277,7 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
 
     def test_native_strata_require_executable_per_tier_coverage_contracts(self):
         catalog = deepcopy(load_capability_catalog())
-        catalog["tier_sampling_policies"]["reasoning_constraint_stress_v1"].pop(
+        catalog["tier_sampling_policies"]["stateful_tool_loop_diagnostic_v1"].pop(
             "tier_coverage_requirements"
         )
 
@@ -253,7 +285,7 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
 
         self.assertFalse(report["ready"])
         self.assertIn(
-            "reasoning_constraint_stress_v1:missing_tier_coverage_requirements",
+            "stateful_tool_loop_diagnostic_v1:missing_tier_coverage_requirements",
             report["errors"],
         )
 

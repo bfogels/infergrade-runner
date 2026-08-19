@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from infergrade.benchmark_catalog import (
     check_index,
+    is_benchmark_quarantined,
     load_capability_catalog,
     surface_score_policy_index,
 )
@@ -38,6 +39,7 @@ def audit_benchmark_adequacy(
                 checks,
                 planned,
                 audit_date,
+                payload,
             )
         )
     scoped_ready = bool(surfaces) and all(item["scoped_claim_coverage_ready"] for item in surfaces)
@@ -273,9 +275,14 @@ def _surface_adequacy(
     checks: Dict[str, Dict[str, Any]],
     planned: Dict[str, Dict[str, Any]],
     audit_date: date,
+    catalog: Dict[str, Any],
 ) -> Dict[str, Any]:
     policy = dict(score_policy.get("representativeness_policy") or {})
-    supporting = [checks[check_id] for check_id in policy.get("supporting_check_ids") or [] if check_id in checks]
+    supporting = [
+        checks[check_id]
+        for check_id in policy.get("supporting_check_ids") or []
+        if check_id in checks and not is_benchmark_quarantined(check_id, catalog)
+    ]
     planned_checks = [planned[check_id] for check_id in policy.get("planned_check_ids") or [] if check_id in planned]
     headline = [
         item

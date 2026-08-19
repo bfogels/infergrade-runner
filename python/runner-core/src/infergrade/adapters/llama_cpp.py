@@ -369,13 +369,11 @@ class LlamaCppAdapter(BaseAdapter):
             "decode_tokens_per_second_p95": _percentile([item["decode_tokens_per_second"] for item in measurements], 0.95),
             "output_tokens_p50": _percentile([item.get("output_tokens") for item in measurements], 0.50),
             "output_tokens_p95": _percentile([item.get("output_tokens") for item in measurements], 0.95),
-            "natural_stop_rate": round(
-                sum(1 for item in measurements if item.get("natural_stop")) / float(len(measurements)),
-                4,
-            ),
-            "token_budget_exhaustion_rate": round(
-                sum(1 for item in measurements if item.get("token_budget_exhausted")) / float(len(measurements)),
-                4,
+            "natural_stop_rate": _known_boolean_rate(measurements, "natural_stop", precision=4),
+            "token_budget_exhaustion_rate": _known_boolean_rate(
+                measurements,
+                "token_budget_exhausted",
+                precision=4,
             ),
             "semantic_task_completion_proof": False,
             "completion_semantics": "natural_stop_is_not_semantic_correctness; use capability task-time for scored task completion",
@@ -525,13 +523,21 @@ class LlamaCppAdapter(BaseAdapter):
             raise RuntimeError((raw_log or "llama.cpp generation failed").strip())
         parsed = _parse_llama_timings(raw_log)
         output = stdout.strip()
+        output_tokens = _whole_token_count(parsed.get("eval_tokens"))
         protocol_error = _llama_generation_protocol_error(
             output,
             max_tokens=max_tokens,
-            output_tokens=_whole_token_count(parsed.get("eval_tokens")),
+            output_tokens=output_tokens,
         )
         if protocol_error:
             raise RuntimeError(protocol_error)
+        token_budget_exhausted = None
+        stop_type = None
+        natural_stop = None
+        if output_tokens is not None and output_tokens >= max(1, int(max_tokens) - 1):
+            token_budget_exhausted = True
+            stop_type = "length"
+            natural_stop = False
         return {
             "text": output,
             "status": "completed",
@@ -540,7 +546,11 @@ class LlamaCppAdapter(BaseAdapter):
             "time_to_first_token_ms": _compute_ttft_ms(parsed),
             "tokens_per_second": parsed.get("eval_tokens_per_second") or _safe_tokens_per_second(parsed),
             "input_tokens": _whole_token_count(parsed.get("prompt_eval_tokens")),
-            "output_tokens": _whole_token_count(parsed.get("eval_tokens")),
+            "output_tokens": output_tokens,
+            "stop_type": stop_type,
+            "natural_stop": natural_stop,
+            "token_budget_exhausted": token_budget_exhausted,
+            "output_token_budget": max_tokens,
             "measurement_source": "llama_cpp_timings",
             "load_time_ms": parsed.get("load_time_ms"),
             "prompt_transform": prompt_transform,
@@ -751,6 +761,10 @@ class LlamaCppAdapter(BaseAdapter):
                     final_payload.get("tokens_evaluated") or timings.get("prompt_n")
                 ),
                 "output_tokens": metrics.get("output_tokens"),
+                "stop_type": metrics.get("stop_type"),
+                "natural_stop": metrics.get("natural_stop"),
+                "token_budget_exhausted": metrics.get("token_budget_exhausted"),
+                "output_token_budget": max_tokens,
                 "measurement_source": "llama_cpp_server_completion_timings",
                 "load_time_ms": metrics.get("load_time_ms"),
                 "prompt_transform": prompt_transform,
@@ -798,6 +812,10 @@ class LlamaCppAdapter(BaseAdapter):
                 usage.get("prompt_tokens") or timings.get("prompt_n") or parsed.get("prompt_eval_tokens")
             ),
             "output_tokens": metrics.get("output_tokens"),
+            "stop_type": metrics.get("stop_type"),
+            "natural_stop": metrics.get("natural_stop"),
+            "token_budget_exhausted": metrics.get("token_budget_exhausted"),
+            "output_token_budget": max_tokens,
             "measurement_source": "llama_cpp_server_chat_timings",
             "load_time_ms": metrics.get("load_time_ms"),
             "prompt_transform": prompt_transform,
@@ -1479,24 +1497,16 @@ class LlamaCppAdapter(BaseAdapter):
 
 def _llama_generation_protocol_error(text: str, max_tokens: int, output_tokens: Optional[int]) -> Optional[str]:
     """Identify runtime UI/protocol output that must not be scored as model text."""
+    del max_tokens, output_tokens
     lowered = text.lower()
     if "available commands:" in lowered or ("loading model..." in lowered and "\n> " in text):
         return (
             "llama.cpp generation protocol failure: interactive llama-cli output "
             "contaminated the completion; use llama-completion for non-interactive generation."
         )
-    unfinished_thinking = (
-        ("[start thinking]" in lowered and "[end thinking]" not in lowered)
-        or ("<think>" in lowered and "</think>" not in lowered)
-    )
-    # llama.cpp timing logs commonly report generated runs as n_predict - 1
-    # because the terminal token is accounted separately.
-    exhausted_budget = output_tokens is not None and output_tokens >= max(1, max_tokens - 1)
-    if unfinished_thinking and exhausted_budget:
-        return (
-            "llama.cpp generation protocol failure: response exhausted max_tokens "
-            "inside an unfinished thinking block before a scorable answer."
-        )
+    # Unfinished or budget-limited model text is still a completed model
+    # observation. Preserve it for the benchmark's deterministic parser to
+    # score as a model-output miss instead of turning it into missing evidence.
     return None
 
 
@@ -1635,6 +1645,18 @@ def _max_or_none(values: List[Optional[float]]) -> Optional[float]:
     if not filtered:
         return None
     return round(max(filtered), 2)
+
+
+def _known_boolean_rate(
+    rows: List[Dict[str, Any]],
+    key: str,
+    precision: int = 6,
+) -> Optional[float]:
+    """Compute a boolean rate without treating missing metadata as false."""
+    known = [row.get(key) for row in rows if isinstance(row.get(key), bool)]
+    if not known:
+        return None
+    return round(sum(value is True for value in known) / float(len(known)), precision)
 
 
 def _deployment_confidence(profile_id: str, measured_successes: int, measured_target: int, failures: int) -> float:
@@ -2162,8 +2184,12 @@ def _metrics_from_server_completion(
     latency_ms = completion.get("elapsed_ms") or compute_total_ms
     if latency_ms is None:
         latency_ms = parsed_timings.get("total_time_ms")
-    stop_type = str(final_payload.get("stop_type") or "").lower()
-    token_budget_exhausted = stop_type in {"limit", "length", "max_tokens"}
+    stop_type = str(final_payload.get("stop_type") or "").lower() or None
+    token_budget_exhausted = (
+        None
+        if stop_type is None
+        else stop_type in {"limit", "length", "max_tokens"}
+    )
     return {
         "ttft_ms": round(ttft_ms, 2) if ttft_ms is not None else None,
         "latency_ms": round(latency_ms, 2) if latency_ms is not None else None,
@@ -2174,8 +2200,8 @@ def _metrics_from_server_completion(
         "prompt_eval_time_ms": round(prompt_ms, 4) if prompt_ms is not None else None,
         "eval_time_ms": round(predicted_ms, 4) if predicted_ms is not None else None,
         "output_tokens": int(predicted_n) if predicted_n is not None else None,
-        "stop_type": stop_type or None,
-        "natural_stop": bool(stop_type) and not token_budget_exhausted,
+        "stop_type": stop_type,
+        "natural_stop": None if stop_type is None else not token_budget_exhausted,
         "token_budget_exhausted": token_budget_exhausted,
     }
 

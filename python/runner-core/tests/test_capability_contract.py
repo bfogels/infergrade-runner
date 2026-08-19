@@ -189,6 +189,26 @@ class CapabilityContractTests(unittest.TestCase):
         manifest = load_contract_manifest()
         self.assertIn("schemas/json/capability_summary.schema.json", manifest["schema_files"])
 
+    def test_capability_schemas_declare_completion_metadata_shapes(self):
+        run_schema = load_capability_run_schema()
+        run_summary = run_schema["properties"]["summary"]["properties"]
+        run_task = run_schema["properties"]["tasks"]["items"]["properties"]
+        run_performance = run_schema["$defs"]["task_performance_summary"]["properties"]
+        summary_schema = load_capability_summary_schema()
+        summary_performance = summary_schema["$defs"]["task_performance_summary"]["properties"]
+
+        self.assertEqual(run_summary["token_budget_exhaustion_count"]["type"], ["integer", "null"])
+        self.assertEqual(run_task["natural_stop"]["type"], ["boolean", "null"])
+        self.assertEqual(run_task["output_token_budget"]["type"], ["integer", "null"])
+        self.assertEqual(run_performance["natural_stop_rate"]["type"], ["number", "null"])
+        self.assertEqual(run_performance["natural_stop_reported_count"]["type"], ["integer", "null"])
+        self.assertEqual(
+            run_performance["token_budget_exhaustion_reported_count"]["type"],
+            ["integer", "null"],
+        )
+        self.assertEqual(run_performance["stop_type_counts"]["type"], "object")
+        self.assertEqual(summary_performance["token_budget_exhaustion_rate"]["type"], ["number", "null"])
+
     def test_valid_capability_run_artifact_passes_semantic_validation(self):
         self.assertEqual(validate_capability_run_artifact(_artifact()), [])
 

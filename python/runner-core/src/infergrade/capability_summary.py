@@ -6,7 +6,10 @@ import os
 from typing import Any, Dict, List, Optional
 
 from infergrade import __version__
-from infergrade.benchmark_catalog import selection_metadata_for_request
+from infergrade.benchmark_catalog import (
+    benchmark_quarantine_reason,
+    selection_metadata_for_request,
+)
 from infergrade.capability_contract import (
     CAPABILITY_SURFACES,
     capability_run_admission_error_summary,
@@ -134,6 +137,10 @@ def _discover_capability_run_artifacts(execution: CapabilityExecution, output_di
     for benchmark_id, paths in sorted(dict(execution.artifacts or {}).items()):
         if not isinstance(paths, dict):
             continue
+        if benchmark_quarantine_reason(benchmark_id):
+            # Legacy direct-no-think artifacts remain on disk for forensic use,
+            # but cannot enter current recommendation or readiness summaries.
+            continue
         capability_run_path = paths.get("capability_run_path")
         if not capability_run_path:
             continue
@@ -160,6 +167,14 @@ def _discover_capability_run_artifacts(execution: CapabilityExecution, output_di
                     "error_class": "artifact_unreadable",
                 }
             )
+            continue
+        artifact_protocol = artifact.get("protocol")
+        artifact_benchmark_id = (
+            artifact_protocol.get("task_version")
+            if isinstance(artifact_protocol, dict)
+            else None
+        )
+        if benchmark_quarantine_reason(artifact_benchmark_id):
             continue
         admission_errors = validate_current_capability_run_artifact(artifact)
         if admission_errors:
@@ -244,6 +259,8 @@ def _fallback_benchmark_summary_pointers(
     pointers = []
     for benchmark_id, result in sorted(dict(execution.benchmark_results or {}).items()):
         if benchmark_id in artifact_benchmark_ids or not isinstance(result, dict):
+            continue
+        if benchmark_quarantine_reason(benchmark_id):
             continue
         metadata = _check_metadata_from_execution(execution, benchmark_id)
         surface = metadata.get("surface_id")
