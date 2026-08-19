@@ -24,14 +24,16 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
         self.assertTrue(report["ready"])
         self.assertEqual(report["status"], "ready")
         self.assertEqual(report["artifact_spec_version"], "0.4.0")
+        self.assertEqual(report["catalog_version"], "2026-08-19-longbench-selection-receipt")
         self.assertEqual(report["varying_tier_benchmark_count"], 15)
         self.assertEqual(report["materialized_native_fixture_count"], 7)
         self.assertEqual(report["native_tier_coverage_contract_count"], 3)
         self.assertEqual(report["verified_static_fixture_manifest_count"], 1)
-        self.assertEqual(report["verified_tier_coverage_contract_count"], 4)
+        self.assertEqual(report["verified_prompt_free_selection_manifest_count"], 1)
+        self.assertEqual(report["verified_tier_coverage_contract_count"], 5)
         self.assertEqual(report["declared_selection_digest_algorithm_count"], 15)
-        self.assertEqual(report["materialized_selection_digest_verified_count"], 8)
-        self.assertEqual(report["runtime_only_selection_digest_contract_count"], 7)
+        self.assertEqual(report["materialized_selection_digest_verified_count"], 9)
+        self.assertEqual(report["runtime_only_selection_digest_contract_count"], 6)
         self.assertEqual(report["errors"], [])
         self.assertTrue(all(item["ready"] for item in report["benchmarks"]))
         by_id = {item["benchmark_id"]: item for item in report["benchmarks"]}
@@ -70,6 +72,29 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
             all(
                 requirement["ready"]
                 for tier in repository_edit["tiers"]
+                for requirement in tier["coverage_requirements"]
+            )
+        )
+        longbench = by_id["longbench_v2_local_reference_v1"]["fixture_verification"]
+        self.assertEqual(longbench["status"], "selection_manifest_verified")
+        self.assertTrue(longbench["prompt_free"])
+        self.assertEqual(longbench["source_fixture_case_count"], 23)
+        self.assertEqual(
+            longbench["raw_selection_sha256"],
+            "1a5f48517a31dc80083700955b92d9524cba2d863448209956e2cf1b423079a3",
+        )
+        self.assertEqual(
+            [tier["selection_sha256"] for tier in longbench["tiers"]],
+            [
+                "9c48047fd0d74e4b325d132f30b40aa4874c1120906f78c3949dcf72f588e2d6",
+                "edf0d5a63e5dba3908908b714d8cbe5a1d9e1d21c070e24d6af212a5b110e47a",
+                "a7ea004340ede696954363da691da52c030fdde6eb9adfa7af0faafa3a1fbd2e",
+            ],
+        )
+        self.assertTrue(
+            all(
+                requirement["ready"]
+                for tier in longbench["tiers"]
                 for requirement in tier["coverage_requirements"]
             )
         )
@@ -275,6 +300,53 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
             "repository_edit_smoke_v1:tier_coverage_missing_required_values:standard:category",
             report["errors"],
         )
+
+    def test_longbench_manifest_tampering_fails_closed(self):
+        catalog = load_capability_catalog()
+        spec = tier_adequacy.CAPABILITY_BENCHMARKS["longbench_v2_local_reference_v1"]
+        policy = catalog["tier_sampling_policies"][spec.benchmark_id]
+        case_limits = dict(spec.case_limits)
+        digest_algorithm = policy["selection_digest_algorithm"]
+
+        def audit_with(mutator):
+            manifest = tier_adequacy.load_longbench_selection_manifest()
+            mutator(manifest)
+            with mock.patch.object(
+                tier_adequacy,
+                "load_longbench_selection_manifest",
+                return_value=manifest,
+            ):
+                return tier_adequacy._audit_prompt_free_selection_manifest(
+                    spec, policy, case_limits, digest_algorithm
+                )
+
+        order_report = audit_with(
+            lambda manifest: manifest["selected_ids"].__setitem__(
+                0, manifest["selected_ids"][1]
+            )
+        )
+        self.assertIn("selection_manifest_projection_order_mismatch", order_report["errors"])
+        self.assertIn("selection_manifest_raw_digest_mismatch", order_report["errors"])
+
+        projection_report = audit_with(
+            lambda manifest: manifest["selection_projection"][0].update(
+                {"domain": "tampered-domain"}
+            )
+        )
+        self.assertTrue(
+            any("tier_coverage_missing_required_values:canary:domain" in error
+                for error in projection_report["errors"])
+        )
+
+        digest_report = audit_with(
+            lambda manifest: manifest.update({"selection_sha256": "0" * 64})
+        )
+        self.assertIn("selection_manifest_raw_digest_mismatch", digest_report["errors"])
+
+        tier_report = audit_with(
+            lambda manifest: manifest["tier_prefix_counts"].update({"standard": 11})
+        )
+        self.assertIn("selection_manifest_tier_prefixes_mismatch", tier_report["errors"])
 
 
 if __name__ == "__main__":

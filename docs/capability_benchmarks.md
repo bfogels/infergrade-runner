@@ -53,6 +53,11 @@ InferGrade needs capability benchmarks that are:
   - Why: local users need to know whether a setup can retrieve a pinned fact at the prompt lengths they intend to use.
   - InferGrade role: deterministic exact-key retrieval at nominal 4K, 8K, and 16K buckets, with observed task token counts. It does not claim broad long-context reasoning or maximum-context support and has zero headline score weight.
 
+- `LongBench v2 local reference`
+  - Why: realistic long-context task reasoning across multiple task categories is materially broader than deterministic key retrieval.
+  - InferGrade role: intentionally selectable reference evidence over the pinned short-context local subset. The Runner-owned prompt-free manifest pins the 23-row order and 6/12/23 tier prefixes; its raw `_id` digest is SHA-256 over sorted IDs joined with one UTF-8 newline and no trailing newline. Prompt-bearing rows remain build-time/container inputs and are not committed.
+  - Claim boundary: this is not an official leaderboard result, medium/long or maximum-context proof, or general long-context capability claim; empirical difficulty, representativeness, and headroom remain unproven. Source: [LongBench v2](https://arxiv.org/abs/2412.15204).
+
 ### Agentic Coding
 
 - `Coding static repair`
@@ -82,10 +87,6 @@ The following are selected as high-value later additions and are not runnable ye
 - `SWE-bench Verified`
   - Why: highest-value software engineering benchmark in this space, but much more operationally expensive than the first-pass coding lanes.
   - InferGrade role: gold evidence first, with curated provenance and maintainer review, not a default laptop run.
-
-- `LongBench v2`
-  - Why: realistic long-context task reasoning across multiple task categories is materially broader than deterministic key retrieval.
-  - InferGrade role: reasoning and assistant reference candidate after memory-fit, task-sampling, duration, recovery, and explicit judge-identity policies are proven. Source: [LongBench v2](https://arxiv.org/abs/2412.15204).
 
 ## Expansion Principle
 

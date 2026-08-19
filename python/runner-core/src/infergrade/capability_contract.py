@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from infergrade.paths import runner_root
 from infergrade.json_schema_subset import validate_json_schema
+from infergrade.benchmark_catalog import load_capability_catalog
 from infergrade.selection_identity import SELECTION_DIGEST_ALGORITHMS, selection_digest
 
 EVIDENCE_LANES = ("smoke", "decision", "reference", "gold")
@@ -64,6 +65,7 @@ SELECTION_PROTOCOL_FIELDS = (
 )
 CAPABILITY_RUN_ADMISSION_ERROR_LIMIT = 20
 CAPABILITY_RUN_ADMISSION_ERROR_MAX_LENGTH = 256
+TIER_NAMES = ("canary", "standard", "gold")
 
 
 def repo_root() -> Path:
@@ -184,6 +186,8 @@ def validate_capability_run_artifact(artifact: Any) -> List[str]:
                 expected_digest = selection_digest(task_ids, algorithm)
                 if digest != expected_digest:
                     errors.append("protocol.selection_sha256 must match task IDs")
+            if isinstance(protocol, dict) and protocol.get("task_version") == "longbench_v2_local_reference_v1":
+                _validate_longbench_tier_selection(protocol, task_ids, errors)
         for index, task in enumerate(tasks):
             if not isinstance(task, dict):
                 errors.append("tasks[%d] must be an object" % index)
@@ -211,6 +215,17 @@ def validate_capability_run_artifact(artifact: Any) -> List[str]:
             value = claim_boundary.get(key)
             if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
                 errors.append("claim_boundary.%s must be a non-empty string array" % key)
+
+    protocol = artifact.get("protocol")
+    if (
+        artifact_spec_version == CAPABILITY_RUN_ARTIFACT_SPEC_VERSION
+        and isinstance(protocol, dict)
+        and protocol.get("task_version") == "longbench_v2_local_reference_v1"
+    ):
+        artifacts = artifact.get("artifacts")
+        supporting_files = artifacts.get("supporting_files") if isinstance(artifacts, dict) else None
+        if not isinstance(supporting_files, list) or "selection_receipt.json" not in supporting_files:
+            errors.append("LongBench capability_run artifacts must include selection_receipt.json")
 
     return errors
 
@@ -272,6 +287,38 @@ def _validate_optional_selection_fields(protocol: Dict[str, Any], errors: List[s
         case_count = protocol.get("case_count")
         if isinstance(case_count, bool) or not isinstance(case_count, int) or case_count < 0:
             errors.append("protocol.case_count must be an integer >= 0")
+    if "benchmark_tier" in protocol:
+        if protocol.get("benchmark_tier") not in TIER_NAMES:
+            errors.append("protocol.benchmark_tier must be canary, standard, or gold")
+
+
+def _validate_longbench_tier_selection(
+    protocol: Dict[str, Any],
+    selection_ids: List[str],
+    errors: List[str],
+) -> None:
+    """Rebind LongBench artifacts to the catalog's exact tier identity."""
+    tier = protocol.get("benchmark_tier")
+    if tier not in TIER_NAMES:
+        errors.append("LongBench protocol.benchmark_tier is required")
+        return
+    policy = (
+        load_capability_catalog()
+        .get("tier_sampling_policies", {})
+        .get("longbench_v2_local_reference_v1", {})
+    )
+    expected = (policy.get("expected_tier_selections") or {}).get(tier)
+    if not isinstance(expected, dict):
+        errors.append("LongBench catalog expected tier selection is missing")
+        return
+    if protocol.get("case_count") != expected.get("case_count"):
+        errors.append("LongBench protocol.case_count must match the catalog tier")
+    if protocol.get("selection_digest_algorithm") != expected.get("selection_digest_algorithm"):
+        errors.append("LongBench protocol.selection_digest_algorithm must match the catalog tier")
+    if protocol.get("selection_sha256") != expected.get("selection_sha256"):
+        errors.append("LongBench protocol.selection_sha256 must match the catalog tier")
+    if len(selection_ids) != expected.get("case_count"):
+        errors.append("LongBench task selection count must match the catalog tier")
 
 
 def _is_supported_selection_digest_algorithm(value: Any) -> bool:

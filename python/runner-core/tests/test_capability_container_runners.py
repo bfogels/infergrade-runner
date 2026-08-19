@@ -1039,10 +1039,24 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
             with open(metadata_path, "w", encoding="utf-8") as handle:
                 json.dump(
                     {
-                        "dataset": "fixture/LongBench-v2",
-                        "dataset_revision": "fixture-revision",
-                        "dataset_sha256": "fixture-source-sha",
+                        "benchmark_id": "longbench_v2_local_reference_v1",
+                        "dataset": "zai-org/LongBench-v2",
+                        "dataset_revision": "2b48e494f2c7a2f0af81aae178e05c7e1dde0fe9",
+                        "dataset_sha256": "15d61c22d92c96900b3c4948b6aeea218d3214b676a65df48e7b8555604c7fe2",
                         "dataset_license": "Apache-2.0",
+                        "case_count": 23,
+                        "source_case_count": 503,
+                        "source_short_case_count": 180,
+                        "source_context_fit_case_count": 177,
+                        "maximum_estimated_context_tokens": 131072,
+                        "domain_count": 6,
+                        "difficulty_count": 2,
+                        "length_scope": "short",
+                        "selection_policy": "short_domain_difficulty_hash_rank_balanced_tier_blocks_v1",
+                        "selection_digest_algorithm": runner.SELECTION_DIGEST_ALGORITHM,
+                        "selection_digest_convention": runner.SELECTION_DIGEST_CONVENTION,
+                        "selected_ids": [row["_id"] for row in rows],
+                        "selection_projection": [runner._selection_projection(row) for row in rows],
                         "selection_sha256": selection_sha,
                         "snapshot_sha256": snapshot_sha,
                     },
@@ -1061,6 +1075,47 @@ class CapabilityContainerRunnerTests(unittest.TestCase):
                 self.assertEqual(
                     len({(case["category"], case["difficulty"]) for case in cases}),
                     expected_strata,
+                )
+                with open(os.path.join(output_dir, "selection_receipt.json"), encoding="utf-8") as handle:
+                    receipt = json.load(handle)
+                self.assertEqual(receipt["tier"], {6: "canary", 12: "standard", 23: "gold"}[limit])
+                self.assertEqual(receipt["case_count"], limit)
+                self.assertEqual(receipt["selected_ids"], [row["_id"] for row in rows[:limit]])
+                self.assertEqual(receipt["prepared_ids"], [case["question_id"] for case in cases])
+                self.assertEqual(
+                    set(receipt),
+                    {
+                        "artifact_kind", "artifact_spec_version", "benchmark_id", "dataset",
+                        "dataset_revision", "dataset_sha256", "dataset_license", "source_case_count",
+                        "source_short_case_count", "source_context_fit_case_count",
+                        "maximum_estimated_context_tokens", "domain_count", "difficulty_count",
+                        "length_scope", "selection_policy", "selection_digest_algorithm",
+                        "selection_digest_convention", "snapshot_sha256", "tier", "case_count",
+                        "selected_ids", "prepared_ids", "selection_projection", "selection_sha256",
+                    },
+                )
+                serialized_receipt = json.dumps(receipt)
+                for forbidden in ("answer", "choice_A", "choice_B", "choice_C", "choice_D", "context", "prompt", "question"):
+                    self.assertNotIn('"%s"' % forbidden, serialized_receipt)
+            with self.assertRaises(ValueError):
+                runner.prepare(
+                    os.path.join(tempdir, "unsupported"),
+                    limit=7,
+                    data_path=snapshot_path,
+                    metadata_path=metadata_path,
+                )
+            with open(metadata_path, encoding="utf-8") as handle:
+                mutated_metadata = json.load(handle)
+            mutated_metadata["selected_ids"] = list(reversed(mutated_metadata["selected_ids"]))
+            mutated_metadata_path = os.path.join(tempdir, "mutated_snapshot_metadata.json")
+            with open(mutated_metadata_path, "w", encoding="utf-8") as handle:
+                json.dump(mutated_metadata, handle)
+            with self.assertRaises(ValueError):
+                runner.prepare(
+                    os.path.join(tempdir, "mutated-metadata"),
+                    limit=6,
+                    data_path=snapshot_path,
+                    metadata_path=mutated_metadata_path,
                 )
             predictions = []
             for index, case in enumerate(cases[:12]):
