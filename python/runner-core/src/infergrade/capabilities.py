@@ -19,6 +19,10 @@ from infergrade.capability_scoring import score_for_use_case
 from infergrade.capability_summary import write_capability_summary_artifact
 from infergrade.contracts import load_contract_manifest
 from infergrade.images import container_image_identity, install_image
+from infergrade.longbench_selection import (
+    BENCHMARK_ID as LONGBENCH_SELECTION_BENCHMARK_ID,
+    verify_longbench_selection_receipt,
+)
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.progress import request_fingerprint
 from infergrade.reasoning_constraint_stress import (
@@ -1215,6 +1219,8 @@ def execute_capability_suite(
             phase_started = time.perf_counter()
             _prepare_benchmark_cases(spec, benchmark_dir, request.tier)
             phase_timings["fixture_preparation_seconds"] = round(time.perf_counter() - phase_started, 6)
+            if spec.benchmark_id == LONGBENCH_SELECTION_BENCHMARK_ID:
+                _verify_longbench_selection_receipt(benchmark_dir, request.tier)
             cases = _read_jsonl(os.path.join(benchmark_dir, "cases.jsonl"))
             if progress_callback:
                 progress_callback(
@@ -2151,6 +2157,8 @@ def _write_multiple_choice_capability_run_artifact(
     summary: Dict[str, Any],
 ) -> str:
     structured_tool_use = spec.benchmark_id == "bfcl_local_reference_v1"
+    if spec.benchmark_id == LONGBENCH_SELECTION_BENCHMARK_ID:
+        _verify_longbench_selection_receipt(benchmark_dir, request.tier)
     check_metadata = _selected_check_metadata(request, spec.benchmark_id)
     primary_metric = dict(summary.get("primary_metric") or {})
     score = primary_metric.get("value")
@@ -2321,6 +2329,13 @@ def _write_multiple_choice_capability_run_artifact(
             "case_count": len(cases),
             "selection_digest_algorithm": selection_digest_algorithm,
             "selection_sha256": selection_sha256,
+            **(
+                {
+                    "benchmark_tier": request.tier,
+                }
+                if spec.benchmark_id == LONGBENCH_SELECTION_BENCHMARK_ID
+                else {}
+            ),
             "source_snapshot_sha256": metadata.get("snapshot_sha256"),
             "dataset_sha256": metadata.get("dataset_sha256"),
         },
@@ -2365,7 +2380,15 @@ def _write_multiple_choice_capability_run_artifact(
             "manifest": "capability_run.json",
             "raw_outputs": ["predictions.jsonl"],
             "scoring_outputs": ["summary.json"],
-            "supporting_files": ["cases.jsonl", "benchmark_metadata.json"],
+            "supporting_files": [
+                "cases.jsonl",
+                "benchmark_metadata.json",
+                *(
+                    ["selection_receipt.json"]
+                    if spec.benchmark_id == LONGBENCH_SELECTION_BENCHMARK_ID
+                    else []
+                ),
+            ],
         },
         "claim_boundary": (
             _structured_tool_use_artifact_claim_boundary(summary_state)
@@ -3315,12 +3338,34 @@ def _prepare_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir: str, 
     if spec.execution_mode == "native":
         _prepare_native_benchmark_cases(spec, benchmark_dir, tier)
         return
+    if spec.benchmark_id == LONGBENCH_SELECTION_BENCHMARK_ID and tier not in spec.case_limits:
+        raise ValueError("Unsupported LongBench tier: %s" % tier)
     limit = spec.case_limits.get(tier)
     command = ["prepare", "--output-dir", "/work"]
     command.extend(spec.container_args)
     if limit:
         command.extend(["--limit", str(limit)])
     _run_capability_container(spec.container_image, benchmark_dir, command)
+
+
+def _verify_longbench_selection_receipt(benchmark_dir: str, tier: str) -> Dict[str, Any]:
+    """Verify container selection evidence before any model generation occurs."""
+    receipt_path = os.path.join(benchmark_dir, "selection_receipt.json")
+    try:
+        receipt = read_json(receipt_path)
+    except Exception:
+        raise ValueError("LongBench selection receipt is missing or unreadable")
+    cases_path = os.path.join(benchmark_dir, "cases.jsonl")
+    try:
+        cases = _read_jsonl(cases_path)
+    except Exception:
+        raise ValueError("LongBench prepared cases are missing or unreadable")
+    metadata_path = os.path.join(benchmark_dir, "benchmark_metadata.json")
+    try:
+        metadata = read_json(metadata_path)
+    except Exception:
+        raise ValueError("LongBench benchmark metadata is missing or unreadable")
+    return verify_longbench_selection_receipt(receipt, cases, tier, metadata)
 
 
 def _evaluate_benchmark(

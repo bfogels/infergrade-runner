@@ -20,6 +20,11 @@ DATASET_URL = (
 BENCHMARK_ID = "longbench_v2_local_reference_v1"
 SELECTION_SHA256 = "1a5f48517a31dc80083700955b92d9524cba2d863448209956e2cf1b423079a3"
 SNAPSHOT_SHA256 = "677ac38dc799b0bbe61816f1d0c245bb93f01dd535a71ecfde6fa619d3eb86db"
+SELECTION_DIGEST_ALGORITHM = "sorted_utf8_newline_sha256_v1"
+SELECTION_DIGEST_CONVENTION = (
+    "sha256 of sorted raw LongBench _id values joined by one UTF-8 newline, "
+    "with no trailing newline"
+)
 DOMAINS = (
     "Code Repository Understanding",
     "Long In-context Learning",
@@ -119,6 +124,17 @@ def _estimated_context_tokens(row: dict) -> int:
     ) + 1024
 
 
+def _selection_projection(row: dict) -> dict:
+    """Return the prompt-free public identity projection for one selected row."""
+    return {
+        "_id": str(row["_id"]),
+        "domain": str(row["domain"]),
+        "sub_domain": str(row["sub_domain"]),
+        "difficulty": str(row["difficulty"]),
+        "length": str(row["length"]),
+    }
+
+
 def _selection_order(grouped: dict) -> list:
     ordered = []
     for rank_index in range(ROWS_PER_STRATUM):
@@ -201,6 +217,9 @@ def build(output_dir: Path, source_path: Path = None) -> None:
             "length_scope": "short",
             "selection_policy": "short_domain_difficulty_hash_rank_balanced_tier_blocks_v1",
             "selected_ids": selected_ids,
+            "selection_digest_algorithm": SELECTION_DIGEST_ALGORITHM,
+            "selection_digest_convention": SELECTION_DIGEST_CONVENTION,
+            "selection_projection": [_selection_projection(row) for row in selected],
             "selection_sha256": hashlib.sha256(
                 "\n".join(sorted(selected_ids)).encode("utf-8")
             ).hexdigest(),
