@@ -24,7 +24,7 @@ from infergrade.cuda import windows_cuda_preflight
 from infergrade.environment import capture_environment
 from infergrade.images import docker_image_exists, local_build_command
 from infergrade.models import RunRequest
-from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cpp_runtime
+from infergrade.runtimes import selected_llama_cpp_runtime
 from infergrade.tls import tls_trust_configuration, verified_https_context
 
 
@@ -37,6 +37,8 @@ DEFAULT_LOCAL_CAPABILITY_IMAGES = (
     {"benchmark_id": "evalplus", "display_name": "EvalPlus", "image": "ghcr.io/bfogels/infergrade-evalplus:%s" % __version__},
     {"benchmark_id": "mmlu_pro_reference_v1", "display_name": "MMLU-Pro reference", "image": "ghcr.io/bfogels/infergrade-mmlu-pro:%s" % __version__},
     {"benchmark_id": "gpqa_diamond_reference_v1", "display_name": "GPQA Diamond reference", "image": "ghcr.io/bfogels/infergrade-gpqa:%s" % __version__},
+    {"benchmark_id": "longbench_v2_local_reference_v1", "display_name": "LongBench v2 local reference", "image": "ghcr.io/bfogels/infergrade-longbench-v2:%s" % __version__},
+    {"benchmark_id": "bfcl_local_reference_v1", "display_name": "BFCL V4 local tool-use reference", "image": "ghcr.io/bfogels/infergrade-bfcl:%s" % __version__},
 )
 DEFAULT_MIN_OUTPUT_FREE_GB = 1.0
 
@@ -216,12 +218,18 @@ def _request_checks(request: RunRequest) -> List[Dict[str, Any]]:
     ]
     checks.extend(_execution_mode_guidance_checks(request, environment))
     checks.extend(_backend_compatibility_checks(request))
-    if request.execution_mode in ("local_container", "cloud_container"):
+    backend_uses_container = request.execution_mode in ("local_container", "cloud_container")
+    capability_images = capability_images_for_request(request)
+    if backend_uses_container or capability_images:
         checks.append(_binary_check("docker", "docker_cli", "Docker CLI is available."))
         if checks[-1]["status"] == "ok":
-            checks.append(_docker_daemon_check())
-            checks.append(_backend_image_check(request))
-            checks.extend(_capability_image_checks(request))
+            required_by = [item["benchmark_id"] for item in capability_images]
+            daemon_check = _docker_daemon_check(required_by=required_by)
+            checks.append(daemon_check)
+            if daemon_check["status"] == "ok":
+                if backend_uses_container:
+                    checks.append(_backend_image_check(request))
+                checks.extend(_capability_image_checks(request))
     if request.execution_mode == "local_native":
         checks.extend(_native_runtime_checks(request, environment))
     if _uses_remote_artifact(request):
@@ -301,43 +309,62 @@ def _backend_compatibility_checks(request: RunRequest) -> List[Dict[str, Any]]:
 
 
 def _llama_native_binary_check(check_id: str, explicit_path: Optional[str], env_name: str, default_binary: str, label: str) -> Dict[str, Any]:
-    managed_selection = selected_llama_cpp_runtime()
+    environment_path = os.environ.get(env_name)
+    operator_override = bool(explicit_path or environment_path)
+    managed_selection = None if operator_override else selected_llama_cpp_runtime()
     binary_kind = "cli" if "cli" in check_id else "server"
-    managed_path = managed_llama_cpp_binary_path(binary_kind) if not explicit_path and not os.environ.get(env_name) else None
-    requested = explicit_path or os.environ.get(env_name) or managed_path or default_binary
-    path = shutil.which(requested)
+    selected_path = (
+        str(((managed_selection or {}).get("binaries") or {}).get(binary_kind) or "").strip()
+        if not operator_override
+        else ""
+    )
+    if operator_override:
+        requested = explicit_path or environment_path or default_binary
+        path = shutil.which(requested)
+    elif managed_selection is not None:
+        # A saved selection is an explicit preference. Do not silently fall back
+        # to a same-named PATH binary when its recorded executable disappears;
+        # runtime locking would still honor the stale selection and fail later.
+        requested = selected_path or default_binary
+        path = shutil.which(selected_path) if selected_path else None
+    else:
+        requested = default_binary
+        path = shutil.which(requested)
     install_hint = "brew install llama.cpp" if platform.system().lower() == "darwin" else None
-    source = "custom_path" if explicit_path else ("environment_path" if os.environ.get(env_name) else ("managed_runtime" if managed_path else "system_path"))
+    source = "custom_path" if explicit_path else ("environment_path" if environment_path else ("managed_runtime" if managed_selection is not None else "system_path"))
+    managed_details = {"managed_runtime": managed_selection} if source == "managed_runtime" else {}
     if not path:
+        details = {
+            "requested": requested,
+            "path": None,
+            "source": source,
+            "env_var": env_name,
+            "suggested_install": install_hint,
+            "managed_install_suggestion": "Run `infergrade install-runtime --runtime llama.cpp` to inspect the pinned managed runtime plan.",
+        }
+        details.update(managed_details)
         return _check(
             check_id,
             "error",
             "%s is required for local_native llama.cpp runs." % label,
-            {
-                "requested": requested,
-                "path": None,
-                "source": source,
-                "managed_runtime": managed_selection,
-                "env_var": env_name,
-                "suggested_install": install_hint,
-                "managed_install_suggestion": "Run `infergrade install-runtime --runtime llama.cpp` to inspect the pinned managed runtime plan.",
-            },
+            details,
         )
     version = _binary_version(path)
+    details = {
+        "requested": requested,
+        "path": path,
+        "version": version,
+        "version_status": "detected" if version else "unknown",
+        "source": source,
+        "env_var": env_name,
+        "suggested_install": install_hint,
+    }
+    details.update(managed_details)
     return _check(
         check_id,
         "ok",
         "%s is available." % label,
-        {
-            "requested": requested,
-            "path": path,
-            "version": version,
-            "version_status": "detected" if version else "unknown",
-            "source": source,
-            "managed_runtime": managed_selection,
-            "env_var": env_name,
-            "suggested_install": install_hint,
-        },
+        details,
     )
 
 
@@ -492,14 +519,21 @@ def _binary_check(binary_name: str, check_id: str, success_message: str, severit
     return _check(check_id, "ok", success_message, {"path": path})
 
 
-def _docker_daemon_check() -> Dict[str, Any]:
+def _docker_daemon_check(required_by: Optional[List[str]] = None) -> Dict[str, Any]:
     completed = subprocess.run(["docker", "info"], capture_output=True, text=True)
     if completed.returncode != 0:
+        details = {"stderr": (completed.stderr or completed.stdout or "").strip()}
+        if required_by:
+            details["required_by_benchmark_ids"] = list(required_by)
         return _check(
             "docker_daemon",
             "error",
-            "Docker daemon is not reachable.",
-            {"stderr": (completed.stderr or completed.stdout or "").strip()},
+            (
+                "Docker is not running, but the selected benchmark requires it."
+                if required_by
+                else "Docker daemon is not reachable."
+            ),
+            details,
         )
     return _check(
         "docker_daemon",

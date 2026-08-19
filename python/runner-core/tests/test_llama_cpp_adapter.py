@@ -32,6 +32,7 @@ from infergrade.adapters.llama_cpp import (
     _stop_container_memory_monitor,
     _stream_server_completion,
     _stream_server_chat_completion,
+    _uses_native_chat_template_server,
     _uses_native_direct_answer_server,
     _validate_direct_answer_server_completion,
 )
@@ -100,7 +101,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.env_patch.stop()
         self.tempdir.cleanup()
 
-    def test_capability_context_size_honors_only_pinned_context_fixture_buckets(self):
+    def test_capability_context_size_honors_only_anchored_reviewed_buckets(self):
         self.assertEqual(
             _capability_context_size("InferGrade nominal context bucket: 8192 tokens.\nfixture"),
             8192,
@@ -108,6 +109,18 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(_capability_context_size("short ordinary prompt"), 4096)
         self.assertEqual(
             _capability_context_size("InferGrade nominal context bucket: 32768 tokens.\nfixture"),
+            32768,
+        )
+        self.assertEqual(
+            _capability_context_size("InferGrade nominal context bucket: 65536 tokens.\nfixture"),
+            65536,
+        )
+        self.assertEqual(
+            _capability_context_size("InferGrade nominal context bucket: 131072 tokens.\nfixture"),
+            131072,
+        )
+        self.assertEqual(
+            _capability_context_size("source text\nInferGrade nominal context bucket: 65536 tokens."),
             4096,
         )
 
@@ -872,6 +885,90 @@ class LlamaCppAdapterTests(unittest.TestCase):
             generation_preset="deterministic_v1",
         )
         self.assertEqual(_prepare_llama_server_chat(request, "User: A\nAssistant:"), (None, None))
+
+    def test_qwen35_default_capability_preset_uses_chat_template_without_thinking(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-4B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset="deterministic_v1",
+            ontology_hints={"architecture": "qwen35"},
+        )
+
+        messages, transform = _prepare_llama_server_chat(
+            request,
+            "Write a short resume with exactly three sections.",
+        )
+
+        self.assertEqual(
+            messages,
+            [{"role": "user", "content": "Write a short resume with exactly three sections."}],
+        )
+        self.assertEqual(transform["policy_id"], "deterministic_v1")
+        self.assertEqual(
+            transform["state"],
+            "chat_template_disable_thinking_with_zero_budget_single_user_prompt",
+        )
+        self.assertTrue(_uses_native_chat_template_server(request))
+        self.assertFalse(_uses_native_direct_answer_server(request))
+
+    def test_recent_template_required_families_use_chat_for_default_capability(self):
+        families = (
+            ("Qwen/Qwen3.6-27B", "qwen36"),
+            ("google/gemma-4-E4B-it", "gemma4"),
+            ("mistralai/Ministral-3-8B-Instruct-2512", "mistral3"),
+        )
+        for model, architecture in families:
+            with self.subTest(architecture=architecture):
+                request = RunRequest(
+                    model=model,
+                    quant_artifact=self.model_path,
+                    backend="llama.cpp",
+                    tier="canary",
+                    execution_mode="local_native",
+                    simulate=False,
+                    generation_preset="deterministic_v1",
+                    ontology_hints={"architecture": architecture},
+                )
+                messages, transform = _prepare_llama_server_chat(request, "Follow this instruction.")
+                self.assertEqual(messages, [{"role": "user", "content": "Follow this instruction."}])
+                self.assertEqual(transform["policy_id"], "deterministic_v1")
+                self.assertTrue(_uses_native_chat_template_server(request))
+                self.assertFalse(_uses_native_direct_answer_server(request))
+
+    @mock.patch.object(LlamaCppAdapter, "_generate_native_server_text")
+    @mock.patch.object(LlamaCppAdapter, "_require_local_gguf_artifact", return_value="/models/qwen35.gguf")
+    @mock.patch.object(LlamaCppAdapter, "_ensure_backend_model_compatibility")
+    def test_qwen35_default_capability_generation_uses_chat_server(
+        self,
+        _compatibility_mock,
+        _artifact_mock,
+        chat_server_mock,
+    ):
+        chat_server_mock.return_value = {"status": "completed", "text": "Three sections."}
+        request = RunRequest(
+            model="Qwen/Qwen3.5-4B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            execution_mode="local_native",
+            simulate=False,
+            generation_preset="deterministic_v1",
+            ontology_hints={"architecture": "qwen35"},
+        )
+
+        generated = LlamaCppAdapter().generate_text(request, "Write three sections.", 128)
+
+        self.assertEqual(generated["text"], "Three sections.")
+        chat_server_mock.assert_called_once_with(
+            request=request,
+            model_path="/models/qwen35.gguf",
+            prompt="Write three sections.",
+            max_tokens=128,
+        )
 
     @mock.patch("infergrade.adapters.llama_cpp.urllib_request.urlopen")
     def test_stream_completion_disables_cross_case_prompt_cache(self, urlopen_mock):

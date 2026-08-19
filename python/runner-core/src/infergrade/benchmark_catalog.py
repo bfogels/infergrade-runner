@@ -12,7 +12,17 @@ from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
 
 FALLBACK_METADATA_ORDERING = {
     "effort_level": ["short", "low", "balanced", "medium", "deep", "high"],
-    "expected_duration_band": ["1-5 min", "5-15 min", "10-25 min", "10-30 min", "15-45 min", "25-60 min", "15-90 min"],
+    "expected_duration_band": [
+        "1-5 min",
+        "5-15 min",
+        "10-25 min",
+        "10-30 min",
+        "15-45 min",
+        "25-60 min",
+        "15-90 min",
+        "45-120 min",
+        "90-180 min",
+    ],
     "token_volume_band": ["tiny", "small", "medium", "large"],
 }
 SUPPORTED_COVERAGE_GENERATION_PRESETS = {
@@ -22,6 +32,7 @@ SUPPORTED_COVERAGE_GENERATION_PRESETS = {
 DIRECT_ANSWER_PROTOCOL_CHECK_IDS = {
     "mmlu_pro_reference_v1",
     "gpqa_diamond_reference_v1",
+    "longbench_v2_local_reference_v1",
 }
 
 
@@ -143,6 +154,8 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         for item in list(payload.get("planned_benchmark_candidates") or [])
         if item.get("check_id")
     }
+    for check_id in sorted(declared_check_ids & planned_check_ids):
+        failures.append(f"{check_id}: benchmark cannot be both a declared check and planned candidate")
     for check_id in sorted(declared_check_ids | planned_check_ids):
         status = status_by_check.get(check_id)
         if not status:
@@ -174,6 +187,36 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
             failures.append(f"{check_id}: scoring_policy_id is not declared")
         if not isinstance(status.get("promotion_blockers"), list) or not status.get("promotion_blockers"):
             failures.append(f"{check_id}: promotion_blockers must be a non-empty list")
+        maturity = str(status.get("maturity") or "")
+        runnable_status = str(status.get("runnable_status") or "")
+        if planned_candidate:
+            if runnable_status != "not_runnable":
+                failures.append(
+                    f"{check_id}: planned candidate must remain not_runnable until moved into checks"
+                )
+            if maturity.endswith("_runnable"):
+                failures.append(
+                    f"{check_id}: planned candidate cannot declare runnable maturity"
+                )
+        if declared_check and runnable_status.startswith("runnable_"):
+            if "not_implemented" in str(status.get("harness_status") or ""):
+                failures.append(
+                    f"{check_id}: runnable check requires an implemented harness"
+                )
+            if str(status.get("expected_duration_token_volume_status") or "") == "unknown":
+                failures.append(
+                    f"{check_id}: runnable check requires bounded duration and token-volume status"
+                )
+        if declared_check and maturity.endswith("_runnable"):
+            if not runnable_status.startswith("runnable_"):
+                failures.append(
+                    f"{check_id}: runnable maturity requires runnable_status"
+                )
+            revision_status = str(status.get("fixture_or_dataset_revision_status") or "")
+            if "pinned" not in revision_status:
+                failures.append(
+                    f"{check_id}: runnable reference or gold maturity requires a pinned fixture or dataset"
+                )
     extra_status_ids = sorted(set(status_by_check) - (declared_check_ids | planned_check_ids))
     for check_id in extra_status_ids:
         failures.append(f"{check_id}: status matrix entry has no matching check or planned candidate")
@@ -193,6 +236,32 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
                 failures.append(f"{priority_id or '<missing>'}: coverage priority field {field} must be non-empty")
         if not isinstance(item.get("target_quants"), list) or not item.get("target_quants"):
             failures.append(f"{priority_id or '<missing>'}: target_quants must be a non-empty list")
+        if item.get("headroom_challenge_eligible") is True:
+            if item.get("calibration_campaign_eligible") is not True:
+                failures.append(
+                    f"{priority_id or '<missing>'}: headroom challenge must be calibration campaign eligible"
+                )
+            if item.get("model_freshness") not in {"current_generation", "recent_generation"}:
+                failures.append(
+                    f"{priority_id or '<missing>'}: headroom challenge must be current or recent generation"
+                )
+            if not str(item.get("model_id") or item.get("checkpoint_name") or "").strip():
+                failures.append(
+                    f"{priority_id or '<missing>'}: headroom challenge requires exact model identity"
+                )
+            target_observations = item.get("target_observations")
+            if (
+                isinstance(target_observations, bool)
+                or not isinstance(target_observations, int)
+                or target_observations < 2
+            ):
+                failures.append(
+                    f"{priority_id or '<missing>'}: headroom challenge requires at least two target observations"
+                )
+            if not str(item.get("headroom_challenge_rationale") or "").strip():
+                failures.append(
+                    f"{priority_id or '<missing>'}: headroom challenge rationale must be non-empty"
+                )
         generation_preset_id = str(item.get("generation_preset_id") or "").strip()
         if generation_preset_id and generation_preset_id not in SUPPORTED_COVERAGE_GENERATION_PRESETS:
             failures.append(
@@ -206,7 +275,13 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         for check_id in check_ids:
             if str(check_id) not in declared_check_ids:
                 failures.append(f"{priority_id or '<missing>'}: unknown coverage benchmark_check_id {check_id!r}")
+    from infergrade.capability_scoring import primary_surface_for_use_case
+
     checks_by_id = check_index(payload)
+    challenge_priorities = [
+        item for item in coverage_expansion_priorities(payload)
+        if item.get("headroom_challenge_eligible") is True
+    ]
     for surface_id, policy in surface_score_policies.items():
         if surface_id not in surfaces:
             failures.append(f"{surface_id}: surface score policy references an unknown surface")
@@ -232,6 +307,43 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
                 failures.append(f"{surface_id}: {field} must be above 0 and at most 1")
         if policy.get("calibration_status") != "not_psychometrically_calibrated":
             failures.append(f"{surface_id}: calibration_status must preserve the non-calibrated claim boundary")
+        calibration_policy = dict(policy.get("calibration_policy") or {})
+        confidence_level = calibration_policy.get(
+            "ceiling_fraction_confidence_level"
+        )
+        if (
+            isinstance(confidence_level, bool)
+            or not isinstance(confidence_level, (int, float))
+            or not 0.0 < float(confidence_level) < 1.0
+        ):
+            failures.append(
+                f"{surface_id}: calibration_policy ceiling_fraction_confidence_level "
+                "must be greater than 0 and less than 1"
+            )
+        headline_check_ids = {
+            check_id
+            for check_id, check in checks_by_id.items()
+            if check.get("surface_id") == surface_id
+            and check.get("evidence_kind") == "capability"
+            and isinstance(check.get("primary_score_weight"), (int, float))
+            and float(check.get("primary_score_weight")) > 0
+        }
+        surface_challenge_priorities = [
+            item for item in challenge_priorities
+            if primary_surface_for_use_case(item.get("use_case")) == surface_id
+            and headline_check_ids.issubset({
+                str(check_id)
+                for check_id in list(item.get("benchmark_check_ids") or [])
+            })
+        ]
+        if (
+            calibration_policy.get("minimum_headroom_challenge_observations")
+            and not surface_challenge_priorities
+        ):
+            failures.append(
+                f"{surface_id}: headroom challenge gate requires an explicit eligible campaign "
+                "target covering every positively weighted capability check"
+            )
         weights = [
             float(check.get("primary_score_weight"))
             for check in checks_by_id.values()
@@ -244,6 +356,11 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
             failures.append(f"{surface_id}: surface score policy has no positively weighted capability checks")
         elif abs(sum(weights) - 1.0) > 0.000001:
             failures.append(f"{surface_id}: positive primary score weights must sum to 1.0")
+    # Local import avoids a module cycle while keeping the established catalog
+    # legitimacy gate authoritative for representativeness metadata too.
+    from infergrade.benchmark_adequacy import validate_benchmark_adequacy_metadata
+
+    failures.extend(validate_benchmark_adequacy_metadata(payload))
     return failures
 
 
@@ -666,6 +783,11 @@ def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dic
         "saturation_evidence": dict(check.get("saturation_evidence") or {}),
         "higher_is_better": check.get("higher_is_better"),
         "score_policy_id": check.get("score_policy_id"),
+        "empirical_saturation_slice_policy": (
+            dict(check["empirical_saturation_slice_policy"])
+            if isinstance(check.get("empirical_saturation_slice_policy"), dict)
+            else {}
+        ),
         "generation_constraint_id": legitimacy_status.get("generation_constraint_id"),
         "score_breakdown_fields": list(check.get("score_breakdown_fields") or []),
         "benchmark_maturity": legitimacy_status.get("maturity"),

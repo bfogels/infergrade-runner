@@ -1,0 +1,88 @@
+{
+  "qualification_version": "infergrade_runtime_qualification_v1",
+  "qualified_at": "2026-08-13",
+  "status": "valid_comparable",
+  "claim_scope": "exact_artifact_on_recorded_hardware_only",
+  "runtime": {
+    "runtime_id": "llama-cpp-b10375-macos-arm64-metal-candidate",
+    "version_label": "llama.cpp b10375 macOS arm64",
+    "upstream": {
+      "project": "ggml-org/llama.cpp",
+      "tag": "b10375",
+      "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b10375"
+    },
+    "catalog_activation_status": "not_staged",
+    "signed_catalog_assertion_state": "absent",
+    "runtime_build_id": "fe690560b595af988c2205eab822ad0f391921977923e432cdbc69c37ce8d3a8",
+    "content_manifest_sha256": "19cc072adc93be0f7e0564f23dc4f355695a0cad07af4dff95689c22143d03cc",
+    "content_manifest_file_count": 61,
+    "archive_sha256": "ebbeed128cde32077c5b430feafe57ce20b1bca545f430ff142472014f03bcec",
+    "source_assertion_id": "573b0b300dfc45676192730b1aacbca85f9034643f8297fda77e838d5ce7c192",
+    "origin": "managed_download",
+    "maturity": "reviewed_candidate",
+    "support_tier": "candidate",
+    "provenance_strength": "checksum_verified",
+    "independent_signature_verified": false
+  },
+  "hardware": {
+    "hardware_class": "apple_silicon",
+    "accelerator_model": "Apple M1 Pro",
+    "memory_gb": 16,
+    "accelerator_api": "metal"
+  },
+  "benchmark": {
+    "depth": "standard",
+    "protocol_registry_version": "2026-07-capability-protocol-3.1",
+    "profile": "interactive_chat_v1",
+    "checks": [
+      "ifeval",
+      "assistant_compositional_instruction_v2",
+      "multiturn_chat_memory_v1",
+      "perplexity_reference_v1"
+    ],
+    "profile_measured_iterations": 5
+  },
+  "assertions": [
+    {
+      "model_id": "openbmb/MiniCPM5-1B-GGUF",
+      "model_revision": "87007042419d30c1d8f38ef065424ee33870831e",
+      "model_artifact_sha256": "81b64d05a23b17b34c475f42b3e72fbde62d4b92cc34541f7a8031d0752deafa",
+      "quantization_label": "Q4_K_M",
+      "bundle_id": "qb_20260813_000451_8e0abe22",
+      "result_id": "qb_20260813_000451_8e0abe22_interactive_chat_v1",
+      "comparison_grade": "comparable",
+      "verification_level": "verified",
+      "bundle_valid": true,
+      "receipt_prelaunch": "passed",
+      "receipt_postrun": "passed",
+      "ifeval_prompt_strict_accuracy": 0.18,
+      "ifeval_model_output_failure_count": 4,
+      "ifeval_output_shape_gate": "passed",
+      "ifeval_answer_budget_exhaustion_count": 63,
+      "assistant_compositional_structured_task_accuracy": 0.0,
+      "assistant_compositional_malformed_output_count": 24,
+      "multiturn_constraint_retention_accuracy": 0.875,
+      "perplexity": 108.0203,
+      "capability_score": 0.081,
+      "capability_score_ready": true,
+      "capability_score_version": "local_assistant_score_v4",
+      "capability_time_per_task_seconds_median": 3.99438,
+      "deployment_decode_tokens_per_second_p50": 163.62,
+      "deployment_ttft_p50_ms": 38.92,
+      "observed_peak_bytes": 891635630,
+      "model_buffer_bytes": 795732869,
+      "kv_cache_bytes": 100663296
+    }
+  ],
+  "publication": {
+    "status": "local_only",
+    "published": false
+  },
+  "limitations": [
+    "This validates only the exact MiniCPM5 1B Q4_K_M artifact on the recorded Apple M1 Pro hardware.",
+    "The verified label records checksum-verified immutable package identity plus prelaunch and postrun checks; no signed InferGrade catalog assertion or independent upstream signature exists for b10375.",
+    "The 8.1/100 capability score is task-scoped benchmark attainment. The strict compositional fixture scored 0 because all 24 outputs violated its required JSON shape; this is retained as capability evidence rather than hidden as a runtime failure.",
+    "Four IFEval responses contained no scorer-visible text and were scored wrong as model-output failures. The 4% rate passed the majority-empty quarantine gate.",
+    "This record does not promote b10375, establish generic MiniCPM5 or GGUF compatibility, authorize a catalog target, or change the supported runtime default."
+  ]
+}

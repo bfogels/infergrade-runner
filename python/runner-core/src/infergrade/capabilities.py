@@ -21,6 +21,26 @@ from infergrade.contracts import load_contract_manifest
 from infergrade.images import container_image_identity, install_image
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.progress import request_fingerprint
+from infergrade.reasoning_constraint_stress import (
+    FIXTURE_REVISION as REASONING_CONSTRAINT_STRESS_FIXTURE_REVISION,
+    SCORING_POLICY as REASONING_CONSTRAINT_STRESS_SCORING_POLICY,
+    reasoning_constraint_stress_cases,
+)
+from infergrade.selection_identity import (
+    SORTED_JSON_STRING_ARRAY_SHA256_V1,
+    SORTED_UTF8_NEWLINE_SHA256_V1,
+    selection_digest,
+)
+from infergrade.stateful_tool_loop import (
+    FIXTURE_REVISION as STATEFUL_TOOL_LOOP_FIXTURE_REVISION,
+    SCORING_POLICY as STATEFUL_TOOL_LOOP_SCORING_POLICY,
+    benchmark_cases as stateful_tool_loop_cases,
+    build_turn_prompt as build_stateful_tool_loop_prompt,
+    executed_transcript_entry,
+    expected_call_matches,
+    parse_tool_call,
+)
+from infergrade.statistical_bounds import wilson_score_interval
 from infergrade.utils import ensure_dir, env_value, read_json, stable_hash, utcnow_iso, write_json
 
 CAPABILITY_REGISTRY_VERSION = "2026-07-capability-protocol-3.1"
@@ -56,6 +76,9 @@ _MMLU_TERMINAL_MARKER = re.compile(
     re.IGNORECASE,
 )
 _MMLU_EMPTY_THINK_PREFIX = re.compile(r"^\s*<think>\s*</think>\s*", re.IGNORECASE)
+CAPABILITY_CONTAINER_POLICY_VERSION = "capability_container_isolation_v1"
+_CAPABILITY_CONTAINER_MEMORY = "4g"
+_CAPABILITY_CONTAINER_PIDS_LIMIT = 256
 
 
 def _released_capability_image(image_name: str) -> str:
@@ -70,6 +93,22 @@ DEFAULT_CAPABILITY_IMAGES = {
     "gpqa_diamond_reference_v1": env_value(
         "INFERGRADE_GPQA_IMAGE", _released_capability_image("infergrade-gpqa")
     ),
+    "longbench_v2_local_reference_v1": env_value(
+        "INFERGRADE_LONGBENCH_V2_IMAGE",
+        _released_capability_image("infergrade-longbench-v2"),
+    ),
+    "bfcl_local_reference_v1": env_value(
+        "INFERGRADE_BFCL_IMAGE", _released_capability_image("infergrade-bfcl")
+    ),
+    "repository_edit_smoke_v1": env_value(
+        "INFERGRADE_REPOSITORY_EDIT_IMAGE",
+        _released_capability_image("infergrade-repository-edit"),
+    ),
+}
+MULTIPLE_CHOICE_REFERENCE_IDS = {
+    "mmlu_pro_reference_v1",
+    "gpqa_diamond_reference_v1",
+    "longbench_v2_local_reference_v1",
 }
 
 _LISTENER_RUNS_DIR = "/app/runs"
@@ -87,6 +126,9 @@ class CapabilityBenchmarkSpec:
     execution_mode: str = "container"
     container_args: List[str] = field(default_factory=list)
     case_limits: Dict[str, int] = field(default_factory=dict)
+    binomial_success_count_field: Optional[str] = None
+    binomial_observation_count_field: Optional[str] = None
+    binomial_observation_unit: Optional[str] = None
 
 
 CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
@@ -98,6 +140,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=640,
         container_image=DEFAULT_CAPABILITY_IMAGES["ifeval"],
         case_limits={"canary": 25, "standard": 100, "gold": 541},
+        binomial_success_count_field="prompt_strict_correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="prompt",
     ),
     "evalplus_humaneval": CapabilityBenchmarkSpec(
         benchmark_id="evalplus_humaneval",
@@ -108,6 +153,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         container_image=DEFAULT_CAPABILITY_IMAGES["evalplus_humaneval"],
         container_args=["--dataset", "humaneval"],
         case_limits={"canary": 20, "standard": 164, "gold": 164},
+        binomial_success_count_field="passed_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "evalplus_mbpp": CapabilityBenchmarkSpec(
         benchmark_id="evalplus_mbpp",
@@ -118,6 +166,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         container_image=DEFAULT_CAPABILITY_IMAGES["evalplus_mbpp"],
         container_args=["--dataset", "mbpp"],
         case_limits={"canary": 25, "standard": 100, "gold": 378},
+        binomial_success_count_field="passed_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "multiturn_chat_memory_v1": CapabilityBenchmarkSpec(
         benchmark_id="multiturn_chat_memory_v1",
@@ -154,6 +205,21 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=32,
         execution_mode="native",
         case_limits={"canary": 2, "standard": 3, "gold": 3},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
+    ),
+    "reasoning_constraint_stress_v1": CapabilityBenchmarkSpec(
+        benchmark_id="reasoning_constraint_stress_v1",
+        display_name="Reasoning constraint stress",
+        benchmark_kind="constraint_reasoning",
+        primary_metric_name="exact_answer_accuracy",
+        generation_max_tokens=64,
+        execution_mode="native",
+        case_limits={"canary": 6, "standard": 24, "gold": 48},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "mmlu_pro_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="mmlu_pro_reference_v1",
@@ -163,6 +229,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=64,
         container_image=DEFAULT_CAPABILITY_IMAGES["mmlu_pro_reference_v1"],
         case_limits={"canary": 25, "standard": 100, "gold": 300},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "gpqa_diamond_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="gpqa_diamond_reference_v1",
@@ -172,6 +241,59 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=64,
         container_image=DEFAULT_CAPABILITY_IMAGES["gpqa_diamond_reference_v1"],
         case_limits={"canary": 25, "standard": 100, "gold": 198},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
+    ),
+    "longbench_v2_local_reference_v1": CapabilityBenchmarkSpec(
+        benchmark_id="longbench_v2_local_reference_v1",
+        display_name="LongBench v2 local reference",
+        benchmark_kind="long_context_multiple_choice",
+        primary_metric_name="accuracy",
+        generation_max_tokens=64,
+        container_image=DEFAULT_CAPABILITY_IMAGES[
+            "longbench_v2_local_reference_v1"
+        ],
+        case_limits={"canary": 6, "standard": 12, "gold": 23},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
+    ),
+    "bfcl_local_reference_v1": CapabilityBenchmarkSpec(
+        benchmark_id="bfcl_local_reference_v1",
+        display_name="BFCL V4 local tool-use reference",
+        benchmark_kind="structured_tool_use",
+        primary_metric_name="accuracy",
+        generation_max_tokens=384,
+        container_image=DEFAULT_CAPABILITY_IMAGES["bfcl_local_reference_v1"],
+        case_limits={"canary": 11, "standard": 55, "gold": 110},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
+    ),
+    "stateful_tool_loop_diagnostic_v1": CapabilityBenchmarkSpec(
+        benchmark_id="stateful_tool_loop_diagnostic_v1",
+        display_name="Stateful tool-loop diagnostic",
+        benchmark_kind="stateful_tool_use",
+        primary_metric_name="trajectory_success_rate",
+        generation_max_tokens=192,
+        execution_mode="native",
+        case_limits={"canary": 8, "standard": 16, "gold": 24},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="trajectory",
+    ),
+    "repository_edit_smoke_v1": CapabilityBenchmarkSpec(
+        benchmark_id="repository_edit_smoke_v1",
+        display_name="Repository edit diagnostic",
+        benchmark_kind="repository_code_editing",
+        primary_metric_name="task_success_rate",
+        generation_max_tokens=1024,
+        container_image=DEFAULT_CAPABILITY_IMAGES["repository_edit_smoke_v1"],
+        case_limits={"canary": 2, "standard": 6, "gold": 8},
+        binomial_success_count_field="passed_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "context_retrieval_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="context_retrieval_reference_v1",
@@ -181,6 +303,9 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=32,
         execution_mode="native",
         case_limits={"canary": 1, "standard": 3, "gold": 6},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
     ),
     "perplexity_reference_v1": CapabilityBenchmarkSpec(
         benchmark_id="perplexity_reference_v1",
@@ -327,6 +452,9 @@ def _case_benchmark_protocol_identity(
         "container_repo_digests": sorted(container_runtime.get("container_repo_digests") or []),
         "runner_version": __version__ if spec.execution_mode == "native" else None,
     }
+    output_shape_policy_id = _output_shape_policy_id(spec)
+    if output_shape_policy_id:
+        scorer_identity["output_shape_policy_id"] = output_shape_policy_id
     generation_identity = {
         "generation_max_tokens": spec.generation_max_tokens,
         "benchmark_kind": spec.benchmark_kind,
@@ -504,6 +632,64 @@ def _benchmark_primary_metric_value(summary: Dict[str, Any]) -> Optional[float]:
         return None
 
 
+def _attach_primary_metric_uncertainty(
+    spec: CapabilityBenchmarkSpec,
+    summary: Dict[str, Any],
+    confidence_level: float = 0.95,
+) -> None:
+    """Attach a descriptive binomial interval for one-outcome-per-unit scores."""
+    success_field = spec.binomial_success_count_field
+    observation_field = spec.binomial_observation_count_field
+    observation_unit = spec.binomial_observation_unit
+    if not success_field or not observation_field or not observation_unit:
+        return
+    primary_metric_value = _benchmark_primary_metric_value(summary)
+    if primary_metric_value is None:
+        return
+    metrics = dict(summary.get("metrics") or {})
+    success_count = metrics.get(success_field)
+    observation_count = metrics.get(observation_field)
+    if (
+        isinstance(success_count, bool)
+        or isinstance(observation_count, bool)
+        or not isinstance(success_count, int)
+        or not isinstance(observation_count, int)
+        or observation_count <= 0
+        or success_count < 0
+        or success_count > observation_count
+    ):
+        return
+    count_derived_value = round(success_count / float(observation_count), 6)
+    if abs(primary_metric_value - count_derived_value) > 0.000001:
+        return
+    interval = wilson_score_interval(
+        success_count,
+        observation_count,
+        confidence_level,
+    )
+    if interval is None:
+        return
+    summary["primary_metric_uncertainty"] = {
+        "policy_id": "binomial_score_uncertainty_v1",
+        "method": "wilson_score_interval",
+        "confidence_level": confidence_level,
+        "lower_bound": round(interval[0], 6),
+        "upper_bound": round(interval[1], 6),
+        "success_count": success_count,
+        "observation_count": observation_count,
+        "observation_unit": observation_unit,
+        "population": "scored_completed_outcomes",
+        "excluded_unscored_count": int(
+            summary.get("unscored_generation_failure_count") or 0
+        ),
+        "interpretation": (
+            "Descriptive small-sample uncertainty for scored completed outcomes only. "
+            "It does not claim benchmark tasks are a random population sample and does "
+            "not cover model, runtime, prompt, hardware, or repeated-run variance."
+        ),
+    }
+
+
 def _benchmark_counts_as_scored(summary: Dict[str, Any]) -> bool:
     return _benchmark_primary_metric_value(summary) is not None and str((summary or {}).get("status") or "") == "completed"
 
@@ -524,8 +710,7 @@ def _multiple_choice_output_shape_gate(
     one answer label despite a diverse reference distribution. That is evidence
     of a broken response protocol, not a trustworthy capability measurement.
     """
-    supported = {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
-    if spec.benchmark_id not in supported:
+    if spec.benchmark_id not in MULTIPLE_CHOICE_REFERENCE_IDS:
         return {"status": "not_applicable", "policy_id": "multiple_choice_output_shape_gate_v2"}
     metrics = dict(summary.get("metrics") or {})
     case_results = list(summary.get("case_results") or [])
@@ -621,6 +806,192 @@ def _multiple_choice_output_shape_gate(
     }
 
 
+def _visible_response_output_shape_gate(
+    spec: CapabilityBenchmarkSpec,
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Quarantine IFEval only when missing visible responses are systemic.
+
+    An isolated empty response remains a strict wrong answer. A run where most
+    responses contain no scorer-visible text is instead evidence of a broken
+    model/template/runtime completion path and must not become a capability
+    score.
+    """
+    if spec.benchmark_id != "ifeval":
+        return {"status": "not_applicable", "policy_id": "visible_response_output_shape_gate_v1"}
+    evaluated_count = len(predictions)
+    empty_response_count = len(
+        [item for item in predictions if not str(item.get("response") or "").strip()]
+    )
+    empty_response_rate = (
+        round(empty_response_count / float(evaluated_count), 6) if evaluated_count else 0.0
+    )
+    token_limit_count = len(
+        [
+            item
+            for item in predictions
+            if isinstance(item.get("output_tokens"), int)
+            and item.get("output_tokens") >= spec.generation_max_tokens
+        ]
+    )
+    blocked = bool(
+        evaluated_count and empty_response_rate > _DOMINANT_MALFORMED_OUTPUT_RATE
+    )
+    reason_codes = ["dominant_empty_visible_response"] if blocked else []
+    if blocked and token_limit_count:
+        reason_codes.append("answer_budget_exhaustion_observed")
+    return {
+        "status": "blocked" if blocked else "passed",
+        "policy_id": "visible_response_output_shape_gate_v1",
+        "threshold": {
+            "metric": "empty_visible_response_rate",
+            "operator": ">",
+            "value": _DOMINANT_MALFORMED_OUTPUT_RATE,
+        },
+        "evaluated_count": evaluated_count,
+        "empty_visible_response_count": empty_response_count,
+        "empty_visible_response_rate": empty_response_rate,
+        "answer_budget_exhaustion_count": token_limit_count,
+        "reason_codes": reason_codes,
+        "strict_primary_metric": dict(summary.get("primary_metric") or {}),
+    }
+
+
+def _repository_edit_output_shape_gate(
+    spec: CapabilityBenchmarkSpec,
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    if spec.benchmark_id != "repository_edit_smoke_v1":
+        return {"status": "not_applicable", "policy_id": "repository_edit_output_shape_gate_v1"}
+    metrics = dict(summary.get("metrics") or {})
+    malformed_count = metrics.get("malformed_patch_count")
+    evaluated_count = metrics.get("total_count")
+    if not isinstance(malformed_count, int) or isinstance(malformed_count, bool):
+        malformed_count = 0
+    if not isinstance(evaluated_count, int) or isinstance(evaluated_count, bool):
+        evaluated_count = len(
+            [item for item in predictions if item.get("generation_status") == "completed"]
+        )
+    malformed_rate = round(malformed_count / float(evaluated_count), 6) if evaluated_count else 0.0
+    blocked = bool(evaluated_count and malformed_rate > _DOMINANT_MALFORMED_OUTPUT_RATE)
+    return {
+        "status": "blocked" if blocked else "passed",
+        "policy_id": "repository_edit_output_shape_gate_v1",
+        "threshold": {
+            "metric": "malformed_patch_rate",
+            "operator": ">",
+            "value": _DOMINANT_MALFORMED_OUTPUT_RATE,
+        },
+        "evaluated_count": evaluated_count,
+        "malformed_patch_count": malformed_count,
+        "malformed_patch_rate": malformed_rate,
+        "reason_codes": ["dominant_malformed_patch_output"] if blocked else [],
+        "strict_primary_metric": dict(summary.get("primary_metric") or {}),
+    }
+
+
+def _structured_tool_use_output_shape_gate(
+    spec: CapabilityBenchmarkSpec,
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    if spec.benchmark_id != "bfcl_local_reference_v1":
+        return {"status": "not_applicable", "policy_id": "structured_tool_use_output_shape_gate_v1"}
+    metrics = dict(summary.get("metrics") or {})
+    malformed_count = metrics.get("malformed_output_count")
+    evaluated_count = metrics.get("total_count")
+    if not isinstance(malformed_count, int) or isinstance(malformed_count, bool):
+        malformed_count = 0
+    if not isinstance(evaluated_count, int) or isinstance(evaluated_count, bool):
+        evaluated_count = len(
+            [item for item in predictions if item.get("generation_status") == "completed"]
+        )
+    malformed_rate = round(malformed_count / float(evaluated_count), 6) if evaluated_count else 0.0
+    blocked = bool(evaluated_count and malformed_rate > _DOMINANT_MALFORMED_OUTPUT_RATE)
+    return {
+        "status": "blocked" if blocked else "passed",
+        "policy_id": "structured_tool_use_output_shape_gate_v1",
+        "threshold": {
+            "metric": "malformed_output_rate",
+            "operator": ">",
+            "value": _DOMINANT_MALFORMED_OUTPUT_RATE,
+        },
+        "evaluated_count": evaluated_count,
+        "malformed_output_count": malformed_count,
+        "malformed_output_rate": malformed_rate,
+        "reason_codes": ["dominant_malformed_structured_tool_output"] if blocked else [],
+        "strict_primary_metric": dict(summary.get("primary_metric") or {}),
+    }
+
+
+def _stateful_tool_loop_output_shape_gate(
+    spec: CapabilityBenchmarkSpec,
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    if spec.benchmark_id != "stateful_tool_loop_diagnostic_v1":
+        return {"status": "not_applicable", "policy_id": "stateful_tool_loop_output_shape_gate_v1"}
+    metrics = dict(summary.get("metrics") or {})
+    malformed_count = metrics.get("malformed_turn_count")
+    evaluated_count = metrics.get("generated_turn_count")
+    if not isinstance(malformed_count, int) or isinstance(malformed_count, bool):
+        malformed_count = 0
+    if not isinstance(evaluated_count, int) or isinstance(evaluated_count, bool):
+        evaluated_count = sum(len(list(item.get("trajectory") or [])) for item in predictions)
+    malformed_rate = round(malformed_count / float(evaluated_count), 6) if evaluated_count else 0.0
+    blocked = bool(evaluated_count and malformed_rate > _DOMINANT_MALFORMED_OUTPUT_RATE)
+    return {
+        "status": "blocked" if blocked else "passed",
+        "policy_id": "stateful_tool_loop_output_shape_gate_v1",
+        "threshold": {
+            "metric": "malformed_turn_rate",
+            "operator": ">",
+            "value": _DOMINANT_MALFORMED_OUTPUT_RATE,
+        },
+        "evaluated_count": evaluated_count,
+        "malformed_turn_count": malformed_count,
+        "malformed_turn_rate": malformed_rate,
+        "reason_codes": ["dominant_malformed_stateful_tool_output"] if blocked else [],
+        "strict_primary_metric": dict(summary.get("primary_metric") or {}),
+    }
+
+
+def _output_shape_policy_id(spec: CapabilityBenchmarkSpec) -> Optional[str]:
+    if spec.benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS:
+        return "multiple_choice_output_shape_gate_v2"
+    if spec.benchmark_id == "ifeval":
+        return "visible_response_output_shape_gate_v1"
+    if spec.benchmark_id == "repository_edit_smoke_v1":
+        return "repository_edit_output_shape_gate_v1"
+    if spec.benchmark_id == "bfcl_local_reference_v1":
+        return "structured_tool_use_output_shape_gate_v1"
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return "stateful_tool_loop_output_shape_gate_v1"
+    return None
+
+
+def _benchmark_output_shape_gate(
+    spec: CapabilityBenchmarkSpec,
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    gate = _multiple_choice_output_shape_gate(spec, predictions, summary)
+    if gate["status"] != "not_applicable":
+        return gate
+    gate = _visible_response_output_shape_gate(spec, predictions, summary)
+    if gate["status"] != "not_applicable":
+        return gate
+    gate = _repository_edit_output_shape_gate(spec, predictions, summary)
+    if gate["status"] != "not_applicable":
+        return gate
+    gate = _structured_tool_use_output_shape_gate(spec, predictions, summary)
+    if gate["status"] != "not_applicable":
+        return gate
+    return _stateful_tool_loop_output_shape_gate(spec, predictions, summary)
+
+
 # Compatibility alias for downstream tests and integrations that referenced the
 # original MMLU-specific helper before the policy became benchmark-agnostic.
 _mmlu_output_shape_gate = _multiple_choice_output_shape_gate
@@ -664,9 +1035,18 @@ def _component_report_for_benchmark(
         "generation_failure_count": benchmark_result.get("generation_failure_count"),
         "generation_failure_rate": benchmark_result.get("generation_failure_rate"),
         "generation_failure_severity": benchmark_result.get("generation_failure_severity"),
+        **(
+            {
+                "primary_metric_uncertainty": dict(
+                    benchmark_result["primary_metric_uncertainty"]
+                )
+            }
+            if benchmark_result.get("primary_metric_uncertainty")
+            else {}
+        ),
     }
     metrics = benchmark_result.get("metrics") or {}
-    if benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"} and isinstance(metrics, dict):
+    if benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS and isinstance(metrics, dict):
         malformed_output_count = metrics.get("malformed_output_count", metrics.get("invalid_count"))
         if isinstance(malformed_output_count, int) and not isinstance(malformed_output_count, bool):
             report["malformed_output_count"] = malformed_output_count
@@ -817,6 +1197,20 @@ def execute_capability_suite(
             "total_wall_seconds": None,
         }
         try:
+            if progress_callback:
+                preparation = (
+                    "Preparing %s benchmark image and cases..."
+                    if spec.execution_mode == "container"
+                    else "Preparing %s benchmark cases..."
+                ) % spec.display_name
+                progress_callback(
+                    {
+                        "event": "benchmark_preparing",
+                        "benchmark_id": benchmark_id,
+                        "display_name": spec.display_name,
+                        "message": preparation,
+                    }
+                )
             phase_started = time.perf_counter()
             _prepare_benchmark_cases(spec, benchmark_dir, request.tier)
             phase_timings["fixture_preparation_seconds"] = round(time.perf_counter() - phase_started, 6)
@@ -842,7 +1236,10 @@ def execute_capability_suite(
             phase_timings["total_wall_seconds"] = round(time.perf_counter() - benchmark_started, 6)
             summary["phase_timings"] = dict(phase_timings)
             if spec.execution_mode == "container":
-                summary["container_runtime"] = container_image_identity(spec.container_image)
+                summary["container_runtime"] = {
+                    **container_image_identity(spec.container_image),
+                    "sandbox_policy": _capability_container_policy(spec.container_image),
+                }
             if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:
                 summary["completion_normalization"] = _summarize_completion_normalization(predictions)
             summary["task_performance"] = _summarize_task_performance_rows(predictions)
@@ -862,7 +1259,7 @@ def execute_capability_suite(
             summary["unscored_generation_failure_severity"] = unscored_failure_severity
             summary["completed_cases"] = len(cases) - failure_count
             summary["total_cases"] = len(cases)
-            output_shape_gate = _multiple_choice_output_shape_gate(spec, predictions, summary)
+            output_shape_gate = _benchmark_output_shape_gate(spec, predictions, summary)
             if output_shape_gate["status"] != "not_applicable":
                 summary["output_shape_gate"] = output_shape_gate
             protocol_identity = _case_benchmark_protocol_identity(
@@ -906,11 +1303,12 @@ def execute_capability_suite(
             if output_shape_gate["status"] == "blocked" and unscored_failure_severity != "all_failed":
                 summary["status"] = "not_comparable"
                 summary["warning"] = (
-                    "Most completed responses did not match the answer protocol. "
+                    "Most completed responses did not match the benchmark output protocol. "
                     "InferGrade preserved the strict raw result but quarantined it from capability scoring."
                 )
                 if isinstance(summary.get("primary_metric"), dict):
                     summary["primary_metric"]["value"] = None
+            _attach_primary_metric_uncertainty(spec, summary)
             write_json(os.path.join(benchmark_dir, "summary.json"), summary)
             capability_run_path = None
             if spec.execution_mode == "native":
@@ -931,8 +1329,22 @@ def execute_capability_suite(
                     predictions=predictions,
                     summary=summary,
                 )
-            elif spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}:
+            elif spec.benchmark_id in {
+                "mmlu_pro_reference_v1",
+                "gpqa_diamond_reference_v1",
+                "longbench_v2_local_reference_v1",
+                "bfcl_local_reference_v1",
+            }:
                 capability_run_path = _write_multiple_choice_capability_run_artifact(
+                    request=request,
+                    spec=spec,
+                    benchmark_dir=benchmark_dir,
+                    cases=cases,
+                    predictions=predictions,
+                    summary=summary,
+                )
+            elif spec.benchmark_id == "repository_edit_smoke_v1":
+                capability_run_path = _write_repository_edit_capability_run_artifact(
                     request=request,
                     spec=spec,
                     benchmark_dir=benchmark_dir,
@@ -1466,6 +1878,11 @@ def _write_native_capability_run_artifact(
         for item in list(summary.get("case_results") or [])
     }
     tasks = []
+    fixture_revision = _selected_fixture_revision(
+        spec.benchmark_id,
+        _native_fixture_revision(spec),
+        cases,
+    )
     for prediction in predictions:
         case_id = str(prediction.get("case_id") or "")
         case = _case_by_id(cases, case_id)
@@ -1500,6 +1917,28 @@ def _write_native_capability_run_artifact(
                     if spec.benchmark_id == "context_retrieval_reference_v1"
                     else {}
                 ),
+                **(
+                    {
+                        "category": case_score.get("category") or case.get("category"),
+                        "variant": case_score.get("variant") or case.get("variant"),
+                        "format_valid": case_score.get("format_valid"),
+                        "format_violation": case_score.get("error_class"),
+                        "attempted_turn_count": case_score.get("attempted_turn_count"),
+                        "expected_turn_count": case_score.get("total_constraints"),
+                        "tool_execution_count": case_score.get("tool_execution_count"),
+                    }
+                    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
+                    else {}
+                ),
+                **(
+                    {
+                        "category": case_score.get("category") or case.get("category"),
+                        "structural_tier": case_score.get("structural_tier")
+                        or case.get("structural_tier"),
+                    }
+                    if spec.benchmark_id == "reasoning_constraint_stress_v1"
+                    else {}
+                ),
             }
         )
     artifact = {
@@ -1511,6 +1950,7 @@ def _write_native_capability_run_artifact(
                 {
                     "model": request.model,
                     "benchmark_id": spec.benchmark_id,
+                    "fixture_revision": fixture_revision,
                     "generation_preset_id": request.generation_preset,
                     "summary": summary,
                 },
@@ -1554,7 +1994,11 @@ def _write_native_capability_run_artifact(
             "task_family": spec.benchmark_kind,
             "prompt_version": spec.benchmark_id,
             "task_version": spec.benchmark_id,
-            "fixture_revision": _native_fixture_revision(spec),
+            "fixture_revision": fixture_revision,
+            "source_fixture_revision": _native_fixture_revision(spec),
+            "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+            "selection_sha256": _case_selection_digest(cases),
+            "case_count": len(cases),
             "dataset_revision": None,
             "scorer_type": _native_scorer_type(spec),
             "scoring_policy": summary.get("scoring_policy") or _native_scoring_policy(spec),
@@ -1563,16 +2007,63 @@ def _write_native_capability_run_artifact(
         "summary": {
             "state": summary_state,
             "score": score if summary_state in ("scored", "partial") else None,
+            **(
+                {"score_uncertainty": dict(summary["primary_metric_uncertainty"])}
+                if summary.get("primary_metric_uncertainty")
+                else {}
+            ),
             "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
-            "passed_count": summary.get("metrics", {}).get("passed_constraints"),
-            "failed_count": summary.get("generation_failure_count"),
-            "partial_count": summary.get("metrics", {}).get("malformed_output_count", 0),
+            "passed_count": (
+                summary.get("metrics", {}).get("correct_count")
+                if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
+                else summary.get("metrics", {}).get("passed_constraints")
+            ),
+            "failed_count": (
+                (
+                    int(summary.get("metrics", {}).get("total_count") or 0)
+                    - int(summary.get("metrics", {}).get("correct_count") or 0)
+                    + int(summary.get("generation_failure_count") or 0)
+                )
+                if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
+                else summary.get("generation_failure_count")
+            ),
+            "partial_count": (
+                0
+                if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
+                else summary.get("metrics", {}).get("malformed_output_count", 0)
+            ),
             "skipped_count": 0,
             "not_comparable_count": 0,
             **_artifact_summary_performance(summary.get("task_performance")),
             **(
                 {"context_bucket_metrics": dict(summary.get("metrics", {}).get("context_bucket_metrics") or {})}
                 if spec.benchmark_id == "context_retrieval_reference_v1"
+                else {}
+            ),
+            **(
+                {
+                    "turn_accuracy": summary.get("metrics", {}).get("turn_accuracy"),
+                    "generated_turn_count": summary.get("metrics", {}).get("generated_turn_count"),
+                    "malformed_turn_count": summary.get("metrics", {}).get("malformed_turn_count"),
+                    "wrong_call_count": summary.get("metrics", {}).get("wrong_call_count"),
+                    "tool_execution_count": summary.get("metrics", {}).get("tool_execution_count"),
+                    "category_metrics": dict(summary.get("metrics", {}).get("category_metrics") or {}),
+                    "variant_metrics": dict(summary.get("metrics", {}).get("variant_metrics") or {}),
+                    "output_shape_gate": dict(summary.get("output_shape_gate") or {}),
+                }
+                if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1"
+                else {}
+            ),
+            **(
+                {
+                    "category_metrics": dict(
+                        summary.get("metrics", {}).get("category_metrics") or {}
+                    ),
+                    "structural_tier_metrics": dict(
+                        summary.get("metrics", {}).get("structural_tier_metrics") or {}
+                    ),
+                }
+                if spec.benchmark_id == "reasoning_constraint_stress_v1"
                 else {}
             ),
         },
@@ -1601,6 +2092,32 @@ def _native_task_error_class(generation_status: str, case_score: Dict[str, Any])
     return None
 
 
+def _container_fixture_revision(
+    spec: CapabilityBenchmarkSpec,
+    metadata: Dict[str, Any],
+    summary: Dict[str, Any],
+) -> str:
+    """Bind a corpus observation to its source, sampling policy, and exact selection."""
+    identity = {
+        "benchmark_id": spec.benchmark_id,
+        "dataset_revision": metadata.get("dataset_revision"),
+        "dataset_sha256": metadata.get("dataset_sha256"),
+        "evalplus_revision": metadata.get("evalplus_revision"),
+        "upstream_revision": metadata.get("upstream_revision"),
+        "source_snapshot_sha256": metadata.get("snapshot_sha256"),
+        "sample_policy": metadata.get("sample_policy") or summary.get("sample_policy") or "unknown",
+        "case_count": metadata.get("case_count") or summary.get("case_count"),
+        "selection_digest_algorithm": metadata.get("selection_digest_algorithm")
+        or summary.get("selection_digest_algorithm")
+        or SORTED_UTF8_NEWLINE_SHA256_V1,
+        "selection_sha256": metadata.get("selection_sha256") or summary.get("selection_sha256"),
+    }
+    return "%s_selection_%s" % (
+        spec.benchmark_id,
+        stable_hash(identity, length=32),
+    )
+
+
 def _write_multiple_choice_capability_run_artifact(
     request: RunRequest,
     spec: CapabilityBenchmarkSpec,
@@ -1609,6 +2126,7 @@ def _write_multiple_choice_capability_run_artifact(
     predictions: List[Dict[str, Any]],
     summary: Dict[str, Any],
 ) -> str:
+    structured_tool_use = spec.benchmark_id == "bfcl_local_reference_v1"
     check_metadata = _selected_check_metadata(request, spec.benchmark_id)
     primary_metric = dict(summary.get("primary_metric") or {})
     score = primary_metric.get("value")
@@ -1625,6 +2143,7 @@ def _write_multiple_choice_capability_run_artifact(
         result = case_results.get(task_id, {})
         generation_status = str(prediction.get("generation_status") or "")
         predicted = result.get("predicted")
+        malformed = bool(result.get("malformed")) if structured_tool_use else predicted is None
         gate_blocked = str((summary.get("output_shape_gate") or {}).get("status")) == "blocked"
         if generation_status != "completed":
             task_state = "failed"
@@ -1634,7 +2153,7 @@ def _write_multiple_choice_capability_run_artifact(
             task_state = "not_comparable"
             task_score = None
             error_class = "systemic_output_protocol_mismatch"
-        elif predicted is None:
+        elif malformed:
             task_state = "scored"
             task_score = 0.0
             error_class = None
@@ -1649,16 +2168,44 @@ def _write_multiple_choice_capability_run_artifact(
                 "state": task_state,
                 "score": task_score,
                 "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
-                "scorer_type": "multiple_choice" if task_state == "scored" else None,
+                "scorer_type": ("json_schema" if structured_tool_use else "multiple_choice") if task_state == "scored" else None,
                 "scoring_policy": summary.get("scoring_policy") if task_state == "scored" else None,
                 "output_artifact": "predictions.jsonl#%s" % (task_id or str(case.get("case_id") or "")),
                 "error_class": error_class,
                 **_task_performance_fields(prediction),
                 "category": result.get("category") or case.get("category"),
-                "expected": result.get("expected") or case.get("answer"),
-                "predicted": predicted,
-                "format_valid": predicted is not None if generation_status == "completed" else None,
-                "format_violation": "malformed_output" if generation_status == "completed" and predicted is None else None,
+                **(
+                    {
+                        "sub_domain": result.get("sub_domain")
+                        or case.get("sub_domain"),
+                        "difficulty": result.get("difficulty")
+                        or case.get("difficulty"),
+                        "length": result.get("length") or case.get("length"),
+                        "context_word_count": result.get("context_word_count")
+                        or case.get("context_word_count"),
+                        "nominal_context_bucket_tokens": result.get(
+                            "nominal_context_bucket_tokens"
+                        )
+                        or case.get("nominal_context_bucket_tokens"),
+                    }
+                    if spec.benchmark_id == "longbench_v2_local_reference_v1"
+                    else {}
+                ),
+                **(
+                    {
+                        "function_selection_correct": result.get("function_selection_correct"),
+                        "format_valid": not malformed if generation_status == "completed" else None,
+                        "format_violation": "malformed_output" if generation_status == "completed" and malformed else None,
+                        "scoring_error_type": result.get("error_type"),
+                    }
+                    if structured_tool_use
+                    else {
+                        "expected": result.get("expected") or case.get("answer"),
+                        "predicted": predicted,
+                        "format_valid": predicted is not None if generation_status == "completed" else None,
+                        "format_violation": "malformed_output" if generation_status == "completed" and predicted is None else None,
+                    }
+                ),
             }
         )
     metrics = dict(summary.get("metrics") or {})
@@ -1672,6 +2219,11 @@ def _write_multiple_choice_capability_run_artifact(
                     "model": request.model,
                     "benchmark_id": spec.benchmark_id,
                     "dataset_revision": metadata.get("dataset_revision"),
+                    "fixture_revision": _container_fixture_revision(
+                        spec,
+                        metadata,
+                        summary,
+                    ),
                     "generation_preset_id": request.generation_preset,
                     "summary": summary,
                 },
@@ -1686,7 +2238,9 @@ def _write_multiple_choice_capability_run_artifact(
         },
         "evidence": {
             "lane": "reference",
-            "surface": check_metadata.get("surface_id") or "local_reasoning_capability",
+            "surface": check_metadata.get("surface_id") or (
+                "local_assistant_capability" if structured_tool_use else "local_reasoning_capability"
+            ),
             "grade": "sampled_reference",
             "experimental": True,
             "confidence_label": "sampled_reference",
@@ -1716,17 +2270,37 @@ def _write_multiple_choice_capability_run_artifact(
             "task_family": spec.benchmark_kind,
             "prompt_version": "%s_prompt_v1" % spec.benchmark_id,
             "task_version": spec.benchmark_id,
-            "fixture_revision": str(metadata.get("sample_policy") or "%s_snapshot" % spec.benchmark_id),
+            "fixture_revision": _container_fixture_revision(
+                spec,
+                metadata,
+                summary,
+            ),
             "dataset_revision": metadata.get("dataset_revision"),
-            "scorer_type": "multiple_choice",
-            "scoring_policy": summary.get("scoring_policy") or "exact_multiple_choice_letter_accuracy_v4",
+            "scorer_type": "json_schema" if structured_tool_use else "multiple_choice",
+            "scoring_policy": summary.get("scoring_policy")
+            or (
+                "infergrade_bfcl_structured_call_accuracy_v1"
+                if structured_tool_use
+                else "exact_multiple_choice_letter_accuracy_v4"
+            ),
             "repetitions": 1,
             "sample_policy": metadata.get("sample_policy"),
             "category_count": metadata.get("category_count"),
+            "case_count": metadata.get("case_count") or metrics.get("total_count"),
+            "selection_digest_algorithm": metadata.get("selection_digest_algorithm")
+            or SORTED_UTF8_NEWLINE_SHA256_V1,
+            "selection_sha256": metadata.get("selection_sha256"),
+            "source_snapshot_sha256": metadata.get("snapshot_sha256"),
+            "dataset_sha256": metadata.get("dataset_sha256"),
         },
         "summary": {
             "state": summary_state,
             "score": score if summary_state in ("scored", "partial") else None,
+            **(
+                {"score_uncertainty": dict(summary["primary_metric_uncertainty"])}
+                if summary.get("primary_metric_uncertainty")
+                else {}
+            ),
             "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
             "passed_count": metrics.get("correct_count"),
             "failed_count": (
@@ -1739,6 +2313,19 @@ def _write_multiple_choice_capability_run_artifact(
             "not_comparable_count": len([task for task in tasks if task["state"] == "not_comparable"]),
             **_artifact_summary_performance(summary.get("task_performance")),
             "category_metrics": dict(summary.get("category_metrics") or {}),
+            **(
+                {
+                    "difficulty_metrics": dict(
+                        summary.get("difficulty_metrics") or {}
+                    ),
+                    "length_metrics": dict(summary.get("length_metrics") or {}),
+                    "context_bucket_metrics": dict(
+                        summary.get("context_bucket_metrics") or {}
+                    ),
+                }
+                if spec.benchmark_id == "longbench_v2_local_reference_v1"
+                else {}
+            ),
             "malformed_output_count": metrics.get("malformed_output_count", metrics.get("invalid_count")),
             "output_shape_gate": dict(summary.get("output_shape_gate") or {}),
         },
@@ -1749,7 +2336,185 @@ def _write_multiple_choice_capability_run_artifact(
             "scoring_outputs": ["summary.json"],
             "supporting_files": ["cases.jsonl", "benchmark_metadata.json"],
         },
-        "claim_boundary": _multiple_choice_artifact_claim_boundary(spec.benchmark_id, summary_state),
+        "claim_boundary": (
+            _structured_tool_use_artifact_claim_boundary(summary_state)
+            if structured_tool_use
+            else _multiple_choice_artifact_claim_boundary(spec.benchmark_id, summary_state)
+        ),
+    }
+    errors = validate_capability_run_artifact(artifact)
+    if errors:
+        raise ValueError("Invalid capability_run artifact: %s" % "; ".join(errors))
+    path = os.path.join(benchmark_dir, "capability_run.json")
+    write_json(path, artifact)
+    return path
+
+
+def _write_repository_edit_capability_run_artifact(
+    request: RunRequest,
+    spec: CapabilityBenchmarkSpec,
+    benchmark_dir: str,
+    cases: List[Dict[str, Any]],
+    predictions: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> str:
+    check_metadata = _selected_check_metadata(request, spec.benchmark_id)
+    primary_metric = dict(summary.get("primary_metric") or {})
+    score = primary_metric.get("value")
+    summary_state = _capability_artifact_state(
+        summary.get("status"), score, summary.get("generation_failure_severity")
+    )
+    case_results = {
+        str(item.get("task_id") or item.get("case_id") or ""): dict(item)
+        for item in list(summary.get("case_results") or [])
+    }
+    metadata = _read_optional_json(os.path.join(benchmark_dir, "benchmark_metadata.json"))
+    fixture_revision = _selected_fixture_revision(
+        spec.benchmark_id,
+        metadata.get("fixture_revision") or summary.get("fixture_revision") or "unknown",
+        cases,
+    )
+    gate_blocked = str((summary.get("output_shape_gate") or {}).get("status")) == "blocked"
+    tasks = []
+    for prediction in predictions:
+        task_id = str(prediction.get("task_id") or prediction.get("case_id") or "")
+        case = _case_by_task_id(cases, task_id)
+        result = case_results.get(task_id, {})
+        generation_status = str(prediction.get("generation_status") or "")
+        if generation_status != "completed":
+            task_state, task_score, error_class = "failed", None, "generation_failed"
+        elif gate_blocked:
+            task_state, task_score, error_class = (
+                "not_comparable",
+                None,
+                "systemic_output_protocol_mismatch",
+            )
+        else:
+            task_state, task_score, error_class = (
+                "scored",
+                result.get("score"),
+                result.get("error_class"),
+            )
+        tasks.append(
+            {
+                "task_id": task_id or str(case.get("task_id") or ""),
+                "task_family": spec.benchmark_kind,
+                "state": task_state,
+                "score": task_score,
+                "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
+                "scorer_type": "unit_test" if task_state == "scored" else None,
+                "scoring_policy": summary.get("scoring_policy") if task_state == "scored" else None,
+                "output_artifact": "predictions.jsonl#%s" % task_id,
+                "error_class": error_class,
+                **_task_performance_fields(prediction),
+                "category": result.get("category") or case.get("category"),
+                "patch_applied": bool(result)
+                and result.get("error_class")
+                not in {"malformed_patch", "patch_apply_failed", "unexpected_file_change"},
+                "tests_passed": result.get("passed"),
+            }
+        )
+    metrics = dict(summary.get("metrics") or {})
+    artifact = {
+        "artifact_spec_version": "0.1.0",
+        "artifact_kind": "capability_run",
+        "capability_run_id": "caprun_%s_%s"
+        % (
+            spec.benchmark_id,
+            stable_hash(
+                {
+                    "model": request.model,
+                    "benchmark_id": spec.benchmark_id,
+                    "fixture_revision": fixture_revision,
+                    "generation_preset_id": request.generation_preset,
+                    "summary": summary,
+                },
+                length=10,
+            ),
+        ),
+        "created_at": utcnow_iso(),
+        "runner": {
+            "name": "infergrade-runner",
+            "version": __version__,
+            "contract_version": _CONTRACT_VERSION,
+        },
+        "evidence": {
+            "lane": check_metadata.get("evidence_lane_id") or "decision",
+            "surface": check_metadata.get("surface_id") or "local_coding_capability",
+            "grade": "thin_local_sample",
+            "experimental": True,
+            "confidence_label": "thin_local_sample",
+        },
+        "subject": {
+            "model": {
+                "model": request.model,
+                "quant_artifact": request.quant_artifact,
+                "quant_artifact_sha256": request.quant_artifact_sha256,
+                "quant_artifact_filename": request.quant_artifact_filename,
+            },
+            "runtime": {
+                "backend": request.backend,
+                "execution_mode": request.execution_mode,
+                "llama_cpp_cli_path": request.llama_cpp_cli_path,
+                **dict(summary.get("container_runtime") or container_image_identity(spec.container_image)),
+            },
+            "hardware": {"source": "run_bundle_environment"},
+            "generation_preset": {
+                "generation_preset_id": request.generation_preset,
+                "max_tokens": spec.generation_max_tokens,
+            },
+        },
+        "protocol": {
+            "task_family": spec.benchmark_kind,
+            "prompt_version": "repository_unified_diff_only_v1",
+            "task_version": spec.benchmark_id,
+            "fixture_revision": fixture_revision,
+            "source_fixture_revision": metadata.get("fixture_revision") or summary.get("fixture_revision"),
+            "selection_digest_algorithm": metadata.get("selection_digest_algorithm")
+            or SORTED_UTF8_NEWLINE_SHA256_V1,
+            "selection_sha256": metadata.get("selection_sha256")
+            or _case_selection_digest(cases, SORTED_UTF8_NEWLINE_SHA256_V1),
+            "dataset_revision": None,
+            "scorer_type": "unit_test",
+            "scoring_policy": summary.get("scoring_policy") or "repo_edit_task_success_v1",
+            "repetitions": 1,
+            "sample_policy": metadata.get("sample_policy"),
+            "case_count": metadata.get("case_count"),
+        },
+        "summary": {
+            "state": summary_state,
+            "score": score if summary_state in ("scored", "partial") else None,
+            **(
+                {"score_uncertainty": dict(summary["primary_metric_uncertainty"])}
+                if summary.get("primary_metric_uncertainty")
+                else {}
+            ),
+            "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
+            "passed_count": metrics.get("passed_count"),
+            "failed_count": (
+                metrics.get("total_count") - metrics.get("passed_count")
+                if isinstance(metrics.get("total_count"), int)
+                and isinstance(metrics.get("passed_count"), int)
+                else None
+            ),
+            "partial_count": summary.get("generation_failure_count") or 0,
+            "skipped_count": 0,
+            "not_comparable_count": len([task for task in tasks if task["state"] == "not_comparable"]),
+            **_artifact_summary_performance(summary.get("task_performance")),
+            "malformed_patch_count": metrics.get("malformed_patch_count"),
+            "patch_apply_failure_count": metrics.get("patch_apply_failure_count"),
+            "test_failure_count": metrics.get("test_failure_count"),
+            "timeout_count": metrics.get("timeout_count"),
+            "output_shape_gate": dict(summary.get("output_shape_gate") or {}),
+        },
+        "tasks": tasks,
+        "artifacts": {
+            "manifest": "capability_run.json",
+            "raw_outputs": ["predictions.jsonl"],
+            "scoring_outputs": ["summary.json"],
+            "supporting_files": ["cases.jsonl", "benchmark_metadata.json"],
+        },
+        "claim_boundary": _repository_edit_artifact_claim_boundary(summary_state),
     }
     errors = validate_capability_run_artifact(artifact)
     if errors:
@@ -1835,6 +2600,11 @@ def _write_evalplus_capability_run_artifact(
                     "model": request.model,
                     "benchmark_id": spec.benchmark_id,
                     "evalplus_revision": metadata.get("evalplus_revision") or summary.get("evalplus_revision"),
+                    "fixture_revision": _container_fixture_revision(
+                        spec,
+                        metadata,
+                        summary,
+                    ),
                     "generation_preset_id": request.generation_preset,
                     "summary": summary,
                 },
@@ -1879,10 +2649,10 @@ def _write_evalplus_capability_run_artifact(
             "task_family": spec.benchmark_kind,
             "prompt_version": "%s_prompt_v2" % spec.benchmark_id,
             "task_version": spec.benchmark_id,
-            "fixture_revision": str(
-                metadata.get("sample_policy")
-                or summary.get("sample_policy")
-                or "%s_evalplus_revision" % (metadata.get("dataset") or summary.get("dataset") or "evalplus")
+            "fixture_revision": _container_fixture_revision(
+                spec,
+                metadata,
+                summary,
             ),
             "dataset_revision": metadata.get("evalplus_revision") or summary.get("evalplus_revision"),
             "scorer_type": "unit_test",
@@ -1891,11 +2661,20 @@ def _write_evalplus_capability_run_artifact(
             "sample_policy": metadata.get("sample_policy") or summary.get("sample_policy"),
             "case_count": metadata.get("case_count") or summary.get("case_count"),
             "dataset": metadata.get("dataset") or summary.get("dataset"),
+            "selection_digest_algorithm": metadata.get("selection_digest_algorithm")
+            or summary.get("selection_digest_algorithm")
+            or SORTED_UTF8_NEWLINE_SHA256_V1,
+            "selection_sha256": metadata.get("selection_sha256") or summary.get("selection_sha256"),
             "completion_normalization_policy": "evalplus_code_completion_v1",
         },
         "summary": {
             "state": summary_state,
             "score": score if summary_state in ("scored", "partial") else None,
+            **(
+                {"score_uncertainty": dict(summary["primary_metric_uncertainty"])}
+                if summary.get("primary_metric_uncertainty")
+                else {}
+            ),
             "score_dimension": check_metadata.get("score_dimension") or spec.benchmark_kind,
             "passed_count": metrics.get("passed_count"),
             "failed_count": metrics.get("failed_count"),
@@ -1934,10 +2713,12 @@ def _native_scorer_type(spec: CapabilityBenchmarkSpec) -> str:
         return "strict_json_equality"
     if spec.benchmark_id == "coding_static_repair_v1":
         return "static_check"
-    if spec.benchmark_id == "reasoning_exact_answer_v1":
+    if spec.benchmark_id in {"reasoning_exact_answer_v1", "reasoning_constraint_stress_v1"}:
         return "exact_match"
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return "exact_match"
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return "json_schema"
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -1950,8 +2731,12 @@ def _native_scoring_policy(spec: CapabilityBenchmarkSpec) -> str:
         return "deterministic_static_code_constraints_v1"
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return "deterministic_exact_answer_v1"
+    if spec.benchmark_id == "reasoning_constraint_stress_v1":
+        return REASONING_CONSTRAINT_STRESS_SCORING_POLICY
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return "deterministic_context_key_retrieval_v1"
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return STATEFUL_TOOL_LOOP_SCORING_POLICY
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -1964,9 +2749,42 @@ def _native_fixture_revision(spec: CapabilityBenchmarkSpec) -> str:
         return CODING_STATIC_REPAIR_FIXTURE_REVISION
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return REASONING_EXACT_ANSWER_FIXTURE_REVISION
+    if spec.benchmark_id == "reasoning_constraint_stress_v1":
+        return REASONING_CONSTRAINT_STRESS_FIXTURE_REVISION
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return CONTEXT_RETRIEVAL_FIXTURE_REVISION
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return STATEFUL_TOOL_LOOP_FIXTURE_REVISION
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
+
+
+def _case_selection_digest(
+    cases: List[Dict[str, Any]],
+    algorithm: str = SORTED_JSON_STRING_ARRAY_SHA256_V1,
+) -> str:
+    case_ids = (
+        str(item.get("task_id") or item.get("case_id") or stable_hash(item, length=64))
+        for item in cases
+    )
+    return selection_digest(case_ids, algorithm)
+
+
+def _selected_fixture_revision(
+    benchmark_id: str,
+    source_fixture_revision: Any,
+    cases: List[Dict[str, Any]],
+) -> str:
+    identity = {
+        "benchmark_id": benchmark_id,
+        "source_fixture_revision": str(source_fixture_revision or "unknown"),
+        "case_count": len(cases),
+        "selection_digest_algorithm": SORTED_JSON_STRING_ARRAY_SHA256_V1,
+        "selection_sha256": _case_selection_digest(cases),
+    }
+    return "%s_selection_%s" % (
+        benchmark_id,
+        stable_hash(identity, length=32),
+    )
 
 
 def _selected_check_metadata(request: RunRequest, benchmark_id: str) -> Dict[str, Any]:
@@ -2066,8 +2884,12 @@ def _native_artifact_claim_boundary(spec: CapabilityBenchmarkSpec, state: str) -
         return _coding_artifact_claim_boundary(state)
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return _reasoning_artifact_claim_boundary(state)
+    if spec.benchmark_id == "reasoning_constraint_stress_v1":
+        return _reasoning_constraint_stress_artifact_claim_boundary(state)
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return _context_retrieval_artifact_claim_boundary(state)
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return _stateful_tool_loop_artifact_claim_boundary(state)
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 
@@ -2114,14 +2936,50 @@ def _reasoning_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
     return {"supported_claims": supported, "unsupported_claims": unsupported}
 
 
+def _reasoning_constraint_stress_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    unsupported = [
+        "This is not a replacement reasoning score or evidence that the saturated v1 component has been repaired in place.",
+        "This synthetic fixture is not a global reasoning, intelligence, expert-knowledge, leaderboard, or contamination-free benchmark.",
+        "A high score does not establish headroom until cross-family, independently replicated ceiling evidence clears the catalog gate.",
+    ]
+    if state == "scored":
+        supported = [
+            "This setup completed the pinned reasoning constraint-stress fixture selected for this tier.",
+            "The artifact reports exact-answer accuracy and category slices for six deterministic reasoning task types.",
+        ]
+    elif state == "partial":
+        supported = [
+            "This setup attempted the pinned reasoning constraint-stress fixture with partial generation failures.",
+            "Scored and failed task rows remain separate in the artifact.",
+        ]
+    elif state == "failed":
+        supported = [
+            "This setup attempted the pinned reasoning constraint-stress fixture.",
+            "Generation failures remain failed evidence rather than zero-valued reasoning scores.",
+        ]
+    else:
+        supported = ["This artifact records that the reasoning constraint-stress fixture was not yet scored."]
+    return {"supported_claims": supported, "unsupported_claims": unsupported}
+
+
 def _multiple_choice_artifact_claim_boundary(benchmark_id: str, state: str) -> Dict[str, List[str]]:
-    label = "GPQA Diamond" if benchmark_id == "gpqa_diamond_reference_v1" else "MMLU-Pro"
+    label = {
+        "gpqa_diamond_reference_v1": "GPQA Diamond",
+        "longbench_v2_local_reference_v1": "LongBench v2-derived short-context",
+    }.get(benchmark_id, "MMLU-Pro")
     unsupported = [
         "This is not a global intelligence score.",
         "This is not public leaderboard evidence.",
         "This is not gold evidence.",
         "Sampled %s reference evidence does not prove broad real-world assistant quality by itself." % label,
     ]
+    if benchmark_id == "longbench_v2_local_reference_v1":
+        unsupported.extend(
+            [
+                "This is not an official LongBench v2 score.",
+                "This short-context subset does not measure the upstream medium or long strata, maximum-context support, or general long-context capability.",
+            ]
+        )
     if state == "scored":
         supported = [
             "This setup completed the pinned %s sampled reference protocol recorded in this artifact." % label,
@@ -2147,6 +3005,57 @@ def _multiple_choice_artifact_claim_boundary(benchmark_id: str, state: str) -> D
             "This artifact records that the pinned %s sampled reference protocol was not yet scored." % label,
         ]
     return {"supported_claims": supported, "unsupported_claims": unsupported}
+
+
+def _structured_tool_use_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    if state == "scored":
+        supported = [
+            "This setup completed the pinned BFCL-derived local structured tool-use protocol recorded in this artifact.",
+            "The score reports strict JSON function selection, argument, parallel-call, and relevance-abstention accuracy for the recorded single-turn subset.",
+        ]
+    elif state == "partial":
+        supported = [
+            "This setup attempted the pinned BFCL-derived local structured tool-use protocol with partial generation failures.",
+            "The artifact preserves scored, malformed, and failed task rows separately.",
+        ]
+    elif state == "not_comparable":
+        supported = [
+            "This setup attempted the pinned BFCL-derived local protocol, but most outputs did not match its structured JSON call format.",
+            "Raw responses and malformed-output diagnostics are preserved without publishing a capability score.",
+        ]
+    else:
+        supported = [
+            "This artifact records an attempted pinned BFCL-derived local structured tool-use protocol without a complete score.",
+        ]
+    return {
+        "supported_claims": supported,
+        "unsupported_claims": [
+            "This is not an official BFCL V4 leaderboard score.",
+            "This does not prove native runtime function-calling support.",
+            "This does not measure BFCL multi-turn, stateful agentic, web-search, or memory capability.",
+            "This is not a global assistant-quality or agent-autonomy score.",
+        ],
+    }
+
+
+def _stateful_tool_loop_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    supported = [
+        "This setup attempted the pinned synthetic stateful tool-loop fixture recorded in this artifact.",
+        "The diagnostic executes deterministic local simulator results between model generations and scores exact multi-step trajectories.",
+    ]
+    if state not in {"scored", "partial"}:
+        supported = [
+            "This artifact records an attempted pinned synthetic stateful tool-loop diagnostic that was not fully comparable."
+        ]
+    return {
+        "supported_claims": supported,
+        "unsupported_claims": [
+            "This diagnostic carries zero Capability protocol v3.1 headline-score weight.",
+            "This does not prove native runtime function calling, arbitrary tool use, external side effects, web access, or long-horizon agent autonomy.",
+            "This is not an official BFCL, GAIA, SWE-bench, or public leaderboard result.",
+            "The synthetic fixture requires cross-family distribution and ceiling audits before any promotion.",
+        ],
+    }
 
 
 def _context_retrieval_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
@@ -2194,6 +3103,25 @@ def _evalplus_artifact_claim_boundary(benchmark_id: str, state: str) -> Dict[str
             "This artifact records that the pinned EvalPlus %s reference protocol was not yet scored." % label,
         ]
     return {"supported_claims": supported, "unsupported_claims": unsupported}
+
+
+def _repository_edit_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
+    supported = [
+        "This setup attempted a pinned set of small repository-edit tasks.",
+        "Generated unified diffs were applied and checked by hidden deterministic tests inside the recorded isolated scorer container.",
+    ]
+    if state not in {"scored", "partial"}:
+        supported = [
+            "This artifact records an attempted pinned repository-edit diagnostic that was not fully comparable."
+        ]
+    return {
+        "supported_claims": supported,
+        "unsupported_claims": [
+            "This diagnostic is not part of Capability protocol v3.1 and carries zero headline-score weight.",
+            "This is not SWE-bench, LiveCodeBench, autonomous agent, arbitrary repository, or public leaderboard evidence.",
+            "Its score distribution and ceiling behavior require cross-family calibration before any promotion.",
+        ],
+    }
 
 
 def _capability_artifact_state(status: Any, score: Any, generation_failure_severity: Any = None) -> str:
@@ -2245,21 +3173,77 @@ def _evaluate_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str) -> Di
 def _run_capability_container(image: str, benchmark_dir: str, args: List[str]) -> None:
     install_image(image)
     mount_source = _host_mount_path(os.path.abspath(benchmark_dir))
-    command = [
-        "docker",
-        "run",
-        "--rm",
-        "-v",
-        "%s:/work" % mount_source,
-        image,
-    ]
-    command.extend(args)
+    command = _capability_container_command(image, mount_source, args)
     completed = subprocess.run(command, capture_output=True, text=True)
     if completed.returncode != 0:
         message = (completed.stderr or completed.stdout or "").strip()
         raise RuntimeError(
-            "Capability container failed for image %s: %s" % (image, message or "unknown error")
+            "Capability container failed for image %s under %s: %s"
+            % (image, CAPABILITY_CONTAINER_POLICY_VERSION, message or "unknown error")
         )
+
+
+def _capability_container_command(image: str, mount_source: str, args: List[str]) -> List[str]:
+    host_uid = getattr(os, "getuid", lambda: 0)()
+    host_gid = getattr(os, "getgid", lambda: 0)()
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--cap-drop",
+        "ALL",
+    ]
+    if "infergrade-repository-edit" in image:
+        command.extend(["--cap-add", "SETUID", "--cap-add", "SETGID"])
+    else:
+        command.extend(["--user", "%s:%s" % (host_uid, host_gid)])
+    command.extend([
+        "--security-opt",
+        "no-new-privileges",
+        "--pids-limit",
+        str(_CAPABILITY_CONTAINER_PIDS_LIMIT),
+        "--memory",
+        _CAPABILITY_CONTAINER_MEMORY,
+        "--memory-swap",
+        _CAPABILITY_CONTAINER_MEMORY,
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,nodev,size=512m",
+        "-v",
+        "%s:/work" % mount_source,
+        image,
+    ])
+    command.extend(args)
+    return command
+
+
+def _capability_container_policy(image: str = "") -> Dict[str, Any]:
+    repository_edit = "infergrade-repository-edit" in str(image)
+    host_uid = getattr(os, "getuid", lambda: 0)()
+    host_gid = getattr(os, "getgid", lambda: 0)()
+    policy = {
+        "policy_version": CAPABILITY_CONTAINER_POLICY_VERSION,
+        "network": "none",
+        "capabilities": "setuid_setgid_only" if repository_edit else "all_dropped",
+        "container_user": "root_supervisor" if repository_edit else "host_uid_gid",
+        "container_user_id": "0:0" if repository_edit else "%s:%s" % (host_uid, host_gid),
+        "no_new_privileges": True,
+        "read_only_root": True,
+        "writable_paths": ["/work", "/tmp"],
+        "tmpfs": "/tmp:rw,noexec,nosuid,nodev,size=512m",
+        "pids_limit": _CAPABILITY_CONTAINER_PIDS_LIMIT,
+        "memory_limit": _CAPABILITY_CONTAINER_MEMORY,
+        "memory_swap_limit": _CAPABILITY_CONTAINER_MEMORY,
+    }
+    if repository_edit:
+        policy["generated_code_user"] = "nobody:65534"
+        policy["capability_exception_reason"] = (
+            "The root scorer retains only SETUID and SETGID so the generated-code test subprocess "
+            "can irreversibly drop to nobody; generated code does not retain those capabilities."
+        )
+    return policy
 
 
 def _host_mount_path(path: str) -> str:
@@ -2306,8 +3290,12 @@ def _case_checkpoint_fingerprint(
                 "container_args": list(spec.container_args),
                 "generation_protocol": (
                     "multiple_choice_letter_grammar_v1"
-                    if spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
-                    else "default_generation_v1"
+                    if spec.benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS
+                    else (
+                        "unified_diff_only_v1"
+                        if spec.benchmark_id == "repository_edit_smoke_v1"
+                        else "default_generation_v1"
+                    )
                 ),
             },
             "cases": cases,
@@ -2428,7 +3416,7 @@ def _mmlu_completion_has_answer_shape(value: Any) -> bool:
 
 
 def _direct_answer_recovery_reason(spec: CapabilityBenchmarkSpec, generated: Dict[str, Any]) -> Optional[str]:
-    if spec.benchmark_id not in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"} or generated.get("status", "completed") != "completed":
+    if spec.benchmark_id not in MULTIPLE_CHOICE_REFERENCE_IDS or generated.get("status", "completed") != "completed":
         return None
     text = str(generated.get("text") or "")
     if _mmlu_completion_has_answer_shape(text):
@@ -2470,7 +3458,7 @@ def _generate_predictions(
         _initialize_case_checkpoint(checkpoint_path, checkpoint_fingerprint, spec, total_cases)
         completed_checkpoint = {}
     adaptive_max_tokens = spec.generation_max_tokens
-    protocol_canary_complete = spec.benchmark_id not in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
+    protocol_canary_complete = spec.benchmark_id not in MULTIPLE_CHOICE_REFERENCE_IDS
     for index, case in enumerate(cases, start=1):
         case_id = case.get("case_id") or case.get("task_id") or stable_hash(case, length=12)
         checkpoint_prediction = completed_checkpoint.get(str(case_id))
@@ -2491,6 +3479,24 @@ def _generate_predictions(
                         "current_case": case_id,
                         "checkpoint_reused": True,
                         "message": "Capability benchmark %s %d/%d cases (checkpoint reused)."
+                        % (spec.display_name, index, total_cases),
+                    }
+                )
+            continue
+        if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+            record = _generate_stateful_tool_loop_prediction(adapter, request, spec, case)
+            _append_case_checkpoint(checkpoint_path, record)
+            predictions.append(record)
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "case_progress",
+                        "benchmark_id": spec.benchmark_id,
+                        "display_name": spec.display_name,
+                        "completed_cases": index,
+                        "total_cases": total_cases,
+                        "current_case": case_id,
+                        "message": "Capability benchmark %s %d/%d cases."
                         % (spec.display_name, index, total_cases),
                     }
                 )
@@ -2539,6 +3545,14 @@ def _generate_predictions(
                     status = "failed"
                     error = normalization["error"]
                     generation_failure_kind = "model_output"
+            if (
+                spec.benchmark_id == "ifeval"
+                and status == "completed"
+                and not str(text or "").strip()
+            ):
+                status = "failed"
+                error = "Model produced no visible response."
+                generation_failure_kind = "model_output"
             performance = _task_performance_fields(generated)
         except Exception as exc:
             text = ""
@@ -2566,6 +3580,8 @@ def _generate_predictions(
             record["benchmark_prompt_transform"] = "evalplus_code_only_v1"
             record["raw_completion"] = raw_completion
             record["completion_normalization"] = normalization
+        elif spec.benchmark_id == "repository_edit_smoke_v1":
+            record["benchmark_prompt_transform"] = "repository_unified_diff_only_v1"
         if spec.benchmark_kind in {"instruction_following", "multiturn_instruction_retention"}:
             record["prompt"] = case["prompt"]
             record["response"] = text
@@ -2575,7 +3591,7 @@ def _generate_predictions(
         _append_case_checkpoint(checkpoint_path, record)
         predictions.append(record)
         if (
-            spec.benchmark_id in {"mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"}
+            spec.benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS
             and record.get("direct_answer_protocol_recovery", {}).get("status") == "failed"
         ):
             # One failed, model-specific protocol canary is sufficient to
@@ -2598,8 +3614,109 @@ def _generate_predictions(
     return predictions
 
 
+def _generate_stateful_tool_loop_prediction(
+    adapter,
+    request: RunRequest,
+    spec: CapabilityBenchmarkSpec,
+    case: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Run a real multi-generation loop with deterministic local tool execution."""
+    case_id = str(case.get("case_id") or case.get("task_id") or stable_hash(case, length=12))
+    transcript: List[Dict[str, Any]] = []
+    trajectory: List[Dict[str, Any]] = []
+    turn_performance: List[Dict[str, Any]] = []
+    generation_status = "completed"
+    generation_error = None
+    generation_failure_kind = None
+    last_response = ""
+    for turn_index, step in enumerate(list(case.get("steps") or []), start=1):
+        prompt = build_stateful_tool_loop_prompt(case, transcript)
+        try:
+            generated = adapter.generate_text(
+                request=request,
+                prompt=prompt,
+                max_tokens=spec.generation_max_tokens,
+            )
+        except Exception as exc:
+            generation_status = "failed"
+            generation_error = str(exc)
+            generation_failure_kind = "runtime"
+            break
+        turn_performance.append(_task_performance_fields(generated))
+        last_response = str(generated.get("text") or "")
+        if generated.get("status", "completed") != "completed":
+            generation_status = "failed"
+            generation_error = generated.get("error") or "Stateful tool-loop generation failed."
+            generation_failure_kind = "generation"
+            break
+        observed_call, parse_error = parse_tool_call(last_response)
+        expected_call = dict(step.get("expected_call") or {})
+        call_correct = parse_error is None and expected_call_matches(observed_call, expected_call)
+        tool_result = dict(step.get("tool_result") or {}) if step.get("tool_result") is not None else None
+        turn = {
+            "turn_index": turn_index,
+            "response": last_response,
+            "parsed_call": observed_call,
+            "format_valid": parse_error is None,
+            "parse_error": parse_error,
+            "call_correct": call_correct,
+            "tool_executed": False,
+        }
+        if call_correct and observed_call and observed_call.get("name") != "finish" and tool_result is not None:
+            turn["tool_executed"] = True
+            turn["tool_result"] = tool_result
+            transcript.append(executed_transcript_entry(observed_call, tool_result))
+        trajectory.append(turn)
+        if not call_correct or observed_call is None or observed_call.get("name") == "finish":
+            break
+    record = {
+        "case_id": case_id,
+        "benchmark_id": spec.benchmark_id,
+        "generation_status": generation_status,
+        "generation_error": generation_error,
+        "generation_preset_id": request.generation_preset,
+        "completion": last_response,
+        "trajectory": trajectory,
+        "attempted_turn_count": len(trajectory),
+        "expected_turn_count": len(list(case.get("steps") or [])),
+        "completed_trajectory": bool(
+            generation_status == "completed"
+            and len(trajectory) == len(list(case.get("steps") or []))
+            and trajectory
+            and all(item.get("call_correct") for item in trajectory)
+            and (trajectory[-1].get("parsed_call") or {}).get("name") == "finish"
+        ),
+        **_aggregate_stateful_turn_performance(turn_performance),
+    }
+    if generation_failure_kind:
+        record["generation_failure_kind"] = generation_failure_kind
+    return record
+
+
+def _aggregate_stateful_turn_performance(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    latencies = _numeric_values(rows, "latency_ms")
+    input_tokens = _integer_values(rows, "input_tokens")
+    output_tokens = _integer_values(rows, "output_tokens")
+    ttft = _numeric_values(rows, "time_to_first_token_ms")
+    sources = sorted({str(item.get("measurement_source")) for item in rows if item.get("measurement_source")})
+    return {
+        "latency_ms": round(sum(latencies), 6) if latencies else None,
+        "time_to_first_token_ms": _percentile_numeric(ttft, 0.5),
+        "tokens_per_second": None,
+        "input_tokens": sum(input_tokens) if input_tokens else None,
+        "output_tokens": sum(output_tokens) if output_tokens else None,
+        "measurement_source": (
+            "stateful_tool_loop_turn_aggregate_v1:%s" % "+".join(sources)
+            if sources
+            else None
+        ),
+    }
+
+
 def _generation_prompt_for_case(spec: CapabilityBenchmarkSpec, case: Dict[str, Any]) -> str:
     prompt = str(case["prompt"])
+    if spec.benchmark_id == "repository_edit_smoke_v1":
+        return prompt
     if spec.benchmark_id not in {"evalplus_humaneval", "evalplus_mbpp"}:
         return prompt
     if spec.benchmark_id == "evalplus_humaneval":
@@ -2942,6 +4059,8 @@ def _prepare_native_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir
 
 
 def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str) -> Dict[str, Any]:
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return _evaluate_stateful_tool_loop_benchmark(spec, benchmark_dir)
     cases_by_id = {
         str(item.get("case_id") or item.get("task_id") or stable_hash(item, length=12)): item
         for item in _read_jsonl(os.path.join(benchmark_dir, "cases.jsonl"))
@@ -2955,10 +4074,19 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
     for prediction in predictions:
         case_id = str(prediction.get("case_id") or "")
         case = cases_by_id.get(case_id) or {}
+        diagnostic_metadata = (
+            {
+                "category": case.get("category"),
+                "structural_tier": case.get("structural_tier"),
+            }
+            if spec.benchmark_id == "reasoning_constraint_stress_v1"
+            else {}
+        )
         checks = list(case.get("checks") or [])
         response = str(prediction.get("response") or prediction.get("completion") or "")
         if prediction.get("generation_status") != "completed":
-            total_constraints += len(checks) if checks else 1
+            # Runtime/transport failures are missing evidence, not model misses.
+            # Preserve their task rows, but exclude them from score denominators.
             case_results.append(
                 {
                     "case_id": case_id,
@@ -2967,6 +4095,7 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                     "passed_constraints": 0,
                     "total_constraints": len(checks) if checks else 1,
                     "score": None,
+                    **diagnostic_metadata,
                 }
             )
             continue
@@ -3039,6 +4168,7 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                     "total_constraints": 1,
                     "score": 1.0 if passed else 0.0,
                     "format_valid": not format_violation,
+                    **diagnostic_metadata,
                     **(
                         {
                             "context_bucket_tokens": case.get("context_bucket_tokens"),
@@ -3098,6 +4228,7 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
     score = round(passed_constraints / float(total_constraints), 6) if total_constraints else None
     malformed_output_count = len([item for item in case_results if item.get("error_class") == "malformed_output"])
     correct_count = len([item for item in case_results if item.get("score") == 1.0])
+    scored_case_results = [item for item in case_results if item.get("score") is not None]
     # A completed response that violates a deterministic output contract is a
     # model-output miss, not absent evidence. Its constraints are already in the
     # denominator and score zero above. Transport/generation failures remain
@@ -3112,13 +4243,14 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
         "passed_constraints": passed_constraints,
         "total_constraints": total_constraints,
         "correct_count": correct_count,
-        "total_count": len(case_results),
+        "total_count": len(scored_case_results),
         "malformed_output_count": malformed_output_count,
         "case_accuracy": round(
-            len([item for item in case_results if item.get("score") == 1.0]) / float(len(case_results)),
+            len([item for item in scored_case_results if item.get("score") == 1.0])
+            / float(len(scored_case_results)),
             6,
         )
-        if case_results
+        if scored_case_results
         else None,
     }
     if spec.benchmark_id == "assistant_compositional_instruction_v2":
@@ -3128,6 +4260,11 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
                 "semantic_correct_count": semantic_correct_count,
                 "semantic_task_accuracy": round(semantic_correct_count / float(len(case_results)), 6) if case_results else None,
             }
+        )
+    if spec.benchmark_id == "reasoning_constraint_stress_v1":
+        metrics["category_metrics"] = _exact_answer_group_metrics(case_results, "category")
+        metrics["structural_tier_metrics"] = _exact_answer_group_metrics(
+            case_results, "structural_tier"
         )
     if spec.benchmark_id == "context_retrieval_reference_v1":
         metrics["format_violation_count"] = format_violation_count
@@ -3167,6 +4304,152 @@ def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str
         "case_results": case_results,
         "scoring_policy": _native_scoring_policy(spec),
     }
+
+
+def _evaluate_stateful_tool_loop_benchmark(
+    spec: CapabilityBenchmarkSpec,
+    benchmark_dir: str,
+) -> Dict[str, Any]:
+    cases = _read_jsonl(os.path.join(benchmark_dir, "cases.jsonl"))
+    cases_by_id = {
+        str(item.get("case_id") or item.get("task_id") or stable_hash(item, length=12)): item
+        for item in cases
+    }
+    predictions = _read_jsonl(os.path.join(benchmark_dir, "predictions.jsonl"))
+    case_results: List[Dict[str, Any]] = []
+    passed_turns = 0
+    total_expected_turns = 0
+    generated_turn_count = 0
+    malformed_turn_count = 0
+    wrong_call_count = 0
+    tool_execution_count = 0
+    for prediction in predictions:
+        case_id = str(prediction.get("case_id") or "")
+        case = cases_by_id.get(case_id) or {}
+        expected_turn_count = len(list(case.get("steps") or []))
+        trajectory = list(prediction.get("trajectory") or [])
+        total_expected_turns += expected_turn_count
+        generated_turn_count += len(trajectory)
+        malformed_turn_count += len([item for item in trajectory if not item.get("format_valid")])
+        wrong_call_count += len(
+            [item for item in trajectory if item.get("format_valid") and not item.get("call_correct")]
+        )
+        tool_execution_count += len([item for item in trajectory if item.get("tool_executed")])
+        correct_turns = len([item for item in trajectory if item.get("call_correct")])
+        passed_turns += correct_turns
+        if prediction.get("generation_status") != "completed":
+            case_results.append(
+                {
+                    "case_id": case_id,
+                    "category": case.get("category"),
+                    "variant": case.get("variant"),
+                    "state": "failed",
+                    "error_class": "generation_failed",
+                    "passed_constraints": correct_turns,
+                    "total_constraints": expected_turn_count,
+                    "score": None,
+                    "attempted_turn_count": len(trajectory),
+                }
+            )
+            continue
+        completed = bool(prediction.get("completed_trajectory"))
+        malformed = any(not item.get("format_valid") for item in trajectory)
+        case_results.append(
+            {
+                "case_id": case_id,
+                "category": case.get("category"),
+                "variant": case.get("variant"),
+                "state": "scored",
+                "error_class": (
+                    "malformed_output" if malformed else None if completed else "wrong_tool_call"
+                ),
+                "passed_constraints": correct_turns,
+                "total_constraints": expected_turn_count,
+                "score": 1.0 if completed else 0.0,
+                "attempted_turn_count": len(trajectory),
+                "tool_execution_count": len([item for item in trajectory if item.get("tool_executed")]),
+                "format_valid": not malformed,
+            }
+        )
+    scored_rows = [item for item in case_results if item.get("score") is not None]
+    correct_count = len([item for item in scored_rows if item.get("score") == 1.0])
+    trajectory_success_rate = (
+        round(correct_count / float(len(scored_rows)), 6) if scored_rows else None
+    )
+    category_metrics = _stateful_group_metrics(case_results, "category")
+    variant_metrics = _stateful_group_metrics(case_results, "variant")
+    return {
+        "benchmark_id": spec.benchmark_id,
+        "display_name": spec.display_name,
+        "status": "completed",
+        "primary_metric": {"name": spec.primary_metric_name, "value": trajectory_success_rate},
+        "metrics": {
+            "trajectory_success_rate": trajectory_success_rate,
+            "correct_count": correct_count,
+            "total_count": len(scored_rows),
+            "passed_constraints": passed_turns,
+            "total_constraints": total_expected_turns,
+            "turn_accuracy": (
+                round(passed_turns / float(total_expected_turns), 6)
+                if total_expected_turns
+                else None
+            ),
+            "generated_turn_count": generated_turn_count,
+            "malformed_turn_count": malformed_turn_count,
+            "wrong_call_count": wrong_call_count,
+            "tool_execution_count": tool_execution_count,
+            "category_metrics": category_metrics,
+            "variant_metrics": variant_metrics,
+        },
+        "category_metrics": category_metrics,
+        "variant_metrics": variant_metrics,
+        "case_results": case_results,
+        "scoring_policy": STATEFUL_TOOL_LOOP_SCORING_POLICY,
+    }
+
+
+def _stateful_group_metrics(
+    case_results: List[Dict[str, Any]],
+    field: str,
+) -> Dict[str, Dict[str, Any]]:
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for value in sorted({str(item.get(field)) for item in case_results if item.get(field)}):
+        scored = [
+            item
+            for item in case_results
+            if item.get(field) == value and item.get("score") is not None
+        ]
+        correct = len([item for item in scored if item.get("score") == 1.0])
+        grouped[value] = {
+            "correct_count": correct,
+            "total_count": len(scored),
+            "trajectory_success_rate": (
+                round(correct / float(len(scored)), 6) if scored else None
+            ),
+        }
+    return grouped
+
+
+def _exact_answer_group_metrics(
+    case_results: List[Dict[str, Any]],
+    field: str,
+) -> Dict[str, Dict[str, Any]]:
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for value in sorted({str(item.get(field)) for item in case_results if item.get(field)}):
+        scored = [
+            item
+            for item in case_results
+            if item.get(field) == value and item.get("score") is not None
+        ]
+        correct = len([item for item in scored if item.get("score") == 1.0])
+        grouped[value] = {
+            "correct_count": correct,
+            "total_count": len(scored),
+            "exact_answer_accuracy": (
+                round(correct / float(len(scored)), 6) if scored else None
+            ),
+        }
+    return grouped
 
 
 def _normalize_score_text(value: Any) -> str:
@@ -3246,8 +4529,12 @@ def _native_benchmark_cases(spec: CapabilityBenchmarkSpec) -> List[Dict[str, Any
         return _coding_static_repair_cases()
     if spec.benchmark_id == "reasoning_exact_answer_v1":
         return _reasoning_exact_answer_cases()
+    if spec.benchmark_id == "reasoning_constraint_stress_v1":
+        return reasoning_constraint_stress_cases()
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return _context_retrieval_cases()
+    if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
+        return stateful_tool_loop_cases()
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
 
 

@@ -50,6 +50,15 @@ jobs:
           - image: infergrade-gpqa
             dockerfile: containers/capability-gpqa/Dockerfile
             platforms: linux/amd64,linux/arm64
+          - image: infergrade-longbench-v2
+            dockerfile: containers/capability-longbench-v2/Dockerfile
+            platforms: linux/amd64,linux/arm64
+          - image: infergrade-bfcl
+            dockerfile: containers/capability-bfcl/Dockerfile
+            platforms: linux/amd64,linux/arm64
+          - image: infergrade-repository-edit
+            dockerfile: containers/capability-repo-edit/Dockerfile
+            platforms: linux/amd64,linux/arm64
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

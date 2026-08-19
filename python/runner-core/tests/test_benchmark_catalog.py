@@ -61,11 +61,20 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("assistant_compositional_instruction_v2", check_ids)
         self.assertIn("coding_static_repair_v1", check_ids)
         self.assertIn("reasoning_exact_answer_v1", check_ids)
+        self.assertIn("reasoning_constraint_stress_v1", check_ids)
         self.assertIn("mmlu_pro_reference_v1", check_ids)
+        self.assertIn("bfcl_local_reference_v1", check_ids)
+        self.assertIn("stateful_tool_loop_diagnostic_v1", check_ids)
+        self.assertIn("longbench_v2_local_reference_v1", check_ids)
         self.assertNotIn("multiturn_chat_memory_v1", planned_ids)
         self.assertNotIn("coding_static_repair_v1", planned_ids)
         self.assertNotIn("reasoning_exact_answer_v1", planned_ids)
+        self.assertNotIn("reasoning_constraint_stress_v1", planned_ids)
         self.assertNotIn("mmlu_pro_reference_v1", planned_ids)
+        self.assertNotIn("bfcl_local_reference_v1", planned_ids)
+        self.assertNotIn("stateful_tool_loop_diagnostic_v1", planned_ids)
+        self.assertNotIn("longbench_v2_reference_v1", planned_ids)
+        self.assertNotIn("longbench_v2_local_reference_v1", planned_ids)
         for check in catalog["checks"]:
             self.assertIn(check["suite_scope"], {"decision", "reference"})
             self.assertIn(check["evidence_lane_id"], {"smoke", "decision", "reference", "gold"})
@@ -85,18 +94,47 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(score_policies["local_assistant_capability"]["protocol_label"], "Capability protocol v3.1")
         self.assertEqual(score_policies["local_assistant_capability"]["scale_interpretation"], "benchmark_attainment_index")
         calibration_policy = score_policies["local_assistant_capability"]["calibration_policy"]
-        self.assertEqual(calibration_policy["policy_id"], "capability_headroom_gate_v2")
+        self.assertEqual(calibration_policy["policy_id"], "capability_headroom_gate_v3")
+        self.assertEqual(calibration_policy["ceiling_fraction_confidence_level"], 0.95)
         self.assertEqual(calibration_policy["minimum_unique_setups"], 8)
         self.assertEqual(calibration_policy["minimum_replicated_setups"], 4)
+        self.assertEqual(calibration_policy["minimum_independently_replicated_setups"], 4)
+        self.assertEqual(
+            calibration_policy["minimum_headline_component_independently_replicated_setups"],
+            2,
+        )
         self.assertEqual(calibration_policy["minimum_current_generation_fraction"], 0.75)
+        self.assertEqual(calibration_policy["minimum_headroom_challenge_observations"], 2)
+        self.assertEqual(calibration_policy["minimum_headroom_challenge_model_families"], 1)
+        self.assertEqual(
+            calibration_policy[
+                "minimum_headroom_challenge_independently_replicated_setups"
+            ],
+            1,
+        )
         self.assertEqual(calibration_policy["maximum_single_setup_fraction"], 0.25)
+        for task_policy in score_policies.values():
+            facet_policy = task_policy["representativeness_policy"][
+                "empirical_priority_facet_policy"
+            ]
+            self.assertEqual(facet_policy["policy_id"], "priority_facet_evidence_gate_v2")
+            self.assertEqual(facet_policy["minimum_observations"], 16)
+            self.assertEqual(facet_policy["minimum_model_families"], 3)
+            self.assertEqual(facet_policy["minimum_parameter_bands"], 2)
+            self.assertEqual(
+                facet_policy["minimum_independently_replicated_setups"],
+                2,
+            )
+            self.assertEqual(facet_policy["maximum_suite_ceiling_fraction"], 0.2)
+            self.assertEqual(facet_policy["ceiling_fraction_confidence_level"], 0.95)
+            self.assertEqual(facet_policy["minimum_suite_headroom"], 0.1)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_coverage_fraction"], 0.5)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_scored_components"], 2)
         self.assertEqual(score_policies["local_coding_capability"]["minimum_score_dimensions"], 2)
         self.assertEqual(score_policies["local_coding_capability"]["maximum_component_weight_fraction"], 0.8)
         for surface_id, expected_policy_id in (
-            ("local_coding_capability", "coding_capability_headroom_gate_v1"),
-            ("local_reasoning_capability", "reasoning_capability_headroom_gate_v1"),
+            ("local_coding_capability", "coding_capability_headroom_gate_v2"),
+            ("local_reasoning_capability", "reasoning_capability_headroom_gate_v2"),
         ):
             task_policy = score_policies[surface_id]
             self.assertEqual(task_policy["distribution_calibration_status"], "provisional_pending_distribution_audit")
@@ -104,9 +142,62 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.assertEqual(task_policy["calibration_policy"]["minimum_observations"], 20)
             self.assertEqual(task_policy["calibration_policy"]["minimum_unique_setups"], 8)
             self.assertEqual(task_policy["calibration_policy"]["minimum_replicated_setups"], 4)
+            self.assertEqual(
+                task_policy["calibration_policy"]["minimum_independently_replicated_setups"],
+                4,
+            )
+            self.assertEqual(
+                task_policy["calibration_policy"][
+                    "minimum_headline_component_independently_replicated_setups"
+                ],
+                2,
+            )
             self.assertEqual(task_policy["calibration_policy"]["minimum_current_generation_fraction"], 0.75)
+            self.assertEqual(
+                task_policy["calibration_policy"]["minimum_headroom_challenge_observations"],
+                2,
+            )
+            self.assertEqual(
+                task_policy["calibration_policy"][
+                    "minimum_headroom_challenge_independently_replicated_setups"
+                ],
+                1,
+            )
             self.assertEqual(task_policy["calibration_policy"]["maximum_suite_ceiling_fraction"], 0.2)
+            self.assertEqual(
+                task_policy["calibration_policy"]["ceiling_fraction_confidence_level"],
+                0.95,
+            )
             self.assertEqual(task_policy["calibration_policy"]["maximum_single_setup_fraction"], 0.25)
+        self.assertEqual(
+            score_policies["local_assistant_capability"]["representativeness_policy"]["scoped_claim_facets"],
+            ["verifiable_instruction_following", "compositional_rule_execution"],
+        )
+        self.assertIn(
+            "repository_edit_smoke_v1",
+            score_policies["local_coding_capability"]["representativeness_policy"]["supporting_check_ids"],
+        )
+        self.assertIn(
+            "longbench_v2_local_reference_v1",
+            score_policies["local_reasoning_capability"]["representativeness_policy"]["supporting_check_ids"],
+        )
+        self.assertEqual(
+            score_policies["local_reasoning_capability"]["representativeness_policy"]["planned_check_ids"],
+            ["livebench_reasoning_refresh_candidate_v1"],
+        )
+        livebench = next(
+            item for item in catalog["planned_benchmark_candidates"]
+            if item["check_id"] == "livebench_reasoning_refresh_candidate_v1"
+        )
+        self.assertEqual(livebench["status"], "research_candidate_near_ceiling_risk")
+        self.assertEqual(
+            livebench["external_headroom_observation"]["headroom_to_suite_ceiling"],
+            0.083,
+        )
+        self.assertEqual(
+            livebench["external_headroom_observation"]["status"],
+            "below_infergrade_headroom_policy",
+        )
 
     def test_coverage_expansion_priorities_are_ordered_and_answer_loop_scoped(self):
         priorities = coverage_expansion_priorities()
@@ -175,6 +266,9 @@ class BenchmarkCatalogTests(unittest.TestCase):
         )
         self.assertEqual(qwen36["model_freshness"], "current_generation")
         self.assertEqual(qwen36["campaign_availability"], "blocked_pending_canary")
+        self.assertTrue(qwen36["headroom_challenge_eligible"])
+        self.assertIn("stress", qwen36["headroom_challenge_rationale"])
+        self.assertEqual(qwen36["target_observations"], 2)
         self.assertIn("24gb", qwen36["blocked_reason"])
         coding_anchor = next(
             item for item in priorities
@@ -184,17 +278,49 @@ class BenchmarkCatalogTests(unittest.TestCase):
             item for item in priorities
             if item["priority_id"] == "apple_silicon_qwen35_9b_reasoning_anchor"
         )
+        coding_challenge = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_qwen36_27b_coding_challenge"
+        )
+        reasoning_challenge = next(
+            item for item in priorities
+            if item["priority_id"] == "apple_silicon_qwen36_27b_reasoning_challenge"
+        )
         self.assertEqual(coding_anchor["model_id"], "Qwen/Qwen3.5-9B")
         self.assertEqual(coding_anchor["use_case"], "agentic_coding")
         self.assertEqual(
             coding_anchor["benchmark_check_ids"],
-            ["interactive_chat_v1", "evalplus_humaneval", "evalplus_mbpp"],
+            [
+                "interactive_chat_v1",
+                "repository_edit_smoke_v1",
+                "evalplus_humaneval",
+                "evalplus_mbpp",
+            ],
         )
         self.assertEqual(reasoning_anchor["use_case"], "reasoning")
+        self.assertEqual(coding_challenge["use_case"], "agentic_coding")
+        self.assertEqual(reasoning_challenge["use_case"], "reasoning")
+        self.assertTrue(coding_challenge["headroom_challenge_eligible"])
+        self.assertTrue(reasoning_challenge["headroom_challenge_eligible"])
+        self.assertEqual(coding_challenge["campaign_availability"], "blocked_pending_canary")
+        self.assertEqual(reasoning_challenge["campaign_availability"], "blocked_pending_canary")
+        self.assertEqual(coding_challenge["target_observations"], 2)
+        self.assertEqual(reasoning_challenge["target_observations"], 2)
+        self.assertIn("coding_static_repair_v1", coding_challenge["benchmark_check_ids"])
         self.assertEqual(
             reasoning_anchor["benchmark_check_ids"],
-            ["reasoning_exact_answer_v1", "mmlu_pro_reference_v1"],
+            [
+                "reasoning_exact_answer_v1",
+                "reasoning_constraint_stress_v1",
+                "mmlu_pro_reference_v1",
+                "gpqa_diamond_reference_v1",
+            ],
         )
+        checks = {item["check_id"]: item for item in load_capability_catalog()["checks"]}
+        self.assertEqual(checks["repository_edit_smoke_v1"]["primary_score_weight"], 0.0)
+        self.assertEqual(checks["repository_edit_smoke_v1"]["score_role"], "diagnostic_only")
+        self.assertEqual(checks["gpqa_diamond_reference_v1"]["primary_score_weight"], 0.0)
+        self.assertEqual(checks["gpqa_diamond_reference_v1"]["score_role"], "diagnostic_only")
         self.assertTrue(coding_anchor["calibration_campaign_eligible"])
         self.assertTrue(reasoning_anchor["calibration_campaign_eligible"])
         historical = next(
@@ -236,6 +362,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
             "multiturn_chat_memory_v1",
             "coding_static_repair_v1",
             "reasoning_exact_answer_v1",
+            "reasoning_constraint_stress_v1",
             "mmlu_pro_reference_v1",
             "evalplus_humaneval",
             "evalplus_mbpp",
@@ -250,6 +377,15 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(statuses["multiturn_chat_memory_v1"]["maturity"], "thin_local_sample")
         self.assertEqual(statuses["coding_static_repair_v1"]["maturity"], "thin_local_sample")
         self.assertEqual(statuses["reasoning_exact_answer_v1"]["maturity"], "thin_local_sample")
+        self.assertEqual(statuses["reasoning_constraint_stress_v1"]["maturity"], "thin_local_sample")
+        self.assertEqual(
+            statuses["reasoning_constraint_stress_v1"]["runnable_status"],
+            "runnable_intentional_diagnostic",
+        )
+        self.assertIn(
+            "Zero-weight",
+            statuses["reasoning_constraint_stress_v1"]["claim_boundary"],
+        )
         self.assertEqual(statuses["mmlu_pro_reference_v1"]["maturity"], "reference_runnable")
         self.assertEqual(statuses["perplexity_reference_v1"]["maturity"], "reference_runnable")
         self.assertEqual(statuses["perplexity_reference_v1"]["surface_id"], "quant_fidelity")
@@ -257,6 +393,14 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(statuses["swebench_verified_gold_v1"]["maturity"], "gold_candidate")
         self.assertEqual(statuses["swebench_verified_gold_v1"]["runnable_status"], "not_runnable")
         self.assertIn("not runnable", statuses["swebench_verified_gold_v1"]["claim_boundary"])
+        self.assertEqual(statuses["repository_edit_smoke_v1"]["maturity"], "thin_local_sample")
+        self.assertEqual(statuses["longbench_v2_local_reference_v1"]["maturity"], "reference_runnable")
+        self.assertIn("not an official leaderboard", statuses["longbench_v2_local_reference_v1"]["claim_boundary"])
+        self.assertEqual(
+            statuses["repository_edit_smoke_v1"]["runnable_status"],
+            "runnable_intentional_diagnostic",
+        )
+        self.assertIn("zero headline weight", statuses["repository_edit_smoke_v1"]["claim_boundary"])
         for check_id in ("multiturn_chat_memory_v1", "coding_static_repair_v1", "reasoning_exact_answer_v1"):
             self.assertEqual(statuses[check_id]["evidence_lane_id"], "decision")
             self.assertNotIn("reference", statuses[check_id]["maturity"])
@@ -281,6 +425,75 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertTrue(any("multiturn_chat_memory_v1" in item and "is not declared" in item for item in failures))
         self.assertTrue(any("gpqa_diamond_reference_v1" in item and "does not match check" in item for item in failures))
 
+    def test_catalog_legitimacy_validation_blocks_catalog_only_planned_promotion(self):
+        mutated = deepcopy(load_capability_catalog())
+        statuses = {item["check_id"]: item for item in mutated["benchmark_status_matrix"]}
+        statuses["livecodebench_reference_v1"]["runnable_status"] = "runnable_intentional_reference"
+        statuses["livecodebench_reference_v1"]["maturity"] = "reference_runnable"
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "livecodebench_reference_v1: planned candidate must remain not_runnable until moved into checks",
+            failures,
+        )
+        self.assertIn(
+            "livecodebench_reference_v1: planned candidate cannot declare runnable maturity",
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_requires_implemented_bounded_runnable_lane(self):
+        mutated = deepcopy(load_capability_catalog())
+        statuses = {item["check_id"]: item for item in mutated["benchmark_status_matrix"]}
+        status = statuses["repository_edit_smoke_v1"]
+        status["harness_status"] = "not_implemented"
+        status["expected_duration_token_volume_status"] = "unknown"
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "repository_edit_smoke_v1: runnable check requires an implemented harness",
+            failures,
+        )
+        self.assertIn(
+            "repository_edit_smoke_v1: runnable check requires bounded duration and token-volume status",
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_requires_pinned_runnable_reference(self):
+        mutated = deepcopy(load_capability_catalog())
+        statuses = {item["check_id"]: item for item in mutated["benchmark_status_matrix"]}
+        status = statuses["mmlu_pro_reference_v1"]
+        status["runnable_status"] = "not_runnable"
+        status["fixture_or_dataset_revision_status"] = "dataset_revision_needed"
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "mmlu_pro_reference_v1: runnable maturity requires runnable_status",
+            failures,
+        )
+        self.assertIn(
+            "mmlu_pro_reference_v1: runnable reference or gold maturity requires a pinned fixture or dataset",
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_rejects_planned_and_runnable_overlap(self):
+        mutated = deepcopy(load_capability_catalog())
+        mutated["planned_benchmark_candidates"].append(
+            {
+                "check_id": "repository_edit_smoke_v1",
+                "planned_score_policy_id": "repo_edit_task_success_v1",
+            }
+        )
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "repository_edit_smoke_v1: benchmark cannot be both a declared check and planned candidate",
+            failures,
+        )
+
     def test_catalog_legitimacy_validation_rejects_unknown_coverage_generation_preset(self):
         mutated = deepcopy(load_capability_catalog())
         priority = next(
@@ -295,6 +508,81 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn(
             "apple_silicon_qwen3_8b_assistant_repeat: unsupported coverage generation_preset_id "
             "'typo_direct_answer_v1'",
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_rejects_unrepeatable_headroom_challenge(self):
+        mutated = deepcopy(load_capability_catalog())
+        priority = next(
+            item
+            for item in mutated["coverage_expansion_priorities"]
+            if item.get("headroom_challenge_eligible") is True
+        )
+        priority["model_freshness"] = "historical_control"
+        priority["target_observations"] = 1
+        priority["headroom_challenge_rationale"] = ""
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "%s: headroom challenge must be current or recent generation"
+            % priority["priority_id"],
+            failures,
+        )
+        self.assertIn(
+            "%s: headroom challenge requires at least two target observations"
+            % priority["priority_id"],
+            failures,
+        )
+        self.assertIn(
+            "%s: headroom challenge rationale must be non-empty"
+            % priority["priority_id"],
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_requires_ceiling_confidence_level(self):
+        mutated = deepcopy(load_capability_catalog())
+        assistant = next(
+            item
+            for item in mutated["surface_score_policies"]
+            if item["surface_id"] == "local_assistant_capability"
+        )
+        assistant["calibration_policy"][
+            "ceiling_fraction_confidence_level"
+        ] = 1.0
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "local_assistant_capability: calibration_policy "
+            "ceiling_fraction_confidence_level must be greater than 0 and less than 1",
+            failures,
+        )
+
+    def test_catalog_legitimacy_validation_requires_complete_challenger_per_surface(self):
+        mutated = deepcopy(load_capability_catalog())
+        coding_challenge = next(
+            item
+            for item in mutated["coverage_expansion_priorities"]
+            if item.get("headroom_challenge_eligible") is True
+            and item.get("use_case") == "agentic_coding"
+        )
+        coding_challenge["benchmark_check_ids"].remove("coding_static_repair_v1")
+
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+
+        self.assertIn(
+            "local_coding_capability: headroom challenge gate requires an explicit eligible "
+            "campaign target covering every positively weighted capability check",
+            failures,
+        )
+
+        coding_challenge["benchmark_check_ids"].append("coding_static_repair_v1")
+        coding_challenge["use_case"] = "general_assistant"
+        failures = validate_benchmark_legitimacy_metadata(mutated)
+        self.assertIn(
+            "local_coding_capability: headroom challenge gate requires an explicit eligible "
+            "campaign target covering every positively weighted capability check",
             failures,
         )
 
@@ -388,6 +676,24 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(request.use_case, "agentic_coding")
         self.assertEqual(request.capability, "auto")
 
+    def test_repository_edit_diagnostic_can_be_selected_explicitly_without_becoming_default(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            backend="llama.cpp",
+            tier="canary",
+            benchmark_group_ids=["repository_edit_diagnostic"],
+        )
+        normalize_request_selection(request)
+
+        self.assertEqual(request.benchmark_group_ids, ["repository_edit_diagnostic"])
+        self.assertEqual(request.benchmark_check_ids, ["repository_edit_smoke_v1"])
+        self.assertEqual(capability_benchmark_ids_for_request(request), ["repository_edit_smoke_v1"])
+        default_suite = next(
+            item for item in load_capability_catalog()["suites"]
+            if item["suite_id"] == "coding_code_editing"
+        )
+        self.assertNotIn("repository_edit_diagnostic", default_suite["default_group_ids"])
+
     def test_native_reasoning_exact_answer_check_can_be_selected_explicitly(self):
         request = RunRequest(
             model="Qwen/Qwen2.5-7B-Instruct",
@@ -400,6 +706,35 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(request.benchmark_check_ids, ["reasoning_exact_answer_v1"])
         self.assertEqual(capability_benchmark_ids_for_request(request), ["reasoning_exact_answer_v1"])
         self.assertEqual(request.capability, "auto")
+
+    def test_reasoning_headroom_diagnostic_is_explicit_and_zero_weight(self):
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_group_ids=["reasoning_headroom_diagnostic"],
+        )
+        normalize_request_selection(request)
+
+        self.assertEqual(request.benchmark_group_ids, ["reasoning_headroom_diagnostic"])
+        self.assertEqual(request.benchmark_check_ids, ["reasoning_constraint_stress_v1"])
+        self.assertEqual(
+            capability_benchmark_ids_for_request(request),
+            ["reasoning_constraint_stress_v1"],
+        )
+        check = next(
+            item
+            for item in load_capability_catalog()["checks"]
+            if item["check_id"] == "reasoning_constraint_stress_v1"
+        )
+        self.assertEqual(check["primary_score_weight"], 0.0)
+        self.assertEqual(check["score_role"], "diagnostic_only")
+        default_suite = next(
+            item
+            for item in load_capability_catalog()["suites"]
+            if item["suite_id"] == "reasoning_problem_solving"
+        )
+        self.assertNotIn("reasoning_headroom_diagnostic", default_suite["default_group_ids"])
 
     def test_reasoning_suite_resolves_to_reasoning_use_case(self):
         request = RunRequest(
@@ -438,6 +773,24 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertIn("mmlu_pro_reference_v1", selection["check_ids"])
         self.assertNotIn("mmlu_pro_reference_v1", shortcut_selection("quick_default")["check_ids"])
 
+    def test_assistant_shortcuts_cover_every_weighted_assistant_check(self):
+        catalog = load_capability_catalog()
+        weighted_assistant_check_ids = {
+            str(item["check_id"])
+            for item in catalog["checks"]
+            if item.get("surface_id") == "local_assistant_capability"
+            and float(item.get("primary_score_weight") or 0) > 0
+        }
+
+        self.assertEqual(
+            weighted_assistant_check_ids,
+            {"ifeval", "assistant_compositional_instruction_v2"},
+        )
+        for shortcut_id in ("quick_default", "broad_compare", "assistant_reference"):
+            with self.subTest(shortcut_id=shortcut_id):
+                selection = shortcut_selection(shortcut_id)
+                self.assertTrue(weighted_assistant_check_ids.issubset(set(selection["check_ids"])))
+
     def test_coding_default_shortcut_covers_every_weighted_coding_check(self):
         catalog = load_capability_catalog()
         weighted_coding_check_ids = {
@@ -471,6 +824,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
             [
                 "ifeval",
                 "multiturn_chat_memory_v1",
+                "assistant_compositional_instruction_v2",
                 "interactive_chat_v1",
                 "batch_generation_v1",
                 "perplexity_reference_v1",
@@ -609,6 +963,24 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(metadata["benchmark_checks"][0]["primary_score_metric"], "constraint_retention_accuracy")
         self.assertIn("case_accuracy", metadata["benchmark_checks"][0]["score_breakdown_fields"])
         self.assertEqual(metadata["score_policies"][0]["score_policy_id"], "multiturn_constraint_retention_v1")
+
+    def test_selection_metadata_declares_stateful_outcome_saturation_slices(self):
+        request = RunRequest(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            backend="llama.cpp",
+            tier="gold",
+            benchmark_check_ids=["stateful_tool_loop_diagnostic_v1"],
+        )
+
+        metadata = selection_metadata_for_request(request)
+
+        check = metadata["benchmark_checks"][0]
+        policy = check["empirical_saturation_slice_policy"]
+        self.assertEqual(policy["breakdown_field"], "variant_metrics")
+        self.assertEqual(policy["score_field"], "trajectory_success_rate")
+        self.assertEqual(policy["minimum_cases_per_slice"], 4)
+        self.assertEqual(policy["required_slices"], ["success", "blocked", "noop"])
+        self.assertIn("variant_metrics", check["score_breakdown_fields"])
 
     def test_selection_metadata_includes_coding_static_score_policy(self):
         request = RunRequest(

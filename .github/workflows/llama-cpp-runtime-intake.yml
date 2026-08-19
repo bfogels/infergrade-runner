@@ -2,8 +2,19 @@ name: llama.cpp Runtime Intake
 
 on:
   workflow_dispatch:
+    inputs:
+      verify_candidate_assets:
+        description: Verify official CPU archives on macOS, Linux, and Windows
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: Optional exact bNNNN release tag to inspect instead of latest
+        required: false
+        type: string
   schedule:
     - cron: "17 9 * * *"
+    - cron: "47 9 * * 0"
 
 permissions:
   contents: read
@@ -27,23 +38,100 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Fetch official latest-release metadata
+      - name: Fetch official release metadata
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUESTED_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           mkdir -p runtime-intake
+          endpoint="latest"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${REQUESTED_RELEASE_TAG}" ]]; then
+            [[ "${REQUESTED_RELEASE_TAG}" =~ ^b[0-9]+$ ]]
+            endpoint="tags/${REQUESTED_RELEASE_TAG}"
+          fi
           curl --fail --show-error --silent --location \
             --retry 3 \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer ${GH_TOKEN}" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
+            "https://api.github.com/repos/ggml-org/llama.cpp/releases/${endpoint}" \
             > runtime-intake/latest-release.json
 
-      - name: Validate pins and build advisory intake report
+      - name: Read inspected release tag
+        id: upstream
+        shell: bash
         run: |
+          tag="$(python3 -c 'import json; print(json.load(open("runtime-intake/latest-release.json", encoding="utf-8"))["tag_name"])')"
+          [[ "${tag}" =~ ^b[0-9]+$ ]]
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore archive receipts for this exact release and verifier
+        id: archive-cache
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '47 9 * * 0'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: runtime-intake/archive-receipts
+          key: llama-cpp-archive-v3-${{ steps.upstream.outputs.tag }}-${{ hashFiles('scripts/verify_llama_cpp_release_asset.py', 'scripts/verify_llama_cpp_model_canary.py', 'runtime/llama_cpp_release_policy.json') }}
+
+      - name: Verify all official candidate archives once
+        if: (github.event_name == 'workflow_dispatch' || github.event.schedule == '47 9 * * 0') && steps.archive-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p runtime-intake/archive-receipts
+          python3 scripts/verify_llama_cpp_release_asset.py \
+            --release-json runtime-intake/latest-release.json \
+            --platform macos-arm64 \
+            --output runtime-intake/archive-receipts/macos-arm64.json
+          python3 scripts/verify_llama_cpp_release_asset.py \
+            --release-json runtime-intake/latest-release.json \
+            --platform ubuntu-x64 \
+            --run-version-smoke \
+            --retain-runtime-dir runtime-intake/ubuntu-runtime \
+            --output runtime-intake/archive-receipts/ubuntu-x64.json
+          python3 scripts/verify_llama_cpp_release_asset.py \
+            --release-json runtime-intake/latest-release.json \
+            --platform windows-cpu-x64 \
+            --output runtime-intake/archive-receipts/windows-cpu-x64.json
+
+      - name: Run tiny legacy model-load canary
+        if: (github.event_name == 'workflow_dispatch' || github.event.schedule == '47 9 * * 0') && steps.archive-cache.outputs.cache-hit != 'true'
+        run: |
+          python3 scripts/verify_llama_cpp_model_canary.py \
+            --runtime-dir runtime-intake/ubuntu-runtime \
+            --archive-receipt runtime-intake/archive-receipts/ubuntu-x64.json \
+            --output runtime-intake/archive-receipts/legacy-control.json
+
+      - name: Run exact MiniCPM5 recent-architecture canary
+        if: (github.event_name == 'workflow_dispatch' || github.event.schedule == '47 9 * * 0') && steps.archive-cache.outputs.cache-hit != 'true'
+        run: |
+          python3 scripts/verify_llama_cpp_model_canary.py \
+            --runtime-dir runtime-intake/ubuntu-runtime \
+            --archive-receipt runtime-intake/archive-receipts/ubuntu-x64.json \
+            --canary-id minicpm5_tokenizer \
+            --output runtime-intake/archive-receipts/minicpm5-tokenizer.json
+
+      - name: Validate pins and build evidence-scoped intake report
+        shell: bash
+        run: |
+          receipt_args=()
+          for receipt in \
+            runtime-intake/archive-receipts/macos-arm64.json \
+            runtime-intake/archive-receipts/ubuntu-x64.json \
+            runtime-intake/archive-receipts/windows-cpu-x64.json; do
+            if [[ -f "${receipt}" ]]; then
+              receipt_args+=(--archive-receipt "${receipt}")
+            fi
+          done
+          for receipt in \
+            runtime-intake/archive-receipts/legacy-control.json \
+            runtime-intake/archive-receipts/minicpm5-tokenizer.json; do
+            if [[ -f "${receipt}" ]]; then
+              receipt_args+=(--model-canary-receipt "${receipt}")
+            fi
+          done
           python3 scripts/check_llama_cpp_runtime_policy.py \
             --latest-release-json runtime-intake/latest-release.json \
+            "${receipt_args[@]}" \
             --report-json runtime-intake/report.json \
             --report-markdown runtime-intake/report.md
           cat runtime-intake/report.md >> "${GITHUB_STEP_SUMMARY}"
@@ -52,5 +140,180 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: llama-cpp-runtime-intake-${{ github.run_id }}
-          path: runtime-intake/
+          path: |
+            runtime-intake/latest-release.json
+            runtime-intake/report.json
+            runtime-intake/report.md
+            runtime-intake/archive-receipts/
           retention-days: 14
+
+  verify-candidate-assets:
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_candidate_assets
+    needs: inspect
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: macos-arm64
+          - os: ubuntu-latest
+            platform: ubuntu-x64
+          - os: windows-latest
+            platform: windows-cpu-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust for immutable materialization
+        if: matrix.platform != 'windows-cpu-x64'
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Download inspected release metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: llama-cpp-runtime-intake-${{ github.run_id }}
+          path: runtime-intake/
+
+      - name: Verify candidate archive and version
+        shell: bash
+        run: |
+          retain_args=()
+          if [[ "${{ matrix.platform }}" != "windows-cpu-x64" ]]; then
+            retain_args+=(--retain-archive "runtime-intake/${{ matrix.platform }}-candidate.tar.gz")
+          fi
+          python3 scripts/verify_llama_cpp_release_asset.py \
+            --release-json runtime-intake/latest-release.json \
+            --platform "${{ matrix.platform }}" \
+            --run-version-smoke \
+            "${retain_args[@]}" \
+            --output "runtime-intake/${{ matrix.platform }}-candidate-receipt.json"
+
+      - name: Materialize immutable candidate package
+        if: matrix.platform != 'windows-cpu-x64'
+        shell: bash
+        run: |
+          python3 scripts/write_runtime_candidate_manifest.py \
+            --archive-receipt "runtime-intake/${{ matrix.platform }}-candidate-receipt.json" \
+            --output "runtime-intake/${{ matrix.platform }}-candidate-manifest.json"
+          digest="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["artifact"]["downloaded_sha256"])' "runtime-intake/${{ matrix.platform }}-candidate-receipt.json")"
+          cargo run -p infergrade_runner_engine --bin materialize-runtime-candidate --locked -- \
+            --manifest-entry "runtime-intake/${{ matrix.platform }}-candidate-manifest.json" \
+            --archive "runtime-intake/${{ matrix.platform }}-candidate.tar.gz" \
+            --runtime-cache-dir "runtime-intake/${{ matrix.platform }}-candidate-cache" \
+            --consent-archive-sha256 "${digest}" \
+            --receipt-output "runtime-intake/${{ matrix.platform }}-materialization-receipt.json" \
+            > "runtime-intake/${{ matrix.platform }}-materialization-local.json"
+          python3 -c 'import json,sys; value=json.load(open(sys.argv[1], encoding="utf-8")); assert value["candidate_only"] is True; assert value["catalog_assertion"] is None' \
+            "runtime-intake/${{ matrix.platform }}-materialization-receipt.json"
+
+      - name: Upload candidate receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: llama-cpp-candidate-${{ matrix.platform }}-${{ github.run_id }}
+          path: runtime-intake/${{ matrix.platform }}-candidate-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload immutable materialization receipt
+        if: matrix.platform != 'windows-cpu-x64'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: llama-cpp-materialization-${{ matrix.platform }}-${{ github.run_id }}
+          path: |
+            runtime-intake/${{ matrix.platform }}-candidate-manifest.json
+            runtime-intake/${{ matrix.platform }}-materialization-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+
+  summarize-candidate-evidence:
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_candidate_assets
+    needs: [inspect, verify-candidate-assets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Download inspected release evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: llama-cpp-runtime-intake-${{ github.run_id }}
+          path: runtime-intake/evidence
+
+      - name: Download native archive receipts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: llama-cpp-candidate-*-${{ github.run_id }}
+          path: runtime-intake/evidence
+          merge-multiple: true
+
+      - name: Download immutable package receipts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: llama-cpp-materialization-*-${{ github.run_id }}
+          path: runtime-intake/evidence
+          merge-multiple: true
+
+      - name: Build candidate evidence ladder
+        shell: bash
+        run: |
+          shopt -s nullglob
+          archive_args=()
+          for receipt in runtime-intake/evidence/*-candidate-receipt.json; do
+            archive_args+=(--archive-receipt "${receipt}")
+          done
+          materialization_args=()
+          for receipt in runtime-intake/evidence/*-materialization-receipt.json; do
+            materialization_args+=(--materialization-receipt "${receipt}")
+          done
+          canary_args=()
+          for receipt in \
+            runtime-intake/evidence/archive-receipts/legacy-control.json \
+            runtime-intake/evidence/archive-receipts/minicpm5-tokenizer.json; do
+            if [[ -f "${receipt}" ]]; then
+              canary_args+=(--model-canary-receipt "${receipt}")
+            fi
+          done
+          inspected_tag="$(python3 -c 'import json; print(json.load(open("runtime-intake/evidence/latest-release.json", encoding="utf-8"))["tag_name"])')"
+          qualification_args=()
+          for qualification in runtime/qualification/*.json; do
+            qualification_tag="$(python3 -c 'import json,sys; runtime=json.load(open(sys.argv[1], encoding="utf-8")).get("runtime") or {}; print((runtime.get("upstream") or {}).get("tag", ""))' "${qualification}")"
+            if [[ "${qualification_tag}" == "${inspected_tag}" ]]; then
+              qualification_args+=(--benchmark-qualification "${qualification}")
+            fi
+          done
+          python3 scripts/check_llama_cpp_runtime_policy.py \
+            --latest-release-json runtime-intake/evidence/latest-release.json \
+            "${archive_args[@]}" \
+            "${materialization_args[@]}" \
+            "${canary_args[@]}" \
+            "${qualification_args[@]}" \
+            --report-json runtime-intake/candidate-evidence-ladder.json \
+            --report-markdown runtime-intake/candidate-evidence-ladder.md
+          cat runtime-intake/candidate-evidence-ladder.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload candidate evidence ladder
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: llama-cpp-candidate-evidence-${{ github.run_id }}
+          path: |
+            runtime-intake/candidate-evidence-ladder.json
+            runtime-intake/candidate-evidence-ladder.md
+          if-no-files-found: error
+          retention-days: 30

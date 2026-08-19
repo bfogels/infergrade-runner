@@ -1164,6 +1164,48 @@ class WorkerTests(unittest.TestCase):
         self.assertIn("artifact cache", failure["message"])
         self.assertIn("failed_check", failure["details"])
 
+    def test_classify_doctor_stale_saved_runtime_enables_desktop_repair(self):
+        failure = _classify_worker_failure(
+            RuntimeError("Preflight failed."),
+            doctor_report={
+                "ok": False,
+                "checks": [
+                    {
+                        "id": "llama_cli_native",
+                        "status": "error",
+                        "message": "Native llama-cli is required for local_native llama.cpp runs.",
+                        "details": {
+                            "source": "managed_runtime",
+                            "requested": "/missing/llama-cli",
+                        },
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(failure["error_code"], "runtime_selection_stale")
+        self.assertIn("repair", failure["message"].lower())
+        self.assertEqual(failure["details"]["failed_check"]["details"]["source"], "managed_runtime")
+
+    def test_classify_doctor_missing_native_runtime_enables_managed_install(self):
+        failure = _classify_worker_failure(
+            RuntimeError("Preflight failed."),
+            doctor_report={
+                "ok": False,
+                "checks": [
+                    {
+                        "id": "llama_cli_native",
+                        "status": "error",
+                        "message": "Native llama-cli is required for local_native llama.cpp runs.",
+                        "details": {"source": "system_path", "requested": "llama-cli"},
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(failure["error_code"], "native_runtime_missing")
+        self.assertIn("required", failure["message"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()

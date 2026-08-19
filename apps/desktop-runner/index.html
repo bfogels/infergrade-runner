@@ -59,7 +59,7 @@
               <span data-readiness-fact="token">Token missing</span>
             </div>
             <div class="primary-actions">
-              <button type="button" data-readiness-check>Check before benchmark</button>
+              <button type="button" data-readiness-check>Make ready</button>
               <button type="button" data-repair-pairing>Pair again</button>
               <button type="button" class="button-secondary" data-open-hub data-hub-target="home">Open Hub</button>
             </div>
@@ -197,12 +197,20 @@
               <div class="progress-bar" aria-hidden="true">
                 <span data-assignment-progress-bar style="width: 0%"></span>
               </div>
+              <ol class="assignment-stages" data-assignment-stages aria-label="Benchmark stages">
+                <li data-assignment-stage="download"><span></span><small>Download</small></li>
+                <li data-assignment-stage="verify"><span></span><small>Verify</small></li>
+                <li data-assignment-stage="load"><span></span><small>Load</small></li>
+                <li data-assignment-stage="benchmark"><span></span><small>Benchmark</small></li>
+                <li data-assignment-stage="publish"><span></span><small>Publish</small></li>
+                <li data-assignment-stage="complete"><span></span><small>Complete</small></li>
+              </ol>
               <p class="hint compact-hint" data-assignment-check hidden></p>
             </div>
           </div>
           <div class="assignment-actions">
             <button type="button" data-assignment-start-listening hidden>Start listening</button>
-            <button type="button" data-assignment-install-runtime hidden>Install required runtime</button>
+            <button type="button" data-assignment-install-runtime hidden>Install runtime and retry</button>
             <button type="button" class="button-secondary" data-open-hub data-hub-target="assignment">Open in Hub</button>
             <button type="button" class="button-secondary" data-view-logs>View logs</button>
           </div>
@@ -292,15 +300,23 @@
                   <span class="mini-chevron" aria-hidden="true"></span>
                 </summary>
                 <div class="inline-tools-body">
-                  <p class="hint runtime-choice-intro">Use a managed build for the simplest setup. Choose a signed reviewed build for newer or specialized models. Power users can select a complete local llama.cpp build.</p>
-                  <div class="runtime-choice-grid">
+                  <section class="runtime-autopilot-card">
+                    <div>
+                      <strong>Automatic (recommended)</strong>
+                      <p>Runner chooses and verifies the compatible managed build for each benchmark.</p>
+                    </div>
+                    <button type="button" data-runtime-install-managed>Make runtime ready</button>
+                  </section>
+                  <details class="runtime-power-options">
+                    <summary>Choose a specific runtime</summary>
+                    <div class="runtime-choice-grid">
                     <section class="runtime-choice-card">
-                      <strong>Managed fallback</strong>
+                      <strong>Packaged channel</strong>
                       <label>
-                        <span>Packaged runtime</span>
+                        <span>Managed build</span>
                         <select name="runtimeId"><option value="">Runner-pinned default</option></select>
                       </label>
-                      <button type="button" data-runtime-install-managed>Install and use</button>
+                      <button type="button" class="button-secondary" data-runtime-reinstall-managed>Use selected build</button>
                     </section>
                     <section class="runtime-choice-card">
                       <strong>Signed runtime catalog</strong>
@@ -326,10 +342,10 @@
                         <button type="button" data-runtime-select-existing>Use this binary</button>
                       </div>
                     </section>
-                  </div>
+                    </div>
+                  </details>
                   <div class="button-row compact-actions runtime-maintenance-actions">
                     <button type="button" class="button-secondary" data-runtime-plan>Inspect plan</button>
-                    <button type="button" class="button-secondary" data-runtime-reinstall-managed>Replace with managed</button>
                     <button type="button" class="button-secondary" data-runtime-remove-selected>Remove selected runtime</button>
                     <button type="button" class="button-secondary" data-runner-self-test>Run startup self-test</button>
                   </div>

@@ -105,6 +105,7 @@ pub const WINDOWS_CUDA_PREVIEW_RUNTIME_ID: &str = "llama-cpp-windows-cuda-cli-pr
 pub const WINDOWS_CUDA_BINARY_SET: &str = "llama_cpp_windows_cuda_x86_64";
 pub const WINDOWS_CUDA_CLAIM_BOUNDARY: &str =
     "Windows/NVIDIA CUDA is preview-only until a pinned, checksummed runtime and full Hub loop are proven.";
+pub const RUNTIME_CANDIDATE_MAX_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MANAGED_LLAMA_CPP_MACOS_METAL_TAG: &str = "b9050";
 const MANAGED_LLAMA_CPP_MACOS_METAL_ARCHIVE_URL: &str =
     "https://github.com/ggml-org/llama.cpp/releases/download/b9050/llama-b9050-bin-macos-arm64.tar.gz";
@@ -1510,6 +1511,105 @@ pub struct ManagedRuntimeInstallOptions {
     pub archive_bytes: Option<Vec<u8>>,
 }
 
+/// Validate a maintainer-local runtime candidate before materializing it into an
+/// isolated cache. This does not authenticate signed catalog metadata and must
+/// not be used to promote a runtime or alter the normal user runtime cache.
+pub fn validate_runtime_candidate_materialization(
+    entry: &Value,
+    consent_archive_sha256: &str,
+    runtime_cache_dir: &Path,
+) -> Result<(), String> {
+    verify_runtime_download_manifest(entry)?;
+
+    let channel = entry.get("channel").and_then(Value::as_str).unwrap_or("");
+    if !matches!(channel, "reviewed_candidate" | "upstream_release") {
+        return Err(
+            "candidate materialization accepts only reviewed_candidate or upstream_release entries"
+                .to_string(),
+        );
+    }
+    if entry
+        .get("catalog_assertion")
+        .is_some_and(|assertion| !assertion.is_null())
+    {
+        return Err(
+            "candidate materialization cannot authenticate catalog_assertion metadata".to_string(),
+        );
+    }
+
+    let system = entry
+        .pointer("/platform/system")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let arch = entry
+        .pointer("/platform/arch")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if system != env::consts::OS || arch != env::consts::ARCH {
+        return Err(format!(
+            "candidate platform {system}/{arch} does not match this host {}/{}",
+            env::consts::OS,
+            env::consts::ARCH
+        ));
+    }
+
+    if entry.pointer("/archive/format").and_then(Value::as_str) != Some("tar.gz") {
+        return Err("candidate materialization currently accepts only tar.gz archives".to_string());
+    }
+    let archive_size = entry
+        .pointer("/archive/size_bytes")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "candidate archive.size_bytes is required".to_string())?;
+    if archive_size == 0 || archive_size > RUNTIME_CANDIDATE_MAX_ARCHIVE_BYTES {
+        return Err(format!(
+            "candidate archive size must be between 1 and {RUNTIME_CANDIDATE_MAX_ARCHIVE_BYTES} bytes"
+        ));
+    }
+
+    let consent = consent_archive_sha256.trim();
+    if consent.len() != 64 || !consent.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return Err("consent archive sha256 must be a 64-character hex digest".to_string());
+    }
+    let expected_sha256 = runtime_archive_sha256(entry)?;
+    if !consent.eq_ignore_ascii_case(expected_sha256) {
+        return Err(format!(
+            "candidate archive consent mismatch: expected {expected_sha256}, got {consent}"
+        ));
+    }
+
+    if runtime_cache_dir.as_os_str().is_empty() {
+        return Err("runtime cache directory is required".to_string());
+    }
+    match fs::symlink_metadata(runtime_cache_dir) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                return Err("runtime cache directory must not be a symlink".to_string());
+            }
+            if !metadata.is_dir() {
+                return Err("runtime cache path must be a directory".to_string());
+            }
+            if fs::read_dir(runtime_cache_dir)
+                .map_err(|error| format!("could not inspect runtime cache directory: {error}"))?
+                .next()
+                .is_some()
+            {
+                return Err(
+                    "runtime cache directory must be empty for candidate materialization"
+                        .to_string(),
+                );
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "could not inspect runtime cache directory `{}`: {error}",
+                runtime_cache_dir.display()
+            ))
+        }
+    }
+    Ok(())
+}
+
 fn managed_llama_cpp_runtime_entry(runtime_id: Option<&str>) -> Result<Value, String> {
     let manifest = managed_llama_cpp_runtime_manifest();
     let runtimes = manifest["runtimes"]
@@ -2850,6 +2950,128 @@ mod tests {
             "rollback_runtime_id": LLAMA_CPP_RUNTIME_ID,
             "provenance": "Test archive with checksum verification only.",
         })
+    }
+
+    fn test_runtime_candidate_entry() -> Value {
+        let mut entry = test_runtime_manifest_entry(b"candidate-archive");
+        entry["channel"] = json!("reviewed_candidate");
+        entry["archive"]["format"] = json!("tar.gz");
+        entry["archive"]["size_bytes"] = json!(17);
+        entry
+    }
+
+    #[test]
+    fn runtime_candidate_materialization_accepts_exact_isolated_request() {
+        let cache = env::temp_dir().join(format!(
+            "infergrade-runtime-candidate-valid-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&cache);
+        let entry = test_runtime_candidate_entry();
+        let consent = entry["archive"]["sha256"].as_str().expect("sha256");
+
+        validate_runtime_candidate_materialization(&entry, consent, &cache)
+            .expect("exact candidate request");
+    }
+
+    #[test]
+    fn runtime_candidate_materialization_rejects_stable_or_catalog_claims() {
+        let cache = env::temp_dir().join(format!(
+            "infergrade-runtime-candidate-policy-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&cache);
+        let mut entry = test_runtime_candidate_entry();
+        let consent = entry["archive"]["sha256"]
+            .as_str()
+            .expect("sha256")
+            .to_string();
+
+        entry["channel"] = json!("infergrade_stable");
+        let error = validate_runtime_candidate_materialization(&entry, &consent, &cache)
+            .expect_err("stable channel must fail");
+        assert!(error.contains("reviewed_candidate or upstream_release"));
+
+        entry["channel"] = json!("reviewed_candidate");
+        entry["catalog_assertion"] = json!({"target_name": "unverified"});
+        let error = validate_runtime_candidate_materialization(&entry, &consent, &cache)
+            .expect_err("catalog assertion must fail");
+        assert!(error.contains("cannot authenticate catalog_assertion"));
+    }
+
+    #[test]
+    fn runtime_candidate_materialization_rejects_wrong_platform_or_consent() {
+        let cache = env::temp_dir().join(format!(
+            "infergrade-runtime-candidate-identity-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&cache);
+        let mut entry = test_runtime_candidate_entry();
+        let consent = entry["archive"]["sha256"]
+            .as_str()
+            .expect("sha256")
+            .to_string();
+
+        entry["platform"]["system"] = json!("different-os");
+        let error = validate_runtime_candidate_materialization(&entry, &consent, &cache)
+            .expect_err("wrong platform must fail");
+        assert!(error.contains("does not match this host"));
+
+        entry["platform"]["system"] = json!(env::consts::OS);
+        let wrong_consent = "0".repeat(64);
+        let error = validate_runtime_candidate_materialization(&entry, &wrong_consent, &cache)
+            .expect_err("wrong consent must fail");
+        assert!(error.contains("archive consent mismatch"));
+    }
+
+    #[test]
+    fn runtime_candidate_materialization_rejects_unbounded_or_nonempty_cache() {
+        let cache = env::temp_dir().join(format!(
+            "infergrade-runtime-candidate-cache-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&cache);
+        let mut entry = test_runtime_candidate_entry();
+        let consent = entry["archive"]["sha256"]
+            .as_str()
+            .expect("sha256")
+            .to_string();
+
+        entry["archive"]["size_bytes"] = json!(RUNTIME_CANDIDATE_MAX_ARCHIVE_BYTES + 1);
+        let error = validate_runtime_candidate_materialization(&entry, &consent, &cache)
+            .expect_err("oversized archive must fail");
+        assert!(error.contains("archive size must be between"));
+
+        entry["archive"]["size_bytes"] = json!(17);
+        fs::create_dir_all(&cache).expect("candidate cache");
+        fs::write(cache.join("selected_runtime.json"), "existing").expect("existing cache");
+        let error = validate_runtime_candidate_materialization(&entry, &consent, &cache)
+            .expect_err("nonempty cache must fail");
+        assert!(error.contains("must be empty"));
+        let _ = fs::remove_dir_all(cache);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_candidate_materialization_rejects_symlinked_cache() {
+        use std::os::unix::fs::symlink;
+
+        let root = env::temp_dir().join(format!(
+            "infergrade-runtime-candidate-symlink-{}",
+            std::process::id()
+        ));
+        let cache = root.join("cache-link");
+        let target = root.join("target");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&target).expect("cache target");
+        symlink(&target, &cache).expect("cache symlink");
+        let entry = test_runtime_candidate_entry();
+        let consent = entry["archive"]["sha256"].as_str().expect("sha256");
+
+        let error = validate_runtime_candidate_materialization(&entry, consent, &cache)
+            .expect_err("symlinked cache must fail");
+        assert!(error.contains("must not be a symlink"));
+        let _ = fs::remove_dir_all(root);
     }
 
     fn append_tar_file(

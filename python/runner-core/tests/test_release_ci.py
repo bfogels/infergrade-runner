@@ -238,6 +238,9 @@ class ReleaseCiTests(unittest.TestCase):
             "INFERGRADE_EVALPLUS_IMAGE",
             "INFERGRADE_MMLU_PRO_IMAGE",
             "INFERGRADE_GPQA_IMAGE",
+            "INFERGRADE_LONGBENCH_V2_IMAGE",
+            "INFERGRADE_BFCL_IMAGE",
+            "INFERGRADE_REPOSITORY_EDIT_IMAGE",
         ):
             self.assertIn(variable, script)
 
@@ -255,6 +258,9 @@ class ReleaseCiTests(unittest.TestCase):
             "infergrade-evalplus",
             "infergrade-mmlu-pro",
             "infergrade-gpqa",
+            "infergrade-longbench-v2",
+            "infergrade-bfcl",
+            "infergrade-repository-edit",
         ):
             self.assertIn(image, verifier)
 
@@ -441,13 +447,62 @@ class ReleaseCiTests(unittest.TestCase):
         )
 
         self.assertIn('cron: "17 9 * * *"', workflow)
+        self.assertIn('cron: "47 9 * * 0"', workflow)
         self.assertIn("permissions:\n  contents: read", workflow)
-        self.assertIn("repos/ggml-org/llama.cpp/releases/latest", workflow)
+        self.assertIn('endpoint="latest"', workflow)
+        self.assertIn('endpoint="tags/${REQUESTED_RELEASE_TAG}"', workflow)
+        self.assertIn("REQUESTED_RELEASE_TAG: ${{ inputs.release_tag }}", workflow)
         self.assertIn("scripts/check_llama_cpp_runtime_policy.py", workflow)
         self.assertIn("actions/upload-artifact@", workflow)
+        self.assertIn("verify_candidate_assets:", workflow)
+        self.assertIn("release_tag:", workflow)
+        self.assertIn("scripts/verify_llama_cpp_release_asset.py", workflow)
+        self.assertIn("Restore archive receipts for this exact release and verifier", workflow)
+        self.assertIn("Verify all official candidate archives once", workflow)
+        self.assertIn("Run tiny legacy model-load canary", workflow)
+        self.assertIn("Run exact MiniCPM5 recent-architecture canary", workflow)
+        self.assertIn("scripts/verify_llama_cpp_model_canary.py", workflow)
+        self.assertIn("runtime-intake/archive-receipts/legacy-control.json", workflow)
+        self.assertIn("runtime-intake/archive-receipts/minicpm5-tokenizer.json", workflow)
+        self.assertIn("--canary-id minicpm5_tokenizer", workflow)
+        self.assertIn('runtime/llama_cpp_release_policy.json', workflow)
+        self.assertIn('receipt_args+=(--model-canary-receipt "${receipt}")', workflow)
+        self.assertIn("github.event.schedule == '47 9 * * 0'", workflow)
+        self.assertIn("steps.archive-cache.outputs.cache-hit != 'true'", workflow)
+        self.assertIn("runtime-intake/archive-receipts/macos-arm64.json", workflow)
+        self.assertIn("runtime-intake/archive-receipts/ubuntu-x64.json", workflow)
+        self.assertIn("runtime-intake/archive-receipts/windows-cpu-x64.json", workflow)
+        self.assertIn("receipt_args+=(--archive-receipt", workflow)
+        self.assertIn("platform: macos-arm64", workflow)
+        self.assertIn("platform: ubuntu-x64", workflow)
+        self.assertIn("platform: windows-cpu-x64", workflow)
+        self.assertIn("--run-version-smoke", workflow)
+        self.assertIn("--retain-archive", workflow)
+        self.assertIn("scripts/write_runtime_candidate_manifest.py", workflow)
+        self.assertIn("--bin materialize-runtime-candidate", workflow)
+        self.assertIn("--receipt-output", workflow)
+        self.assertIn("Upload immutable materialization receipt", workflow)
+        self.assertIn("summarize-candidate-evidence:", workflow)
+        self.assertIn("needs: [inspect, verify-candidate-assets]", workflow)
+        self.assertIn("Build candidate evidence ladder", workflow)
+        self.assertIn('archive_args+=(--archive-receipt "${receipt}")', workflow)
+        self.assertIn(
+            'materialization_args+=(--materialization-receipt "${receipt}")',
+            workflow,
+        )
+        self.assertIn('canary_args+=(--model-canary-receipt "${receipt}")', workflow)
+        self.assertIn(
+            'qualification_args+=(--benchmark-qualification "${qualification}")',
+            workflow,
+        )
+        self.assertIn("candidate-evidence-ladder.json", workflow)
+        self.assertIn("candidate-evidence-ladder.md", workflow)
+        self.assertIn("Upload candidate evidence ladder", workflow)
+        self.assertIn("matrix.platform != 'windows-cpu-x64'", workflow)
         self.assertNotIn("contents: write", workflow)
         self.assertNotIn("pull-requests: write", workflow)
         self.assertNotIn("issues: write", workflow)
+        self.assertNotIn("model_compatibility_verified: true", workflow)
 
     def test_runtime_catalog_workflows_keep_online_role_authority_separate(self):
         release = (ROOT / ".github" / "workflows" / "runtime-catalog-release.yml").read_text(

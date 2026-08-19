@@ -220,7 +220,40 @@ export function assignmentFailureRecovery(message = "") {
 
 export function assignmentEventRecovery(payload = {}) {
   const description = String(payload.description || "").trim();
-  if (payload.recovery_kind !== "specialized_runtime_required") {
+  const recoveryKind = String(payload.recovery_kind || "").trim();
+  if (recoveryKind === "runtime_selection_stale") {
+    return {
+      kind: "repair_saved_runtime",
+      description: "The saved llama.cpp executable is unavailable. Repair the runtime here, then Runner will retry this benchmark.",
+      checkName: "Saved runtime needs repair",
+      requiredRuntime: null,
+    };
+  }
+  if (recoveryKind === "native_runtime_missing") {
+    return {
+      kind: "install_managed_runtime",
+      description: "llama.cpp is not installed yet. Install the verified managed runtime here, then Runner will retry this benchmark.",
+      checkName: "Runtime installation required",
+      requiredRuntime: null,
+    };
+  }
+  if (recoveryKind === "specialized_artifact_unsupported") {
+    return {
+      kind: "choose_reviewed_artifact",
+      description: "InferGrade does not have a reviewed runtime for this exact GGUF. Open Hub and choose the reviewed model alternative.",
+      checkName: "Choose reviewed artifact in Hub",
+      requiredRuntime: null,
+    };
+  }
+  if (recoveryKind === "artifact_download_failed") {
+    return {
+      kind: "retry_artifact_download",
+      description: "The model download did not complete. Check the artifact in Hub, reconnect Hugging Face if it is gated, then retry.",
+      checkName: "Model download failed",
+      requiredRuntime: null,
+    };
+  }
+  if (recoveryKind !== "specialized_runtime_required") {
     return assignmentFailureRecovery(description);
   }
   const required = payload.required_runtime || {};
@@ -245,6 +278,19 @@ export function assignmentEventRecovery(payload = {}) {
     checkName: "Specialized runtime required",
     requiredRuntime: { targetName, runtimeBuildId },
   };
+}
+
+export function catalogRuntimeRepairRequirement(plan = {}) {
+  const selection = plan?.selected_runtime?.selection || {};
+  const targetName = String(selection?.catalog_assertion?.target_name || "").trim();
+  const runtimeBuildId = String(selection?.runtime_build?.runtime_build_id || "").trim().toLowerCase();
+  const safeTarget =
+    /^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$/.test(targetName) &&
+    !targetName.startsWith("/") &&
+    !targetName.includes("..") &&
+    !targetName.includes("\\");
+  if (!safeTarget || !/^[0-9a-f]{64}$/.test(runtimeBuildId)) return null;
+  return { targetName, runtimeBuildId };
 }
 
 export function hubAuthenticationFailure(message = "") {
@@ -537,4 +583,23 @@ export function userSafeStartFailure(message = "") {
     return "Pairing is saved. A local runtime is missing; inspect the Runtime panel, then start listening again.";
   }
   return "Pairing is saved. Runner could not start automatically; inspect Logs, then start listening again.";
+}
+
+export function assignmentProgressStage({ phase = "", checkName = "", progress = 0, waitingForListener = false } = {}) {
+  if (waitingForListener) return "";
+  const normalizedPhase = String(phase || "").toLowerCase();
+  const normalizedCheck = String(checkName || "").toLowerCase();
+  if (normalizedPhase === "complete") return "complete";
+  if (
+    normalizedPhase.includes("retry")
+    || normalizedCheck.includes("runtime")
+    || normalizedCheck.includes("llama.cpp")
+    || normalizedCheck.includes("sha")
+    || normalizedCheck.includes("verify")
+    || normalizedCheck.includes("artifact identity")
+  ) return "verify";
+  if (normalizedPhase.includes("upload") || normalizedPhase.includes("publish") || Number(progress) >= 90) return "publish";
+  if (normalizedCheck.includes("model load") || normalizedCheck.includes("loading") || normalizedPhase.includes("load")) return "load";
+  if (normalizedPhase.includes("running") || normalizedCheck.includes("benchmark") || normalizedCheck.includes("suite")) return "benchmark";
+  return "download";
 }

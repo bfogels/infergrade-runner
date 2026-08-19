@@ -10,8 +10,10 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
 import warnings
 from pathlib import Path, PurePosixPath
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
@@ -20,6 +22,8 @@ DEFAULT_MANIFEST = ROOT / "runtime" / "desktop_python_runtime.json"
 DEFAULT_OUTPUT = ROOT / "apps" / "desktop-runner" / "src-tauri" / "desktop-python"
 RECEIPT_NAME = "infergrade-python-runtime-receipt.json"
 PLACEHOLDER_CONTENT = "# Generated at build time; do not commit runtime contents.\n"
+DOWNLOAD_ATTEMPTS = 3
+RETRYABLE_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
 def _sha256(path):
@@ -97,8 +101,7 @@ def _extract_archive(archive, destination):
             bundle.extractall(destination, members=members)
 
 
-def _download(url, output, expected_size):
-    request = Request(url, headers={"User-Agent": "infergrade-runner-runtime-preparer/1"})
+def _download_once(request, output, expected_size):
     partial = Path(str(output) + ".partial")
     partial.unlink(missing_ok=True)
     written = 0
@@ -114,6 +117,24 @@ def _download(url, output, expected_size):
         os.replace(partial, output)
     finally:
         partial.unlink(missing_ok=True)
+
+
+def _download(url, output, expected_size, *, attempts=DOWNLOAD_ATTEMPTS, sleep=time.sleep):
+    if attempts < 1:
+        raise ValueError("Desktop Python runtime download attempts must be positive")
+    request = Request(url, headers={"User-Agent": "infergrade-runner-runtime-preparer/1"})
+    for attempt in range(1, attempts + 1):
+        try:
+            _download_once(request, output, expected_size)
+            return
+        except HTTPError as exc:
+            retryable = exc.code in RETRYABLE_HTTP_STATUS
+            if not retryable or attempt == attempts:
+                raise
+        except (URLError, TimeoutError):
+            if attempt == attempts:
+                raise
+        sleep(attempt)
 
 
 def _runtime_is_current(output, target, archive_sha, manifest_sha, executable, prune_paths=()):

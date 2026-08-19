@@ -51,6 +51,24 @@ KNOWN_RELEASE_IMAGES: List[Dict[str, str]] = [
         "benchmark_id": "gpqa_diamond_reference_v1",
         "archive_name": "infergrade-gpqa_{release_version}.tar",
     },
+    {
+        "image_name": "infergrade-longbench-v2",
+        "role": "capability_runtime",
+        "benchmark_id": "longbench_v2_local_reference_v1",
+        "archive_name": "infergrade-longbench-v2_{release_version}.tar",
+    },
+    {
+        "image_name": "infergrade-bfcl",
+        "role": "capability_runtime",
+        "benchmark_id": "bfcl_local_reference_v1",
+        "archive_name": "infergrade-bfcl_{release_version}.tar",
+    },
+    {
+        "image_name": "infergrade-repository-edit",
+        "role": "capability_runtime",
+        "benchmark_id": "repository_edit_smoke_v1",
+        "archive_name": "infergrade-repository-edit_{release_version}.tar",
+    },
 ]
 
 

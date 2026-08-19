@@ -168,7 +168,10 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(html.includes("data-runtime-llama-status"));
   assert.ok(html.includes("Model preflight"));
   assert.ok(html.includes("data-model-preflight-status"));
-  assert.ok(html.includes("Check before benchmark"));
+  assert.ok(html.includes("Make ready"));
+  assert.ok(html.includes("Automatic (recommended)"));
+  assert.ok(html.includes('class="runtime-power-options"'));
+  assert.ok(html.includes('class="assignment-stages"'));
   assert.ok(html.includes("data-runtime-install-managed"));
   assert.ok(html.includes("data-runtime-reinstall-managed"));
   assert.ok(html.includes("data-runtime-remove-selected"));
@@ -212,7 +215,7 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(js.includes("SHA-256 verified"));
   assert.ok(js.includes("no independent signature"));
   assert.ok(js.includes("Retry install, remove the selected runtime, or select an existing llama.cpp binary."));
-  assert.ok(html.includes("Replace with managed"));
+  assert.ok(html.includes("Use selected build"));
   assert.ok(js.includes("Replacing the selected llama.cpp runtime with the managed runtime. Local binaries are not deleted."));
   assert.equal(js.includes("executeSidecar(runtimeCommandArgs([\"--select-existing\"])"), false);
   assert.ok(rust.includes("fn llama_cpp_runtime_plan"));
@@ -439,6 +442,7 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(html.includes("data-assignment-progress-bar"));
   assert.ok(html.includes("data-assignment-start-listening"));
   assert.ok(html.includes("data-assignment-install-runtime"));
+  assert.ok(html.includes("Install runtime and retry"));
   assert.ok(js.includes("assignmentTitleFromRunId"));
   assert.ok(js.includes("waitingForListener: !childProcess"));
   assert.ok(js.includes('assignmentTime.textContent = "Not started"'));
@@ -453,6 +457,15 @@ test("desktop assignment panel renders real listener progress updates", () => {
   assert.ok(js.includes("Handoff received"));
   assert.ok(js.includes("Start listening to claim this run"));
   assert.ok(js.includes("install_required_runtime_catalog_target"));
+  assert.ok(js.includes('invoke("resume_hub_run"'));
+  assert.ok(js.includes("Runtime installed · Hub run requeued"));
+  assert.ok(js.includes("Repair runtime and retry"));
+  assert.ok(js.includes("Runtime repaired · Hub run requeued"));
+  assert.ok(js.includes("catalogRuntimeRepairRequirement"));
+  assert.ok(js.includes('mockAssignment === "runtime-repair"'));
+  assert.ok(js.includes("The required runtime is installed, but Hub could not requeue the run."));
+  assert.ok(rust.includes("async fn resume_hub_run"));
+  assert.ok(rust.includes('format!("/v1/runs/{run_id}/resume")'));
   assert.ok(helpers.includes("Specialized runtime required"));
   assert.ok(helpers.includes("Choose reviewed artifact in Hub"));
   assert.ok(rust.includes("engine_install_active_runtime_catalog_target"));

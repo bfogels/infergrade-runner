@@ -39,7 +39,7 @@ _EVAL_TIME_RE = re.compile(r"eval time\s*=\s*([0-9.]+)\s*ms", re.IGNORECASE)
 _EVAL_TOKENS_RE = re.compile(r"eval time\s*=\s*[0-9.]+\s*ms\s*/\s*([0-9.]+)\s*runs?", re.IGNORECASE)
 _EVAL_TPS_RE = re.compile(r"\(\s*[0-9.]+\s*ms per token,\s*([0-9.]+)\s*tokens per second\)", re.IGNORECASE)
 _INFERGRADE_CONTEXT_BUCKET_RE = re.compile(
-    r"InferGrade nominal context bucket:\s*(4096|8192|16384)\s+tokens\.",
+    r"\AInferGrade nominal context bucket:\s*(4096|8192|16384|32768|65536|131072)\s+tokens\.",
     re.IGNORECASE,
 )
 
@@ -413,7 +413,7 @@ class LlamaCppAdapter(BaseAdapter):
     ):
         if not request.simulate:
             self._ensure_backend_model_compatibility(request)
-        reuse_native_server = _uses_native_direct_answer_server(request)
+        reuse_native_server = _uses_native_chat_template_server(request)
         if not reuse_native_server and _can_reuse_native_capability_server(request):
             try:
                 self._native_server_path(request)
@@ -464,7 +464,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "Runner container capability generation still uses llama-completion, which cannot safely apply "
                 "Gemma 4's Jinja chat template."
             )
-        if _uses_native_direct_answer_server(request):
+        if _uses_native_chat_template_server(request):
             return self._generate_native_server_text(
                 request=request,
                 model_path=model_path,
@@ -556,9 +556,9 @@ class LlamaCppAdapter(BaseAdapter):
         """Generate one capability answer through llama-server's chat template.
 
         Qwen3.5's embedded template does not honor the legacy ``/no_think``
-        directive through ``llama-completion``. The server chat API accepts the
-        same explicit ``enable_thinking=false`` policy already used by deployment
-        profiles, so direct-answer capability tasks use that protocol as well.
+        directive through raw completions. The server chat API accepts explicit
+        ``enable_thinking=false`` policy, so all capability tasks for model
+        families that require their embedded chat template use that protocol.
         Gemma 4 also requires its Jinja chat template; recent llama-completion
         builds abort when asked to infer that template from a preformatted prompt.
         """
@@ -2266,13 +2266,21 @@ def _prepare_llama_server_chat(
     request: RunRequest,
     prompt: str,
 ) -> Tuple[Optional[List[Dict[str, str]]], Optional[Dict[str, str]]]:
-    """Use llama-server chat templating for explicit direct-answer protocols."""
-    if request.generation_preset != DIRECT_ANSWER_GENERATION_PRESET:
-        return None, None
+    """Use llama-server chat templating when task or model protocol requires it."""
     architecture = str(_infer_llama_cpp_architecture(request) or "")
-    if not (
+    supports_chat_template = (
         architecture.startswith("qwen3")
+        or _is_qwen36_request(request)
         or architecture in {"gemma4", "mistral3"}
+    )
+    model_requires_chat_template = (
+        architecture.startswith(("qwen35", "qwen36"))
+        or _is_qwen36_request(request)
+        or architecture in {"gemma4", "mistral3"}
+    )
+    if not supports_chat_template or (
+        request.generation_preset != DIRECT_ANSWER_GENERATION_PRESET
+        and not model_requires_chat_template
     ):
         return None, None
     transform_id = {
@@ -2289,7 +2297,7 @@ def _prepare_llama_server_chat(
             raise RuntimeError("Direct-answer prompt is empty")
         transform = {
             "id": transform_id,
-            "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
+            "policy_id": request.generation_preset or "deterministic_v1",
             "state": "chat_template_disable_thinking_with_zero_budget_single_user_prompt",
             "placement": "structured_messages",
         }
@@ -2308,7 +2316,7 @@ def _prepare_llama_server_chat(
     messages.append({"role": "user", "content": user_content})
     return messages, {
         "id": transform_id,
-        "policy_id": DIRECT_ANSWER_GENERATION_PRESET,
+        "policy_id": request.generation_preset or "deterministic_v1",
         "state": "chat_template_disable_thinking_with_zero_budget",
         "placement": "structured_messages",
     }
@@ -2361,6 +2369,19 @@ def _uses_native_direct_answer_server(request: RunRequest) -> bool:
             or _is_qwen36_request(request)
             or architecture in {"gemma4", "mistral3"}
         )
+    )
+
+
+def _uses_native_chat_template_server(request: RunRequest) -> bool:
+    if request.simulate or request.execution_mode != "local_native":
+        return False
+    architecture = str(_infer_llama_cpp_architecture(request) or "")
+    if _uses_native_direct_answer_server(request):
+        return True
+    return (
+        architecture.startswith(("qwen35", "qwen36"))
+        or _is_qwen36_request(request)
+        or architecture in {"gemma4", "mistral3"}
     )
 
 

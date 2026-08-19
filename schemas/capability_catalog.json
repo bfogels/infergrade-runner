@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-01-benchmark-duration-truth",
+  "catalog_version": "2026-08-14-selection-digest-provenance",
   "default_shortcut_id": "quick_default",
   "metadata_ordering": {
     "effort_level": [
@@ -17,7 +17,9 @@
       "10-30 min",
       "15-45 min",
       "25-60 min",
-      "15-90 min"
+      "15-90 min",
+      "45-120 min",
+      "90-180 min"
     ],
     "token_volume_band": [
       "tiny",
@@ -51,17 +53,67 @@
       "calibration_status": "not_psychometrically_calibrated",
       "distribution_calibration_status": "provisional_pending_distribution_audit",
       "calibration_policy": {
-        "policy_id": "capability_headroom_gate_v2",
+        "policy_id": "capability_headroom_gate_v3",
         "minimum_observations": 20,
         "minimum_model_families": 5,
         "minimum_parameter_bands": 3,
         "minimum_distinct_scores": 6,
         "minimum_unique_setups": 8,
         "minimum_replicated_setups": 4,
+        "minimum_independently_replicated_setups": 4,
         "minimum_current_generation_fraction": 0.75,
+        "minimum_headroom_challenge_observations": 2,
+        "minimum_headroom_challenge_model_families": 1,
+        "minimum_headroom_challenge_independently_replicated_setups": 1,
         "maximum_suite_ceiling_fraction": 0.2,
+        "ceiling_fraction_confidence_level": 0.95,
+        "minimum_suite_headroom": 0.1,
+        "minimum_headline_component_observations": 8,
+        "minimum_headline_component_model_families": 3,
+        "minimum_headline_component_parameter_bands": 2,
+        "minimum_headline_component_independently_replicated_setups": 2,
+        "maximum_headline_component_ceiling_fraction": 0.2,
+        "minimum_headline_component_headroom": 0.1,
+        "near_ceiling_threshold": 0.9,
         "maximum_largest_family_fraction": 0.4,
         "maximum_single_setup_fraction": 0.25
+      },
+      "representativeness_policy": {
+        "policy_id": "assistant_representativeness_v1",
+        "scoped_claim_facets": [
+          "verifiable_instruction_following",
+          "compositional_rule_execution"
+        ],
+        "priority_facets": [
+          "verifiable_instruction_following",
+          "compositional_rule_execution",
+          "multi_turn_state_retention",
+          "assistant_preference_quality",
+          "tool_use",
+          "stateful_tool_use",
+          "long_context_task_reasoning"
+        ],
+        "supporting_check_ids": [
+          "ifeval",
+          "assistant_compositional_instruction_v2",
+          "multiturn_chat_memory_v1",
+          "bfcl_local_reference_v1",
+          "stateful_tool_loop_diagnostic_v1"
+        ],
+        "planned_check_ids": [
+          "arena_hard_local_reference_v1"
+        ],
+        "minimum_refreshable_priority_facets": 1,
+        "empirical_priority_facet_policy": {
+          "policy_id": "priority_facet_evidence_gate_v2",
+          "minimum_observations": 16,
+          "minimum_model_families": 3,
+          "minimum_parameter_bands": 2,
+          "minimum_independently_replicated_setups": 2,
+          "maximum_suite_ceiling_fraction": 0.2,
+          "ceiling_fraction_confidence_level": 0.95,
+          "minimum_suite_headroom": 0.1
+        }
       },
       "claim_boundary": "Task-scoped benchmark attainment from IFEval and the compositional instruction fixture. A value at the suite ceiling means every scored check passed; it does not mean the model is perfect or establish a global intelligence rank."
     },
@@ -78,19 +130,67 @@
       "calibration_status": "not_psychometrically_calibrated",
       "distribution_calibration_status": "provisional_pending_distribution_audit",
       "calibration_policy": {
-        "policy_id": "coding_capability_headroom_gate_v1",
+        "policy_id": "coding_capability_headroom_gate_v2",
         "minimum_observations": 20,
         "minimum_model_families": 5,
         "minimum_parameter_bands": 3,
         "minimum_distinct_scores": 6,
         "minimum_unique_setups": 8,
         "minimum_replicated_setups": 4,
+        "minimum_independently_replicated_setups": 4,
         "minimum_current_generation_fraction": 0.75,
+        "minimum_headroom_challenge_observations": 2,
+        "minimum_headroom_challenge_model_families": 1,
+        "minimum_headroom_challenge_independently_replicated_setups": 1,
         "maximum_suite_ceiling_fraction": 0.2,
+        "ceiling_fraction_confidence_level": 0.95,
+        "minimum_suite_headroom": 0.1,
+        "minimum_headline_component_observations": 8,
+        "minimum_headline_component_model_families": 3,
+        "minimum_headline_component_parameter_bands": 2,
+        "minimum_headline_component_independently_replicated_setups": 2,
+        "maximum_headline_component_ceiling_fraction": 0.2,
+        "minimum_headline_component_headroom": 0.1,
+        "near_ceiling_threshold": 0.9,
         "maximum_largest_family_fraction": 0.4,
         "maximum_single_setup_fraction": 0.25
       },
-      "claim_boundary": "Task-scoped coding evidence from the versioned benchmark mix. It does not imply repository-editing or general software-engineering capability."
+      "representativeness_policy": {
+        "policy_id": "coding_representativeness_v1",
+        "scoped_claim_facets": [
+          "function_code_generation",
+          "bounded_code_repair"
+        ],
+        "priority_facets": [
+          "function_code_generation",
+          "bounded_code_repair",
+          "repository_code_editing",
+          "contemporary_code_generation",
+          "real_repository_issue_resolution"
+        ],
+        "supporting_check_ids": [
+          "coding_static_repair_v1",
+          "repository_edit_smoke_v1",
+          "evalplus_humaneval",
+          "evalplus_mbpp"
+        ],
+        "planned_check_ids": [
+          "livecodebench_reference_v1",
+          "swebench_verified_gold_v1"
+        ],
+        "minimum_refreshable_priority_facets": 1,
+        "empirical_priority_facet_policy": {
+          "policy_id": "priority_facet_evidence_gate_v2",
+          "minimum_observations": 16,
+          "minimum_model_families": 3,
+          "minimum_parameter_bands": 2,
+          "minimum_independently_replicated_setups": 2,
+          "maximum_suite_ceiling_fraction": 0.2,
+          "ceiling_fraction_confidence_level": 0.95,
+          "minimum_suite_headroom": 0.1
+        }
+      },
+      "claim_boundary": "Task-scoped coding evidence from the versioned headline benchmark mix. A separately labeled repository-edit diagnostic may support only its pinned miniature tasks; neither implies general software-engineering capability."
     },
     {
       "surface_id": "local_reasoning_capability",
@@ -105,17 +205,64 @@
       "calibration_status": "not_psychometrically_calibrated",
       "distribution_calibration_status": "provisional_pending_distribution_audit",
       "calibration_policy": {
-        "policy_id": "reasoning_capability_headroom_gate_v1",
+        "policy_id": "reasoning_capability_headroom_gate_v2",
         "minimum_observations": 20,
         "minimum_model_families": 5,
         "minimum_parameter_bands": 3,
         "minimum_distinct_scores": 6,
         "minimum_unique_setups": 8,
         "minimum_replicated_setups": 4,
+        "minimum_independently_replicated_setups": 4,
         "minimum_current_generation_fraction": 0.75,
+        "minimum_headroom_challenge_observations": 2,
+        "minimum_headroom_challenge_model_families": 1,
+        "minimum_headroom_challenge_independently_replicated_setups": 1,
         "maximum_suite_ceiling_fraction": 0.2,
+        "ceiling_fraction_confidence_level": 0.95,
+        "minimum_suite_headroom": 0.1,
+        "minimum_headline_component_observations": 8,
+        "minimum_headline_component_model_families": 3,
+        "minimum_headline_component_parameter_bands": 2,
+        "minimum_headline_component_independently_replicated_setups": 2,
+        "maximum_headline_component_ceiling_fraction": 0.2,
+        "minimum_headline_component_headroom": 0.1,
+        "near_ceiling_threshold": 0.9,
         "maximum_largest_family_fraction": 0.4,
         "maximum_single_setup_fraction": 0.25
+      },
+      "representativeness_policy": {
+        "policy_id": "reasoning_representativeness_v1",
+        "scoped_claim_facets": [
+          "broad_multidomain_reasoning",
+          "exact_micro_reasoning"
+        ],
+        "priority_facets": [
+          "broad_multidomain_reasoning",
+          "exact_micro_reasoning",
+          "expert_scientific_reasoning",
+          "long_context_task_reasoning"
+        ],
+        "supporting_check_ids": [
+          "mmlu_pro_reference_v1",
+          "gpqa_diamond_reference_v1",
+          "reasoning_exact_answer_v1",
+          "reasoning_constraint_stress_v1",
+          "longbench_v2_local_reference_v1"
+        ],
+        "planned_check_ids": [
+          "livebench_reasoning_refresh_candidate_v1"
+        ],
+        "minimum_refreshable_priority_facets": 1,
+        "empirical_priority_facet_policy": {
+          "policy_id": "priority_facet_evidence_gate_v2",
+          "minimum_observations": 16,
+          "minimum_model_families": 3,
+          "minimum_parameter_bands": 2,
+          "minimum_independently_replicated_setups": 2,
+          "maximum_suite_ceiling_fraction": 0.2,
+          "ceiling_fraction_confidence_level": 0.95,
+          "minimum_suite_headroom": 0.1
+        }
       },
       "claim_boundary": "Task-scoped reasoning evidence from the versioned benchmark mix. It is not an expert-reasoning, global intelligence, or leaderboard claim."
     }
@@ -311,11 +458,13 @@
       "status": "blocked_pending_24gb_artifact_runtime_protocol_canary",
       "model_freshness": "current_generation",
       "campaign_role": "freshness_canary",
+      "headroom_challenge_eligible": true,
+      "headroom_challenge_rationale": "Curated current 27B local setup intended to stress every weighted surface after artifact, fit, runtime, and protocol qualification; selection does not claim frontier capability.",
       "queue_policy": "campaign",
       "campaign_availability": "blocked_pending_canary",
       "blocked_reason": "requires_24gb_host_and_qwen36_artifact_runtime_protocol_canary",
       "calibration_campaign_eligible": true,
-      "target_observations": 1
+      "target_observations": 2
     },
     {
       "priority_id": "apple_silicon_qwen35_9b_coding_anchor",
@@ -328,9 +477,9 @@
       "target_quants": ["q4_k_m"],
       "use_case": "agentic_coding",
       "generation_preset_id": "deterministic_direct_answer_v1",
-      "benchmark_check_ids": ["interactive_chat_v1", "evalplus_humaneval", "evalplus_mbpp"],
-      "why": "Establish a current-model coding anchor with executable HumanEval+ and MBPP+ evidence instead of relying on the historical Qwen2.5-Coder control.",
-      "what_it_would_change": "Gives coding recommendations a current Qwen3.5 capability, speed, task-time, and memory observation on Apple Silicon.",
+      "benchmark_check_ids": ["interactive_chat_v1", "repository_edit_smoke_v1", "evalplus_humaneval", "evalplus_mbpp"],
+      "why": "Establish a current-model coding anchor with executable HumanEval+ and MBPP+ evidence plus a zero-weight repository-edit diagnostic instead of relying on the historical Qwen2.5-Coder control.",
+      "what_it_would_change": "Gives coding recommendations a current Qwen3.5 capability, speed, task-time, and memory observation while collecting repository-edit discrimination evidence without changing the coding score.",
       "status": "needs_first_observation",
       "model_freshness": "current_generation",
       "campaign_role": "current_task_anchor",
@@ -350,9 +499,9 @@
       "target_quants": ["q4_k_m"],
       "use_case": "reasoning",
       "generation_preset_id": "deterministic_direct_answer_v1",
-      "benchmark_check_ids": ["reasoning_exact_answer_v1", "mmlu_pro_reference_v1"],
-      "why": "Establish a current-model reasoning anchor with exact-answer and sampled MMLU-Pro evidence instead of relying on the historical Qwen2.5 control.",
-      "what_it_would_change": "Gives reasoning recommendations a current Qwen3.5 capability, speed, task-time, and memory observation on Apple Silicon.",
+      "benchmark_check_ids": ["reasoning_exact_answer_v1", "reasoning_constraint_stress_v1", "mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"],
+      "why": "Establish a current-model reasoning anchor with exact-answer and sampled MMLU-Pro evidence plus zero-weight expert and constraint-stress diagnostics instead of relying on the historical Qwen2.5 control.",
+      "what_it_would_change": "Gives reasoning recommendations a current Qwen3.5 capability, speed, task-time, and memory observation while collecting expert and per-category constraint-reasoning discrimination evidence without changing the reasoning score.",
       "status": "needs_first_observation",
       "model_freshness": "current_generation",
       "campaign_role": "current_task_anchor",
@@ -360,6 +509,56 @@
       "campaign_availability": "reviewed_runnable",
       "calibration_campaign_eligible": true,
       "target_observations": 1
+    },
+    {
+      "priority_id": "apple_silicon_qwen36_27b_coding_challenge",
+      "rank": 32,
+      "hardware_class": "apple_silicon",
+      "model_family": "Qwen3.6",
+      "model_id": "Qwen/Qwen3.6-27B",
+      "checkpoint_name": "Qwen3.6-27B",
+      "parameter_scale": "27B",
+      "target_quants": ["q3_k_m"],
+      "use_case": "agentic_coding",
+      "generation_preset_id": "deterministic_direct_answer_v1",
+      "benchmark_check_ids": ["interactive_chat_v1", "coding_static_repair_v1", "repository_edit_smoke_v1", "evalplus_humaneval", "evalplus_mbpp"],
+      "why": "Challenge the coding suite with the curated current 27B setup only after its 24 GB artifact, runtime, fit, and coding protocol path are qualified.",
+      "what_it_would_change": "Tests coding-suite headroom against the same curated stress setup without treating model size or selection as a frontier-capability claim.",
+      "status": "blocked_pending_24gb_artifact_runtime_task_protocol_canary",
+      "model_freshness": "current_generation",
+      "campaign_role": "task_headroom_challenge",
+      "headroom_challenge_eligible": true,
+      "headroom_challenge_rationale": "Curated current 27B local setup intended to stress the weighted coding surface after artifact, fit, runtime, and task-protocol qualification; selection does not claim frontier capability.",
+      "queue_policy": "campaign",
+      "campaign_availability": "blocked_pending_canary",
+      "blocked_reason": "requires_24gb_host_and_qwen36_artifact_runtime_coding_protocol_canary",
+      "calibration_campaign_eligible": true,
+      "target_observations": 2
+    },
+    {
+      "priority_id": "apple_silicon_qwen36_27b_reasoning_challenge",
+      "rank": 33,
+      "hardware_class": "apple_silicon",
+      "model_family": "Qwen3.6",
+      "model_id": "Qwen/Qwen3.6-27B",
+      "checkpoint_name": "Qwen3.6-27B",
+      "parameter_scale": "27B",
+      "target_quants": ["q3_k_m"],
+      "use_case": "reasoning",
+      "generation_preset_id": "deterministic_direct_answer_v1",
+      "benchmark_check_ids": ["reasoning_exact_answer_v1", "reasoning_constraint_stress_v1", "mmlu_pro_reference_v1", "gpqa_diamond_reference_v1"],
+      "why": "Challenge the reasoning suite with the curated current 27B setup only after its 24 GB artifact, runtime, fit, and direct-answer task protocol are qualified.",
+      "what_it_would_change": "Tests weighted reasoning-suite and zero-weight constraint-diagnostic headroom against the same curated setup without treating model size or selection as a frontier-capability claim.",
+      "status": "blocked_pending_24gb_artifact_runtime_task_protocol_canary",
+      "model_freshness": "current_generation",
+      "campaign_role": "task_headroom_challenge",
+      "headroom_challenge_eligible": true,
+      "headroom_challenge_rationale": "Curated current 27B local setup intended to stress the weighted reasoning surface after artifact, fit, runtime, and task-protocol qualification; selection does not claim frontier capability.",
+      "queue_policy": "campaign",
+      "campaign_availability": "blocked_pending_canary",
+      "blocked_reason": "requires_24gb_host_and_qwen36_artifact_runtime_reasoning_protocol_canary",
+      "calibration_campaign_eligible": true,
+      "target_observations": 2
     },
     {
       "priority_id": "apple_silicon_qwen25_historical_quant_control",
@@ -438,6 +637,100 @@
       "calibration_campaign_eligible": false
     }
   ],
+  "tier_sampling_policies": {
+    "ifeval": {"strategy": "coverage_balanced_hash_rank", "stratification_fields": ["instruction_id"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 541}},
+    "evalplus_humaneval": {"strategy": "global_hash_rank", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "case_limits": {"canary": 20, "standard": 164, "gold": 164}},
+    "evalplus_mbpp": {"strategy": "global_hash_rank", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 378}},
+    "multiturn_chat_memory_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "case_limits": {"canary": 3, "standard": 5, "gold": 5}},
+    "assistant_compositional_instruction_v2": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "case_limits": {"canary": 4, "standard": 24, "gold": 24}},
+    "coding_static_repair_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "case_limits": {"canary": 2, "standard": 3, "gold": 3}},
+    "reasoning_exact_answer_v1": {"strategy": "pinned_semantic_order", "stratification_fields": [], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_json_string_array_sha256_v1", "case_limits": {"canary": 2, "standard": 3, "gold": 3}},
+    "reasoning_constraint_stress_v1": {
+      "strategy": "balanced_tier_blocks",
+      "stratification_fields": ["category", "structural_tier"],
+      "selection_identity_policy": "exact_selected_case_ids_sha256_v1",
+      "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
+      "case_limits": {"canary": 6, "standard": 24, "gold": 48},
+      "tier_coverage_requirements": {
+        "canary": {
+          "category": {"required_values": ["state_tracking", "graph_planning", "modular_reasoning", "set_reasoning", "dependency_planning", "arrangement_counting"], "minimum_cases_per_required_value": 1},
+          "structural_tier": {"required_values": ["foundation"], "minimum_cases_per_required_value": 1}
+        },
+        "standard": {
+          "category": {"required_values": ["state_tracking", "graph_planning", "modular_reasoning", "set_reasoning", "dependency_planning", "arrangement_counting"], "minimum_cases_per_required_value": 4},
+          "structural_tier": {"required_values": ["foundation", "intermediate", "hard", "stress"], "minimum_cases_per_required_value": 6}
+        },
+        "gold": {
+          "category": {"required_values": ["state_tracking", "graph_planning", "modular_reasoning", "set_reasoning", "dependency_planning", "arrangement_counting"], "minimum_cases_per_required_value": 8},
+          "structural_tier": {"required_values": ["foundation", "intermediate", "hard", "stress"], "minimum_cases_per_required_value": 6}
+        }
+      }
+    },
+    "mmlu_pro_reference_v1": {"strategy": "stratum_round_robin_hash_rank", "stratification_fields": ["category"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 300}},
+    "gpqa_diamond_reference_v1": {"strategy": "stratum_round_robin_hash_rank", "stratification_fields": ["domain"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "case_limits": {"canary": 25, "standard": 100, "gold": 198}},
+    "longbench_v2_local_reference_v1": {"strategy": "balanced_tier_blocks", "stratification_fields": ["domain", "difficulty", "length"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "case_limits": {"canary": 6, "standard": 12, "gold": 23}},
+    "bfcl_local_reference_v1": {"strategy": "stratum_round_robin_hash_rank", "stratification_fields": ["category"], "selection_identity_policy": "exact_selected_case_ids_sha256_v1", "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1", "case_limits": {"canary": 11, "standard": 55, "gold": 110}},
+    "stateful_tool_loop_diagnostic_v1": {
+      "strategy": "balanced_tier_blocks",
+      "stratification_fields": ["category", "variant"],
+      "selection_identity_policy": "exact_selected_case_ids_sha256_v1",
+      "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
+      "case_limits": {"canary": 8, "standard": 16, "gold": 24},
+      "tier_coverage_requirements": {
+        "canary": {
+          "category": {"required_values": ["inventory", "access_control", "service_operations", "budgeting", "scheduling", "data_workflow", "communication", "release_safety"], "minimum_cases_per_required_value": 1},
+          "variant": {"required_values": ["success", "blocked", "noop"], "minimum_cases_per_required_value": 2}
+        },
+        "standard": {
+          "category": {"required_values": ["inventory", "access_control", "service_operations", "budgeting", "scheduling", "data_workflow", "communication", "release_safety"], "minimum_cases_per_required_value": 2},
+          "variant": {"required_values": ["success", "blocked", "noop"], "minimum_cases_per_required_value": 5}
+        },
+        "gold": {
+          "category": {"required_values": ["inventory", "access_control", "service_operations", "budgeting", "scheduling", "data_workflow", "communication", "release_safety"], "minimum_cases_per_required_value": 3},
+          "variant": {"required_values": ["success", "blocked", "noop"], "minimum_cases_per_required_value": 8}
+        }
+      }
+    },
+    "repository_edit_smoke_v1": {
+      "strategy": "pinned_semantic_order",
+      "stratification_fields": ["category"],
+      "selection_identity_policy": "exact_selected_case_ids_sha256_v1",
+      "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
+      "case_limits": {"canary": 2, "standard": 6, "gold": 8},
+      "tier_coverage_requirements": {
+        "canary": {
+          "category": {"required_values": ["state_and_time", "data_transformation"], "minimum_cases_per_required_value": 1}
+        },
+        "standard": {
+          "category": {"required_values": ["state_and_time", "data_transformation", "security_boundary", "protocol_parsing"], "minimum_cases_per_required_value": 1}
+        },
+        "gold": {
+          "category": {"required_values": ["state_and_time", "data_transformation", "security_boundary", "protocol_parsing", "policy_logic", "scheduling"], "minimum_cases_per_required_value": 1}
+        }
+      }
+    },
+    "context_retrieval_reference_v1": {
+      "strategy": "balanced_tier_blocks",
+      "stratification_fields": ["context_bucket_tokens", "key_position"],
+      "selection_identity_policy": "exact_selected_case_ids_sha256_v1",
+      "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
+      "case_limits": {"canary": 1, "standard": 3, "gold": 6},
+      "tier_coverage_requirements": {
+        "canary": {
+          "context_bucket_tokens": {"required_values": [4096], "minimum_cases_per_required_value": 1},
+          "key_position": {"required_values": ["early"], "minimum_cases_per_required_value": 1}
+        },
+        "standard": {
+          "context_bucket_tokens": {"required_values": [4096, 8192, 16384], "minimum_cases_per_required_value": 1},
+          "key_position": {"required_values": ["early", "middle", "late"], "minimum_cases_per_required_value": 1}
+        },
+        "gold": {
+          "context_bucket_tokens": {"required_values": [4096, 8192, 16384], "minimum_cases_per_required_value": 2},
+          "key_position": {"required_values": ["early", "middle", "late"], "minimum_cases_per_required_value": 2}
+        }
+      }
+    }
+  },
   "benchmark_maturity_levels": [
     {
       "maturity": "planned",
@@ -479,7 +772,7 @@
       "fixture_or_dataset_revision_status": "fixture_policy_known_upstream_pinning_needed",
       "harness_status": "container_harness_implemented",
       "scoring_policy_id": "instruction_following_primary_accuracy_v1",
-      "sample_policy": "Decision-sized instruction-following sample; not a leaderboard protocol.",
+      "sample_policy": "Pinned IFEval revision; canary and standard tiers greedily maximize distinct instruction-type coverage with deterministic hash tie-breaking instead of taking a positional prefix. Not a leaderboard protocol.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "container_optional_for_scoring",
       "claim_boundary": "Instruction-following decision evidence only; not broad assistant quality or leaderboard evidence.",
@@ -566,6 +859,26 @@
       ]
     },
     {
+      "check_id": "reasoning_constraint_stress_v1",
+      "surface_id": "local_reasoning_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "thin_local_sample",
+      "runnable_status": "runnable_intentional_diagnostic",
+      "default_inclusion_status": "not_default_diagnostic",
+      "fixture_or_dataset_revision_status": "pinned_runner_fixture",
+      "harness_status": "native_harness_implemented",
+      "scoring_policy_id": "deterministic_exact_answer_category_metrics_v1",
+      "sample_policy": "Forty-eight pinned synthetic exact-answer cases interleaved across six task categories and eight rounds spanning four structural tiers; canary spans all six categories and standard runs four cases per category.",
+      "expected_duration_token_volume_status": "estimated small; 6 to 48 short generations",
+      "sandbox_requirement": "none_native_generation_only",
+      "claim_boundary": "Zero-weight synthetic reasoning headroom diagnostic only; not a replacement score, global intelligence measure, expert-knowledge benchmark, leaderboard, or contamination-free benchmark.",
+      "promotion_blockers": [
+        "Collect current and older cross-family local distributions with independent replication.",
+        "Demonstrate category-level and whole-suite headroom below the configured saturation ceiling on current large local models.",
+        "Propose a new score version rather than modifying reasoning_exact_answer_v1 in place if empirical evidence supports promotion."
+      ]
+    },
+    {
       "check_id": "mmlu_pro_reference_v1",
       "surface_id": "local_reasoning_capability",
       "evidence_lane_id": "reference",
@@ -637,7 +950,7 @@
       "fixture_or_dataset_revision_status": "pinned_upstream_harness_revision",
       "harness_status": "container_harness_implemented",
       "scoring_policy_id": "coding_primary_pass_at_1_normalized_v2",
-      "sample_policy": "Pinned EvalPlus HumanEval+ revision with canary and full local reference limits.",
+      "sample_policy": "Pinned EvalPlus HumanEval+ revision with deterministic task-id hash-ranked canary and full local reference limits, avoiding upstream positional-prefix bias.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "container_required_for_generated_code_execution",
       "claim_boundary": "EvalPlus HumanEval+ reference coding evidence under pass@1 unit tests; not repo-edit, LiveCodeBench, SWE-bench, gold, or broad agentic coding proof.",
@@ -657,7 +970,7 @@
       "fixture_or_dataset_revision_status": "pinned_upstream_harness_revision",
       "harness_status": "container_harness_implemented",
       "scoring_policy_id": "coding_primary_pass_at_1_normalized_v2",
-      "sample_policy": "Pinned EvalPlus MBPP+ revision with canary, sampled local reference, and full local reference limits.",
+      "sample_policy": "Pinned EvalPlus MBPP+ revision with deterministic task-id hash-ranked canary and sampled local reference limits plus the full local reference tier, avoiding upstream positional-prefix bias.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "container_required_for_generated_code_execution",
       "claim_boundary": "EvalPlus MBPP+ reference coding breadth evidence under pass@1 unit tests; not repo-edit, LiveCodeBench, SWE-bench, gold, or broad agentic coding proof.",
@@ -764,19 +1077,40 @@
       "check_id": "repository_edit_smoke_v1",
       "surface_id": "local_coding_capability",
       "evidence_lane_id": "decision",
+      "maturity": "thin_local_sample",
+      "runnable_status": "runnable_intentional_diagnostic",
+      "default_inclusion_status": "not_default_diagnostic",
+      "fixture_or_dataset_revision_status": "pinned_runner_fixture",
+      "harness_status": "isolated_container_harness_implemented",
+      "scoring_policy_id": "repo_edit_task_success_v1",
+      "sample_policy": "Eight pinned miniature Python repository repairs spanning state, parsing, policy, security, data transformation, and scheduling; canary runs two and standard runs six.",
+      "expected_duration_token_volume_status": "estimated_static_catalog",
+      "sandbox_requirement": "capability_container_isolation_v1_plus_unprivileged_test_subprocess",
+      "claim_boundary": "Diagnostic local repository-edit evidence only; zero headline weight and not SWE-bench, LiveCodeBench, autonomous-agent, arbitrary-repository, or leaderboard evidence.",
+      "promotion_blockers": [
+        "Run a cross-family distribution audit before assigning headline score weight.",
+        "Measure malformed-patch, timeout, duration, repeatability, and ceiling rates across current and historical model bands.",
+        "Replace or expand fixtures if the component ceiling rate breaches the headroom gate."
+      ]
+    },
+    {
+      "check_id": "livebench_reasoning_refresh_candidate_v1",
+      "surface_id": "local_reasoning_capability",
+      "evidence_lane_id": "reference",
       "maturity": "planned",
       "runnable_status": "not_runnable",
       "default_inclusion_status": "not_default",
-      "fixture_or_dataset_revision_status": "fixture_repo_policy_needed",
+      "fixture_or_dataset_revision_status": "release_and_harder_subset_policy_needed",
       "harness_status": "not_implemented",
-      "scoring_policy_id": "repo_edit_task_success_v1",
-      "sample_policy": "Future tiny pinned repo-edit fixtures with rollback-safe execution and deterministic assertions.",
+      "scoring_policy_id": "livebench_objective_reasoning_accuracy_v1",
+      "sample_policy": "Future release-pinned, objective-scored reasoning subset only after a harder local mix clears the headroom policy.",
       "expected_duration_token_volume_status": "unknown",
-      "sandbox_requirement": "required_before_generated_patch_execution",
-      "claim_boundary": "Future local repo-edit smoke only; not SWE-bench, LiveCodeBench, or broad agentic coding evidence.",
+      "sandbox_requirement": "none_for_generation_task_specific_scorers_pending",
+      "claim_boundary": "Research candidate for refreshable reasoning evidence; not runnable, not a leaderboard reproduction, and not proof of future headroom.",
       "promotion_blockers": [
-        "Define fixture repositories and rollback policy.",
-        "Design sandboxed patch application and deterministic scoring."
+        "Define a bounded objective-scored local subset and pin every release input.",
+        "Demonstrate at least ten points of headroom across current challenge models.",
+        "Collect cross-family, independent-repeat, category-slice, and local-duration evidence."
       ]
     },
     {
@@ -786,16 +1120,17 @@
       "maturity": "planned",
       "runnable_status": "not_runnable",
       "default_inclusion_status": "not_default",
-      "fixture_or_dataset_revision_status": "task_window_pin_needed",
-      "harness_status": "not_implemented",
+      "fixture_or_dataset_revision_status": "pinned_livecodebench_v6_dataset_file_sha256_and_48_case_snapshot",
+      "harness_status": "container_harness_implemented_release_blocked_on_source_license_review",
       "scoring_policy_id": "code_task_pass_rate_v1",
-      "sample_policy": "Future pinned task-window pass@1 generation mode before broader LiveCodeBench modes.",
-      "expected_duration_token_volume_status": "unknown",
-      "sandbox_requirement": "sandbox_required_for_generated_code_execution",
-      "claim_boundary": "Future coding reference candidate; not SWE-bench, not repo-edit proof, and not a default local lane.",
+      "sample_policy": "Forty-eight LiveCodeBench v6 tasks balanced across AtCoder and LeetCode, easy/medium/hard labels, and January-April 2025 month blocks; canary runs six and standard runs eighteen.",
+      "expected_duration_token_volume_status": "bounded but not yet observed: 6 to 48 generations and 208 to 1895 selected execution tests with 6-second per-test and 30-second per-task timeouts",
+      "sandbox_requirement": "offline read-only root supervisor with only SETUID, SETGID, and KILL for irreversible nobody subprocess execution and timeout cleanup; generated children clear those capabilities, hidden inputs are passed one at a time, and expected outputs remain in the root scorer",
+      "claim_boundary": "Pinned LiveCodeBench v6-derived local Python pass@1 candidate only; not an official leaderboard, pass@10, SWE-bench, repository-edit, general software-engineering, or post-April-2025 contamination-free claim.",
       "promotion_blockers": [
-        "Pin task window and upstream version.",
-        "Implement sandbox, timeout, and failure-state preservation."
+        "Resolve and record the inconsistent upstream dataset-license metadata before publishing a protocol image.",
+        "Publish and independently verify the exact protocol image before making the check selectable.",
+        "Collect cross-family duration, failure, repeatability, discrimination, and ceiling-rate evidence before any stronger product role."
       ]
     },
     {
@@ -816,6 +1151,67 @@
         "Define legal/access and task-subset policy.",
         "Implement sandboxed environment prep and maintainer-review workflow.",
         "Block product copy from presenting this as self-run local default evidence."
+      ]
+    },
+    {
+      "check_id": "bfcl_local_reference_v1",
+      "surface_id": "local_assistant_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "reference_runnable",
+      "runnable_status": "runnable_intentional_reference",
+      "default_inclusion_status": "not_default",
+      "fixture_or_dataset_revision_status": "pinned_bfcl_v4_commit_source_digests_and_110_case_selection",
+      "harness_status": "implemented_container_scorer",
+      "scoring_policy_id": "infergrade_bfcl_structured_call_accuracy_v1",
+      "sample_policy": "Hash-ranked 110-case BFCL V4 subset balanced across 11 static and live single-turn selection, parallel, and relevance categories; canary and standard tiers round-robin across every category.",
+      "expected_duration_token_volume_status": "estimated medium; 11 to 110 generations",
+      "sandbox_requirement": "offline_read_only_no_network_scorer_container",
+      "claim_boundary": "Pinned BFCL-derived local structured tool-use diagnostic only; not an official BFCL score, native runtime function-calling proof, multi-turn tool-use result, or agent-autonomy claim.",
+      "promotion_blockers": [
+        "Collect independently replicated local distributions before treating the tool-use facet as empirically broad.",
+        "Demonstrate headroom below the configured saturation ceiling on current large local models.",
+        "Implement a separately identified stateful multi-turn or agentic lane before making those broader claims."
+      ]
+    },
+    {
+      "check_id": "stateful_tool_loop_diagnostic_v1",
+      "surface_id": "local_assistant_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "thin_local_sample",
+      "runnable_status": "runnable_intentional_diagnostic",
+      "default_inclusion_status": "not_default_diagnostic",
+      "fixture_or_dataset_revision_status": "pinned_runner_fixture",
+      "harness_status": "native_multi_generation_tool_simulator_implemented",
+      "scoring_policy_id": "deterministic_stateful_tool_trajectory_v1",
+      "sample_policy": "Twenty-four pinned synthetic trajectories across eight domains; every 8-case tier increment spans all domains and mixes success, guarded-abstention, and idempotent no-op outcomes.",
+      "expected_duration_token_volume_status": "estimated medium; 19 to 56 generations",
+      "sandbox_requirement": "deterministic_local_side_effect_free_tool_simulator",
+      "claim_boundary": "Synthetic stateful local tool-loop diagnostic only; zero headline weight and not native function calling, external side-effect, long-horizon autonomy, BFCL, GAIA, or leaderboard evidence.",
+      "promotion_blockers": [
+        "Collect cross-family local distributions and independently replicated observations.",
+        "Demonstrate headroom below the configured saturation ceiling on current large local models.",
+        "Replace or expand trajectories if ceiling rates breach the headroom gate."
+      ]
+    },
+    {
+      "check_id": "longbench_v2_local_reference_v1",
+      "surface_id": "local_reasoning_capability",
+      "evidence_lane_id": "reference",
+      "maturity": "reference_runnable",
+      "runnable_status": "runnable_intentional_reference",
+      "default_inclusion_status": "not_default_diagnostic",
+      "fixture_or_dataset_revision_status": "pinned_dataset_revision_sha256_and_23_case_context_bounded_short_snapshot",
+      "harness_status": "container_harness_implemented",
+      "scoring_policy_id": "longbench_v2_exact_answer_letter_accuracy_v1",
+      "generation_constraint_id": "longbench_v2_choice_a_d_grammar_v1",
+      "sample_policy": "Twenty-three hash-ranked, context-bounded short-stratum cases: up to two per domain and difficulty stratum; canary spans all six domains and standard spans all twelve strata. The gold tier has one structured-data easy case because the only second upstream row exceeds the reviewed 131072-token estimate ceiling.",
+      "expected_duration_token_volume_status": "estimated large; 6 to 23 contexts in reviewed 16K to 131K nominal context buckets",
+      "sandbox_requirement": "offline_read_only_container_for_prepare and scoring; generation allocates reviewed nominal context buckets and preserves per-case failures when the runtime or model cannot fit them",
+      "claim_boundary": "Pinned LongBench v2-derived short-context local reference only; not an official leaderboard, medium/long context, maximum-context, or general long-context capability claim.",
+      "promotion_blockers": [
+        "Collect cross-family distributions and independently replicated observations.",
+        "Observe duration, actual prompt-token counts, memory-fit failures, resumability, and malformed-output behavior on supported local runtimes.",
+        "Demonstrate headroom on current large local models before any stronger product claim."
       ]
     }
   ],
@@ -851,9 +1247,33 @@
       "score_method": "primary_metric_value_v1"
     },
     {
+      "score_policy_id": "longbench_v2_exact_answer_letter_accuracy_v1",
+      "display_name": "LongBench v2 strict answer-letter accuracy",
+      "description": "Score the pinned LongBench v2-derived short-context subset by deterministic A/B/C/D answer-letter accuracy. Completed malformed answers score incorrect; generation failures remain unscored execution failures.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "infergrade_bfcl_structured_call_accuracy_v1",
+      "display_name": "InferGrade BFCL-derived structured call accuracy",
+      "description": "Score strict JSON tool-call arrays against pinned BFCL V4 function selection, argument alternatives, parallel calls, and relevance abstention. This local prompt/scorer contract is not an official BFCL protocol score.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "deterministic_stateful_tool_trajectory_v1",
+      "display_name": "Deterministic stateful tool trajectory success",
+      "description": "Score complete strict-JSON trajectories across separate model generations, executed deterministic simulator results, opaque-token chaining, guarded abstention, and exact finish states.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
       "score_policy_id": "reasoning_exact_answer_v1",
       "display_name": "Reasoning exact answer",
       "description": "Score compact local reasoning prompts with deterministic exact-answer matching.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "deterministic_exact_answer_category_metrics_v1",
+      "display_name": "Reasoning constraint exact answer with diagnostic slices",
+      "description": "Score completed cases by deterministic exact-answer matching and report category and structural-tier accuracy slices; generation failures remain unscored partial evidence.",
       "score_method": "primary_metric_value_v1"
     },
     {
@@ -872,6 +1292,12 @@
       "score_policy_id": "coding_static_constraints_v1",
       "display_name": "Coding static constraints",
       "description": "Score small local coding outputs with deterministic static constraints and explicit malformed-output failure states.",
+      "score_method": "primary_metric_value_v1"
+    },
+    {
+      "score_policy_id": "repo_edit_task_success_v1",
+      "display_name": "Sandboxed repository-edit task success",
+      "description": "Apply a bounded unified diff to a pinned miniature repository and score task success with hidden deterministic tests inside the recorded isolated scorer container.",
       "score_method": "primary_metric_value_v1"
     },
     {
@@ -1099,6 +1525,23 @@
       "execution_pattern": "native_capability_structured_check"
     },
     {
+      "group_id": "tool_use_reference",
+      "display_name": "Tool-use diagnostics",
+      "description": "Run complementary single-turn BFCL-derived structured calls and synthetic stateful local tool-loop trajectories.",
+      "evidence_kind": "capability",
+      "surface_id": "local_assistant_capability",
+      "default_check_ids": [
+        "bfcl_local_reference_v1",
+        "stateful_tool_loop_diagnostic_v1"
+      ],
+      "effort_hint": "deep",
+      "suite_scope": "reference",
+      "expected_duration_band": "45-120 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "case",
+      "execution_pattern": "mixed_single_turn_and_stateful_tool_diagnostics"
+    },
+    {
       "group_id": "broad_reasoning_knowledge",
       "display_name": "Broad reasoning knowledge",
       "description": "Run a sampled MMLU-Pro reference pass for harder broad knowledge and reasoning coverage.",
@@ -1147,6 +1590,22 @@
       "execution_pattern": "native_context_retrieval"
     },
     {
+      "group_id": "long_context_reasoning_reference",
+      "display_name": "Long-context reasoning reference",
+      "description": "Run a pinned LongBench v2-derived short-context subset across six realistic task domains.",
+      "evidence_kind": "capability",
+      "surface_id": "local_reasoning_capability",
+      "default_check_ids": [
+        "longbench_v2_local_reference_v1"
+      ],
+      "effort_hint": "deep",
+      "suite_scope": "reference",
+      "expected_duration_band": "45-120 min",
+      "token_volume_band": "large",
+      "resumability_boundary": "case",
+      "execution_pattern": "long_context_multiple_choice_reference"
+    },
+    {
       "group_id": "reasoning_exact_answer",
       "display_name": "Reasoning exact answer",
       "description": "Run small native exact-answer reasoning prompts scored by deterministic answer matching.",
@@ -1163,6 +1622,22 @@
       "execution_pattern": "native_capability_microcheck"
     },
     {
+      "group_id": "reasoning_headroom_diagnostic",
+      "display_name": "Reasoning headroom diagnostic",
+      "description": "Run a broader synthetic exact-answer stress bank to measure discrimination before proposing any new reasoning score version.",
+      "evidence_kind": "capability",
+      "surface_id": "local_reasoning_capability",
+      "default_check_ids": [
+        "reasoning_constraint_stress_v1"
+      ],
+      "effort_hint": "balanced",
+      "suite_scope": "reference",
+      "expected_duration_band": "5-15 min",
+      "token_volume_band": "small",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "native_reasoning_constraint_stress"
+    },
+    {
       "group_id": "coding_static_repair",
       "display_name": "Coding static repair",
       "description": "Run small native coding repair prompts scored by deterministic static output constraints.",
@@ -1177,6 +1652,22 @@
       "token_volume_band": "tiny",
       "resumability_boundary": "benchmark",
       "execution_pattern": "native_capability_microcheck"
+    },
+    {
+      "group_id": "repository_edit_diagnostic",
+      "display_name": "Repository edit diagnostic",
+      "description": "Apply model-generated patches to pinned miniature repositories and run hidden deterministic tests in an isolated scorer.",
+      "evidence_kind": "capability",
+      "surface_id": "local_coding_capability",
+      "default_check_ids": [
+        "repository_edit_smoke_v1"
+      ],
+      "effort_hint": "balanced",
+      "suite_scope": "decision",
+      "expected_duration_band": "5-15 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "sandboxed_repository_edit"
     },
     {
       "group_id": "coding_core",
@@ -1283,6 +1774,10 @@
       "check_id": "ifeval",
       "display_name": "IFEval",
       "description": "Instruction-following benchmark.",
+      "capability_facets": [
+        "verifiable_instruction_following"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "instruction_following",
       "surface_id": "local_assistant_capability",
@@ -1311,6 +1806,10 @@
       "check_id": "multiturn_chat_memory_v1",
       "display_name": "Multi-turn chat memory",
       "description": "Short transcript-retention benchmark for corrected facts, remembered preferences, and output constraints.",
+      "capability_facets": [
+        "multi_turn_state_retention"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "chat_memory",
       "surface_id": "local_assistant_capability",
@@ -1353,6 +1852,10 @@
       "check_id": "assistant_compositional_instruction_v2",
       "display_name": "Compositional instruction following",
       "description": "Pinned synthetic assistant tasks that combine state corrections, filtering, ordering, conditional rules, and strict JSON output.",
+      "capability_facets": [
+        "compositional_rule_execution"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "assistant_compositional",
       "surface_id": "local_assistant_capability",
@@ -1392,9 +1895,130 @@
       ]
     },
     {
+      "check_id": "bfcl_local_reference_v1",
+      "display_name": "BFCL V4 local tool-use reference",
+      "description": "Pinned BFCL-derived single-turn diagnostic for structured function selection, arguments, parallel calls, and relevance abstention using a strict local JSON call contract.",
+      "capability_facets": [
+        "tool_use"
+      ],
+      "temporal_scope": "periodically_refreshed_snapshot",
+      "evidence_kind": "capability",
+      "group_id": "tool_use_reference",
+      "surface_id": "local_assistant_capability",
+      "runner_target": "bfcl_local_reference_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "reference",
+      "evidence_lane_id": "reference",
+      "effort_level": "deep",
+      "expected_duration_band": "15-45 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "throughput_oriented_offline_suite",
+      "selection_guidance": "Adds a broad structured tool-use diagnostic while keeping its local JSON prompt format and single-turn scope distinct from official BFCL, native tool calling, multi-turn, and agentic claims.",
+      "score_dimension": "structured_tool_use",
+      "primary_score_metric": "accuracy",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "score_role": "diagnostic_only",
+      "discrimination_status": "pending_distribution_audit",
+      "calibration_policy": {
+        "policy_id": "capability_headroom_gate_v1",
+        "minimum_task_count": 55
+      },
+      "higher_is_better": true,
+      "score_policy_id": "infergrade_bfcl_structured_call_accuracy_v1",
+      "score_breakdown_fields": [
+        "correct_count",
+        "total_count",
+        "function_selection_accuracy",
+        "function_selection_correct_count",
+        "malformed_output_count",
+        "category_metrics"
+      ],
+      "source": "https://github.com/ShishirPatil/gorilla",
+      "dataset_revision": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8",
+      "dataset_sha256": "7c239c7ae1d0ef371a15f96ec9fc0f38e79c331c94adbf54d7f73c0614445562",
+      "dataset_license": "Apache-2.0",
+      "freshness_policy": {
+        "policy_id": "benchmark_content_age_gate_v1",
+        "source_release": "BFCL V4",
+        "content_release_date": "2025-07-17",
+        "maximum_content_age_days": 365,
+        "revision_pinned_date": "2026-03-23",
+        "source_release_url": "https://github.com/ShishirPatil/gorilla/blob/main/berkeley-function-call-leaderboard/CHANGELOG.md"
+      }
+    },
+    {
+      "check_id": "stateful_tool_loop_diagnostic_v1",
+      "display_name": "Stateful tool-loop diagnostic",
+      "description": "Pinned synthetic multi-generation diagnostic that executes deterministic local tool results between strict JSON calls and scores complete trajectories.",
+      "capability_facets": [
+        "stateful_tool_use"
+      ],
+      "temporal_scope": "static_pinned",
+      "evidence_kind": "capability",
+      "group_id": "tool_use_reference",
+      "surface_id": "local_assistant_capability",
+      "runner_target": "stateful_tool_loop_diagnostic_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "reference",
+      "evidence_lane_id": "reference",
+      "effort_level": "deep",
+      "expected_duration_band": "15-45 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "case",
+      "execution_pattern": "native_stateful_tool_loop",
+      "selection_guidance": "Adds a distinct stateful diagnostic after single-turn BFCL-derived calls: each case uses separate generations, deterministic executed results, opaque-token chaining, conditional abstention, and exact final state.",
+      "score_dimension": "stateful_tool_use",
+      "primary_score_metric": "trajectory_success_rate",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "score_role": "diagnostic_only",
+      "discrimination_status": "pending_distribution_audit",
+      "calibration_policy": {
+        "policy_id": "capability_headroom_gate_v1",
+        "minimum_task_count": 16
+      },
+      "higher_is_better": true,
+      "score_policy_id": "deterministic_stateful_tool_trajectory_v1",
+      "empirical_saturation_slice_policy": {
+        "policy_id": "stateful_tool_loop_outcome_saturation_v1",
+        "breakdown_field": "variant_metrics",
+        "score_field": "trajectory_success_rate",
+        "count_field": "total_count",
+        "minimum_cases_per_slice": 4,
+        "required_slices": [
+          "success",
+          "blocked",
+          "noop"
+        ]
+      },
+      "score_breakdown_fields": [
+        "correct_count",
+        "total_count",
+        "turn_accuracy",
+        "generated_turn_count",
+        "malformed_turn_count",
+        "wrong_call_count",
+        "tool_execution_count",
+        "category_metrics",
+        "variant_metrics"
+      ]
+    },
+    {
       "check_id": "mmlu_pro_reference_v1",
       "display_name": "MMLU-Pro reference",
       "description": "Sampled harder broad knowledge and reasoning benchmark.",
+      "capability_facets": [
+        "broad_multidomain_reasoning"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "broad_reasoning_knowledge",
       "surface_id": "local_reasoning_capability",
@@ -1432,6 +2056,10 @@
       "check_id": "gpqa_diamond_reference_v1",
       "display_name": "GPQA Diamond reference",
       "description": "Official expert-level multiple-choice reference split with strict answer-letter scoring.",
+      "capability_facets": [
+        "expert_scientific_reasoning"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "expert_reasoning_reference",
       "surface_id": "local_reasoning_capability",
@@ -1467,6 +2095,60 @@
       "dataset_revision": "56686c06f5e19865c153de0fdb11be3890014df7",
       "dataset_sha256": "461ae7329f15a3e35f8184d2dac24b990f34fdf12f366ca4062d8e6638cd08dc",
       "dataset_license": "CC-BY-4.0"
+    },
+    {
+      "check_id": "longbench_v2_local_reference_v1",
+      "display_name": "LongBench v2 local reference",
+      "description": "Pinned short-context LongBench v2-derived multiple-choice reference across six realistic task domains and both difficulty labels.",
+      "capability_facets": [
+        "long_context_task_reasoning"
+      ],
+      "temporal_scope": "static_pinned",
+      "evidence_kind": "capability",
+      "group_id": "long_context_reasoning_reference",
+      "surface_id": "local_reasoning_capability",
+      "runner_target": "longbench_v2_local_reference_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "reference",
+      "evidence_lane_id": "reference",
+      "effort_level": "deep",
+      "expected_duration_band": "45-120 min",
+      "token_volume_band": "large",
+      "resumability_boundary": "case",
+      "execution_pattern": "long_context_multiple_choice_reference",
+      "selection_guidance": "Adds deterministic task-reasoning evidence beyond key retrieval while limiting the first local lane to the upstream short length stratum.",
+      "score_dimension": "long_context_task_reasoning",
+      "primary_score_metric": "accuracy",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "score_role": "diagnostic_only",
+      "discrimination_status": "pending_distribution_audit",
+      "calibration_policy": {
+        "policy_id": "capability_headroom_gate_v1",
+        "minimum_task_count": 12
+      },
+      "higher_is_better": true,
+      "score_policy_id": "longbench_v2_exact_answer_letter_accuracy_v1",
+      "score_breakdown_fields": [
+        "correct_count",
+        "total_count",
+        "invalid_count",
+        "malformed_output_count",
+        "category_metrics",
+        "difficulty_metrics",
+        "length_metrics",
+        "context_bucket_metrics"
+      ],
+      "source": "https://huggingface.co/datasets/zai-org/LongBench-v2",
+      "source_code": "https://github.com/THUDM/LongBench",
+      "dataset_revision": "2b48e494f2c7a2f0af81aae178e05c7e1dde0fe9",
+      "dataset_sha256": "15d61c22d92c96900b3c4948b6aeea218d3214b676a65df48e7b8555604c7fe2",
+      "selection_sha256": "1a5f48517a31dc80083700955b92d9524cba2d863448209956e2cf1b423079a3",
+      "snapshot_sha256": "677ac38dc799b0bbe61816f1d0c245bb93f01dd535a71ecfde6fa619d3eb86db",
+      "dataset_license": "Apache-2.0"
     },
     {
       "check_id": "context_retrieval_reference_v1",
@@ -1508,6 +2190,10 @@
       "check_id": "reasoning_exact_answer_v1",
       "display_name": "Reasoning exact answer",
       "description": "Small local reasoning prompts scored by deterministic exact-answer matching.",
+      "capability_facets": [
+        "exact_micro_reasoning"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "reasoning_exact_answer",
       "surface_id": "local_reasoning_capability",
@@ -1528,6 +2214,16 @@
       "primary_score_metric": "exact_answer_accuracy",
       "score_floor": 0.0,
       "primary_score_weight": 0.2,
+      "score_role": "headline_component",
+      "discrimination_status": "empirically_saturated_in_score_ready_cohort",
+      "saturation_evidence": {
+        "as_of": "2026-08-12",
+        "sample_scope": "latest_300_public_result_briefs_score_ready_reasoning_v2",
+        "scored_result_count": 13,
+        "suite_ceiling_count": 12,
+        "suite_ceiling_fraction": 0.923077,
+        "decision": "blocks_distribution_readiness_pending_replacement_or_demotion"
+      },
       "higher_is_better": true,
       "score_policy_id": "reasoning_exact_answer_v1",
       "score_breakdown_fields": [
@@ -1537,9 +2233,74 @@
       ]
     },
     {
+      "check_id": "reasoning_constraint_stress_v1",
+      "display_name": "Reasoning constraint stress",
+      "description": "Broader pinned synthetic exact-answer tasks across state tracking, graph planning, modular recurrences, set reasoning, dependency planning, and arrangement counting.",
+      "capability_facets": [
+        "exact_micro_reasoning"
+      ],
+      "temporal_scope": "static_pinned",
+      "evidence_kind": "capability",
+      "group_id": "reasoning_headroom_diagnostic",
+      "surface_id": "local_reasoning_capability",
+      "runner_target": "reasoning_constraint_stress_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "reference",
+      "evidence_lane_id": "reference",
+      "effort_level": "balanced",
+      "expected_duration_band": "5-15 min",
+      "token_volume_band": "small",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "native_reasoning_constraint_stress",
+      "selection_guidance": "Use only to collect cross-family discrimination and slice-level headroom evidence. It does not replace the saturated historical component and does not affect the current reasoning score.",
+      "score_dimension": "constraint_reasoning_stress",
+      "primary_score_metric": "exact_answer_accuracy",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "score_role": "diagnostic_only",
+      "discrimination_status": "pending_distribution_audit",
+      "calibration_policy": {
+        "policy_id": "capability_headroom_gate_v1",
+        "minimum_task_count": 24
+      },
+      "empirical_saturation_slice_policy": {
+        "policy_id": "reasoning_constraint_stress_slice_headroom_v1",
+        "breakdown_field": "category_metrics",
+        "required_slices": [
+          "state_tracking",
+          "graph_planning",
+          "modular_reasoning",
+          "set_reasoning",
+          "dependency_planning",
+          "arrangement_counting"
+        ],
+        "score_field": "exact_answer_accuracy",
+        "count_field": "total_count",
+        "minimum_cases_per_slice": 4
+      },
+      "higher_is_better": true,
+      "score_policy_id": "deterministic_exact_answer_category_metrics_v1",
+      "score_breakdown_fields": [
+        "correct_count",
+        "total_count",
+        "case_accuracy",
+        "category_metrics",
+        "structural_tier_metrics"
+      ],
+      "fixture_revision": "2026-08-reasoning-constraint-stress-v1",
+      "source": "infergrade_synthetic_fixture"
+    },
+    {
       "check_id": "coding_static_repair_v1",
       "display_name": "Coding static repair",
       "description": "Small local coding repair prompts scored by deterministic static constraints without executing generated code.",
+      "capability_facets": [
+        "bounded_code_repair"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "coding_static_repair",
       "surface_id": "local_coding_capability",
@@ -1560,6 +2321,18 @@
       "primary_score_metric": "static_constraint_accuracy",
       "score_floor": 0.0,
       "primary_score_weight": 0.15,
+      "score_role": "headline_component",
+      "discrimination_status": "thin_ceiling_signal_with_high_partial_rate",
+      "saturation_evidence": {
+        "as_of": "2026-08-12",
+        "sample_scope": "latest_300_public_result_briefs",
+        "reported_result_count": 44,
+        "completed_result_count": 4,
+        "partial_result_count": 38,
+        "degraded_result_count": 2,
+        "completed_suite_ceiling_count": 4,
+        "decision": "insufficient_component_calibration_and_replacement_candidate"
+      },
       "higher_is_better": true,
       "score_policy_id": "coding_static_constraints_v1",
       "score_breakdown_fields": [
@@ -1570,9 +2343,59 @@
       ]
     },
     {
+      "check_id": "repository_edit_smoke_v1",
+      "display_name": "Repository edit diagnostic",
+      "description": "Pinned miniature Python repositories repaired by unified diff and scored with hidden deterministic tests inside an isolated container.",
+      "capability_facets": [
+        "repository_code_editing"
+      ],
+      "temporal_scope": "static_pinned",
+      "evidence_kind": "capability",
+      "group_id": "repository_edit_diagnostic",
+      "surface_id": "local_coding_capability",
+      "runner_target": "repository_edit_smoke_v1",
+      "supported_backends": [
+        "llama.cpp",
+        "vllm"
+      ],
+      "suite_scope": "decision",
+      "evidence_lane_id": "decision",
+      "effort_level": "balanced",
+      "expected_duration_band": "5-15 min",
+      "token_volume_band": "medium",
+      "resumability_boundary": "benchmark",
+      "execution_pattern": "sandboxed_repository_edit",
+      "selection_guidance": "Adds a practical diagnostic for producing and applying repository patches. It remains outside the headline score until cross-model calibration proves stable discrimination and headroom.",
+      "score_dimension": "repository_code_editing",
+      "primary_score_metric": "task_success_rate",
+      "score_floor": 0.0,
+      "primary_score_weight": 0.0,
+      "score_role": "diagnostic_only",
+      "discrimination_status": "pending_distribution_audit",
+      "calibration_policy": {
+        "policy_id": "capability_headroom_gate_v1",
+        "minimum_task_count": 8
+      },
+      "higher_is_better": true,
+      "score_policy_id": "repo_edit_task_success_v1",
+      "score_breakdown_fields": [
+        "passed_count",
+        "total_count",
+        "malformed_patch_count",
+        "patch_apply_failure_count",
+        "test_failure_count",
+        "timeout_count"
+      ],
+      "fixture_revision": "2026-08-repository-edit-v1"
+    },
+    {
       "check_id": "evalplus_humaneval",
       "display_name": "EvalPlus HumanEval+",
       "description": "Core coding benchmark for code generation quality.",
+      "capability_facets": [
+        "function_code_generation"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "coding_core",
       "surface_id": "local_coding_capability",
@@ -1592,6 +2415,7 @@
       "primary_score_metric": "pass_at_1_plus",
       "score_floor": 0.0,
       "primary_score_weight": 0.55,
+      "score_role": "headline_component",
       "higher_is_better": true,
       "score_policy_id": "coding_primary_pass_at_1_normalized_v2"
     },
@@ -1599,6 +2423,10 @@
       "check_id": "evalplus_mbpp",
       "display_name": "EvalPlus MBPP+",
       "description": "Broader coding benchmark focused on practical Python tasks.",
+      "capability_facets": [
+        "function_code_generation"
+      ],
+      "temporal_scope": "static_pinned",
       "evidence_kind": "capability",
       "group_id": "coding_breadth",
       "surface_id": "local_coding_capability",
@@ -1618,6 +2446,7 @@
       "primary_score_metric": "pass_at_1_plus",
       "score_floor": 0.0,
       "primary_score_weight": 0.3,
+      "score_role": "headline_component",
       "higher_is_better": true,
       "score_policy_id": "coding_primary_pass_at_1_normalized_v2"
     },
@@ -1791,7 +2620,7 @@
     {
       "shortcut_id": "broad_compare",
       "display_name": "Broad compare",
-      "description": "A broader assistant comparison with chat, batch, and quant fidelity signals.",
+      "description": "A broader assistant comparison with complete score-weighted assistant coverage, chat, batch, and quant fidelity signals.",
       "suite_scope": "reference",
       "effort_level": "balanced",
       "expected_duration_band": "15-45 min",
@@ -1802,6 +2631,7 @@
       "group_ids": [
         "instruction_following",
         "chat_memory",
+        "assistant_compositional",
         "deployment_chat",
         "deployment_batch",
         "quant_fidelity"
@@ -1809,6 +2639,7 @@
       "check_ids": [
         "ifeval",
         "multiturn_chat_memory_v1",
+        "assistant_compositional_instruction_v2",
         "interactive_chat_v1",
         "batch_generation_v1",
         "perplexity_reference_v1"
@@ -1817,10 +2648,10 @@
     {
       "shortcut_id": "assistant_reference",
       "display_name": "Assistant reference",
-      "description": "Stronger assistant evidence with sampled MMLU-Pro, instruction following, chat memory, deployment, and quant fidelity signals.",
+      "description": "Stronger assistant evidence with complete score-weighted assistant coverage plus sampled reasoning, single-turn and stateful tool-use, chat memory, deployment, and quant fidelity diagnostics.",
       "suite_scope": "reference",
       "effort_level": "deep",
-      "expected_duration_band": "25-60 min",
+      "expected_duration_band": "90-180 min",
       "suite_ids": [
         "chat_instruction_following",
         "quant_fidelity"
@@ -1828,7 +2659,9 @@
       "group_ids": [
         "instruction_following",
         "chat_memory",
+        "assistant_compositional",
         "broad_reasoning_knowledge",
+        "tool_use_reference",
         "deployment_chat",
         "deployment_batch",
         "quant_fidelity"
@@ -1836,7 +2669,10 @@
       "check_ids": [
         "ifeval",
         "multiturn_chat_memory_v1",
+        "assistant_compositional_instruction_v2",
         "mmlu_pro_reference_v1",
+        "bfcl_local_reference_v1",
+        "stateful_tool_loop_diagnostic_v1",
         "interactive_chat_v1",
         "batch_generation_v1",
         "perplexity_reference_v1"
@@ -1855,42 +2691,72 @@
       "benchmark_tier": "reference",
       "evidence_lane_id": "reference",
       "score_dimension": "assistant_preference_quality",
+      "capability_facets": [
+        "assistant_preference_quality"
+      ],
+      "temporal_scope": "periodically_refreshed_snapshot",
       "planned_score_policy_id": "assistant_preference_win_rate_v1",
       "local_feasibility": "candidate",
       "why_not_default": "Needs an explicit judge policy before it can be trusted as a local decision score.",
       "status": "planned"
     },
     {
-      "check_id": "repository_edit_smoke_v1",
-      "display_name": "Repository edit smoke",
-      "value": "Adds a small local coding-agent edit task before broader SWE-style suites.",
-      "cost": "small-to-medium token volume; needs deterministic fixture repos",
+      "check_id": "livebench_reasoning_refresh_candidate_v1",
+      "display_name": "LiveBench reasoning refresh candidate",
+      "value": "Adds objective, release-pinned reasoning tasks from a benchmark designed to refresh its question sources over time.",
+      "cost": "unknown local duration; requires a bounded objective-scored subset and release-by-release fixture review",
       "implementation_risk": "medium",
-      "suite_placement": "coding_code_editing/decision",
-      "primary_use_case": "agentic_coding",
-      "benchmark_tier": "decision",
-      "evidence_lane_id": "decision",
-      "score_dimension": "repo_editing_smoke",
-      "planned_score_policy_id": "repo_edit_task_success_v1",
-      "local_feasibility": "good",
-      "why_not_default": "Needs deterministic fixture repositories and rollback-safe execution before default inclusion.",
-      "status": "planned"
+      "suite_placement": "broad_reasoning_knowledge/reference",
+      "primary_use_case": "reasoning",
+      "surface_id": "local_reasoning_capability",
+      "benchmark_tier": "reference",
+      "evidence_lane_id": "reference",
+      "score_dimension": "broad_multidomain_reasoning",
+      "capability_facets": [
+        "broad_multidomain_reasoning"
+      ],
+      "temporal_scope": "periodically_refreshed_snapshot",
+      "planned_score_policy_id": "livebench_objective_reasoning_accuracy_v1",
+      "local_feasibility": "research_candidate",
+      "freshness_policy": {
+        "policy_id": "benchmark_content_age_gate_v1",
+        "source_release": "LiveBench 2026-06-25",
+        "content_release_date": "2026-06-25",
+        "maximum_content_age_days": 180,
+        "source_release_url": "https://livebench.ai/"
+      },
+      "external_headroom_observation": {
+        "observed_at": "2026-08-14",
+        "release": "2026-06-25",
+        "category": "reasoning",
+        "highest_observed_score": 0.917,
+        "headroom_to_suite_ceiling": 0.083,
+        "minimum_required_headroom": 0.1,
+        "status": "below_infergrade_headroom_policy",
+        "source": "https://livebench.ai/"
+      },
+      "why_not_default": "Refreshability does not guarantee headroom. The observed 2026-06-25 reasoning leaderboard leaves only 8.3 points at the top, below InferGrade's 10-point minimum; a harder bounded local mix must independently pass cross-family, challenger, and slice audits before becoming runnable.",
+      "status": "research_candidate_near_ceiling_risk"
     },
     {
       "check_id": "livecodebench_reference_v1",
       "display_name": "LiveCodeBench reference",
-      "value": "Adds contemporary coding task coverage beyond static HumanEval+/MBPP+ style checks.",
-      "cost": "large token volume plus sandboxed execution; needs task-set pinning",
-      "implementation_risk": "high",
+      "value": "Adds temporally newer execution-tested coding tasks beyond static HumanEval+/MBPP+ style checks.",
+      "cost": "6 to 48 generations plus 208 to 1895 sandboxed tests; observed local duration is still pending",
+      "implementation_risk": "medium",
       "suite_placement": "coding_code_editing/reference",
       "primary_use_case": "agentic_coding",
       "benchmark_tier": "reference",
       "evidence_lane_id": "reference",
       "score_dimension": "contemporary_code_generation",
+      "capability_facets": [
+        "contemporary_code_generation"
+      ],
+      "temporal_scope": "static_pinned",
       "planned_score_policy_id": "code_task_pass_rate_v1",
       "local_feasibility": "reference_only",
-      "why_not_default": "Needs pinned task windows and robust local sandboxing before it can support reproducible local comparisons.",
-      "status": "planned"
+      "why_not_default": "The pinned scorer is implemented, but upstream license metadata must be resolved and the protocol image verified before the lane can become selectable.",
+      "status": "implementation_ready_blocked"
     },
     {
       "check_id": "swebench_verified_gold_v1",
@@ -1903,6 +2769,10 @@
       "benchmark_tier": "gold",
       "evidence_lane_id": "gold",
       "score_dimension": "software_engineering_task_success",
+      "capability_facets": [
+        "real_repository_issue_resolution"
+      ],
+      "temporal_scope": "periodically_refreshed_snapshot",
       "planned_score_policy_id": "repository_issue_resolution_v1",
       "local_feasibility": "curated_reference_first",
       "why_not_default": "Operationally expensive enough that it should start as maintainer-reviewed gold evidence, not a default laptop run.",

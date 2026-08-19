@@ -6,7 +6,9 @@ import {
   assignmentEventRecovery,
   assignmentFailureRecovery,
   assignmentPreflightPresentation,
+  assignmentProgressStage,
   assignmentTitleFromRunId,
+  catalogRuntimeRepairRequirement,
   desktopReadinessPresentation,
   hubAuthenticationFailure,
   displayCacheArtifactName,
@@ -24,6 +26,16 @@ import {
   userSafeUpdateFailure,
   userSafeTokenFailure,
 } from "./desktopHelpers.js";
+
+test("maps assignment progress to stable user-facing stages", () => {
+  assert.equal(assignmentProgressStage({ waitingForListener: true }), "");
+  assert.equal(assignmentProgressStage({ phase: "Running", checkName: "artifact identity" }), "verify");
+  assert.equal(assignmentProgressStage({ phase: "Running", checkName: "llama.cpp readiness check" }), "verify");
+  assert.equal(assignmentProgressStage({ phase: "Running", checkName: "model load" }), "load");
+  assert.equal(assignmentProgressStage({ phase: "Running", checkName: "assistant suite" }), "benchmark");
+  assert.equal(assignmentProgressStage({ phase: "Uploading", progress: 94 }), "publish");
+  assert.equal(assignmentProgressStage({ phase: "Complete", progress: 100 }), "complete");
+});
 
 test("accepts only the non-secret pairing intent deep link", () => {
   assert.equal(isPairingIntentDeepLink("infergrade-runner://open?intent=pair"), true);
@@ -72,6 +84,42 @@ test("uses structured runtime requirements without depending on log-text parsing
   });
   assert.equal(unsafe.kind, "unknown");
   assert.equal(unsafe.requiredRuntime, null);
+});
+
+test("maps structured saved-runtime failures to one-click repair", () => {
+  assert.equal(assignmentEventRecovery({ recovery_kind: "runtime_selection_stale" }).kind, "repair_saved_runtime");
+  assert.equal(assignmentEventRecovery({ recovery_kind: "native_runtime_missing" }).kind, "install_managed_runtime");
+  assert.equal(
+    assignmentEventRecovery({ recovery_kind: "specialized_artifact_unsupported" }).kind,
+    "choose_reviewed_artifact"
+  );
+  assert.equal(assignmentEventRecovery({ recovery_kind: "artifact_download_failed" }).kind, "retry_artifact_download");
+});
+
+test("extracts only safe signed-catalog targets for runtime repair", () => {
+  const required = catalogRuntimeRepairRequirement({
+    selected_runtime: {
+      selection: {
+        catalog_assertion: { target_name: "infergrade/prism/runtime.tar.gz" },
+        runtime_build: { runtime_build_id: "A".repeat(64) },
+      },
+    },
+  });
+  assert.deepEqual(required, {
+    targetName: "infergrade/prism/runtime.tar.gz",
+    runtimeBuildId: "a".repeat(64),
+  });
+  assert.equal(
+    catalogRuntimeRepairRequirement({
+      selected_runtime: {
+        selection: {
+          catalog_assertion: { target_name: "../runtime.tar.gz" },
+          runtime_build: { runtime_build_id: "a".repeat(64) },
+        },
+      },
+    }),
+    null
+  );
 });
 
 test("turns internal assignment ids into compact model-aware titles", () => {

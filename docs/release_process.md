@@ -67,6 +67,14 @@ The verifier requests anonymous GHCR pull tokens directly, checks every runtime 
 Before a public release candidate, also run the local readiness summary:
 
 ```bash
+python3 scripts/run_product_acceptance.py
+```
+
+The resulting JSON separates autonomous source/test/package evidence from the
+manual macOS, specialized-model, and physical NVIDIA lanes. A passing autonomous
+status must not be described as hardware or model-compatibility proof.
+
+```bash
 python3 ./scripts/check_public_release_readiness.py
 ```
 

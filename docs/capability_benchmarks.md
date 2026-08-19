@@ -1,6 +1,6 @@
 # Capability Benchmarks
 
-Capability container defaults use the canonical public `ghcr.io/bfogels/<image>:<runner-version>` release reference. Source checkouts build that exact reference; installed runners pull it. Capability artifacts record the resolved local image ID and any repository digest so the actual scorer can be audited after the run. Source developers may override an image explicitly with `INFERGRADE_IFEVAL_IMAGE`, `INFERGRADE_EVALPLUS_IMAGE`, `INFERGRADE_MMLU_PRO_IMAGE`, or `INFERGRADE_GPQA_IMAGE`; an unversioned `:local` image is never selected implicitly for evidence collection.
+Capability container defaults use the canonical public `ghcr.io/bfogels/<image>:<runner-version>` release reference. Source checkouts build that exact reference; installed runners pull it. Capability artifacts record the resolved local image ID and any repository digest so the actual scorer can be audited after the run. Source developers may override an image explicitly with `INFERGRADE_IFEVAL_IMAGE`, `INFERGRADE_EVALPLUS_IMAGE`, `INFERGRADE_MMLU_PRO_IMAGE`, `INFERGRADE_GPQA_IMAGE`, or `INFERGRADE_BFCL_IMAGE`; an unversioned `:local` image is never selected implicitly for evidence collection.
 
 InferGrade needs capability benchmarks that are:
 
@@ -16,10 +16,11 @@ InferGrade needs capability benchmarks that are:
 - `IFEval`
   - Why: strong fit for instruction following, objective checking, compact enough to tier by sample count, and already used by the Hugging Face Open LLM Leaderboard.
   - InferGrade role: first real quality gate for `general_assistant`.
+  - Output-shape policy: isolated empty visible responses remain strict wrong answers and are counted as model-output failures. A run with a majority of empty visible responses is quarantined as a model/template/runtime protocol failure instead of becoming a capability score. Token-budget exhaustion is recorded for diagnosis but does not invalidate IFEval on its own.
 
 - `Multi-turn chat memory`
   - Why: low-cost assistant decision signal for retaining facts, corrections, and output constraints across a short transcript.
-  - InferGrade role: native local-friendly assistant decision check after IFEval.
+  - InferGrade role: zero-weight diagnostic after its five-case fixture empirically saturated; it no longer contributes headline assistant score weight.
 
 - `MMLU-Pro reference`
   - Why: recognized broad knowledge and reasoning benchmark with harder, more robust multiple-choice questions than legacy MMLU.
@@ -29,9 +30,24 @@ InferGrade needs capability benchmarks that are:
   - Why: gives local users a compact reasoning decision signal without shipping restricted datasets or making reference-suite claims.
   - InferGrade role: native local-friendly exact-answer reasoning check for thin local sample evidence.
 
+- `Reasoning constraint stress`
+  - Why: the weighted three-case exact-answer component is empirically saturated, so a broader six-category bank is needed to measure whether a successor can discriminate current models.
+  - InferGrade role: explicitly selected, zero-weight diagnostic with 48 pinned synthetic cases. Canary runs one case from every category; standard runs four per category; gold runs all eight per category.
+  - Claim boundary: structural tiers describe fixture construction, not validated model difficulty. The diagnostic is not a replacement score unless cross-family, independently replicated distribution and slice-headroom evidence supports a new score version.
+
 - `GPQA Diamond reference`
   - Why: harder expert-level multiple-choice evidence can add headroom where smaller reasoning checks cluster.
   - InferGrade role: deliberately selected diagnostic reference evidence. It has zero Capability protocol v3.1 weight until cross-family distribution, duration, malformed-output, and repeatability audits justify promotion.
+
+- `BFCL V4 local tool-use reference`
+  - Why: structured function selection, arguments, parallel calls, and relevance abstention cover an assistant capability that instruction-following accuracy does not.
+  - InferGrade role: zero-weight, intentionally selected reference diagnostic over a hash-ranked 110-case subset balanced across 11 BFCL V4 static and live single-turn categories. The upstream commit and every downloaded source file digest are pinned. Canary and standard samples round-robin across categories instead of taking a narrow prefix.
+  - Claim boundary: InferGrade uses a strict runtime-neutral JSON call prompt and local deterministic scorer. The result is not an official BFCL V4 leaderboard score, does not prove native runtime function calling, and does not measure BFCL multi-turn, memory, web-search, or stateful agentic capability. Those require separately identified protocols.
+
+- `Stateful tool-loop diagnostic`
+  - Why: separate generations with executed intermediate state test opaque-token chaining, conditional action, guarded abstention, and idempotent completion that a single-turn call cannot measure.
+  - InferGrade role: zero-weight synthetic diagnostic over 24 pinned trajectories and eight domains, with deterministic side-effect-free local simulator results between turns.
+  - Claim boundary: the result is not native function-calling proof, real external-tool execution, long-horizon autonomy, BFCL/GAIA conformance, or leaderboard evidence. Cross-family discrimination and headroom are unproven.
 
 - `Context retrieval reference`
   - Why: local users need to know whether a setup can retrieve a pinned fact at the prompt lengths they intend to use.
@@ -51,21 +67,25 @@ InferGrade needs capability benchmarks that are:
   - Why: expands beyond HumanEval-style tasks, uses the same container/evaluation ecosystem, and gives us a second coding signal without introducing a completely separate harness.
   - InferGrade role: executable coding breadth reference lane for `agentic_coding`, separate from HumanEval+. It preserves MBPP task ids and prompts, generated samples, EvalPlus revision, sample policy, pass@1 base/plus scoring, raw outputs, scoring outputs, and task-level execution failure classes. It is not LiveCodeBench, SWE-bench, repo-edit proof, gold evidence, broad agentic software-engineering proof, or a public leaderboard claim.
 
-## Selected Next
-
-These are selected as high-value next additions, but are not yet wired into the first runnable capability container pass:
+## Diagnostic and Selected Next
 
 - `Repository edit smoke`
-  - Why: a deterministic, small repo-edit task can bridge the gap between code-generation benchmarks and SWE-style work.
-  - InferGrade role: likely next local-friendly coding decision check before heavier reference suites.
+  - Why: deterministic miniature repo-edit tasks bridge the gap between code-generation benchmarks and SWE-style work.
+  - InferGrade role: intentionally selectable zero-weight diagnostic. Its isolated scorer and pinned fixtures are implemented, but cross-family discrimination and headroom remain unproven.
+
+The following are selected as high-value later additions and are not runnable yet:
 
 - `LiveCodeBench`
   - Why: broad contemporary coding benchmark with multiple task modes and temporal freshness.
-  - InferGrade role: coding reference suite after local sandboxing, task pinning, and cost metadata are proven.
+  - InferGrade role: the pinned v6 Python pass@1 scorer and unprivileged hidden-test subprocess are implemented. It remains non-runnable until the inconsistent upstream dataset-license metadata is resolved, an exact protocol image is published and verified, and observed local cost/distribution evidence is collected. It is not the official multi-sample leaderboard protocol.
 
 - `SWE-bench Verified`
   - Why: highest-value software engineering benchmark in this space, but much more operationally expensive than the first-pass coding lanes.
   - InferGrade role: gold evidence first, with curated provenance and maintainer review, not a default laptop run.
+
+- `LongBench v2`
+  - Why: realistic long-context task reasoning across multiple task categories is materially broader than deterministic key retrieval.
+  - InferGrade role: reasoning and assistant reference candidate after memory-fit, task-sampling, duration, recovery, and explicit judge-identity policies are proven. Source: [LongBench v2](https://arxiv.org/abs/2412.15204).
 
 ## Expansion Principle
 
@@ -78,6 +98,29 @@ InferGrade should move toward benchmark legitimacy comparable to serious model-a
 - and why it is not part of the default quick path yet.
 
 Planned candidates are roadmap metadata only. They must not be rendered or validated as runnable checks until Runner owns a reproducible harness, scoring policy, fixture/version pin, and runtime-cost story.
+
+## Benchmark Adequacy Audit
+
+`scripts/audit_benchmark_adequacy.py` audits the static catalog along four separate axes:
+
+- whether every narrow claim facet is backed by a positively weighted check,
+- which broader real-world priority facets have runnable or diagnostic coverage,
+- which missing facets have an explicit planned benchmark rather than an unowned gap,
+- and whether the surface has a refreshable lane plus any already-known headline saturation risk.
+
+The audit deliberately reports `scoped_claim_coverage_ready` separately from `broad_surface_coverage_ready`. The current catalog covers its narrow task-scoped claim definitions, but it does not pass broad-surface coverage. Assistant still lacks runnable preference and long-context task-reasoning evidence; its BFCL-derived tool-use diagnostic remains runnable but its content snapshot is stale, and the memory diagnostic is already saturated. Coding lacks runnable contemporary and real-repository issue-resolution evidence. Reasoning has runnable checks for every declared priority facet, but its refresh candidate remains planned and held back on headroom while the weighted exact-answer component retains a known ceiling risk. A known saturation risk blocks broad readiness whether the affected priority facet is headline-weighted or diagnostic-only; role separation remains visible in the report.
+
+This is a catalog-structure audit, not empirical validation. `scripts/audit_capability_calibration.py` remains the result-corpus gate for cross-family distribution, repeats, failure quality, component ceiling rates, and score headroom. A surface needs both kinds of evidence before broader claims are credible; passing either audit never substitutes for the other.
+
+For a claim-readiness decision, run both gates through the fail-closed join:
+
+```bash
+PYTHONPATH=python/runner-core/src python3 scripts/audit_benchmark_readiness.py /path/to/result-bundles --fail-scoped-ready
+```
+
+`scripts/audit_benchmark_readiness.py` reports separate scoped-claim and broad-surface blockers for every task surface. Scoped readiness requires the catalog's narrow facets plus an empirically diverse, non-saturated score distribution. Broad readiness additionally requires the broader priority facets, a runnable refreshable facet, and no known headline or diagnostic saturation risk. Missing or unreadable result evidence remains unready; the audit never curves, caps, or rescales raw attainment. Use `--fail-broad-ready` only for a workflow that is intentionally gating a broad-surface claim, because the current catalog is expected to fail that stronger gate.
+
+The gap choices are grounded in the scope of the candidate benchmarks rather than their popularity. [LiveCodeBench](https://arxiv.org/abs/2403.07974) adds continuously collected coding problems and broader execution modes beyond static function-generation sets. [SWE-bench](https://arxiv.org/abs/2310.06770) uses real repository issues that can require multi-file changes. [GPQA](https://arxiv.org/abs/2311.12022) supplies a harder expert-science diagnostic, while [MMLU-Pro](https://arxiv.org/abs/2406.01574) remains the harder broad multi-domain headline component. [IFEval](https://arxiv.org/abs/2311.07911) remains a verifiable instruction-following component, not a proxy for tool use, preference quality, or long-context task reasoning.
 
 ## Optional Local Judge Boundary
 
@@ -109,6 +152,8 @@ The currently implemented first-user catalog is:
   - check: `multiturn_chat_memory_v1`
 - group: `reasoning_exact_answer`
   - check: `reasoning_exact_answer_v1`
+- group: `reasoning_headroom_diagnostic`
+  - check: `reasoning_constraint_stress_v1` (intentional, zero-weight diagnostic)
 - group: `broad_reasoning_knowledge`
   - check: `mmlu_pro_reference_v1`
 - group: `deployment_chat`
@@ -153,6 +198,8 @@ Benchmark maturity is separate from evidence lane:
 - `gold_candidate` and `gold_runnable` are reserved for high-legitimacy evidence with stronger controls and maintainer review.
 
 Thin local samples cannot be promoted because their score is high. Promotion requires protocol controls.
+
+Container-backed capability scorers run under `capability_container_isolation_v1`: the invoking host user rather than container root, no network, all Linux capabilities dropped, no-new-privileges, a read-only root filesystem, bounded memory and process counts, and only `/work` plus a no-exec `/tmp` writable. The exact policy is recorded beside the scorer image identity in each result. These controls reduce risk from generated code and scorer dependencies; they do not make arbitrary community benchmarks safe or automatically promote a planned executable benchmark.
 
 ## Capability Surfaces
 
@@ -211,9 +258,25 @@ The older 7B setup's remaining misses included genuine filtering, deduplication,
 
 The first local coding artifact path is `coding_static_repair_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. It checks fenced Python outputs against deterministic static constraints. It does not execute generated code, run unit tests, sandbox a repository, or support SWE-bench/LiveCodeBench-style claims.
 
+`repository_edit_smoke_v1` is the first executable repository-edit diagnostic. It uses eight pinned miniature Python repositories spanning state/time behavior, immutable transformations, archive-path safety, rate limiting, event reconciliation, protocol parsing, permission policy, and bounded scheduling. Canary runs two tasks, standard runs six, and gold runs all eight. The model receives source files and an issue description, returns one bounded unified diff, and the scorer permits edits only to the named existing files. Hidden deterministic tests are materialized after patch application.
+
+The scorer runs with no network, a read-only root filesystem, bounded memory and process counts, and no-new-privileges. Its root process retains only `SETUID` and `SETGID` so the generated-code subprocess can drop irreversibly to `nobody`; source and hidden tests are root-owned and read-only before generated code executes. The result records that exception as part of the sandbox policy. Dominant malformed-patch output is quarantined as a protocol mismatch, while a valid patch that fails hidden tests remains a real incorrect task.
+
+This benchmark has zero Capability protocol v3.1 weight and is not selected by default. It becomes eligible for score-weight consideration only after a cross-family distribution audit shows adequate observations, repeatability, manageable malformed/timeout rates, and component headroom. It is not SWE-bench, LiveCodeBench, autonomous-agent, arbitrary-repository, gold, or leaderboard evidence.
+
+`stateful_tool_loop_diagnostic_v1` is a distinct synthetic assistant diagnostic for behavior that single-turn structured-call checks cannot measure. It has twenty-four pinned cases across inventory, access control, service operations, budgeting, scheduling, data workflows, consent-aware communication, and release safety. Every eight-case tier increment spans all eight domains and mixes success, guarded-abstention, and idempotent already-complete outcomes, so even canary exercises action and no-action decisions rather than an easy success-only slice. Canary requires 19 separate model generations and gold requires 56 rather than treating a transcript as one answer. Reports preserve both domain and outcome-variant metrics so aggregate strength cannot hide systematic refusal or idempotency failures.
+
+Its empirical readiness gate also treats `success`, `blocked`, and `noop` as required saturation slices. Each slice must come from the catalog-declared `variant_metrics` field, contain at least four cases per run, and independently clear the same observation, model-family, parameter-band, replication, ceiling-fraction, and headroom thresholds as the aggregate diagnostic. One perfect run remains insufficient evidence; once the corpus is representative, a saturated outcome blocks broad stateful-tool-use readiness even when the aggregate still has headroom.
+
+For each turn, Runner asks for one strict JSON call, verifies it against the current state, executes a deterministic side-effect-free local simulator result, and exposes only that executed call and result to the next generation. Success paths must carry opaque tokens, revisions, regions, channels, digests, or returned identifiers into the next operation and then close with an exact `finish` state. A canary tool result also contains an untrusted instruction string that must remain data instead of redirecting the next call. Wrong or malformed calls do not execute. The scorer reports complete-trajectory success, turn accuracy, malformed and wrong-call counts, simulator execution counts, and domain breakdowns; dominant malformed output is quarantined as a protocol mismatch.
+
+This diagnostic has zero Capability protocol v3.1 weight and must remain separately identified from `bfcl_local_reference_v1`. It does not prove native runtime function calling, arbitrary external tools, real side effects, web access, recovery from arbitrary tool errors, long-horizon autonomy, BFCL/GAIA conformance, or leaderboard standing. Cross-family distributions, independent repeats, and ceiling audits are required before considering a harder fixture or any score-role change.
+
 The first executable coding reference artifact path is `evalplus_humaneval`: when selected, it emits a validated `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, `samples.jsonl`, `benchmark_metadata.json`, `eval_results.json`, and `summary.json`. It preserves the pinned EvalPlus revision, sample policy, pass@1 base/plus scores, generated outputs, scoring outputs, and task-level classes such as `test_failed`, `timeout`, `malformed_output`, and `generation_failed` where available from generated outputs and EvalPlus status rows. A completion-normalization failure caused by the model remains in EvalPlus's denominator as an incorrect answer and is disclosed separately; a runtime or adapter generation failure remains missing evidence and degrades or suppresses the score. It remains experimental reference evidence, not gold evidence or a public leaderboard claim.
 
 The first local reasoning artifact path is `reasoning_exact_answer_v1`: it emits a `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, and `summary.json`. It checks a compact synthetic exact-answer fixture set. It does not use GPQA, does not replace MMLU-Pro reference evidence, and does not support broad reasoning, expert knowledge, or gold-evidence claims.
+
+`reasoning_constraint_stress_v1` is a separate diagnostic successor candidate, not an in-place rewrite of that historical score component. Its 48 cases interleave state tracking, graph planning, modular recurrence, set inclusion-exclusion, dependency planning, and constrained arrangement counting so every tier spans every category. Reports preserve per-category and structural-tier accuracy, and its category saturation gate requires at least four scored cases per slice. Completed scored outcomes form the accuracy and Wilson-interval population; runtime generation failures remain explicit unscored partial evidence. It has zero Capability protocol weight and is excluded from default suites until a cross-family distribution audit demonstrates discrimination and headroom.
 
 The first sampled reasoning reference artifact path is `mmlu_pro_reference_v1`: when intentionally selected, it emits a validated `capability_run.json` beside `cases.jsonl`, `predictions.jsonl`, `benchmark_metadata.json`, and `summary.json`. It preserves the pinned dataset revision, sample policy, category breakdowns, and reference-sample claim boundaries. It remains experimental reference evidence, not gold evidence or a public leaderboard claim.
 
@@ -239,9 +302,19 @@ Assistant, coding, and reasoning scores are separate, versioned task scores. A v
 
 Every v2 score includes configured component weights, coverage, leave-one-component-out sensitivity, dominant-component flags, and an inspectable confidence basis. That basis describes evidence coverage and sensitivity; it is not a probability, confidence interval, psychometric calibration, or global intelligence claim. Composite confidence conservatively uses the weakest evidence label on the capability surface, and consumers must not compare scores across score versions.
 
+Individual benchmark point estimates may also carry `primary_metric_uncertainty` when the primary score has one binary outcome per prompt, task, or trajectory. Runner reports a two-sided 95% Wilson interval from exact success and observation counts, fails closed when those counts do not reproduce the point estimate, and records how many unscored generation failures were excluded. This is a descriptive small-sample interval among scored completed outcomes, not a claim that curated benchmark tasks are a random population sample. It does not cover repeated-run variance, benchmark representativeness, model or prompt changes, runtime or hardware failures, or composite-score calibration. Constraint-weighted metrics and perplexity omit this field rather than manufacture independence.
+
 Capability protocol v3.1 changes the assistant mix and its meaning. IFEval carries 45% weight, the expanded compositional fixture carries 55%, and the saturated memory microcheck carries zero. Both weighted components and both dimensions must score, so protocol v3.1 requires 100% configured coverage. The value is a **benchmark-attainment index**, not a percentile, probability, IQ-like quantity, or percent of perfect general capability. `scripts/audit_capability_calibration.py --score-version local_assistant_score_v4 ...` audits only publication-ready composite scores; `--benchmark-id assistant_compositional_instruction_v2 ...` audits the component distribution separately. Neither mode alters raw scores. The compatibility identifier remains `local_assistant_score_v4` so existing evidence is not split into a false new cohort; it is not the public protocol name. Saturation requires benchmark replacement and another protocol revision.
 
-The v3.1 headroom audit also guards campaign composition. Observation count alone is insufficient: the corpus must include eight exact model-plus-quant setups, four independently replicated setups, and a 75% share from current or recent Runner-declared campaign targets, while preventing any exact setup from exceeding 25% of the sample. Current-model status is explicit catalog policy, not guessed from model-name strings in Hub. Historical controls remain comparable within the score version but cannot make the recent-model calibration campaign look complete by repetition.
+The v3.1 headroom audit also guards campaign composition. Observation count alone is insufficient: the corpus must include eight exact model-plus-quant setups, four setups repeated across at least two distinct trusted evidence groups, and a 75% share from current or recent Runner-declared campaign targets, while preventing any exact setup from exceeding 25% of the sample. Same-source reruns remain useful repeatability evidence but cannot satisfy the independent-replication gate; missing group identity fails closed, and a claimed `evidence_group_id` counts only with `evidence_group_provenance: trusted_corpus_operator_v1`. Only aggregate group counts leave the audit. Current-model status is explicit catalog policy, not guessed from model-name strings in Hub. Historical controls remain comparable within the score version but cannot make the recent-model calibration campaign look complete by repetition.
+
+That current/recent share and the three-band minimum do not by themselves prove the suite was challenged by a deliberately stressful model. Every surface must also include two complete observations of an explicit `headroom_challenge_eligible` campaign target, with the same exact setup independently repeated across two trusted evidence groups. Complete means every positive-weight component on that surface produced a usable component report; partial composites are counted as incomplete candidates but cannot close the challenger gate. Runner curates this role instead of inferring it from size or an observed high score, so future MoE or strong compact challengers can qualify without equating parameters with capability. The first task-scoped targets share the blocked Qwen3.6 27B setup across Assistant, Coding, and Reasoning. None can count until its artifact, fit, runtime, and relevant task protocol are qualified, and selection does not establish a frontier or leaderboard claim.
+
+Distribution readiness also requires component-level headroom. Each weighted component needs eight score-ready observations, no more than 20% may hit that component's ceiling, and both the composite and sufficiently sampled components must retain at least ten points below their suite ceiling. The 2026-08-12 latest-300-result audit caught a failure that composite-only checks masked: `reasoning_exact_answer_v1` reached its three-case ceiling in 12 of 13 score-ready Reasoning observations even though MMLU-Pro kept the composite below its ceiling. `coding_static_repair_v1` also reached its ceiling in all four completed observations, but 38 of its 44 reports were partial, so it is presently both too thin and too fragile for a saturation conclusion. The Runner reports these facts and blocks distribution readiness; it does not curve scores or silently change component weights.
+
+Tier selection must not turn a representative full benchmark into a biased shortcut. IFEval canary and standard tiers therefore greedily maximize distinct instruction-type coverage with a stable hash tie-breaker, and EvalPlus HumanEval+/MBPP+ subsets use a revision-pinned task-id hash rank rather than upstream positional prefixes. MMLU-Pro, GPQA Diamond, and BFCL samples retain their category/domain round-robin behavior while hash-ranking cases within each stratum, so upstream row order cannot choose the tier. Runtime metadata records the sampling policy, exact selection digest, and versioned digest serialization; IFEval also records selected-versus-full instruction-type coverage. Container capability artifacts bind source revision, policy, case count, digest algorithm, and selection digest into `fixture_revision`. Changing a tier, selection, or digest interpretation therefore creates a distinct protocol cohort instead of pooling scores from different case sets.
+
+`scripts/audit_benchmark_tiers.py --fail-invalid` mechanically compares every varying-size capability benchmark in the executable registry against `tier_sampling_policies` in the catalog. It fails when a benchmark omits a strategy, declares stale canary/standard/gold limits, omits required strata for a balanced strategy, uses anything weaker than exact selected-case identity, or leaves the digest serialization implicit or incompatible with its execution path. It also materializes every native fixture, verifies that the largest tier exists, rejects missing or duplicate task identities, and executes per-tier coverage floors for the reasoning-stress categories and structural tiers, stateful-tool domains and outcomes, and context-retrieval lengths and key positions. The first-party repository-edit fixture ships an exact-source manifest in `runner-core`; source-checkout audits additionally verify the full container fixture SHA, revision, ordered task/category manifest, tier counts, category floors, and the same newline-serialized selection digest emitted at runtime. Canary therefore retains state/time and data-transformation tasks, standard adds security-boundary and protocol-parsing coverage, and gold adds policy-logic and scheduling coverage. Upstream container-owned datasets still prove their selection at runtime rather than through this static materialization. Native and repository-edit artifacts derive `fixture_revision` from their source fixture, digest algorithm, and exact selected case IDs, closing the cross-tier pooling boundary outside the reference containers. Structural coverage remains a necessary guard, not empirical proof of difficulty or source representativeness.
 
 When every weighted component reaches its maximum, Runner records `suite_ceiling_reached`. Consumers should display that phrase instead of presenting the model as “100/100 perfect.” The result means the current suite cannot distinguish additional capability; the remedy is a harder or broader benchmark mix and a new protocol revision, not an arbitrary point penalty.
 

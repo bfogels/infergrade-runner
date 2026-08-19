@@ -44,6 +44,47 @@ previously archived build without rewriting any active run lock:
 infergrade-runner runtime rollback --runtime-build-id <sha256>
 ```
 
+### Maintainer candidate qualification
+
+Maintainers can materialize a reviewed upstream candidate into a new isolated
+cache before running an exact-artifact qualification. This is deliberately not
+a normal Runner install command and it cannot promote or authenticate a signed
+catalog target:
+
+```bash
+cargo run -p infergrade_runner_engine --bin materialize-runtime-candidate -- \
+  --manifest-entry <candidate.json> \
+  --archive <reviewed-runtime.tar.gz> \
+  --runtime-cache-dir <new-or-empty-qualification-cache> \
+  --consent-archive-sha256 <exact-archive-sha256>
+```
+
+The tool accepts only `reviewed_candidate` or `upstream_release` entries for the
+current host, requires a declared archive length, caps local archives at 2 GiB,
+verifies the exact digest through the shared install engine, and refuses
+non-empty or symlinked cache directories. It also rejects `infergrade_stable`
+and every non-null `catalog_assertion`: signed catalog targets must use the
+catalog verification and install path above. A successful materialization is
+only a checksum-verified immutable local package. Compatibility still requires
+an exact model/protocol canary and benchmark receipt; catalog activation,
+support promotion, result publication, and release remain separate decisions.
+
+The read-only `llama.cpp Runtime Intake` workflow can run the same composition
+for an exact `bNNNN` release through manual dispatch. Its macOS and Linux lanes
+verify the official archive, run a version smoke, materialize an isolated
+immutable package, and upload a path-free candidate receipt. The Windows lane
+retains its archive/version receipt because the candidate materializer is
+intentionally tar.gz-only. No lane writes repository contents, catalog
+metadata, releases, or support policy, and none of these package checks proves
+model compatibility.
+
+After all manual platform lanes pass, the workflow emits one candidate evidence
+ladder. It keeps release discovery, archive identity, native version execution,
+immutable materialization, exact recent-model canaries, exact benchmark
+qualifications, signed catalog policy, and support promotion as separate gates.
+The first incomplete gate is named as the next review action; the report never
+promotes a runtime automatically.
+
 `runtime/catalog/signed/` is currently a review-candidate root. Before
 production distribution, it will be replaced by a new production root version
 1 under the detached ceremony in `runtime_catalog_operations.md`; unreleased
@@ -90,7 +131,7 @@ infergrade-runner runtime install
 - No legacy install or upgrade happens unless `--execute` is passed.
 - No Rust managed install happens unless `infergrade-runner runtime install` is run explicitly.
 - Runtime channel changes and updates are manual. The shared engine exposes `infergrade_stable`, `reviewed_candidate`, `previous_release`, `upstream_release`, `local_binary`, and `experimental` channel policy so Desktop and CLI can render the same safety model.
-- Upstream discovery is automated but promotion is not. The daily runtime-intake workflow reports new llama.cpp candidates and pin age without silently changing a user's selected runtime.
+- Upstream discovery is automated but promotion is not. The daily runtime-intake workflow reports new llama.cpp candidates and pin age without silently changing a user's selected runtime. A weekly or explicitly dispatched proof lane downloads the official macOS arm64, Linux x64, and Windows CPU x64 archives once per exact tag and verifier revision, verifies GitHub's digest, bounded extraction, and expected tools, then caches those receipts. The Linux archive gets a native `--version` smoke, a pinned 1.2 MB synthetic llama-architecture control, and an exact pinned MiniCPM5 1B Q4_K_M load/generation canary capped at 1 GiB. The recent canary proves only that exact artifact on Linux CPU; native macOS/Windows version smokes, chat-template behavior, benchmark correctness, and every other recent architecture remain separate gates. No intake result promotes a runtime automatically.
 - Managed runtime packages are immutable and content-addressed under
   `~/.cache/infergrade/runtimes/llama.cpp/builds/<runtime_build_id>/`. Installing
   different bytes under the same release label creates another build instead
@@ -124,6 +165,14 @@ infergrade-runner runtime install
   the run. Mutation or a missing lock fails the attempt; it never triggers a
   silent runtime substitution. Resume verifies the saved lock and marks the
   same attempt active again before backend execution.
+- Before a per-attempt lock exists, Doctor treats a saved selection as
+  authoritative and will not hide a missing selected executable behind a
+  same-named binary on `PATH`. Desktop can explicitly repair that selection:
+  it reinstalls the same signed-catalog target when the saved assertion is
+  valid, otherwise installs the pinned managed fallback, then asks Hub to
+  requeue the failed run so artifact, runtime, and model checks all repeat.
+  The structured failure sent to Hub names the selection source without
+  including the local executable path.
 - Clearing a selected runtime removes only the mutable preference. It never
   deletes immutable managed bytes. Cross-process leases, crashed-run recovery,
   inventory, and safe pruning remain a separate lifecycle feature; until that

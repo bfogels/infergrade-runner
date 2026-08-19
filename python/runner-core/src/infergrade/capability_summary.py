@@ -180,6 +180,11 @@ def _discover_capability_run_artifacts(execution: CapabilityExecution, output_di
                 "confidence_explanation": _confidence_explanation(confidence_label),
                 "path": _relative_path(capability_run_path, output_dir),
                 "score": summary.get("score") if state in ("scored", "partial") else None,
+                **(
+                    {"score_uncertainty": dict(summary["score_uncertainty"])}
+                    if summary.get("score_uncertainty")
+                    else {}
+                ),
                 "task_count": len(tasks),
                 "failure_count": len([task for task in tasks if task.get("state") == "failed"]),
                 "partial_count": summary.get("partial_count") or 0,
@@ -232,6 +237,15 @@ def _fallback_benchmark_summary_pointers(
                 ),
                 "path": _relative_path(summary_path, output_dir),
                 "score": _primary_metric_value(result) if state in ("scored", "partial") else None,
+                **(
+                    {
+                        "score_uncertainty": dict(
+                            result["primary_metric_uncertainty"]
+                        )
+                    }
+                    if result.get("primary_metric_uncertainty")
+                    else {}
+                ),
                 "task_count": int(result.get("total_cases") or 0),
                 "failure_count": int(result.get("generation_failure_count") or 0),
                 "partial_count": 1 if state == "partial" else 0,

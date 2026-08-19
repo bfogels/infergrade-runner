@@ -1,0 +1,95 @@
+{
+  "qualification_version": "infergrade_runtime_qualification_v1",
+  "qualified_at": "2026-08-13",
+  "status": "valid_comparable",
+  "claim_scope": "exact_artifact_on_recorded_hardware_only",
+  "runtime": {
+    "runtime_id": "llama-cpp-b10375-macos-aarch64-qualification",
+    "version_label": "llama.cpp b10375 macOS arm64 qualification",
+    "upstream": {
+      "project": "ggml-org/llama.cpp",
+      "tag": "b10375",
+      "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b10375"
+    },
+    "catalog_activation_status": "not_staged",
+    "signed_catalog_assertion_state": "absent",
+    "runtime_build_id": "fe690560b595af988c2205eab822ad0f391921977923e432cdbc69c37ce8d3a8",
+    "content_manifest_sha256": "19cc072adc93be0f7e0564f23dc4f355695a0cad07af4dff95689c22143d03cc",
+    "content_manifest_file_count": 61,
+    "archive_sha256": "ebbeed128cde32077c5b430feafe57ce20b1bca545f430ff142472014f03bcec",
+    "source_assertion_id": "01dbb01de141a0f9561475ce457b6ecc7cce6141603ebfd1ad0f23209a37a619",
+    "origin": "managed_download",
+    "package_maturity": "upstream_release",
+    "qualification_maturity": "reviewed_candidate",
+    "support_tier": "candidate",
+    "provenance_strength": "checksum_verified",
+    "independent_signature_verified": false
+  },
+  "hardware": {
+    "hardware_class": "apple_silicon",
+    "accelerator_model": "Apple M1 Pro",
+    "memory_gb": 16,
+    "accelerator_api": "metal"
+  },
+  "benchmark": {
+    "depth": "standard",
+    "protocol_registry_version": "2026-07-capability-protocol-3.1",
+    "profile": "interactive_chat_v1",
+    "checks": [
+      "ifeval",
+      "assistant_compositional_instruction_v2",
+      "multiturn_chat_memory_v1",
+      "perplexity_reference_v1"
+    ],
+    "profile_measured_iterations": 5
+  },
+  "assertions": [
+    {
+      "model_id": "Qwen/Qwen3.5-4B",
+      "artifact_repo_id": "unsloth/Qwen3.5-4B-GGUF",
+      "model_revision": "e87f176479d0855a907a41277aca2f8ee7a09523",
+      "model_artifact_filename": "Qwen3.5-4B-Q4_K_M.gguf",
+      "model_artifact_sha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+      "model_artifact_size_bytes": 2740937888,
+      "quantization_label": "Q4_K_M",
+      "bundle_id": "qb_20260813_025226_1cafe370",
+      "result_id": "qb_20260813_025226_1cafe370_interactive_chat_v1",
+      "comparison_grade": "comparable",
+      "verification_level": "verified",
+      "bundle_valid": true,
+      "receipt_prelaunch": "passed",
+      "receipt_postrun": "passed",
+      "ifeval_prompt_strict_accuracy": 0.8,
+      "ifeval_model_output_failure_count": 0,
+      "ifeval_output_shape_gate": "passed",
+      "ifeval_answer_budget_exhaustion_count": 20,
+      "assistant_compositional_structured_task_accuracy": 0.333333,
+      "assistant_compositional_malformed_output_count": 1,
+      "assistant_compositional_model_output_failure_count": 0,
+      "multiturn_constraint_retention_accuracy": 1.0,
+      "perplexity": 36.0587,
+      "capability_score": 0.543333,
+      "capability_score_ready": true,
+      "capability_score_version": "local_assistant_score_v4",
+      "capability_time_per_task_seconds_median": 4.018,
+      "deployment_decode_tokens_per_second_p50": 35.71,
+      "deployment_ttft_p50_ms": 325.85,
+      "deployment_token_budget_exhaustion_rate": 1.0,
+      "observed_peak_bytes": 3191980687,
+      "model_buffer_bytes": 3251434947,
+      "kv_cache_bytes": 134217728
+    }
+  ],
+  "publication": {
+    "status": "local_only",
+    "published": false
+  },
+  "limitations": [
+    "This validates only the exact Qwen3.5 4B Q4_K_M artifact on the recorded Apple M1 Pro hardware.",
+    "The verified label records checksum-verified immutable package identity plus prelaunch and postrun checks; no signed InferGrade catalog assertion or independent upstream signature exists for b10375.",
+    "The 54.3/100 local assistant benchmark index is raw, task-scoped attainment under Capability protocol v3.1. It is not global intelligence, preference quality, or proof of broad Qwen3.5 compatibility.",
+    "All 100 IFEval cases produced scorer-visible text and the output-shape gate passed. Twenty responses exhausted the answer budget and were scored by the pinned benchmark policy rather than hidden.",
+    "The interactive deployment profile exhausted its 160-token generation budget on every measured request, so deployment throughput remains valid while semantic task completion is explicitly unproven. The recorded 4.018 second task time comes from scored capability cases.",
+    "This record does not promote b10375, authorize a catalog target, change the supported runtime default, or publish the local bundle."
+  ]
+}

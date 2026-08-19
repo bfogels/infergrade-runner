@@ -34,6 +34,8 @@ Every implemented check and every planned benchmark candidate must have a `bench
 
 Runner tests validate that this metadata exists. New benchmark checks should fail catalog tests until their legitimacy status is declared.
 
+The validator also enforces the promotion transition. An entry in `planned_benchmark_candidates` must remain `not_runnable` and cannot declare runnable maturity. Promotion moves the lane into `checks`; a runnable check must name an implemented harness and bounded duration/token-volume status, while `reference_runnable` and `gold_runnable` additionally require a pinned fixture or dataset. A benchmark cannot appear in both collections. These checks prevent a roadmap-only lane from becoming runnable through status-copy changes alone; they do not substitute for reviewing the harness or its evidence.
+
 ## Promotion Gates
 
 A `thin_local_sample` can be runnable when:
@@ -67,7 +69,10 @@ The first thin local samples are:
 
 - `multiturn_chat_memory_v1`
 - `coding_static_repair_v1`
+- `repository_edit_smoke_v1` (intentional, zero-weight diagnostic pending a cross-family distribution audit)
+- `stateful_tool_loop_diagnostic_v1` (intentional, zero-weight synthetic stateful diagnostic pending a cross-family distribution audit)
 - `reasoning_exact_answer_v1`
+- `reasoning_constraint_stress_v1` (intentional, zero-weight successor diagnostic pending cross-family and per-category headroom audits)
 
 The first reference-runnable lanes are:
 
@@ -76,16 +81,19 @@ The first reference-runnable lanes are:
 - `evalplus_mbpp`
 - `gpqa_diamond_reference_v1`
 - `context_retrieval_reference_v1`
+- `bfcl_local_reference_v1`
 - `perplexity_reference_v1`
 
 Important candidates that are not yet promoted:
 
-- `livecodebench_reference_v1`: planned, non-runnable until task-window and sandbox controls exist.
+- `livecodebench_reference_v1`: implementation-ready but non-runnable. The v6 task window, deterministic 48-task snapshot, scorer, hidden-test boundary, and unprivileged subprocess controls are implemented; source-license review and a separately verified protocol image still block selection.
 - `swebench_verified_gold_v1`: gold candidate only, non-runnable until maintainer-reviewed gold controls exist.
 
 `gpqa_diamond_reference_v1` and `context_retrieval_reference_v1` are
 diagnostic-only reference lanes. They have zero headline capability weight and
 are not part of the default suites.
+
+`bfcl_local_reference_v1` and `stateful_tool_loop_diagnostic_v1` are complementary zero-weight tool-use diagnostics. The first is a pinned BFCL-derived single-turn structured-call reference; the second is a pinned synthetic multi-generation simulator loop. Neither supports native function-calling, broad agent-autonomy, or leaderboard claims, and neither is empirically ready without cross-family distributions and headroom audits.
 
 `perplexity_reference_v1` is reference-runnable only as same-family quant-fidelity evidence. Its comparability key includes model family, checkpoint, tokenizer id, corpus id/revision, and protocol id/parameters. It does not support cross-family model ranking, broad capability claims, gold evidence, or leaderboard claims.
 

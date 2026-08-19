@@ -703,6 +703,63 @@ h4 {
   transition: width 180ms ease;
 }
 
+.assignment-stages {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.assignment-stages li {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.assignment-stages li span {
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.assignment-stages li small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assignment-stages li[data-state="complete"],
+.assignment-stages li[data-state="current"] {
+  color: var(--text);
+}
+
+.assignment-stages li[data-state="complete"] span {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.assignment-stages li[data-state="current"] span {
+  border-color: var(--success);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 18%, transparent);
+}
+
+.assignment-stages li[data-state="blocked"] {
+  color: var(--warning);
+}
+
+.assignment-stages li[data-state="blocked"] span {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+}
+
 .support-drawer {
   border-width: 1px 0 0;
   border-right: 0;
@@ -935,6 +992,50 @@ h4 {
   margin: 0 0 12px;
 }
 
+.runtime-autopilot-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--success) 42%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--success-soft) 48%, var(--surface));
+}
+
+.runtime-autopilot-card strong,
+.runtime-autopilot-card p {
+  display: block;
+  margin: 0;
+}
+
+.runtime-autopilot-card p {
+  margin-top: 3px;
+  color: var(--text-muted);
+}
+
+.runtime-autopilot-card button {
+  flex: 0 0 auto;
+}
+
+.runtime-power-options {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.runtime-power-options > summary {
+  cursor: pointer;
+  padding: 11px 12px;
+  color: var(--text);
+  font-weight: 850;
+}
+
+.runtime-power-options > .runtime-choice-grid {
+  padding: 0 10px 10px;
+}
+
 .runtime-choice-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -971,6 +1072,15 @@ h4 {
 @media (max-width: 760px) {
   .runtime-choice-grid {
     grid-template-columns: 1fr;
+  }
+
+  .runtime-autopilot-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .assignment-stages li small {
+    font-size: 0.6rem;
   }
 }
 

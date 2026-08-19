@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -7,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
+from urllib.error import HTTPError
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -26,6 +29,43 @@ SIGNER_SPEC.loader.exec_module(SIGNER)
 
 
 class DesktopPythonRuntimeTests(unittest.TestCase):
+    def test_download_retries_transient_http_failure_and_replaces_atomically(self):
+        payload = b"reviewed runtime"
+        transient = HTTPError("https://example.test/runtime.tar.gz", 503, "unavailable", {}, None)
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "runtime.tar.gz"
+            output.write_bytes(b"old")
+            sleeps = []
+            with mock.patch.object(MODULE, "urlopen", side_effect=[transient, io.BytesIO(payload)]):
+                MODULE._download(
+                    "https://example.test/runtime.tar.gz",
+                    output,
+                    len(payload),
+                    sleep=sleeps.append,
+                )
+
+            self.assertEqual(output.read_bytes(), payload)
+            self.assertEqual(sleeps, [1])
+            self.assertFalse(Path(str(output) + ".partial").exists())
+
+    def test_download_does_not_retry_non_transient_http_failure(self):
+        missing = HTTPError("https://example.test/runtime.tar.gz", 404, "missing", {}, None)
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "runtime.tar.gz"
+            sleeps = []
+            with mock.patch.object(MODULE, "urlopen", side_effect=missing) as opener:
+                with self.assertRaises(HTTPError):
+                    MODULE._download(
+                        "https://example.test/runtime.tar.gz",
+                        output,
+                        10,
+                        sleep=sleeps.append,
+                    )
+
+            self.assertEqual(opener.call_count, 1)
+            self.assertEqual(sleeps, [])
+            self.assertFalse(Path(str(output) + ".partial").exists())
+
     def test_manifest_pins_supported_desktop_targets(self):
         manifest, digest = MODULE._load_manifest(ROOT / "runtime" / "desktop_python_runtime.json")
         self.assertEqual(manifest["python_version"], "3.12.13")

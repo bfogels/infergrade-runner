@@ -9,16 +9,27 @@ from unittest import mock
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade import __version__
+from infergrade.reasoning_constraint_stress import reasoning_constraint_stress_cases
 from infergrade.capabilities import (
     CAPABILITY_BENCHMARKS,
+    _attach_primary_metric_uncertainty,
+    _capability_container_command,
+    _capability_container_policy,
     _case_benchmark_protocol_identity,
+    _container_fixture_revision,
     _generate_predictions,
     _generation_prompt_for_case,
     _host_mount_path,
     _multiple_choice_artifact_claim_boundary,
+    _multiple_choice_output_shape_gate,
     _normalize_evalplus_completion,
     _native_benchmark_cases,
+    _repository_edit_output_shape_gate,
+    _selected_fixture_revision,
     _run_capability_container,
+    _structured_tool_use_output_shape_gate,
+    _write_multiple_choice_capability_run_artifact,
+    _write_repository_edit_capability_run_artifact,
     capability_images_for_request,
     execute_capability_suite,
     remove_capability_case_checkpoints,
@@ -189,6 +200,69 @@ class _MmluProAdapter(object):
 
 
 class CapabilityTests(unittest.TestCase):
+    def test_binomial_primary_metric_uncertainty_is_explicit_for_small_samples(self):
+        spec = CAPABILITY_BENCHMARKS["reasoning_exact_answer_v1"]
+        summary = {
+            "status": "completed",
+            "primary_metric": {"name": "exact_answer_accuracy", "value": 1 / 3},
+            "metrics": {"correct_count": 1, "total_count": 3},
+            "unscored_generation_failure_count": 0,
+        }
+
+        _attach_primary_metric_uncertainty(spec, summary)
+
+        uncertainty = summary["primary_metric_uncertainty"]
+        self.assertEqual(uncertainty["policy_id"], "binomial_score_uncertainty_v1")
+        self.assertEqual(uncertainty["observation_count"], 3)
+        self.assertEqual(uncertainty["success_count"], 1)
+        self.assertEqual(uncertainty["lower_bound"], 0.061492)
+        self.assertEqual(uncertainty["upper_bound"], 0.79234)
+        self.assertEqual(uncertainty["population"], "scored_completed_outcomes")
+
+    def test_binomial_uncertainty_omits_non_binomial_and_quarantined_scores(self):
+        non_binomial = {"primary_metric": {"name": "perplexity", "value": 7.2}, "metrics": {}}
+        _attach_primary_metric_uncertainty(
+            CAPABILITY_BENCHMARKS["perplexity_reference_v1"], non_binomial
+        )
+        quarantined = {
+            "primary_metric": {"name": "accuracy", "value": None},
+            "metrics": {"correct_count": 0, "total_count": 25},
+        }
+        _attach_primary_metric_uncertainty(
+            CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"], quarantined
+        )
+
+        self.assertNotIn("primary_metric_uncertainty", non_binomial)
+        self.assertNotIn("primary_metric_uncertainty", quarantined)
+
+    def test_binomial_uncertainty_fails_closed_when_counts_do_not_match_score(self):
+        summary = {
+            "primary_metric": {"name": "accuracy", "value": 0.75},
+            "metrics": {"correct_count": 1, "total_count": 3},
+        }
+
+        _attach_primary_metric_uncertainty(
+            CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"], summary
+        )
+
+        self.assertNotIn("primary_metric_uncertainty", summary)
+
+    def test_longbench_reference_uses_task_level_score_uncertainty(self):
+        summary = {
+            "primary_metric": {"name": "accuracy", "value": 0.75},
+            "metrics": {"correct_count": 9, "total_count": 12},
+        }
+
+        _attach_primary_metric_uncertainty(
+            CAPABILITY_BENCHMARKS["longbench_v2_local_reference_v1"], summary
+        )
+
+        uncertainty = summary["primary_metric_uncertainty"]
+        self.assertEqual(uncertainty["observation_unit"], "task")
+        self.assertEqual(uncertainty["observation_count"], 12)
+        self.assertLess(uncertainty["lower_bound"], 0.5)
+        self.assertGreater(uncertainty["upper_bound"], 0.9)
+
     def setUp(self):
         self.tempdir = tempfile.mkdtemp(prefix="infergrade-capability-")
 
@@ -288,6 +362,32 @@ class CapabilityTests(unittest.TestCase):
         self.assertNotEqual(
             constrained["fingerprint_sha256"],
             raw_cli["fingerprint_sha256"],
+        )
+
+    def test_ifeval_protocol_identity_includes_host_output_shape_policy(self):
+        spec = CAPABILITY_BENCHMARKS["ifeval"]
+        cases = [{"case_id": "ifeval/1", "prompt": "Follow this instruction."}]
+        summary = {
+            "container_runtime": {"container_image_id": "sha256:fixture"},
+        }
+        selection_check = {
+            "score_policy_id": "instruction_following_primary_accuracy_v1",
+            "execution_pattern": "fast_capability_microcheck",
+        }
+
+        with mock.patch("infergrade.capabilities._benchmark_protocol_identity", return_value={}) as identity_mock:
+            _case_benchmark_protocol_identity(
+                spec,
+                cases,
+                [{"generation_preset_id": "deterministic_direct_answer_v1"}],
+                summary,
+                selection_check,
+            )
+
+        scoring_identity = identity_mock.call_args.kwargs["scoring_identity"]
+        self.assertEqual(
+            scoring_identity["output_shape_policy_id"],
+            "visible_response_output_shape_gate_v1",
         )
 
     def test_resume_reuses_exact_completed_capability_cases(self):
@@ -783,6 +883,377 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual([item["benchmark_id"] for item in images], ["gpqa_diamond_reference_v1"])
         self.assertEqual(images[0]["image"], "ghcr.io/bfogels/infergrade-gpqa:%s" % __version__)
 
+    def test_capability_images_include_longbench_v2_reference_when_selected(self):
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["longbench_v2_local_reference_v1"],
+        )
+        images = capability_images_for_request(request)
+
+        self.assertEqual([item["benchmark_id"] for item in images], ["longbench_v2_local_reference_v1"])
+        self.assertEqual(images[0]["image"], "ghcr.io/bfogels/infergrade-longbench-v2:%s" % __version__)
+        self.assertEqual(
+            CAPABILITY_BENCHMARKS["longbench_v2_local_reference_v1"].case_limits,
+            {"canary": 6, "standard": 12, "gold": 23},
+        )
+
+    def test_longbench_v2_malformed_output_gate_and_claim_boundary_are_narrow(self):
+        spec = CAPABILITY_BENCHMARKS["longbench_v2_local_reference_v1"]
+        gate = _multiple_choice_output_shape_gate(
+            spec,
+            [{"generation_status": "completed"} for _ in range(12)],
+            {
+                "metrics": {"total_count": 12, "malformed_output_count": 7},
+                "case_results": [
+                    {"predicted": None if index < 7 else "A"}
+                    for index in range(12)
+                ],
+            },
+        )
+        boundary = _multiple_choice_artifact_claim_boundary(
+            "longbench_v2_local_reference_v1", "scored"
+        )
+
+        self.assertEqual(gate["status"], "blocked")
+        self.assertIn("dominant_malformed_output", gate["reason_codes"])
+        unsupported = " ".join(boundary["unsupported_claims"])
+        self.assertIn("not an official LongBench v2 score", unsupported)
+        self.assertIn("medium or long strata", unsupported)
+
+    def test_capability_images_include_bfcl_reference_when_selected(self):
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["bfcl_local_reference_v1"],
+        )
+        images = capability_images_for_request(request)
+
+        self.assertEqual([item["benchmark_id"] for item in images], ["bfcl_local_reference_v1"])
+        self.assertEqual(images[0]["image"], "ghcr.io/bfogels/infergrade-bfcl:%s" % __version__)
+
+    def test_bfcl_dominant_malformed_output_is_quarantined(self):
+        spec = CAPABILITY_BENCHMARKS["bfcl_local_reference_v1"]
+        gate = _structured_tool_use_output_shape_gate(
+            spec,
+            [{"generation_status": "completed"} for _ in range(5)],
+            {
+                "primary_metric": {"name": "accuracy", "value": 0.2},
+                "metrics": {"total_count": 5, "malformed_output_count": 3},
+            },
+        )
+
+        self.assertEqual(gate["status"], "blocked")
+        self.assertEqual(gate["malformed_output_rate"], 0.6)
+        self.assertEqual(gate["reason_codes"], ["dominant_malformed_structured_tool_output"])
+
+    def test_bfcl_capability_artifact_preserves_local_claim_and_privacy_boundaries(self):
+        spec = CAPABILITY_BENCHMARKS["bfcl_local_reference_v1"]
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            benchmark_check_ids=["bfcl_local_reference_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        cases = [
+            {
+                "case_id": "bfcl_v4/simple_1",
+                "task_id": "bfcl_v4/simple_1",
+                "category": "simple_python",
+                "ground_truth": [{"private.tool": {"secret_argument": ["fixture-secret"]}}],
+            }
+        ]
+        predictions = [
+            {
+                "task_id": "bfcl_v4/simple_1",
+                "generation_status": "completed",
+                "completion": '[{"name":"private.tool","arguments":{"secret_argument":"fixture-secret"}}]',
+            }
+        ]
+        summary = {
+            "status": "completed",
+            "primary_metric": {"name": "accuracy", "value": 1.0},
+            "metrics": {
+                "accuracy": 1.0,
+                "correct_count": 1,
+                "total_count": 1,
+                "malformed_output_count": 0,
+            },
+            "case_results": [
+                {
+                    "case_id": "bfcl_v4/simple_1",
+                    "task_id": "bfcl_v4/simple_1",
+                    "category": "simple_python",
+                    "correct": True,
+                    "function_selection_correct": True,
+                    "malformed": False,
+                    "error_type": None,
+                }
+            ],
+            "category_metrics": {"simple_python": {"accuracy": 1.0, "correct_count": 1, "total_count": 1}},
+            "scoring_policy": "infergrade_bfcl_structured_call_accuracy_v1",
+            "container_runtime": {
+                "container_image": "infergrade-bfcl:local",
+                "container_image_id": "sha256:bfcl",
+                "container_repo_digests": [],
+            },
+        }
+        with open(os.path.join(self.tempdir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "dataset_revision": "fixture-revision",
+                    "snapshot_sha256": "fixture-snapshot-sha",
+                    "sample_policy": "category_round_robin_1_v2",
+                    "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
+                    "selection_sha256": "a" * 64,
+                    "case_count": 1,
+                    "category_count": 1,
+                },
+                handle,
+            )
+
+        path = _write_multiple_choice_capability_run_artifact(
+            request,
+            spec,
+            self.tempdir,
+            cases,
+            predictions,
+            summary,
+        )
+        with open(path, encoding="utf-8") as handle:
+            artifact = json.load(handle)
+
+        self.assertEqual(artifact["protocol"]["scorer_type"], "json_schema")
+        self.assertTrue(
+            artifact["protocol"]["fixture_revision"].startswith(
+                "bfcl_local_reference_v1_selection_"
+            )
+        )
+        self.assertEqual(
+            artifact["protocol"]["source_snapshot_sha256"],
+            "fixture-snapshot-sha",
+        )
+        self.assertEqual(
+            artifact["protocol"]["selection_sha256"],
+            "a" * 64,
+        )
+        self.assertEqual(
+            artifact["protocol"]["selection_digest_algorithm"],
+            "sorted_utf8_newline_sha256_v1",
+        )
+        self.assertEqual(artifact["evidence"]["surface"], "local_assistant_capability")
+        self.assertEqual(artifact["tasks"][0]["score"], 1.0)
+        self.assertNotIn("expected", artifact["tasks"][0])
+        self.assertNotIn("predicted", artifact["tasks"][0])
+        self.assertNotIn("fixture-secret", json.dumps(artifact))
+        self.assertIn(
+            "This is not an official BFCL V4 leaderboard score.",
+            artifact["claim_boundary"]["unsupported_claims"],
+        )
+
+    def test_container_fixture_identity_separates_exact_subsets(self):
+        spec = CAPABILITY_BENCHMARKS["bfcl_local_reference_v1"]
+        common = {
+            "dataset_revision": "fixture-revision",
+            "snapshot_sha256": "fixture-snapshot-sha",
+            "sample_policy": "category_round_robin_11_v2",
+            "case_count": 11,
+            "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
+        }
+
+        first = _container_fixture_revision(
+            spec,
+            {**common, "selection_sha256": "selection-a"},
+            {},
+        )
+        second = _container_fixture_revision(
+            spec,
+            {**common, "selection_sha256": "selection-b"},
+            {},
+        )
+        larger = _container_fixture_revision(
+            spec,
+            {
+                **common,
+                "sample_policy": "category_round_robin_55_v2",
+                "case_count": 55,
+                "selection_sha256": "selection-c",
+            },
+            {},
+        )
+
+        self.assertNotEqual(first, second)
+        self.assertNotEqual(first, larger)
+        alternate_serialization = _container_fixture_revision(
+            spec,
+            {
+                **common,
+                "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
+                "selection_sha256": "selection-a",
+            },
+            {},
+        )
+        self.assertNotEqual(first, alternate_serialization)
+
+    def test_native_fixture_identity_separates_exact_tier_subsets(self):
+        cases = [
+            {"task_id": "stateful_tool_loop_diagnostic_v1/case-%d" % index}
+            for index in range(24)
+        ]
+
+        canary = _selected_fixture_revision(
+            "stateful_tool_loop_diagnostic_v1",
+            "2026-08-stateful-tool-loop-v1",
+            cases[:8],
+        )
+        standard = _selected_fixture_revision(
+            "stateful_tool_loop_diagnostic_v1",
+            "2026-08-stateful-tool-loop-v1",
+            cases[:16],
+        )
+        alternate = _selected_fixture_revision(
+            "stateful_tool_loop_diagnostic_v1",
+            "2026-08-stateful-tool-loop-v1",
+            cases[8:16],
+        )
+
+        self.assertNotEqual(canary, standard)
+        self.assertNotEqual(canary, alternate)
+
+    def test_capability_images_include_repository_edit_diagnostic_when_selected(self):
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            benchmark_check_ids=["repository_edit_smoke_v1"],
+        )
+        images = capability_images_for_request(request)
+
+        self.assertEqual([item["benchmark_id"] for item in images], ["repository_edit_smoke_v1"])
+        self.assertEqual(
+            images[0]["image"],
+            "ghcr.io/bfogels/infergrade-repository-edit:%s" % __version__,
+        )
+
+    def test_repository_edit_dominant_malformed_patches_are_quarantined(self):
+        spec = CAPABILITY_BENCHMARKS["repository_edit_smoke_v1"]
+        gate = _repository_edit_output_shape_gate(
+            spec,
+            [{"generation_status": "completed"} for _ in range(3)],
+            {
+                "primary_metric": {"name": "task_success_rate", "value": 0.0},
+                "metrics": {"total_count": 3, "malformed_patch_count": 2},
+            },
+        )
+
+        self.assertEqual(gate["status"], "blocked")
+        self.assertEqual(gate["reason_codes"], ["dominant_malformed_patch_output"])
+        self.assertEqual(gate["strict_primary_metric"]["value"], 0.0)
+
+    def test_repository_edit_artifact_is_diagnostic_and_records_container_sandbox(self):
+        request = RunRequest(
+            model="fixture/model",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="agentic_coding",
+            output_dir=self.tempdir,
+            benchmark_check_ids=["repository_edit_smoke_v1"],
+        )
+        benchmark_dir = os.path.join(self.tempdir, "repo-edit")
+        os.makedirs(benchmark_dir)
+        with open(os.path.join(benchmark_dir, "benchmark_metadata.json"), "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "fixture_revision": "2026-08-repository-edit-v1",
+                    "sample_policy": "pinned_fixture_order_v1",
+                    "case_count": 1,
+                },
+                handle,
+            )
+        cases = [
+            {
+                "case_id": "repository_edit/simple",
+                "task_id": "repository_edit/simple",
+                "category": "repair",
+            }
+        ]
+        predictions = [
+            {
+                "case_id": "repository_edit/simple",
+                "task_id": "repository_edit/simple",
+                "generation_status": "completed",
+                "completion": "--- a/a.py\n+++ b/a.py\n",
+            }
+        ]
+        summary = {
+            "status": "completed",
+            "primary_metric": {"name": "task_success_rate", "value": 1.0},
+            "metrics": {
+                "total_count": 1,
+                "passed_count": 1,
+                "malformed_patch_count": 0,
+                "patch_apply_failure_count": 0,
+                "test_failure_count": 0,
+                "timeout_count": 0,
+            },
+            "case_results": [
+                {
+                    "task_id": "repository_edit/simple",
+                    "category": "repair",
+                    "score": 1.0,
+                    "passed": True,
+                    "error_class": None,
+                }
+            ],
+            "scoring_policy": "repo_edit_task_success_v1",
+            "fixture_revision": "2026-08-repository-edit-v1",
+            "generation_failure_severity": "none",
+            "container_runtime": {
+                "container_image": "ghcr.io/bfogels/infergrade-repository-edit:%s" % __version__,
+                "container_image_id": "sha256:repo-edit",
+                "sandbox_policy": {"policy_version": "capability_container_isolation_v1"},
+            },
+        }
+
+        path = _write_repository_edit_capability_run_artifact(
+            request,
+            CAPABILITY_BENCHMARKS["repository_edit_smoke_v1"],
+            benchmark_dir,
+            cases,
+            predictions,
+            summary,
+        )
+        with open(path, encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["evidence"]["surface"], "local_coding_capability")
+        self.assertEqual(artifact["protocol"]["scorer_type"], "unit_test")
+        self.assertTrue(
+            artifact["protocol"]["fixture_revision"].startswith(
+                "repository_edit_smoke_v1_selection_"
+            )
+        )
+        self.assertEqual(
+            artifact["protocol"]["source_fixture_revision"],
+            "2026-08-repository-edit-v1",
+        )
+        self.assertEqual(
+            artifact["protocol"]["selection_digest_algorithm"],
+            "sorted_utf8_newline_sha256_v1",
+        )
+        self.assertEqual(len(artifact["protocol"]["selection_sha256"]), 64)
+        self.assertEqual(artifact["summary"]["score"], 1.0)
+        self.assertEqual(
+            artifact["subject"]["runtime"]["sandbox_policy"]["policy_version"],
+            "capability_container_isolation_v1",
+        )
+        unsupported = " ".join(artifact["claim_boundary"]["unsupported_claims"])
+        self.assertIn("zero headline-score weight", unsupported)
+
     def test_gpqa_claim_boundary_names_gpqa_instead_of_mmlu_pro(self):
         boundary = _multiple_choice_artifact_claim_boundary(
             "gpqa_diamond_reference_v1",
@@ -1022,7 +1493,9 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["generation_failure_severity"], "partial")
         self.assertEqual(result["metrics"]["malformed_output_count"], 1)
-        self.assertEqual(result["primary_metric"]["value"], 0.333333)
+        self.assertEqual(result["primary_metric"]["value"], 0.5)
+        self.assertEqual(result["metrics"]["total_count"], 2)
+        self.assertEqual(result["unscored_generation_failure_count"], 1)
         capability_run_path = execution.artifacts["coding_static_repair_v1"]["capability_run_path"]
         with open(capability_run_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)
@@ -1185,6 +1658,8 @@ class CapabilityTests(unittest.TestCase):
         result = execution.benchmark_results["reasoning_exact_answer_v1"]
         self.assertEqual(result["primary_metric"]["name"], "exact_answer_accuracy")
         self.assertEqual(result["metrics"]["correct_count"], result["metrics"]["total_count"])
+        self.assertEqual(result["primary_metric_uncertainty"]["observation_count"], 3)
+        self.assertEqual(result["primary_metric_uncertainty"]["lower_bound"], 0.438503)
         capability_run_path = execution.artifacts["reasoning_exact_answer_v1"]["capability_run_path"]
         with open(capability_run_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)
@@ -1195,6 +1670,10 @@ class CapabilityTests(unittest.TestCase):
         self.assertTrue(artifact["evidence"]["experimental"])
         self.assertEqual(artifact["summary"]["state"], "scored")
         self.assertEqual(artifact["summary"]["score"], 1.0)
+        self.assertEqual(
+            artifact["summary"]["score_uncertainty"],
+            result["primary_metric_uncertainty"],
+        )
         self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored"})
         self.assertEqual(artifact["protocol"]["scorer_type"], "exact_match")
         self.assertEqual(artifact["protocol"]["scoring_policy"], "deterministic_exact_answer_v1")
@@ -1225,6 +1704,9 @@ class CapabilityTests(unittest.TestCase):
         result = execution.benchmark_results["reasoning_exact_answer_v1"]
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["generation_failure_severity"], "partial")
+        self.assertEqual(
+            result["primary_metric_uncertainty"]["excluded_unscored_count"], 1
+        )
         capability_run_path = execution.artifacts["reasoning_exact_answer_v1"]["capability_run_path"]
         with open(capability_run_path, "r", encoding="utf-8") as handle:
             artifact = json.load(handle)
@@ -1232,6 +1714,108 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual({task["state"] for task in artifact["tasks"]}, {"scored", "failed"})
         self.assertEqual({task["error_class"] for task in artifact["tasks"] if task["state"] == "failed"}, {"generation_failed"})
         self.assertIn("partial generation failures", artifact["claim_boundary"]["supported_claims"][0])
+
+    def test_reasoning_constraint_stress_reports_balanced_diagnostic_slices(self):
+        answers_by_prompt = {
+            case["prompt"]: case["expected_answers"][0]
+            for case in reasoning_constraint_stress_cases()
+        }
+
+        class _PassingStressAdapter(object):
+            def generate_text(self, request, prompt, max_tokens):
+                return {
+                    "text": answers_by_prompt[prompt],
+                    "status": "completed",
+                    "error": None,
+                }
+
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["reasoning_constraint_stress_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        with mock.patch("infergrade.capabilities._run_capability_container") as container_mock:
+            execution = execute_capability_suite(_PassingStressAdapter(), request)
+
+        container_mock.assert_not_called()
+        self.assertEqual(execution.status, "completed")
+        self.assertIsNone(execution.score)
+        result = execution.benchmark_results["reasoning_constraint_stress_v1"]
+        self.assertEqual(result["primary_metric"], {"name": "exact_answer_accuracy", "value": 1.0})
+        self.assertEqual(result["metrics"]["total_count"], 24)
+        self.assertEqual(result["primary_metric_uncertainty"]["observation_count"], 24)
+        self.assertEqual(
+            {key: value["total_count"] for key, value in result["metrics"]["category_metrics"].items()},
+            {
+                "arrangement_counting": 4,
+                "dependency_planning": 4,
+                "graph_planning": 4,
+                "modular_reasoning": 4,
+                "set_reasoning": 4,
+                "state_tracking": 4,
+            },
+        )
+        self.assertEqual(
+            set(result["metrics"]["structural_tier_metrics"]),
+            {"foundation", "intermediate", "hard", "stress"},
+        )
+        capability_run_path = execution.artifacts["reasoning_constraint_stress_v1"][
+            "capability_run_path"
+        ]
+        with open(capability_run_path, "r", encoding="utf-8") as handle:
+            artifact = json.load(handle)
+        self.assertEqual(artifact["evidence"]["lane"], "reference")
+        self.assertEqual(artifact["summary"]["score_dimension"], "constraint_reasoning_stress")
+        self.assertEqual(len(artifact["summary"]["category_metrics"]), 6)
+        self.assertTrue(all(task.get("category") for task in artifact["tasks"]))
+        self.assertTrue(all(task.get("structural_tier") for task in artifact["tasks"]))
+        self.assertIn(
+            "This is not a replacement reasoning score",
+            artifact["claim_boundary"]["unsupported_claims"][0],
+        )
+
+    def test_native_generation_failures_are_excluded_from_stress_score_population(self):
+        cases = reasoning_constraint_stress_cases()
+        answers_by_prompt = {case["prompt"]: case["expected_answers"][0] for case in cases}
+        failed_prompt = cases[0]["prompt"]
+
+        class _PartiallyFailingStressAdapter(object):
+            def generate_text(self, request, prompt, max_tokens):
+                if prompt == failed_prompt:
+                    raise RuntimeError("stress generation failed")
+                return {
+                    "text": answers_by_prompt[prompt],
+                    "status": "completed",
+                    "error": None,
+                }
+
+        request = RunRequest(
+            model="Qwen/Qwen3.5-9B",
+            backend="llama.cpp",
+            tier="standard",
+            benchmark_check_ids=["reasoning_constraint_stress_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        execution = execute_capability_suite(_PartiallyFailingStressAdapter(), request)
+
+        self.assertEqual(execution.status, "partial")
+        result = execution.benchmark_results["reasoning_constraint_stress_v1"]
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["primary_metric"]["value"], 1.0)
+        self.assertEqual(result["metrics"]["correct_count"], 23)
+        self.assertEqual(result["metrics"]["total_count"], 23)
+        self.assertEqual(result["primary_metric_uncertainty"]["observation_count"], 23)
+        self.assertEqual(result["primary_metric_uncertainty"]["excluded_unscored_count"], 1)
+        self.assertEqual(result["metrics"]["category_metrics"]["state_tracking"]["total_count"], 3)
+        failed_rows = [row for row in result["case_results"] if row["state"] == "failed"]
+        self.assertEqual(len(failed_rows), 1)
+        self.assertIsNone(failed_rows[0]["score"])
 
     def test_native_reasoning_exact_answer_extracts_common_answer_formats(self):
         request = RunRequest(
@@ -1747,6 +2331,12 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(artifact["subject"]["runtime"]["container_image_id"], "sha256:scorer")
         self.assertEqual(artifact["subject"]["runtime"]["container_repo_digests"], ["ghcr.io/bfogels/infergrade-mmlu-pro@sha256:scorer"])
         self.assertEqual(execution.benchmark_results["mmlu_pro_reference_v1"]["container_runtime"]["container_image_id"], "sha256:scorer")
+        sandbox = execution.benchmark_results["mmlu_pro_reference_v1"]["container_runtime"]["sandbox_policy"]
+        self.assertEqual(sandbox["policy_version"], "capability_container_isolation_v1")
+        self.assertEqual(sandbox["network"], "none")
+        self.assertTrue(sandbox["read_only_root"])
+        self.assertEqual(sandbox["memory_limit"], "4g")
+        self.assertEqual(artifact["subject"]["runtime"]["sandbox_policy"], sandbox)
         self.assertEqual([task["score"] for task in artifact["tasks"]], [1.0, 0.0])
         self.assertIn("This is not public leaderboard evidence.", artifact["claim_boundary"]["unsupported_claims"])
 
@@ -1989,6 +2579,114 @@ class CapabilityTests(unittest.TestCase):
         public_summary = summarize_capability_execution(request, execution)
         self.assertEqual(public_summary["capability_state"], "not_comparable")
         self.assertIn("output_shape_gate_blocked", public_summary["capability_reason_codes"])
+
+    def test_ifeval_dominant_empty_visible_responses_are_quarantined(self):
+        def fake_prepare(spec, benchmark_dir, tier):
+            cases = [
+                {
+                    "case_id": "ifeval/%d" % index,
+                    "prompt": "Follow instruction %d" % index,
+                    "instruction_id_list": ["fixture"],
+                }
+                for index in range(4)
+            ]
+            with open(os.path.join(benchmark_dir, "cases.jsonl"), "w", encoding="utf-8") as handle:
+                for case in cases:
+                    handle.write(json.dumps(case) + "\n")
+
+        def fake_evaluate(spec, benchmark_dir):
+            return {
+                "benchmark_id": spec.benchmark_id,
+                "display_name": spec.display_name,
+                "status": "completed",
+                "primary_metric": {"name": "prompt_strict_accuracy", "value": 0.25},
+                "metrics": {
+                    "prompt_strict_accuracy": 0.25,
+                    "instruction_strict_accuracy": 0.25,
+                    "prompt_loose_accuracy": 0.25,
+                    "instruction_loose_accuracy": 0.25,
+                },
+            }
+
+        adapter = mock.Mock()
+        adapter.generate_text.side_effect = [
+            {
+                "text": "",
+                "status": "completed",
+                "output_tokens": 640,
+            },
+            {
+                "text": "   ",
+                "status": "completed",
+                "output_tokens": 640,
+            },
+            {
+                "text": "",
+                "status": "completed",
+                "output_tokens": 20,
+            },
+            {
+                "text": "Visible answer",
+                "status": "completed",
+                "output_tokens": 3,
+            },
+        ]
+        request = RunRequest(
+            model="openbmb/MiniCPM5-1B",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="general_assistant",
+            output_dir=self.tempdir,
+            benchmark_check_ids=["ifeval"],
+            simulate=False,
+        )
+        with mock.patch("infergrade.capabilities._prepare_benchmark_cases", side_effect=fake_prepare):
+            with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
+                with mock.patch("infergrade.capabilities.container_image_identity", return_value={}):
+                    execution = execute_capability_suite(adapter, request)
+
+        result = execution.benchmark_results["ifeval"]
+        self.assertEqual(execution.status, "not_comparable")
+        self.assertNotIn("ifeval", execution.component_scores)
+        self.assertIsNone(result["primary_metric"]["value"])
+        self.assertEqual(result["generation_failure_count"], 3)
+        self.assertEqual(result["model_output_failure_count"], 3)
+        self.assertEqual(result["unscored_generation_failure_count"], 0)
+        self.assertEqual(result["output_shape_gate"]["status"], "blocked")
+        self.assertEqual(
+            result["output_shape_gate"]["policy_id"],
+            "visible_response_output_shape_gate_v1",
+        )
+        self.assertEqual(result["output_shape_gate"]["empty_visible_response_count"], 3)
+        self.assertEqual(result["output_shape_gate"]["empty_visible_response_rate"], 0.75)
+        self.assertEqual(result["output_shape_gate"]["answer_budget_exhaustion_count"], 2)
+        self.assertIn(
+            "dominant_empty_visible_response",
+            result["output_shape_gate"]["reason_codes"],
+        )
+        with open(execution.artifacts["ifeval"]["predictions_path"], "r", encoding="utf-8") as handle:
+            predictions = [json.loads(line) for line in handle if line.strip()]
+        self.assertEqual(predictions[0]["generation_status"], "failed")
+        self.assertEqual(predictions[0]["generation_failure_kind"], "model_output")
+        self.assertEqual(predictions[0]["generation_error"], "Model produced no visible response.")
+
+    def test_ifeval_isolated_empty_visible_response_remains_strictly_scored_wrong(self):
+        from infergrade.capabilities import _visible_response_output_shape_gate
+
+        spec = CAPABILITY_BENCHMARKS["ifeval"]
+        predictions = [
+            {"generation_status": "failed", "response": "", "output_tokens": 640},
+            {"generation_status": "completed", "response": "Visible answer", "output_tokens": 3},
+        ]
+        summary = {
+            "primary_metric": {"name": "prompt_strict_accuracy", "value": 0.5},
+        }
+
+        gate = _visible_response_output_shape_gate(spec, predictions, summary)
+
+        self.assertEqual(gate["status"], "passed")
+        self.assertEqual(gate["empty_visible_response_rate"], 0.5)
+        self.assertEqual(gate["strict_primary_metric"]["value"], 0.5)
 
     def test_mmlu_isolated_malformed_output_remains_strictly_scored_wrong(self):
         spec = CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"]
@@ -2253,6 +2951,11 @@ class CapabilityTests(unittest.TestCase):
                     "display_name": "EvalPlus HumanEval+",
                     "status": "completed",
                     "primary_metric": {"name": "pass_at_1_plus", "value": 0.72},
+                    "primary_metric_uncertainty": {
+                        "policy_id": "binomial_score_uncertainty_v1",
+                        "lower_bound": 0.62,
+                        "upper_bound": 0.8,
+                    },
                 }
             },
         )
@@ -2268,6 +2971,10 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(completed_component["surface"], "local_coding_capability")
         self.assertEqual(completed_component["evidence_lane_id"], "reference")
         self.assertEqual(completed_component["confidence_label"], "sampled_reference")
+        self.assertEqual(
+            completed_component["primary_metric_uncertainty"]["lower_bound"],
+            0.62,
+        )
         missing_component = next(
             item for item in summary["capability_component_reports"] if item["benchmark_id"] == "evalplus_mbpp"
         )
@@ -2437,6 +3144,40 @@ class CapabilityTests(unittest.TestCase):
             "/Users/tester/infergrade-runner/runs/run_example/artifacts/capability/evalplus_humaneval:/work",
             command,
         )
+        self.assertIn("--network", command)
+        self.assertEqual(command[command.index("--network") + 1], "none")
+        self.assertIn("--cap-drop", command)
+        self.assertEqual(command[command.index("--cap-drop") + 1], "ALL")
+        self.assertEqual(
+            command[command.index("--user") + 1],
+            "%s:%s" % (getattr(os, "getuid", lambda: 0)(), getattr(os, "getgid", lambda: 0)()),
+        )
+        self.assertIn("no-new-privileges", command)
+        self.assertIn("--read-only", command)
+        self.assertIn("/tmp:rw,noexec,nosuid,nodev,size=512m", command)
+        self.assertEqual(command[command.index("--pids-limit") + 1], "256")
+        self.assertEqual(command[command.index("--memory") + 1], "4g")
+        self.assertEqual(command[command.index("--memory-swap") + 1], "4g")
+        policy = _capability_container_policy()
+        self.assertEqual(policy["container_user"], "host_uid_gid")
+        self.assertEqual(policy["container_user_id"], command[command.index("--user") + 1])
+
+    def test_repository_edit_container_retains_only_privilege_drop_capabilities(self):
+        command = _capability_container_command(
+            "ghcr.io/bfogels/infergrade-repository-edit:0.3.58",
+            "/tmp/repository-edit",
+            ["evaluate", "--output-dir", "/work"],
+        )
+        added = [command[index + 1] for index, item in enumerate(command) if item == "--cap-add"]
+        self.assertEqual(added, ["SETUID", "SETGID"])
+        self.assertEqual(command[command.index("--cap-drop") + 1], "ALL")
+        self.assertNotIn("--user", command)
+        policy = _capability_container_policy("infergrade-repository-edit:local")
+        self.assertEqual(policy["capabilities"], "setuid_setgid_only")
+        self.assertEqual(policy["container_user"], "root_supervisor")
+        self.assertEqual(policy["container_user_id"], "0:0")
+        self.assertEqual(policy["generated_code_user"], "nobody:65534")
+        self.assertIn("irreversibly drop", policy["capability_exception_reason"])
 
     def test_execute_capability_suite_reports_benchmark_progress(self):
         events = []
@@ -2469,9 +3210,12 @@ class CapabilityTests(unittest.TestCase):
             with mock.patch("infergrade.capabilities._evaluate_benchmark", side_effect=fake_evaluate):
                 execute_capability_suite(_FakeAdapter(), request, progress_callback=events.append)
         event_types = [event["event"] for event in events]
+        self.assertIn("benchmark_preparing", event_types)
         self.assertIn("benchmark_started", event_types)
         self.assertIn("case_progress", event_types)
         self.assertIn("benchmark_completed", event_types)
+        preparing = next(event for event in events if event["event"] == "benchmark_preparing")
+        self.assertIn("benchmark image and cases", preparing["message"])
 
     def test_execute_capability_suite_scores_supported_assistant_lane(self):
         def fake_prepare(spec, benchmark_dir, tier):

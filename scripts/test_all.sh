@@ -9,10 +9,16 @@ unset \
   INFERGRADE_IFEVAL_IMAGE \
   INFERGRADE_EVALPLUS_IMAGE \
   INFERGRADE_MMLU_PRO_IMAGE \
-  INFERGRADE_GPQA_IMAGE
+  INFERGRADE_GPQA_IMAGE \
+  INFERGRADE_LONGBENCH_V2_IMAGE \
+  INFERGRADE_BFCL_IMAGE \
+  INFERGRADE_REPOSITORY_EDIT_IMAGE
 
 PYTHONPATH="$ROOT_DIR/python/runner-core/src${PYTHONPATH:+:$PYTHONPATH}" \
   python3 -m unittest discover -s "$ROOT_DIR/python/runner-core/tests"
+
+PYTHONPATH="$ROOT_DIR/python/runner-core/src${PYTHONPATH:+:$PYTHONPATH}" \
+  python3 "$ROOT_DIR/scripts/audit_benchmark_tiers.py" --fail-invalid >/dev/null
 
 # Rust tests are owned by the dedicated `rust` CI job and the local
 # `cargo test --workspace` workflow. Opt in here only when explicitly

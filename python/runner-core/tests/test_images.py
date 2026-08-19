@@ -1,3 +1,4 @@
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -68,6 +69,22 @@ class ImageInstallTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as exc:
             install_image("infergrade-llama-cpp:local")
         self.assertIn("infergrade install-images --image infergrade-llama-cpp:local", str(exc.exception))
+
+    @mock.patch("infergrade.images._repo_root", return_value=None)
+    @mock.patch("infergrade.images.subprocess.run")
+    def test_install_image_times_out_with_desktop_recovery_guidance(self, run_mock, _repo_root_mock):
+        run_mock.side_effect = [
+            mock.Mock(returncode=1, stdout="", stderr="missing"),
+            subprocess.TimeoutExpired(["docker", "pull"], 1200),
+        ]
+
+        with self.assertRaises(RuntimeError) as exc:
+            install_image("ghcr.io/bfogels/infergrade-gpqa:0.3.57", prefer_local_build=False)
+
+        self.assertIn("did not finish downloading", str(exc.exception))
+        self.assertIn("Restart Docker Desktop", str(exc.exception))
+        self.assertIn("reuse the cached model artifact", str(exc.exception))
+        self.assertEqual(run_mock.call_args_list[-1].kwargs["timeout"], 1200)
 
     @mock.patch("infergrade.images.platform.machine", return_value="arm64")
     @mock.patch("infergrade.images.platform.system", return_value="Darwin")
@@ -223,6 +240,16 @@ class ImageInstallTests(unittest.TestCase):
         command = local_build_command("infergrade-gpqa:local")
         self.assertIn("containers/capability-gpqa/Dockerfile", command)
 
+    @mock.patch("infergrade.images._repo_root", return_value="/tmp/infergrade-runner")
+    def test_local_build_command_is_available_for_longbench_v2_image(self, _repo_root_mock):
+        command = local_build_command("infergrade-longbench-v2:local")
+        self.assertIn("containers/capability-longbench-v2/Dockerfile", command)
+
+    @mock.patch("infergrade.images._repo_root", return_value="/tmp/infergrade-runner")
+    def test_local_build_command_is_available_for_bfcl_image(self, _repo_root_mock):
+        command = local_build_command("infergrade-bfcl:local")
+        self.assertIn("containers/capability-bfcl/Dockerfile", command)
+
     @mock.patch("infergrade.images.install_image")
     def test_install_known_images_includes_runner_core_for_local_runtime_setup(self, install_mock):
         install_mock.side_effect = lambda image, **_kwargs: {"image": image, "action": "present"}
@@ -245,7 +272,9 @@ class ImageInstallTests(unittest.TestCase):
     def test_install_known_images_defaults_to_canonical_runner_version(self, install_mock):
         install_mock.side_effect = lambda image, **_kwargs: {"image": image, "action": "present"}
         installed = install_known_images()
-        self.assertEqual(len(installed), 6)
+        self.assertEqual(len(installed), 9)
+        self.assertIn("ghcr.io/bfogels/infergrade-bfcl:" + __version__, installed)
+        self.assertIn("ghcr.io/bfogels/infergrade-longbench-v2:" + __version__, installed)
         self.assertTrue(all(image.startswith("ghcr.io/bfogels/") and image.endswith(":" + __version__) for image in installed))
         self.assertTrue(all(call.kwargs["pull_if_missing"] for call in install_mock.call_args_list))
 

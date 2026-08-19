@@ -903,7 +903,43 @@ def _classify_doctor_failure(report: Dict[str, Any]) -> Dict[str, Any]:
             ],
             "details": {"failed_check": primary},
         }
-    if check_id in {"apple_silicon_local_container", "llama_cli_native", "llama_server_native", "native_backend_support"}:
+    if check_id in {"llama_cli_native", "llama_server_native"} and details.get("source") == "managed_runtime":
+        failed_check = {
+            "id": check_id,
+            "status": "error",
+            "message": message,
+            "details": {"source": "managed_runtime"},
+        }
+        return {
+            "error_code": "runtime_selection_stale",
+            "message": "The saved llama.cpp runtime is no longer available. Runner can repair the selection and retry this benchmark.",
+            "recovery": [
+                {
+                    "label": "Repair the saved runtime",
+                    "detail": "Use the Runner repair action to reinstall the exact reviewed build when possible, or the pinned managed fallback.",
+                },
+            ],
+            "details": {"failed_check": failed_check},
+        }
+    if check_id in {"llama_cli_native", "llama_server_native"}:
+        failed_check = {
+            "id": check_id,
+            "status": "error",
+            "message": message,
+            "details": {"source": str(details.get("source") or "unknown")},
+        }
+        return {
+            "error_code": "native_runtime_missing",
+            "message": "A runnable llama.cpp installation is required before this local benchmark can start.",
+            "recovery": [
+                {
+                    "label": "Install the managed runtime",
+                    "detail": "Use the Runner repair action to install the pinned managed build, then retry this benchmark.",
+                },
+            ],
+            "details": {"failed_check": failed_check},
+        }
+    if check_id in {"apple_silicon_local_container", "native_backend_support"}:
         return {
             "error_code": "worker_execution_failed",
             "message": message,

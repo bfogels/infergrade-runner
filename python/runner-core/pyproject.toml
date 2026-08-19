@@ -20,5 +20,8 @@ infergrade = "infergrade.cli:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+[tool.setuptools.package-data]
+"infergrade.audit_manifests" = ["*.json"]
+
 [tool.setuptools.packages.find]
 where = ["src"]

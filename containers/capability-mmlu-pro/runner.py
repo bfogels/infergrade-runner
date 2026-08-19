@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -63,6 +64,17 @@ def _sample_rows(rows: List[dict], limit: Optional[int]) -> List[dict]:
     grouped: Dict[str, List[dict]] = defaultdict(list)
     for row in rows:
         grouped[str(row.get("category") or "unknown")].append(row)
+    for category, bucket in grouped.items():
+        bucket.sort(
+            key=lambda row: hashlib.sha256(
+                (
+                    "mmlu_pro_category_rank_v2\0"
+                    + category
+                    + "\0"
+                    + str(row.get("question_id"))
+                ).encode("utf-8")
+            ).hexdigest()
+        )
 
     selected = []
     categories = sorted(grouped)
@@ -75,6 +87,11 @@ def _sample_rows(rows: List[dict], limit: Optional[int]) -> List[dict]:
         categories = [item for item in categories if grouped[item]]
         cursor += 1
     return selected[:limit]
+
+
+def _selection_digest(rows: List[dict]) -> str:
+    question_ids = sorted(str(row.get("question_id")) for row in rows)
+    return hashlib.sha256("\n".join(question_ids).encode("utf-8")).hexdigest()
 
 
 def _answer_letter(row: dict) -> str:
@@ -159,7 +176,8 @@ def _strip_terminal_markers(completion: str) -> str:
 
 
 def prepare(output_dir: str, limit: int = None, data_path: str = DEFAULT_DATA_PATH) -> None:
-    rows = _sample_rows(_load_rows(data_path), limit)
+    full_rows = _load_rows(data_path)
+    rows = _sample_rows(full_rows, limit)
     cases = [_case_from_row(row) for row in rows]
     _write_jsonl(os.path.join(output_dir, "cases.jsonl"), cases)
     _write_json(
@@ -170,7 +188,13 @@ def prepare(output_dir: str, limit: int = None, data_path: str = DEFAULT_DATA_PA
             "case_count": len(cases),
             "data_path": data_path,
             "dataset_revision": os.environ.get("MMLU_PRO_DATASET_REVISION"),
-            "sample_policy": "category_round_robin_v1" if limit else "full_snapshot_order",
+            "sample_policy": (
+                "category_round_robin_%d_v2" % len(cases)
+                if len(rows) < len(full_rows)
+                else "full_snapshot_order"
+            ),
+            "selection_digest_algorithm": "sorted_utf8_newline_sha256_v1",
+            "selection_sha256": _selection_digest(rows),
             "category_count": len(set(case["category"] for case in cases)),
         },
     )
