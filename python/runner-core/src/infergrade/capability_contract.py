@@ -43,7 +43,12 @@ SCORER_TYPES = (
     "metric_only",
     "manual_review",
 )
-CAPABILITY_ARTIFACT_POINTER_KINDS = ("capability_run", "benchmark_summary", "unreadable_capability_run")
+CAPABILITY_ARTIFACT_POINTER_KINDS = (
+    "capability_run",
+    "benchmark_summary",
+    "unreadable_capability_run",
+    "inadmissible_capability_run",
+)
 LEGACY_CAPABILITY_RUN_ARTIFACT_SPEC_VERSION = "0.1.0"
 CAPABILITY_RUN_ARTIFACT_SPEC_VERSION = "0.1.1"
 CAPABILITY_RUN_ARTIFACT_SPEC_VERSIONS = (
@@ -84,8 +89,10 @@ def load_capability_summary_schema(root: Optional[Path] = None) -> Dict[str, Any
     return json.loads(capability_summary_schema_path(root).read_text(encoding="utf-8"))
 
 
-def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
+def validate_capability_run_artifact(artifact: Any) -> List[str]:
     """Return validation errors for the v1 capability run artifact semantics."""
+    if not isinstance(artifact, dict):
+        return ["capability_run artifact must be an object"]
     errors: List[str] = []
     artifact_spec_version = artifact.get("artifact_spec_version")
     _require(artifact, "artifact_spec_version", errors)
@@ -165,7 +172,11 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
                 task_ids.append(task_id)
             algorithm = protocol.get("selection_digest_algorithm") if isinstance(protocol, dict) else None
             digest = protocol.get("selection_sha256") if isinstance(protocol, dict) else None
-            if task_ids_valid and algorithm in SELECTION_DIGEST_ALGORITHMS and isinstance(digest, str):
+            if (
+                task_ids_valid
+                and _is_supported_selection_digest_algorithm(algorithm)
+                and isinstance(digest, str)
+            ):
                 expected_digest = selection_digest(task_ids, algorithm)
                 if digest != expected_digest:
                     errors.append("protocol.selection_sha256 must match task IDs")
@@ -200,11 +211,25 @@ def validate_capability_run_artifact(artifact: Dict[str, Any]) -> List[str]:
     return errors
 
 
+def validate_current_capability_run_artifact(artifact: Any) -> List[str]:
+    """Return errors unless an artifact is valid current capability evidence."""
+    errors = validate_capability_run_artifact(artifact)
+    artifact_spec_version = (
+        artifact.get("artifact_spec_version") if isinstance(artifact, dict) else None
+    )
+    if artifact_spec_version != CAPABILITY_RUN_ARTIFACT_SPEC_VERSION:
+        errors.append(
+            "artifact_spec_version must be current-admissible: %s"
+            % CAPABILITY_RUN_ARTIFACT_SPEC_VERSION
+        )
+    return errors
+
+
 def _validate_optional_selection_fields(protocol: Dict[str, Any], errors: List[str]) -> None:
     """Validate selection provenance shapes, including optional legacy fields."""
     if "selection_digest_algorithm" in protocol:
         algorithm = protocol.get("selection_digest_algorithm")
-        if algorithm not in SELECTION_DIGEST_ALGORITHMS:
+        if not _is_supported_selection_digest_algorithm(algorithm):
             errors.append(
                 "protocol.selection_digest_algorithm must be a supported selection digest algorithm"
             )
@@ -216,6 +241,10 @@ def _validate_optional_selection_fields(protocol: Dict[str, Any], errors: List[s
         case_count = protocol.get("case_count")
         if isinstance(case_count, bool) or not isinstance(case_count, int) or case_count < 0:
             errors.append("protocol.case_count must be an integer >= 0")
+
+
+def _is_supported_selection_digest_algorithm(value: Any) -> bool:
+    return isinstance(value, str) and value in SELECTION_DIGEST_ALGORITHMS
 
 
 def validate_capability_summary_artifact(artifact: Dict[str, Any]) -> List[str]:

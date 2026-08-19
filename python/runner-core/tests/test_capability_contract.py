@@ -14,6 +14,7 @@ from infergrade.capability_contract import (
     load_capability_summary_schema,
     validate_capability_run_artifact,
     validate_capability_summary_artifact,
+    validate_current_capability_run_artifact,
 )
 from infergrade.contracts import load_contract_manifest
 from infergrade.selection_identity import (
@@ -135,6 +136,10 @@ class CapabilityContractTests(unittest.TestCase):
 
         self.assertEqual(artifact["artifact_spec_version"], "0.1.0")
         self.assertEqual(validate_capability_run_artifact(artifact), [])
+        self.assertIn(
+            "artifact_spec_version must be current-admissible: 0.1.1",
+            validate_current_capability_run_artifact(artifact),
+        )
 
     def test_v011_capability_run_requires_valid_selection_provenance(self):
         artifact = _artifact()
@@ -150,6 +155,7 @@ class CapabilityContractTests(unittest.TestCase):
         )
 
         self.assertEqual(validate_capability_run_artifact(artifact), [])
+        self.assertEqual(validate_current_capability_run_artifact(artifact), [])
 
         missing = dict(artifact)
         missing["protocol"] = dict(artifact["protocol"])
@@ -241,6 +247,31 @@ class CapabilityContractTests(unittest.TestCase):
             errors,
         )
         self.assertIn("protocol.case_count must be an integer >= 0", errors)
+
+    def test_selection_digest_algorithm_rejects_unhashable_json_values_without_crashing(self):
+        for artifact_spec_version in ("0.1.0", "0.1.1"):
+            for malformed in ([], {}):
+                with self.subTest(
+                    artifact_spec_version=artifact_spec_version,
+                    malformed=malformed,
+                ):
+                    artifact = _artifact()
+                    artifact["artifact_spec_version"] = artifact_spec_version
+                    artifact["protocol"]["selection_digest_algorithm"] = malformed
+                    if artifact_spec_version == "0.1.1":
+                        artifact["protocol"].update(
+                            {
+                                "selection_sha256": "0" * 64,
+                                "case_count": 1,
+                            }
+                        )
+
+                    errors = validate_capability_run_artifact(artifact)
+
+                    self.assertIn(
+                        "protocol.selection_digest_algorithm must be a supported selection digest algorithm",
+                        errors,
+                    )
 
     def test_v011_schema_conditionally_requires_selection_provenance(self):
         schema = load_capability_run_schema()

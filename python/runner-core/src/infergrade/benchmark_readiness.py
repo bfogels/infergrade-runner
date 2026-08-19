@@ -33,7 +33,13 @@ def audit_benchmark_readiness(
     ]
     metadata_valid = not metadata_errors
     adequacy = audit_benchmark_adequacy(payload, surface_id=surface_id)
-    observations = extract_calibration_observations(document_list, catalog=payload)
+    rejected_capability_runs: List[Dict[str, Any]] = []
+    observations = extract_calibration_observations(
+        document_list,
+        catalog=payload,
+        rejected_capability_runs=rejected_capability_runs,
+    )
+    capability_run_admission_rejected = bool(rejected_capability_runs)
     surfaces = []
     for structural in adequacy["surfaces"]:
         score_version = str(structural.get("score_version") or "")
@@ -43,7 +49,10 @@ def audit_benchmark_readiness(
             policy=policy_for_score_version(score_version, catalog=payload),
             catalog=payload,
         )
-        empirical_ready = bool(empirical.get("headline_ready"))
+        empirical_ready = (
+            bool(empirical.get("headline_ready"))
+            and not capability_run_admission_rejected
+        )
         priority_facet_evidence = _audit_priority_facet_evidence(
             observations,
             structural,
@@ -61,7 +70,12 @@ def audit_benchmark_readiness(
             and empirical_ready
             and priority_facets_ready
         )
-        scoped_blockers = _scoped_claim_blockers(structural, empirical, metadata_errors)
+        scoped_blockers = _scoped_claim_blockers(
+            structural,
+            empirical,
+            metadata_errors,
+            capability_run_admission_rejected,
+        )
         broad_blockers = _broad_surface_blockers(
             structural,
             scoped_blockers,
@@ -128,7 +142,11 @@ def audit_benchmark_readiness(
         ),
         "surface_filter": surface_id,
         "input_document_count": len(document_list),
-        "calibration_observation_count": len(observations),
+        "calibration_observation_count": sum(
+            1 for item in observations if item.get("admission_status") != "rejected"
+        ),
+        "rejected_capability_run_count": len(rejected_capability_runs),
+        "rejected_capability_runs": rejected_capability_runs,
         "scoped_claim_ready": scoped_ready,
         "broad_surface_ready": broad_ready,
         "status": (
@@ -158,6 +176,7 @@ def _scoped_claim_blockers(
     structural: Dict[str, Any],
     empirical: Dict[str, Any],
     metadata_errors: List[str],
+    capability_run_admission_rejected: bool = False,
 ) -> List[str]:
     blockers = ["catalog_metadata:%s" % error for error in metadata_errors]
     blockers.extend(
@@ -168,6 +187,11 @@ def _scoped_claim_blockers(
         "calibration:%s" % blocker
         for blocker in list(empirical.get("blockers") or [])
     )
+    if (
+        capability_run_admission_rejected
+        and "calibration:capability_run_admission_rejected" not in blockers
+    ):
+        blockers.append("calibration:capability_run_admission_rejected")
     return blockers
 
 
@@ -318,14 +342,19 @@ def _priority_check_metrics(
                 (observation, float(component["score"]), "score_ready_composite")
             )
     matching_standalone = []
+    rejected_standalone = []
     undersized_standalone = []
     undersized_cohort_task_counts: Dict[str, List[int]] = {}
     for observation in standalone_observations:
         if (
             observation.get("benchmark_id") != check_id
             or observation.get("surface_id") != surface_id
-            or _attainment_score(observation.get("score")) is None
         ):
+            continue
+        if observation.get("admission_status") == "rejected":
+            rejected_standalone.append(observation)
+            continue
+        if _attainment_score(observation.get("score")) is None:
             continue
         matching_standalone.append(observation)
         cohort_id = "standalone:%s" % observation.get("score_version")
@@ -371,6 +400,12 @@ def _priority_check_metrics(
         selected_metrics["status"] = "insufficient_evidence"
         selected_metrics["ready"] = False
         selected_metrics["blockers"] = ["standalone_task_count_below_minimum"]
+    if rejected_standalone:
+        selected_metrics["status"] = "insufficient_evidence"
+        selected_metrics["ready"] = False
+        selected_metrics["blockers"] = sorted(
+            set(selected_metrics["blockers"] + ["capability_run_admission_rejected"])
+        )
     return {
         "check_id": check_id,
         **selected_metrics,
@@ -379,6 +414,7 @@ def _priority_check_metrics(
             composite_observation_count + len(matching_standalone)
         ),
         "observed_standalone_capability_run_count": len(matching_standalone),
+        "rejected_standalone_capability_run_count": len(rejected_standalone),
         "excluded_standalone_below_minimum_task_count": len(
             undersized_standalone
         ),

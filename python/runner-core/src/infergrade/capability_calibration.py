@@ -13,7 +13,9 @@ from statistics import mean, median
 from typing import Any, Dict, Iterable, List, Optional
 
 from infergrade.benchmark_catalog import check_index, load_capability_catalog, surface_score_policy_index
+from infergrade.capability_contract import validate_current_capability_run_artifact
 from infergrade.statistical_bounds import wilson_score_upper_bound
+from infergrade.utils import stable_hash
 
 
 DEFAULT_POLICY = {
@@ -65,12 +67,47 @@ def extract_calibration_observations(
     score_version: Optional[str] = None,
     benchmark_id: Optional[str] = None,
     catalog: Optional[Dict[str, Any]] = None,
+    rejected_capability_runs: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     observations: List[Dict[str, Any]] = []
     checks = check_index(catalog) if catalog else {}
     for document in documents:
         source = str(document.get("_source") or "")
         if document.get("artifact_kind") == "capability_run":
+            admission_errors = validate_current_capability_run_artifact(document)
+            if admission_errors:
+                protocol = document.get("protocol")
+                protocol = protocol if isinstance(protocol, dict) else {}
+                rejected_benchmark_id = str(protocol.get("task_version") or "")
+                check = checks.get(rejected_benchmark_id) or {}
+                evidence = document.get("evidence")
+                evidence = evidence if isinstance(evidence, dict) else {}
+                source_fingerprint = stable_hash(source) if source else None
+                rejected = {
+                    "observation_id": str(
+                        document.get("capability_run_id")
+                        or "rejected_%s" % (source_fingerprint or "unknown")
+                    ),
+                    "score_version": (
+                        "benchmark:%s:%s"
+                        % (
+                            rejected_benchmark_id,
+                            protocol.get("fixture_revision") or "unknown",
+                        )
+                        if rejected_benchmark_id
+                        else None
+                    ),
+                    "benchmark_id": rejected_benchmark_id or None,
+                    "surface_id": check.get("surface_id") or evidence.get("surface"),
+                    "admission_status": "rejected",
+                    "admission_errors": admission_errors,
+                    "artifact_spec_version": document.get("artifact_spec_version"),
+                    "source_fingerprint": source_fingerprint,
+                }
+                observations.append(rejected)
+                if rejected_capability_runs is not None:
+                    rejected_capability_runs.append(dict(rejected))
+                continue
             protocol = dict(document.get("protocol") or {})
             observation = _component_observation(
                 document,
@@ -124,9 +161,15 @@ def extract_calibration_observations(
                 "source": source,
             }
         )
+    rejected_observations = [
+        item for item in observations if item.get("admission_status") == "rejected"
+    ]
+    admitted_observations = [
+        item for item in observations if item.get("admission_status") != "rejected"
+    ]
     deduplicated_by_key: Dict[Any, Dict[str, Any]] = {}
     key_order = []
-    for item in observations:
+    for item in admitted_observations:
         key = (item.get("score_version"), _observation_scope(str(item.get("source") or "")) or item.get("observation_id"))
         existing = deduplicated_by_key.get(key)
         if existing is None:
@@ -146,11 +189,27 @@ def extract_calibration_observations(
         if conflicts:
             existing = dict(existing, integrity_conflicts=conflicts)
         deduplicated_by_key[key] = existing
-    deduplicated = [deduplicated_by_key[key] for key in key_order]
+    deduplicated = [deduplicated_by_key[key] for key in key_order] + rejected_observations
     if score_version:
-        return [item for item in deduplicated if item.get("score_version") == score_version]
+        return [
+            item
+            for item in deduplicated
+            if item.get("score_version") == score_version
+            or (
+                item.get("admission_status") == "rejected"
+                and item.get("score_version") is None
+            )
+        ]
     if benchmark_id:
-        return [item for item in deduplicated if item.get("benchmark_id") == benchmark_id]
+        return [
+            item
+            for item in deduplicated
+            if item.get("benchmark_id") == benchmark_id
+            or (
+                item.get("admission_status") == "rejected"
+                and item.get("benchmark_id") is None
+            )
+        ]
     return deduplicated
 
 
@@ -262,6 +321,7 @@ def _component_observation(
     )
     return {
         "observation_id": str(document.get("capability_run_id") or source),
+        "admission_status": "current_verified",
         "score_version": "benchmark:%s:%s" % (benchmark_id, protocol.get("fixture_revision") or "unknown"),
         "benchmark_id": benchmark_id,
         "surface_id": _nested(document, "evidence", "surface"),
@@ -329,7 +389,19 @@ def audit_capability_observations(
     policy: Optional[Dict[str, Any]] = None,
     catalog: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    matching = [item for item in observations if item.get("score_version") == score_version and _number(item.get("score")) is not None]
+    relevant = [item for item in observations if item.get("score_version") == score_version]
+    rejected = [
+        item
+        for item in observations
+        if item.get("admission_status") == "rejected"
+        and item.get("score_version") in (None, score_version)
+    ]
+    matching = [
+        item
+        for item in relevant
+        if item.get("admission_status") != "rejected"
+        and _number(item.get("score")) is not None
+    ]
     integrity_conflicts = [item for item in matching if item.get("integrity_conflicts")]
     eligible = [item for item in matching if not item.get("integrity_conflicts")]
     minimum_task_count = int((policy or {}).get("minimum_task_count") or 0)
@@ -428,6 +500,7 @@ def audit_capability_observations(
     metrics = {
         "observation_count": count,
         "integrity_conflict_count": len(integrity_conflicts),
+        "rejected_capability_run_count": len(rejected),
         "excluded_below_minimum_task_count": len(eligible) - len(selected),
         "model_family_count": len([name for name in families if name != "unknown"]),
         "parameter_band_count": len([name for name in bands if name != "unknown"]),
@@ -478,6 +551,8 @@ def audit_capability_observations(
     blockers = []
     if integrity_conflicts:
         blockers.append("duplicate_observation_integrity_conflict")
+    if rejected:
+        blockers.append("capability_run_admission_rejected")
     _minimum_gate(blockers, metrics, effective_policy, "observation_count", "minimum_observations")
     _minimum_gate(blockers, metrics, effective_policy, "model_family_count", "minimum_model_families")
     _minimum_gate(blockers, metrics, effective_policy, "parameter_band_count", "minimum_parameter_bands")
@@ -602,7 +677,7 @@ def audit_capability_observations(
     insufficient = any(item.startswith("insufficient_") for item in blockers)
     status = (
         "evidence_integrity_risk"
-        if integrity_conflicts
+        if integrity_conflicts or rejected
         else ("insufficient_calibration" if insufficient else ("saturation_or_concentration_risk" if blockers else "calibrated_headroom"))
     )
     return {
