@@ -360,6 +360,15 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("VERSION is unchanged; this is a version-neutral source promotion.", workflow)
         self.assertIn("python3 ./scripts/check_version_bump.py --base-ref origin/main", workflow)
 
+    def test_linux_package_index_updates_have_bounded_official_mirror_fallbacks(self):
+        for filename in ("ci.yml", "desktop-platform-smoke.yml"):
+            workflow = (ROOT / ".github" / "workflows" / filename).read_text(encoding="utf-8")
+            with self.subTest(filename=filename):
+                self.assertIn("timeout --kill-after=15s 180s apt-get", workflow)
+                self.assertIn("/etc/apt/apt-mirrors.txt", workflow)
+                self.assertIn("https://archive.ubuntu.com/ubuntu", workflow)
+                self.assertIn("Hosted mirror stalled", workflow)
+
     def test_release_version_guard_requires_strict_semver_forward_progress(self):
         self.assertEqual(parse_release_version("0.3.36"), (0, 3, 36))
         validate_forward_version("0.3.37", "0.3.36")
