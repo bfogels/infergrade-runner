@@ -1,5 +1,5 @@
 {
-  "contract_version": "0.3.34",
+  "contract_version": "0.3.35",
   "publisher": "infergrade-runner",
   "ontology_source": "schemas/json/model_ontology.schema.json",
   "schema_files": [
@@ -44,6 +44,7 @@
     "docs/input_output_spec.md",
     "docs/local_benchmark_methodology.md",
     "docs/local_capability_score.md",
+    "docs/model_quant_identity.md",
     "docs/managed_llama_cpp_runtime.md",
     "docs/runtime_catalog_operations.md",
     "docs/schema_draft.md",

@@ -4,17 +4,20 @@ import re
 from typing import Any, Dict, Optional, Tuple
 
 from infergrade.models import RunRequest
+from infergrade.quant_identity import (
+    ONTOLOGY_IDENTITY_VERSION,
+    artifact_source_identity_payload,
+    infer_artifact_source,
+    quantization_identity,
+)
 from infergrade.utils import slugify, stable_hash
 
 
 _PARAMETER_SCALE_RE = re.compile(r"-(\d+(?:\.\d+)?)b(?:-|$)", re.IGNORECASE)
-_WEIGHT_PRECISION_RE = re.compile(r"q(\d+(?:\.\d+)?)", re.IGNORECASE)
-_GGUF_QUANTIZATION_SCHEME_RE = re.compile(
-    r"(?<![a-z0-9])((?:iq|tq|q)\d+(?:_[a-z0-9]+)*)(?![a-z0-9])",
+_WEIGHT_PRECISION_RE = re.compile(
+    r"(?:i?q|int|w|(?:nv|mx)?fp|bf)(\d+(?:\.\d+)?)",
     re.IGNORECASE,
 )
-
-
 def resolve_quant_format(artifact: str, backend: str) -> Optional[str]:
     if artifact:
         lowered = artifact.lower()
@@ -24,6 +27,10 @@ def resolve_quant_format(artifact: str, backend: str) -> Optional[str]:
             return "awq"
         if ".gptq" in lowered or "gptq" in lowered:
             return "gptq"
+        if lowered.endswith(".safetensors"):
+            return "safetensors"
+    if backend == "vllm":
+        return "safetensors"
     return None
 
 
@@ -93,27 +100,19 @@ def _infer_quantization_family(quant_label: Optional[str], quant_format: Optiona
         return "awq"
     if "gptq" in lowered:
         return "gptq"
-    if "_k_" in lowered or "q2_k" in lowered or "q3_k" in lowered or "q4_k" in lowered or "q5_k" in lowered or "q6_k" in lowered:
+    if re.search(r"(?:^|_)q?\d+_k(?:_|$)", lowered):
         return "k_quant"
     if "iq" in lowered:
         return "i_quant"
+    if lowered.startswith("int"):
+        return "int_quant"
+    if lowered.startswith("w") and "a" in lowered:
+        return "weight_activation_quant"
+    if lowered.startswith(("fp", "bf", "nvfp", "mxfp")):
+        return "floating_point_quant"
     if quant_format == "gguf":
         return "gguf"
     return None
-
-
-def _infer_quantization_scheme(quant_label: Optional[str], quant_format: Optional[str]) -> Optional[str]:
-    if quant_label:
-        label = os.path.splitext(os.path.basename(quant_label))[0]
-        lowered = label.lower()
-        if "awq" in lowered:
-            return "awq"
-        if "gptq" in lowered:
-            return "gptq"
-        match = _GGUF_QUANTIZATION_SCHEME_RE.search(lowered)
-        if match:
-            return match.group(1)
-    return quant_format
 
 
 def _stable_named_id(prefix: str, primary_label: Optional[str], payload: Dict[str, Any]) -> str:
@@ -130,15 +129,45 @@ def build_ontology(request: RunRequest, adapter_version: str) -> Dict[str, Any]:
     family_name = hints.get("family_name") or _infer_family_name(checkpoint_name)
     parameter_scale = hints.get("parameter_scale") or _infer_parameter_scale(checkpoint_name)
     training_stage = hints.get("training_stage") or _infer_training_stage(checkpoint_name)
-    quant_input = request.quant_artifact_filename or request.quant_artifact or request.quant_artifact_resolved_path or ""
+    quant_input = (
+        request.quant_artifact_filename
+        or request.quant_artifact
+        or request.quant_artifact_resolved_path
+        or (request.model if request.backend == "vllm" else "")
+    )
     quant_label = hints.get("quantization_label") or (os.path.basename(quant_input) if quant_input else None)
-    quant_format = hints.get("quantization_format") or resolve_quant_format(quant_input, request.backend)
+    inferred_quant_format = next(
+        (
+            resolved
+            for value in (
+                request.quant_artifact,
+                request.quant_artifact_filename,
+                request.quant_artifact_resolved_path,
+                request.model if request.backend == "vllm" else None,
+            )
+            for resolved in (resolve_quant_format(str(value), "") if value else None,)
+            if resolved
+        ),
+        resolve_quant_format("", request.backend),
+    )
+    quant_format = hints.get("quantization_format") or inferred_quant_format
     quantization_status = "quantized" if request.quant_artifact else "unknown"
-    quantization_family = hints.get("quantization_family") or _infer_quantization_family(quant_label, quant_format)
-    quantization_scheme = hints.get("quantization_scheme") or _infer_quantization_scheme(quant_label, quant_format)
+    quant_identity = quantization_identity(
+        hints.get("quantization_scheme"),
+        quant_label,
+        quant_format,
+        inferred_quant_format,
+    )
+    quantization_scheme = quant_identity["quantization_scheme"]
+    quantization_family = hints.get("quantization_family") or _infer_quantization_family(
+        quantization_scheme or quant_label,
+        quant_format,
+    )
+    if quant_identity["quantization_id"]:
+        quantization_status = "quantized"
     weight_precision_bits = hints.get("weight_precision_bits")
     if weight_precision_bits is None:
-        weight_precision_bits = _infer_weight_precision_bits(quant_label)
+        weight_precision_bits = _infer_weight_precision_bits(quantization_scheme or quant_label)
 
     family_id = hints.get("family_id") or _stable_named_id(
         "fam",
@@ -151,15 +180,30 @@ def build_ontology(request: RunRequest, adapter_version: str) -> Dict[str, Any]:
         {"model_ref": request.model, "checkpoint_name": checkpoint_name},
     )
     artifact_reference = request.quant_artifact or request.model
-    artifact_id = _stable_named_id(
-        "art",
-        quant_label or checkpoint_name,
-        {"artifact": artifact_reference, "quant_label": quant_label},
-    )
     artifact_sha256 = (
         request.quant_artifact_sha256
         or resolve_artifact_sha256(request.quant_artifact_resolved_path)
         or resolve_artifact_sha256(request.quant_artifact)
+    )
+    artifact_source = infer_artifact_source(
+        artifact_reference,
+        request.quant_artifact_source,
+        request.quant_artifact_revision,
+        allow_plain_hf_repo=not request.quant_artifact and request.backend == "vllm",
+    )
+    artifact_source_id = _stable_named_id(
+        "src",
+        artifact_source.get("repository_id") or artifact_source.get("publisher"),
+        artifact_source_identity_payload(artifact_source),
+    ) if any(artifact_source.values()) else None
+    artifact_id = _stable_named_id(
+        "art",
+        quant_label or checkpoint_name,
+        {
+            "artifact": artifact_reference,
+            "quant_label": quant_label,
+            "artifact_source": artifact_source_identity_payload(artifact_source),
+        },
     )
     runtime_binding_id = _stable_named_id(
         "rt",
@@ -184,6 +228,7 @@ def build_ontology(request: RunRequest, adapter_version: str) -> Dict[str, Any]:
 
     return {
         "ontology_version": "0.1-draft",
+        "ontology_identity_version": ONTOLOGY_IDENTITY_VERSION,
         "model_family": {
             "family_id": family_id,
             "family_name": family_name,
@@ -204,14 +249,20 @@ def build_ontology(request: RunRequest, adapter_version: str) -> Dict[str, Any]:
             "quantization_label": quant_label,
             "quantization_family": quantization_family,
             "quantization_scheme": quantization_scheme,
+            "quantization_scheme_raw": quant_identity["quantization_scheme_raw"],
+            "quantization_id": quant_identity["quantization_id"],
+            "canonicalization_status": quant_identity["canonicalization_status"],
+            "canonicalization_version": quant_identity["canonicalization_version"],
             "weight_precision_bits": weight_precision_bits,
         },
         "artifact": {
             "artifact_id": artifact_id,
-            "artifact_kind": "quantized_weights" if request.quant_artifact else "model_reference",
+            "artifact_kind": "quantized_weights" if request.quant_artifact or quant_identity["quantization_id"] else "model_reference",
             "artifact_uri": artifact_reference,
             "artifact_filename": request.quant_artifact_filename or (os.path.basename(quant_input) if request.quant_artifact else None),
             "artifact_sha256": artifact_sha256,
+            "artifact_source_id": artifact_source_id,
+            "source": artifact_source,
             "artifact_resolved_by": "server_policy" if request.quant_artifact and request.run_config_id else ("operator" if request.quant_artifact else "runner_default"),
         },
         "runtime_binding": {
