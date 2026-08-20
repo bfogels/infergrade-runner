@@ -857,6 +857,8 @@ def main(argv: Optional[list] = None) -> int:
                 quantized_weights["revision"] = request.quant_artifact_revision
             if request.quant_artifact_download_size_bytes:
                 quantized_weights["download_size_bytes"] = request.quant_artifact_download_size_bytes
+            if request.quant_artifact_source:
+                quantized_weights["source"] = dict(request.quant_artifact_source)
             request_payload["artifacts"] = {"quantized_weights": quantized_weights}
         if request.backend_image or request.quant_artifact_cache_dir or request.llama_cpp_cli_path or request.llama_cpp_server_path or request.llama_cpp_perplexity_path:
             runtime_payload = {}

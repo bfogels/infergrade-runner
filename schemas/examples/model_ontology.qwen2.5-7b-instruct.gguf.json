@@ -1,5 +1,6 @@
 {
   "ontology_version": "0.1-draft",
+  "ontology_identity_version": "model_quant_identity_v1",
   "model_family": {
     "family_id": "fam_qwen2-5_0f9d6ac7f1",
     "family_name": "Qwen2.5",
@@ -20,6 +21,10 @@
     "quantization_label": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
     "quantization_family": "k_quant",
     "quantization_scheme": "q4_k_m",
+    "quantization_scheme_raw": "q4_k_m",
+    "quantization_id": "gguf:q4_k_m",
+    "canonicalization_status": "exact",
+    "canonicalization_version": "quant_v1",
     "weight_precision_bits": 4.0
   },
   "artifact": {
@@ -28,6 +33,14 @@
     "artifact_uri": "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
     "artifact_filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
     "artifact_sha256": "6ebea7f54d1af57d",
+    "artifact_source_id": "src_bartowski-qwen2-5-7b-instruct-gguf_2d5d923b12",
+    "source": {
+      "provider": "huggingface",
+      "repository_id": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+      "publisher": "bartowski",
+      "publisher_id": "huggingface:bartowski",
+      "revision": null
+    },
     "artifact_resolved_by": "operator"
   },
   "runtime_binding": {

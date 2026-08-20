@@ -157,7 +157,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.34")
+        self.assertEqual(manifest["contract_version"], "0.3.35")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_run_request_contract_accepts_authorized_artifact_download_size(self):
@@ -177,6 +177,12 @@ class ContractExportTests(unittest.TestCase):
                     "revision": "0123456789abcdef",
                     "sha256": "a" * 64,
                     "download_size_bytes": 123456,
+                    "source": {
+                        "provider": "huggingface",
+                        "repository_id": "example/model-GGUF",
+                        "publisher": "example",
+                        "publisher_id": "huggingface:example",
+                    },
                 }
             },
         }
