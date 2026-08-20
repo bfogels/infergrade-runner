@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from infergrade.constants import DEFAULT_GENERATION_PRESET
 from infergrade.generation_policies import REASONING_CONSTRAINT_STRESS_THINKING_POLICY_ID
@@ -18,6 +18,28 @@ from infergrade.reasoning_constraint_stress_v2 import (
     SCORING_POLICY,
     SELECTION_DIGEST_ALGORITHM,
     SELECTION_DIGEST_SHA256,
+)
+from infergrade.reasoning_constraint_stress_v2_content import (
+    BENCHMARK_ID as CONTENT_PACK_BENCHMARK_ID,
+    FAMILY_ORDER as CONTENT_PACK_FAMILY_ORDER,
+    FIXTURE_REVISION as CONTENT_PACK_FIXTURE_REVISION,
+    FULL_FIXTURE_SHA256 as CONTENT_PACK_FULL_FIXTURE_SHA256,
+    FULL_SELECTION_SHA256 as CONTENT_PACK_FULL_SELECTION_SHA256,
+    GENERATOR_ALGORITHM as CONTENT_PACK_GENERATOR_ALGORITHM,
+    GENERATOR_ID as CONTENT_PACK_GENERATOR_ID,
+    GENERATOR_REVISION as CONTENT_PACK_GENERATOR_REVISION,
+    GENERATOR_SEED_SHA256 as CONTENT_PACK_GENERATOR_SEED_SHA256,
+    LOCKED_FIXTURE_SHA256 as CONTENT_PACK_LOCKED_FIXTURE_SHA256,
+    LOCKED_FULL_SELECTION_SHA256 as CONTENT_PACK_LOCKED_FULL_SELECTION_SHA256,
+    LOCKED_GENERATOR_SEED_SHA256 as CONTENT_PACK_LOCKED_GENERATOR_SEED_SHA256,
+    LOCKED_TIER_COVERAGE as CONTENT_PACK_LOCKED_TIER_COVERAGE,
+    LOCKED_TIER_SELECTION_DIGESTS as CONTENT_PACK_LOCKED_TIER_SELECTION_DIGESTS,
+    SELECTION_DIGEST_ALGORITHM as CONTENT_PACK_SELECTION_DIGEST_ALGORITHM,
+    STRUCTURAL_LEVEL_ORDER as CONTENT_PACK_STRUCTURAL_LEVEL_ORDER,
+    TIER_COVERAGE as CONTENT_PACK_TIER_COVERAGE,
+    TIER_PREFIX_COUNTS as CONTENT_PACK_TIER_PREFIX_COUNTS,
+    TIER_SELECTION_DIGESTS as CONTENT_PACK_TIER_SELECTION_DIGESTS,
+    VARIANT_ORDER as CONTENT_PACK_VARIANT_ORDER,
 )
 
 FALLBACK_METADATA_ORDERING = {
@@ -100,10 +122,134 @@ FOUNDATION_CANARY_BENCHMARKS = {
     }
 }
 
+BENCHMARK_IDENTITY_ONLY_PREFIX = "benchmark_identity_only"
+CONTENT_PACK_METADATA_ERROR = "metadata_invalid"
+CONTENT_PACK_DISPLAY_NAME = "Reasoning constraint stress v2 content pack"
+CONTENT_PACK_DESCRIPTION = (
+    "Planned identity-only content pack: 40 SHA-derived cases across five reasoning "
+    "families and four structural levels; no adapter, runtime, score, or evidence claim."
+)
+CONTENT_PACK_CLAIM_BOUNDARY = CONTENT_PACK_DESCRIPTION
+CONTENT_PACK_SELECTION_GUIDANCE = (
+    "Future benchmark content is available for identity and coverage inspection only. "
+    "It is not runnable and must not inform current capability, score, readiness, "
+    "recommendation, or release claims."
+)
+CONTENT_PACK_SAMPLE_POLICY = (
+    "Forty generated cases arranged as five families x four structural levels x two variants; "
+    "canary, standard, and gold are exact prefixes of 5, 20, and 40 cases with locked digests "
+    "and family/level coverage. Content identity only; no execution is implemented."
+)
+CONTENT_PACK_PROMOTION_BLOCKERS = [
+    "Complete independent review of generated prompts, family oracles, and tier coverage.",
+    "Add a separately reviewed adapter only after the strict terminal policy is bound to receipts.",
+    "Run representative reasoning-capable canaries and inspect malformed-output and runtime-failure distributions before any evidence role.",
+]
+EXPECTED_CONTENT_PACK_BENCHMARK_IDS = frozenset(
+    {"reasoning_constraint_stress_v2_content_v1"}
+)
+CONTENT_PACK_BENCHMARKS = {
+    CONTENT_PACK_BENCHMARK_ID: {
+        "check_id": CONTENT_PACK_BENCHMARK_ID,
+        "identity_only": True,
+        "display_name": CONTENT_PACK_DISPLAY_NAME,
+        "description": CONTENT_PACK_DESCRIPTION,
+        "capability_facets": ["constraint_reasoning_stress_v2"],
+        "temporal_scope": "static_pinned",
+        "selection_guidance": CONTENT_PACK_SELECTION_GUIDANCE,
+        "claim_boundary": CONTENT_PACK_CLAIM_BOUNDARY,
+        "status": "planned",
+        "runnable_status": "not_runnable",
+        "maturity": "planned",
+        "default_inclusion_status": "not_default",
+        "fixture_or_dataset_revision_status": "pinned_generator_identity_only",
+        "harness_status": "fixture_generator_identity_only_not_implemented",
+        "expected_duration_token_volume_status": "not_estimated_identity_only",
+        "sandbox_requirement": "none_fixture_only",
+        "sample_policy": CONTENT_PACK_SAMPLE_POLICY,
+        "promotion_blockers": list(CONTENT_PACK_PROMOTION_BLOCKERS),
+        "evidence_kind": "capability",
+        "surface_id": "local_reasoning_capability",
+        "evidence_lane_id": "reference",
+        "suite_scope": "reference",
+        "group_id": None,
+        "runner_target": CONTENT_PACK_BENCHMARK_ID,
+        "effort_level": "deep",
+        "expected_duration_band": "not estimated",
+        "token_volume_band": "not estimated",
+        "resumability_boundary": "benchmark",
+        "execution_pattern": "fixture_generator_identity_only",
+        "score_dimension": "constraint_reasoning_stress_v2_content",
+        "primary_score_metric": "exact_signed_integer_accuracy",
+        "score_floor": 0.0,
+        "primary_score_weight": 0.0,
+        "score_role": "diagnostic_only",
+        "discrimination_status": "unreviewed",
+        "higher_is_better": True,
+        "score_policy_id": SCORING_POLICY,
+        "scoring_policy_id": SCORING_POLICY,
+        "generation_constraint_id": FINAL_ANSWER_PARSER_ID,
+        "generation_policy_id": REASONING_CONSTRAINT_STRESS_THINKING_POLICY_ID,
+        "score_breakdown_fields": [
+            "correct_count",
+            "total_count",
+            "case_accuracy",
+            "family_metrics",
+            "structural_level_metrics",
+            "parser_code_counts",
+        ],
+        "fixture_revision": CONTENT_PACK_FIXTURE_REVISION,
+        "fixture_sha256": CONTENT_PACK_LOCKED_FIXTURE_SHA256,
+        "full_fixture_sha256": CONTENT_PACK_LOCKED_FIXTURE_SHA256,
+        "generator_id": CONTENT_PACK_GENERATOR_ID,
+        "generator_revision": CONTENT_PACK_GENERATOR_REVISION,
+        "generator_algorithm": CONTENT_PACK_GENERATOR_ALGORITHM,
+        "generator_seed_sha256": CONTENT_PACK_LOCKED_GENERATOR_SEED_SHA256,
+        "selection_digest_algorithm": CONTENT_PACK_SELECTION_DIGEST_ALGORITHM,
+        "selection_sha256": CONTENT_PACK_LOCKED_FULL_SELECTION_SHA256,
+        "tier_prefix_counts": dict(CONTENT_PACK_TIER_PREFIX_COUNTS),
+        "tier_selection_digests": dict(CONTENT_PACK_LOCKED_TIER_SELECTION_DIGESTS),
+        "tier_coverage": CONTENT_PACK_LOCKED_TIER_COVERAGE,
+        "family_order": list(CONTENT_PACK_FAMILY_ORDER),
+        "structural_level_order": list(CONTENT_PACK_STRUCTURAL_LEVEL_ORDER),
+        "variant_order": list(CONTENT_PACK_VARIANT_ORDER),
+        "source": "infergrade_sha256_generated_fixture",
+        "attestation_state": "unreviewed",
+        "excluded_from_default_groups": True,
+        "excluded_from_suites": True,
+        "excluded_from_weighted_score": True,
+        "excluded_from_readiness": True,
+        "excluded_from_recommendation": True,
+        "excluded_from_release_evidence": True,
+    }
+}
+CONTENT_PACK_STATUS_BENCHMARKS = json.loads(json.dumps(CONTENT_PACK_BENCHMARKS))
+
 
 def _foundation_field_matches(actual: Any, expected: Any) -> bool:
-    """Require exact JSON scalar/container types for foundation identity fields."""
-    return type(actual) is type(expected) and actual == expected
+    """Require recursively exact JSON types and values for identity fields."""
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        if len(actual) != len(expected):
+            return False
+        for expected_key, expected_value in expected.items():
+            matching_keys = [
+                actual_key
+                for actual_key in actual
+                if type(actual_key) is type(expected_key) and actual_key == expected_key
+            ]
+            if len(matching_keys) != 1 or not _foundation_field_matches(
+                actual[matching_keys[0]], expected_value
+            ):
+                return False
+        return True
+    if isinstance(expected, (list, tuple)):
+        return len(actual) == len(expected) and all(
+            _foundation_field_matches(actual_item, expected_item)
+            for actual_item, expected_item in zip(actual, expected)
+        )
+    return actual == expected
 
 
 def repo_root() -> Path:
@@ -245,6 +391,139 @@ def _foundation_canary_placement_error(
                         if contains(suite.get("check_ids")) or contains(suite.get("default_check_ids")):
                             return FOUNDATION_CANARY_METADATA_ERROR
     return None
+
+
+def _selection_normalized_scalar(value: Any) -> str:
+    """Normalize one selection scalar exactly as request de-duplication does."""
+    return str(value or "").strip()
+
+
+def _normalized_string_occurrence_paths(
+    value: Any,
+    target: str,
+    path: Tuple[Any, ...] = (),
+) -> List[Tuple[Any, ...]]:
+    """Return target paths using selection-compatible scalar stringification."""
+    paths: List[Tuple[Any, ...]] = []
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            key_path = path + (("dict_key", key),)
+            if isinstance(key, (dict, list, tuple)):
+                paths.extend(_normalized_string_occurrence_paths(key, target, key_path))
+            elif _selection_normalized_scalar(key) == target:
+                paths.append(key_path)
+            paths.extend(_normalized_string_occurrence_paths(nested, target, path + (key,)))
+    elif isinstance(value, (list, tuple)):
+        for index, nested in enumerate(value):
+            paths.extend(_normalized_string_occurrence_paths(nested, target, path + (index,)))
+    elif _selection_normalized_scalar(value) == target:
+        paths.append(path)
+    return paths
+
+
+def _content_pack_placement_error(
+    check_id: str,
+    catalog: Dict[str, Any],
+) -> Optional[str]:
+    """Allow the identity string only in its two exact raw catalog rows."""
+    raw_checks = catalog.get("checks")
+    raw_statuses = catalog.get("benchmark_status_matrix")
+    if not isinstance(raw_checks, list) or not isinstance(raw_statuses, list):
+        return CONTENT_PACK_METADATA_ERROR
+    check_rows = [
+        index
+        for index, item in enumerate(raw_checks)
+        if isinstance(item, dict) and item.get("check_id") == check_id
+    ]
+    status_rows = [
+        index
+        for index, item in enumerate(raw_statuses)
+        if isinstance(item, dict) and item.get("check_id") == check_id
+    ]
+    # Count on raw rows before constructing last-write-wins indexes.
+    if len(check_rows) != 1 or len(status_rows) != 1:
+        return CONTENT_PACK_METADATA_ERROR
+    allowed_paths = {
+        ("checks", check_rows[0], "check_id"),
+        ("checks", check_rows[0], "runner_target"),
+        ("benchmark_status_matrix", status_rows[0], "check_id"),
+        ("benchmark_status_matrix", status_rows[0], "runner_target"),
+    }
+    try:
+        occurrence_paths = _normalized_string_occurrence_paths(catalog, check_id)
+        occurrence_path_set = set(occurrence_paths)
+    except Exception:
+        return CONTENT_PACK_METADATA_ERROR
+    if len(occurrence_paths) != len(allowed_paths) or occurrence_path_set != allowed_paths:
+        return CONTENT_PACK_METADATA_ERROR
+    return None
+
+
+def _content_pack_metadata_error(
+    check_id: str,
+    catalog: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Return a stable error when the code-registered content identity drifts."""
+    check_key = str(check_id or "").strip()
+    if check_key not in EXPECTED_CONTENT_PACK_BENCHMARK_IDS:
+        return None
+    if (
+        set(CONTENT_PACK_BENCHMARKS) != EXPECTED_CONTENT_PACK_BENCHMARK_IDS
+        or set(CONTENT_PACK_STATUS_BENCHMARKS) != EXPECTED_CONTENT_PACK_BENCHMARK_IDS
+        or CONTENT_PACK_BENCHMARK_ID not in EXPECTED_CONTENT_PACK_BENCHMARK_IDS
+    ):
+        return CONTENT_PACK_METADATA_ERROR
+    expected_check = CONTENT_PACK_BENCHMARKS.get(check_key)
+    expected_status = CONTENT_PACK_STATUS_BENCHMARKS.get(check_key)
+    if not isinstance(expected_check, dict) or not isinstance(expected_status, dict):
+        return CONTENT_PACK_METADATA_ERROR
+    payload = catalog or load_capability_catalog()
+    if _content_pack_placement_error(check_key, payload):
+        return CONTENT_PACK_METADATA_ERROR
+    checks = check_index(payload)
+    statuses = benchmark_status_index(payload)
+    check = checks.get(check_key)
+    status = statuses.get(check_key)
+    if not isinstance(check, dict) or not isinstance(status, dict):
+        return CONTENT_PACK_METADATA_ERROR
+    marked_checks = {
+        item_id for item_id, item in checks.items() if item.get("identity_only") is True
+    }
+    marked_statuses = {
+        item_id for item_id, item in statuses.items() if item.get("identity_only") is True
+    }
+    if (
+        marked_checks != EXPECTED_CONTENT_PACK_BENCHMARK_IDS
+        or marked_statuses != EXPECTED_CONTENT_PACK_BENCHMARK_IDS
+        or not _foundation_field_matches(check, expected_check)
+        or not _foundation_field_matches(status, expected_status)
+    ):
+        return CONTENT_PACK_METADATA_ERROR
+    # The generated module itself is part of the identity.  If a future code
+    # edit changes bytes without updating the lock, catalog validation fails.
+    if (
+        CONTENT_PACK_GENERATOR_SEED_SHA256 != CONTENT_PACK_LOCKED_GENERATOR_SEED_SHA256
+        or CONTENT_PACK_FULL_FIXTURE_SHA256 != CONTENT_PACK_LOCKED_FIXTURE_SHA256
+        or CONTENT_PACK_FULL_SELECTION_SHA256 != CONTENT_PACK_LOCKED_FULL_SELECTION_SHA256
+        or CONTENT_PACK_TIER_SELECTION_DIGESTS != CONTENT_PACK_LOCKED_TIER_SELECTION_DIGESTS
+        or CONTENT_PACK_TIER_COVERAGE != CONTENT_PACK_LOCKED_TIER_COVERAGE
+    ):
+        return CONTENT_PACK_METADATA_ERROR
+    if CONTENT_PACK_SELECTION_DIGEST_ALGORITHM != SELECTION_DIGEST_ALGORITHM:
+        return CONTENT_PACK_METADATA_ERROR
+    return None
+
+
+def _raise_on_malformed_content_pack_metadata(
+    catalog: Optional[Dict[str, Any]] = None,
+) -> None:
+    payload = catalog or load_capability_catalog()
+    for check_id in EXPECTED_CONTENT_PACK_BENCHMARK_IDS:
+        if _content_pack_metadata_error(check_id, payload):
+            raise ValueError(
+                "%s:%s:%s"
+                % (BENCHMARK_IDENTITY_ONLY_PREFIX, check_id, CONTENT_PACK_METADATA_ERROR)
+            )
 
 
 def _foundation_canary_metadata_error(
@@ -391,6 +670,12 @@ def benchmark_evidence_exclusion_reason(
 ) -> Optional[str]:
     """Return why a check cannot enter score/readiness/recommendation evidence."""
     payload = catalog or load_capability_catalog()
+    check_key = str(check_id or "").strip()
+    if check_key in EXPECTED_CONTENT_PACK_BENCHMARK_IDS:
+        content_pack_error = _content_pack_metadata_error(check_key, payload)
+        if content_pack_error:
+            return "%s:%s" % (BENCHMARK_IDENTITY_ONLY_PREFIX, content_pack_error)
+        return "%s:planned" % BENCHMARK_IDENTITY_ONLY_PREFIX
     quarantined = benchmark_quarantine_reason(check_id, payload)
     if quarantined:
         return quarantined
@@ -438,6 +723,7 @@ def reject_tier_restricted_benchmarks(
     """Reject canary-only checks after explicit and inferred tier derivation."""
     payload = catalog or load_capability_catalog()
     _raise_on_malformed_foundation_canary_metadata(payload)
+    _raise_on_malformed_content_pack_metadata(payload)
     checks = check_index(payload)
     derived_tier = derive_tier_from_selection(
         check_ids,
@@ -562,6 +848,11 @@ def validate_benchmark_legitimacy_metadata(catalog: Optional[Dict[str, Any]] = N
         if _foundation_canary_metadata_error(check_id, payload):
             failures.append(
                 f"{check_id}: code-registered foundation canary metadata must match its paired check/status contract"
+            )
+    for check_id in EXPECTED_CONTENT_PACK_BENCHMARK_IDS:
+        if _content_pack_metadata_error(check_id, payload):
+            failures.append(
+                f"{check_id}: code-registered content identity metadata must match its paired check/status contract"
             )
     for check_id, declaration in quarantine_payload.items():
         if check_id not in declared_checks:
@@ -1052,6 +1343,7 @@ def capability_benchmark_ids_for_request(
 ) -> List[str]:
     """Return selected capability benchmark ids."""
     payload = catalog or load_capability_catalog()
+    _raise_on_malformed_content_pack_metadata(payload)
     checks = check_index(payload)
     selection = resolve_request_selection(request, payload)
     return [
@@ -1068,6 +1360,7 @@ def deployment_profile_ids_for_request(
 ) -> List[str]:
     """Return selected deployment profile ids."""
     payload = catalog or load_capability_catalog()
+    _raise_on_malformed_content_pack_metadata(payload)
     checks = check_index(payload)
     selection = resolve_request_selection(request, payload)
     return [
@@ -1084,6 +1377,7 @@ def fidelity_enabled_for_request(
 ) -> bool:
     """Return whether the request explicitly includes fidelity evidence."""
     payload = catalog or load_capability_catalog()
+    _raise_on_malformed_content_pack_metadata(payload)
     checks = check_index(payload)
     selection = resolve_request_selection(request, payload)
     return any(
@@ -1100,6 +1394,7 @@ def benchmark_scope_summary_for_selection(
     """Summarize whether a selected benchmark set is decision-sized or reference-sized."""
     payload = catalog or load_capability_catalog()
     _raise_on_malformed_foundation_canary_metadata(payload)
+    _raise_on_malformed_content_pack_metadata(payload)
     checks = check_index(payload)
     selected_ids = [item for item in _dedupe_strings(check_ids) if item in checks]
     selected = [checks[item] for item in selected_ids]
@@ -1132,15 +1427,27 @@ def benchmark_scope_summary_for_selection(
             "reference_checks_included": False,
         }
     if not selected:
+        content_identity_ids = [
+            item for item in excluded_ids
+            if item in EXPECTED_CONTENT_PACK_BENCHMARK_IDS
+        ]
         return {
             "scope": "identity_only",
-            "scope_label": "Foundation identity only",
+            "scope_label": (
+                "Future benchmark content identity only"
+                if content_identity_ids
+                else "Foundation identity only"
+            ),
             "identity_only": True,
             "eligible_benchmark_check_ids": [],
             "identity_only_benchmark_check_ids": excluded_ids,
             "excluded_benchmark_check_ids": excluded_ids,
             "evidence_exclusion_reasons": exclusion_reasons,
-            "selection_guidance": FOUNDATION_CANARY_SELECTION_GUIDANCE,
+            "selection_guidance": (
+                CONTENT_PACK_SELECTION_GUIDANCE
+                if content_identity_ids
+                else FOUNDATION_CANARY_SELECTION_GUIDANCE
+            ),
             "effort_level": "short",
             "expected_duration_band": "not estimated",
             "token_volume_band": "not estimated",
@@ -1189,6 +1496,7 @@ def capability_coverage_guidance_for_selection(
     """Return user-facing coverage guidance without treating unknown as failure."""
     payload = catalog or load_capability_catalog()
     _raise_on_malformed_foundation_canary_metadata(payload)
+    _raise_on_malformed_content_pack_metadata(payload)
     checks = check_index(payload)
     selected_ids = [item for item in _dedupe_strings(check_ids) if item in checks]
     excluded_ids = [
@@ -1211,6 +1519,8 @@ def capability_coverage_guidance_for_selection(
     planned = [
         _planned_benchmark_candidate_payload(payload, item)
         for item in list(payload.get("planned_benchmark_candidates") or [])
+        if str(item.get("check_id") or "").strip()
+        not in EXPECTED_CONTENT_PACK_BENCHMARK_IDS
     ] + [
         _planned_benchmark_candidate_payload(
             payload,
@@ -1225,6 +1535,7 @@ def capability_coverage_guidance_for_selection(
         )
         for check_id, check in checks.items()
         if check.get("status") == "planned"
+        and not is_benchmark_excluded_from_evidence(check_id, payload)
     ]
     missing_core = []
     for kind, label in (
@@ -1338,27 +1649,34 @@ def _selected_score_policies(check_ids: List[str], catalog: Dict[str, Any]) -> L
         if item.get("score_policy_id")
     }
     selected_policy_ids = _dedupe_strings(
-        [checks[item].get("score_policy_id") for item in _dedupe_strings(check_ids) if item in checks]
+        [
+            checks[item].get("score_policy_id")
+            for item in _dedupe_strings(check_ids)
+            if item in checks and not is_benchmark_excluded_from_evidence(item, catalog)
+        ]
     )
     return [policies[policy_id] for policy_id in selected_policy_ids if policy_id in policies]
 
 
 def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dict[str, Any]) -> Dict[str, Any]:
     excluded = is_benchmark_excluded_from_evidence(check_id, catalog)
-    foundation = FOUNDATION_CANARY_BENCHMARKS.get(check_id) if excluded else None
+    identity = (
+        FOUNDATION_CANARY_BENCHMARKS.get(check_id)
+        or CONTENT_PACK_BENCHMARKS.get(check_id)
+    ) if excluded else None
     lane_id = None if excluded else _evidence_lane_id_for_item(catalog, check)
     lane = {} if excluded else _evidence_lane_payload(catalog, lane_id)
     legitimacy_status = benchmark_status_index(catalog).get(check_id, {})
     return {
         "check_id": check_id,
-        "display_name": foundation.get("display_name") if foundation else check.get("display_name"),
-        "description": foundation.get("description") if foundation else check.get("description"),
+        "display_name": identity.get("display_name") if identity else check.get("display_name"),
+        "description": identity.get("description") if identity else check.get("description"),
         "evidence_kind": check.get("evidence_kind"),
         "surface_id": check.get("surface_id"),
         "evidence_lane_id": lane_id,
         "evidence_lane_label": lane.get("display_name"),
         "claim_strength": lane.get("claim_strength"),
-        "claim_boundary": foundation.get("claim_boundary") if foundation else lane.get("claim_boundary"),
+        "claim_boundary": identity.get("claim_boundary") if identity else lane.get("claim_boundary"),
         "group_id": check.get("group_id"),
         "suite_scope": None if excluded else check.get("suite_scope"),
         "effort_level": check.get("effort_level"),
@@ -1366,7 +1684,7 @@ def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dic
         "token_volume_band": check.get("token_volume_band"),
         "resumability_boundary": check.get("resumability_boundary"),
         "execution_pattern": check.get("execution_pattern"),
-        "selection_guidance": foundation.get("selection_guidance") if foundation else check.get("selection_guidance"),
+        "selection_guidance": identity.get("selection_guidance") if identity else check.get("selection_guidance"),
         "status": check.get("status", "available"),
         "score_dimension": check.get("score_dimension"),
         "primary_score_metric": check.get("primary_score_metric"),
@@ -1391,8 +1709,8 @@ def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dic
         "harness_status": legitimacy_status.get("harness_status"),
         "sample_policy": legitimacy_status.get("sample_policy"),
         "benchmark_claim_boundary": (
-            foundation.get("claim_boundary")
-            if foundation
+            identity.get("claim_boundary")
+            if identity
             else legitimacy_status.get("claim_boundary")
         ),
         "quarantine_reason_code": benchmark_quarantine_reason(check_id, catalog),
@@ -1533,7 +1851,7 @@ def _dedupe_strings(values: Optional[List[Any]]) -> List[str]:
     """Return de-duplicated, non-empty string values while preserving order."""
     cleaned: List[str] = []
     for value in list(values or []):
-        normalized = str(value or "").strip()
+        normalized = _selection_normalized_scalar(value)
         if normalized and normalized not in cleaned:
             cleaned.append(normalized)
     return cleaned
