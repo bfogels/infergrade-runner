@@ -15,6 +15,10 @@
   ],
   "properties": {
     "ontology_version": { "type": "string" },
+    "ontology_identity_version": {
+      "type": "string",
+      "enum": ["model_quant_identity_v1"]
+    },
     "model_family": {
       "type": "object",
       "required": ["family_id", "family_name", "primary_modality"],
@@ -51,6 +55,13 @@
         "quantization_label": { "type": ["string", "null"] },
         "quantization_family": { "type": ["string", "null"] },
         "quantization_scheme": { "type": ["string", "null"] },
+        "quantization_scheme_raw": { "type": ["string", "null"] },
+        "quantization_id": { "type": ["string", "null"] },
+        "canonicalization_status": {
+          "type": ["string", "null"],
+          "enum": ["exact", "alias", "generic", "unknown", "conflict", null]
+        },
+        "canonicalization_version": { "type": ["string", "null"] },
         "weight_precision_bits": { "type": ["number", "null"], "minimum": 0 }
       },
       "additionalProperties": false
@@ -64,6 +75,18 @@
         "artifact_uri": { "type": "string" },
         "artifact_filename": { "type": ["string", "null"] },
         "artifact_sha256": { "type": ["string", "null"] },
+        "artifact_source_id": { "type": ["string", "null"] },
+        "source": {
+          "type": ["object", "null"],
+          "properties": {
+            "provider": { "type": ["string", "null"] },
+            "repository_id": { "type": ["string", "null"] },
+            "publisher": { "type": ["string", "null"] },
+            "publisher_id": { "type": ["string", "null"] },
+            "revision": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        },
         "artifact_resolved_by": { "type": "string", "enum": ["operator", "runner_default", "server_policy"] }
       },
       "additionalProperties": false

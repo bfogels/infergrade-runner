@@ -183,6 +183,7 @@ def request_from_dict(data: Dict[str, Any], simulate: bool = True, run_config_so
         quant_artifact_filename=quantized_weights.get("filename"),
         quant_artifact_revision=quantized_weights.get("revision"),
         quant_artifact_download_size_bytes=quantized_weights.get("download_size_bytes"),
+        quant_artifact_source=dict(quantized_weights.get("source") or {}),
         quant_artifact_cache_dir=runtime.get("artifact_cache_dir"),
         backend_image=runtime.get("backend_image"),
         llama_cpp_cli_path=runtime.get("llama_cpp_cli_path") or runtime.get("llama_cpp_cli"),
@@ -267,4 +268,6 @@ def request_to_dict(request: RunRequest) -> Dict[str, Any]:
         payload["deployment_measured_runs"] = request.deployment_measured_runs
     if request.quant_artifact_download_size_bytes is not None:
         payload["quant_artifact_download_size_bytes"] = request.quant_artifact_download_size_bytes
+    if request.quant_artifact_source:
+        payload["quant_artifact_source"] = dict(request.quant_artifact_source)
     return payload

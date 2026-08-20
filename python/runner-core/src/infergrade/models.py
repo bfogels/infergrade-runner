@@ -17,6 +17,7 @@ class RunRequest:
     quant_artifact_filename: Optional[str] = None
     quant_artifact_revision: Optional[str] = None
     quant_artifact_download_size_bytes: Optional[int] = None
+    quant_artifact_source: Dict[str, Any] = field(default_factory=dict)
     quant_artifact_resolved_path: Optional[str] = None
     quant_artifact_cache_dir: Optional[str] = None
     backend_image: Optional[str] = None

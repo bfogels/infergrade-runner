@@ -97,6 +97,12 @@ class RequestResolutionTests(unittest.TestCase):
                     "filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
                     "revision": "main",
                     "download_size_bytes": 123456,
+                    "source": {
+                        "provider": "huggingface",
+                        "repository_id": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+                        "publisher": "bartowski",
+                        "publisher_id": "huggingface:bartowski",
+                    },
                 }
             },
             "runtime": {
@@ -125,6 +131,11 @@ class RequestResolutionTests(unittest.TestCase):
         self.assertEqual(request.quant_artifact_filename, "Qwen2.5-7B-Instruct-Q4_K_M.gguf")
         self.assertEqual(request.quant_artifact_revision, "main")
         self.assertEqual(request.quant_artifact_download_size_bytes, 123456)
+        self.assertEqual(request.quant_artifact_source["publisher_id"], "huggingface:bartowski")
+        self.assertEqual(
+            request_to_dict(request)["quant_artifact_source"],
+            request.quant_artifact_source,
+        )
         self.assertEqual(request.deployment_warmup_runs, 2)
         self.assertEqual(request.deployment_measured_runs, 7)
         self.assertEqual(request.backend_image, "infergrade-llama-cpp:local")

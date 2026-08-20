@@ -89,7 +89,18 @@
             "sha256": { "type": "string" },
             "filename": { "type": "string" },
             "revision": { "type": "string" },
-            "download_size_bytes": { "type": "integer", "minimum": 1 }
+            "download_size_bytes": { "type": "integer", "minimum": 1 },
+            "source": {
+              "type": "object",
+              "properties": {
+                "provider": { "type": "string", "minLength": 1 },
+                "repository_id": { "type": "string", "minLength": 1 },
+                "publisher": { "type": "string", "minLength": 1 },
+                "publisher_id": { "type": "string", "minLength": 1 },
+                "revision": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
           },
           "additionalProperties": false
         }
