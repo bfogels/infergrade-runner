@@ -43,6 +43,7 @@ from infergrade.support import build_support_export, write_support_export
 from infergrade.templates import render_run_config_template, render_run_request_template
 from infergrade.transport import (
     InsecureApiUrlError,
+    RunnerConnectionError,
     RunnerTokenInvalidError,
     fetch_run_config,
     list_run_configs,
@@ -1093,6 +1094,8 @@ def main(argv: Optional[list] = None) -> int:
                 )
             except RunnerTokenInvalidError as exc:
                 _exit_for_invalid_runner_token(exc)
+            except RunnerConnectionError as exc:
+                raise SystemExit(str(exc))
         if args.json:
             print(json.dumps(result, indent=2, sort_keys=True))
         elif args.once:
@@ -1150,6 +1153,8 @@ def main(argv: Optional[list] = None) -> int:
                 )
             except RunnerTokenInvalidError as exc:
                 _exit_for_invalid_runner_token(exc)
+            except RunnerConnectionError as exc:
+                raise SystemExit(str(exc))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 

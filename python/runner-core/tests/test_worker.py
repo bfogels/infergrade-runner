@@ -8,6 +8,7 @@ from urllib import error as urllib_error
 
 sys.path.insert(0, "python/runner-core/src")
 
+from infergrade.transport import RunnerConnectionError, RunnerTokenInvalidError
 from infergrade.worker import _claim_error_message, _classify_worker_failure, _desktop_progress_projection, _emit_desktop_event, _listener_error_summary, _progress_detail, _progress_percent, _runtime_progress_update, run_worker_loop, run_worker_once
 
 DESKTOP_EVENT_PREFIX = "INFERGRADE_DESKTOP_EVENT "
@@ -954,6 +955,88 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(register_mock.call_args.kwargs["contract"], snapshot["contract"])
         self.assertEqual(register_mock.call_args.kwargs["diagnostics"], snapshot["diagnostics"])
 
+    def test_worker_loop_does_not_claim_connected_when_registration_is_rejected(self):
+        messages = []
+        with mock.patch(
+            "infergrade.worker.collect_runner_diagnostics",
+            return_value={"environment": {}, "contract": {}, "diagnostics": {}},
+        ), mock.patch(
+            "infergrade.worker.register_runner",
+            side_effect=RunnerConnectionError(
+                "Runner registration rejected by Hub: HTTP 403: runner token is bound to another runner. "
+                "Omit --worker-id to use the paired Runner identity, or re-pair this Runner."
+            ),
+        ), mock.patch("infergrade.worker.heartbeat_runner") as heartbeat_mock, mock.patch(
+            "infergrade.worker.run_worker_once"
+        ) as once_mock:
+            with self.assertRaisesRegex(
+                RunnerConnectionError,
+                r"Runner registration rejected by Hub.*Omit --worker-id",
+            ):
+                run_worker_loop(
+                    api_url="http://localhost:8000",
+                    execution_mode="local_native",
+                    worker_id="wrong-label",
+                    max_jobs=1,
+                    emit_progress=messages.append,
+                )
+
+        heartbeat_mock.assert_not_called()
+        once_mock.assert_not_called()
+        self.assertFalse(any("Runner connected" in message for message in messages))
+
+    def test_worker_loop_preserves_revoked_token_as_non_retryable_startup_failure(self):
+        messages = []
+        with mock.patch(
+            "infergrade.worker.collect_runner_diagnostics",
+            return_value={"environment": {}, "contract": {}, "diagnostics": {}},
+        ), mock.patch(
+            "infergrade.worker.register_runner",
+            side_effect=RunnerTokenInvalidError("re-pair this Runner"),
+        ), mock.patch("infergrade.worker.heartbeat_runner") as heartbeat_mock, mock.patch(
+            "infergrade.worker.run_worker_once"
+        ) as once_mock:
+            with self.assertRaises(RunnerTokenInvalidError):
+                run_worker_loop(
+                    api_url="http://localhost:8000",
+                    execution_mode="local_native",
+                    worker_id="runner-revoked",
+                    max_jobs=1,
+                    emit_progress=messages.append,
+                )
+
+        heartbeat_mock.assert_not_called()
+        once_mock.assert_not_called()
+        self.assertFalse(any("Runner connected" in message for message in messages))
+
+    def test_worker_loop_does_not_claim_connected_when_initial_heartbeat_is_rejected(self):
+        messages = []
+        with mock.patch(
+            "infergrade.worker.collect_runner_diagnostics",
+            return_value={"environment": {}, "contract": {}, "diagnostics": {}},
+        ), mock.patch(
+            "infergrade.worker.register_runner",
+        ), mock.patch(
+            "infergrade.worker.heartbeat_runner",
+            side_effect=RunnerConnectionError(
+                "Runner readiness heartbeat rejected by Hub: HTTP 404: runner not found."
+            ),
+        ), mock.patch("infergrade.worker.run_worker_once") as once_mock:
+            with self.assertRaisesRegex(
+                RunnerConnectionError,
+                r"Runner readiness heartbeat rejected by Hub.*runner not found",
+            ):
+                run_worker_loop(
+                    api_url="http://localhost:8000",
+                    execution_mode="local_native",
+                    worker_id="runner-1",
+                    max_jobs=1,
+                    emit_progress=messages.append,
+                )
+
+        once_mock.assert_not_called()
+        self.assertFalse(any("Runner connected" in message for message in messages))
+
     def test_worker_loop_announces_listening_once_and_suppresses_poll_spam(self):
         snapshot = {"environment": {}, "contract": {}, "diagnostics": {}}
         messages = []
@@ -1042,7 +1125,10 @@ class WorkerTests(unittest.TestCase):
 
         with mock.patch("infergrade.worker.collect_runner_diagnostics", return_value=snapshot):
             with mock.patch("infergrade.worker.register_runner"):
-                with mock.patch("infergrade.worker.heartbeat_runner", side_effect=[None, urllib_error.URLError("still down")]):
+                with mock.patch(
+                    "infergrade.worker.heartbeat_runner",
+                    side_effect=[None, urllib_error.URLError("still down")],
+                ):
                     with mock.patch("infergrade.worker.time.sleep") as sleep_mock:
                         with mock.patch("infergrade.worker.run_worker_once", side_effect=worker_once_side_effect):
                             result = run_worker_loop(

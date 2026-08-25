@@ -9,6 +9,7 @@ sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.cli import main
 from infergrade.models import RunRequest
+from infergrade.transport import RunnerConnectionError
 
 
 class CliTests(unittest.TestCase):
@@ -466,6 +467,26 @@ class CliTests(unittest.TestCase):
         )
         self.assertIn("Runner stopped · 0 completed · 0 failed.", output.getvalue())
 
+    def test_start_command_surfaces_rejected_runner_connection_without_stopped_claim(self):
+        output = io.StringIO()
+        with mock.patch(
+            "infergrade.cli.run_worker_loop",
+            side_effect=RunnerConnectionError(
+                "Runner registration rejected by Hub: HTTP 403: runner token is bound to another runner."
+            ),
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_execution_mode", return_value="local_native"
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_id", return_value="runner-paired"
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_api_token", return_value="qbhr_secret"
+        ), redirect_stdout(output):
+            with self.assertRaises(SystemExit) as caught:
+                main(["start", "--api-url", "http://localhost:8000"])
+
+        self.assertIn("registration rejected by Hub", str(caught.exception))
+        self.assertNotIn("Runner stopped", output.getvalue())
+
     def test_start_without_pairing_fails_before_polling(self):
         with mock.patch("infergrade.cli.resolve_runner_api_url", return_value=None), mock.patch(
             "infergrade.cli.run_worker_loop"
@@ -672,6 +693,26 @@ class CliTests(unittest.TestCase):
             max_jobs=None,
             emit_progress=mock.ANY,
         )
+
+    def test_worker_command_surfaces_rejected_runner_connection(self):
+        with mock.patch(
+            "infergrade.cli.run_worker_loop",
+            side_effect=RunnerConnectionError(
+                "Runner readiness heartbeat rejected by Hub: HTTP 404: runner not found."
+            ),
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_execution_mode", return_value="local_native"
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_id", return_value="runner-paired"
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_api_url", return_value="http://localhost:8000"
+        ), mock.patch(
+            "infergrade.cli.resolve_runner_api_token", return_value="qbhr_saved_token"
+        ):
+            with self.assertRaises(SystemExit) as caught:
+                main(["worker"])
+
+        self.assertIn("heartbeat rejected by Hub", str(caught.exception))
 
     def test_pair_command_redeems_code_and_saves_profile(self):
         output = io.StringIO()
