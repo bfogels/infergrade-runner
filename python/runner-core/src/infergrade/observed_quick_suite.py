@@ -7,7 +7,7 @@ bounded diagnostics plus the redacted ``observed_runtime_v1`` receipt.
 """
 
 from collections import Counter
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from infergrade.adapters.openai_compatible import OpenAICompatibleAdapter
 from infergrade.models import RunRequest
