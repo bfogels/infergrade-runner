@@ -32,6 +32,7 @@ use serde_json::{json, Value};
 pub struct RunnerCapabilities {
     pub run_token_supported: bool,
     pub auto_upload: bool,
+    pub observed_runtime_v1: bool,
 }
 
 impl Default for RunnerCapabilities {
@@ -39,6 +40,7 @@ impl Default for RunnerCapabilities {
         Self {
             run_token_supported: true,
             auto_upload: true,
+            observed_runtime_v1: false,
         }
     }
 }
@@ -75,7 +77,10 @@ impl RunnerRegisterRequest {
             hostname,
             provider_id: None,
             instance_type_id: None,
-            capabilities: RunnerCapabilities::default(),
+            capabilities: RunnerCapabilities {
+                observed_runtime_v1: matches!(execution_mode, "local_native" | "local_container"),
+                ..RunnerCapabilities::default()
+            },
             version: env!("CARGO_PKG_VERSION").to_string(),
             environment: desktop_environment(),
             contract: json!({}),

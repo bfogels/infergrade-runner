@@ -4552,6 +4552,7 @@ mod tests {
         assert_eq!(register["runner_kind"], "local_listener");
         assert_eq!(register["capabilities"]["run_token_supported"], true);
         assert_eq!(register["capabilities"]["auto_upload"], true);
+        assert_eq!(register["capabilities"]["observed_runtime_v1"], true);
         assert_eq!(register["environment"]["source"], "desktop_rust_supervisor");
 
         let heartbeat = runner_heartbeat_payload(
