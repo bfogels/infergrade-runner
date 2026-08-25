@@ -26,6 +26,10 @@ class RunnerTokenInvalidError(RuntimeError):
     """Raised when Hub explicitly revokes or expires a paired runner token."""
 
 
+class RunnerConnectionError(RuntimeError):
+    """Raised when Hub does not acknowledge runner registration or readiness."""
+
+
 RUNNER_TOKEN_INVALID_MESSAGE = "Runner token revoked or expired. Run 'infergrade pair' to re-pair."
 RUNTIME_RECEIPT_ARTIFACT_PATH = "artifacts/receipts/runtime_receipt.json"
 RUNTIME_RECEIPT_ARTIFACT_MAX_BYTES = 4 * 1024 * 1024
@@ -701,28 +705,38 @@ def register_runner(
     diagnostics: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """Register a long-lived runner with the Hub."""
-    _, payload = _json_request(
-        api_url,
-        "/v1/runners/register",
-        method="POST",
-        payload={
-            "runner_id": runner_id,
-            "execution_modes": list(execution_modes or []),
-            "status": status,
-            "label": label,
-            "runner_kind": runner_kind,
-            "hostname": hostname,
-            "provider_id": provider_id,
-            "instance_type_id": instance_type_id,
-            "capabilities": capabilities or {},
-            "version": version,
-            "environment": environment or {},
-            "contract": contract or {},
-            "diagnostics": diagnostics or {},
-        },
-        api_token=api_token,
+    try:
+        status, payload = _json_request(
+            api_url,
+            "/v1/runners/register",
+            method="POST",
+            payload={
+                "runner_id": runner_id,
+                "execution_modes": list(execution_modes or []),
+                "status": status,
+                "label": label,
+                "runner_kind": runner_kind,
+                "hostname": hostname,
+                "provider_id": provider_id,
+                "instance_type_id": instance_type_id,
+                "capabilities": capabilities or {},
+                "version": version,
+                "environment": environment or {},
+                "contract": contract or {},
+                "diagnostics": diagnostics or {},
+            },
+            api_token=api_token,
+        )
+    except urllib_error.URLError as exc:
+        raise RunnerConnectionError(
+            "Runner registration could not reach Hub: %s" % _bounded_runner_control_detail(exc)
+        ) from None
+    return _require_runner_control_response(
+        status,
+        payload,
+        runner_id=runner_id,
+        operation="registration",
     )
-    return payload
 
 
 def heartbeat_runner(
@@ -740,21 +754,86 @@ def heartbeat_runner(
     diagnostics: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """Send a runner readiness heartbeat to the Hub."""
-    _, payload = _json_request(
-        api_url,
-        "/v1/runners/%s/heartbeat" % runner_id,
-        method="POST",
-        payload={
-            "status": status,
-            "current_run_id": current_run_id,
-            "hostname": hostname,
-            "provider_id": provider_id,
-            "instance_type_id": instance_type_id,
-            "metadata": metadata or {},
-            "environment": environment or {},
-            "contract": contract or {},
-            "diagnostics": diagnostics or {},
-        },
-        api_token=api_token,
+    try:
+        status, payload = _json_request(
+            api_url,
+            "/v1/runners/%s/heartbeat" % runner_id,
+            method="POST",
+            payload={
+                "status": status,
+                "current_run_id": current_run_id,
+                "hostname": hostname,
+                "provider_id": provider_id,
+                "instance_type_id": instance_type_id,
+                "metadata": metadata or {},
+                "environment": environment or {},
+                "contract": contract or {},
+                "diagnostics": diagnostics or {},
+            },
+            api_token=api_token,
+        )
+    except urllib_error.URLError as exc:
+        raise RunnerConnectionError(
+            "Runner readiness heartbeat could not reach Hub: %s" % _bounded_runner_control_detail(exc)
+        ) from None
+    return _require_runner_control_response(
+        status,
+        payload,
+        runner_id=runner_id,
+        operation="readiness heartbeat",
     )
-    return payload
+
+
+def _require_runner_control_response(
+    status: int,
+    payload: Dict[str, Any],
+    *,
+    runner_id: str,
+    operation: str,
+) -> Dict[str, Any]:
+    """Fail closed unless Hub acknowledges the exact runner identity."""
+    runner = payload.get("runner") if isinstance(payload, dict) else None
+    returned_runner_id = str((runner or {}).get("runner_id") or "").strip()
+    if 200 <= status < 300 and isinstance(runner, dict) and returned_runner_id == runner_id:
+        return payload
+
+    if status >= 400:
+        detail = _api_error_detail(payload) if isinstance(payload, dict) else ""
+        code = _api_error_code(payload) if isinstance(payload, dict) else ""
+        reason = "HTTP %d%s: %s" % (
+            status,
+            " (%s)" % code if code else "",
+            _bounded_runner_control_detail(detail),
+        )
+    elif isinstance(runner, dict) and returned_runner_id:
+        reason = "Hub acknowledged a different runner identity"
+    else:
+        reason = "Hub response did not include the acknowledged runner"
+    recovery = ""
+    if "bound to another runner" in reason.lower():
+        recovery = " Omit --worker-id to use the paired Runner identity, or re-pair this Runner."
+    raise RunnerConnectionError(
+        "Runner %s rejected by Hub: %s.%s"
+        % (operation, reason.rstrip("."), recovery)
+    )
+
+
+def _bounded_runner_control_detail(value: str) -> str:
+    """Keep Hub readiness failures single-line and safe for CLI output."""
+    detail = re.sub(r"\s+", " ", str(value or "no detail")).strip()
+    secret_patterns = (
+        (r"\bqbhr_[^\s\"']+", "qbhr_[redacted]"),
+        (r"\bigrt_[^\s\"']+", "igrt_[redacted]"),
+        (r"\bigrp_[^\s\"']+", "igrp_[redacted]"),
+        (r"\bIGRP-[A-Za-z0-9-]+", "IGRP-[redacted]"),
+        (r"\bBearer\s+[^\s\"']+", "Bearer [redacted]"),
+        (
+            r"([?&](?:token|signature|signed|x-amz-signature|x-goog-signature)=)[^&\s\"']+",
+            r"\1[redacted]",
+        ),
+    )
+    for pattern, replacement in secret_patterns:
+        detail = re.sub(pattern, replacement, detail, flags=re.IGNORECASE)
+    if len(detail) > 180:
+        detail = detail[:177].rstrip() + "..."
+    return detail or "no detail"

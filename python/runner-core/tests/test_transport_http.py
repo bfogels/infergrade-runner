@@ -8,18 +8,23 @@ import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest import mock
+from urllib import error as urllib_error
 
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.transport import (
+    RunnerConnectionError,
     RunnerTokenInvalidError,
     _resolve_api_token,
     bundle_payload,
     complete_run_job,
     fetch_run_config,
+    heartbeat_runner,
     heartbeat_run_job,
     list_run_configs,
     publish_run_config,
+    register_runner,
     redeem_runner_pairing,
     upload_bundle,
     upload_run_bundle,
@@ -348,12 +353,112 @@ class TransportHttpTests(unittest.TestCase):
                 ("POST", "/v1/runners/runner-revoked/heartbeat"): 401,
             }
 
-            from infergrade.transport import heartbeat_runner
-
             with self.assertRaises(RunnerTokenInvalidError) as caught:
                 heartbeat_runner(server.base_url, "runner-revoked", api_token="qbhr_revoked")
 
         self.assertIn("re-pair", str(caught.exception))
+
+    def test_register_runner_rejects_wrong_bound_identity_without_echoing_ids_or_tokens(self):
+        with _HttpHarness() as server:
+            _CaptureHandler.responses = {
+                ("POST", "/v1/runners/register"): {
+                    "error": {
+                        "code": "runner_identity_mismatch",
+                        "message": (
+                            "runner token qbhr_secret is bound to another runner; pairing IGRP-8421; "
+                            "Bearer arbitrary-secret; https://example.test/callback?token=query-secret&signature=sig-secret"
+                        ),
+                    }
+                }
+            }
+            _CaptureHandler.response_statuses = {("POST", "/v1/runners/register"): 403}
+
+            with self.assertRaises(RunnerConnectionError) as caught:
+                register_runner(
+                    server.base_url,
+                    "wrong-local-label",
+                    ["local_native"],
+                    api_token="qbhr_secret",
+                )
+
+        message = str(caught.exception)
+        self.assertIn("HTTP 403", message)
+        self.assertIn("runner_identity_mismatch", message)
+        self.assertIn("Omit --worker-id", message)
+        self.assertNotIn("wrong-local-label", message)
+        self.assertNotIn("qbhr_secret", message)
+        self.assertNotIn("IGRP-8421", message)
+        self.assertNotIn("arbitrary-secret", message)
+        self.assertNotIn("query-secret", message)
+        self.assertNotIn("sig-secret", message)
+
+    def test_register_runner_treats_generic_unauthorized_response_as_connection_rejection(self):
+        with _HttpHarness() as server:
+            _CaptureHandler.responses = {
+                ("POST", "/v1/runners/register"): {"detail": "authentication required"}
+            }
+            _CaptureHandler.response_statuses = {("POST", "/v1/runners/register"): 401}
+
+            with self.assertRaises(RunnerConnectionError) as caught:
+                register_runner(server.base_url, "runner-unauthorized", ["local_native"])
+
+        self.assertIn("HTTP 401", str(caught.exception))
+        self.assertIn("authentication required", str(caught.exception))
+
+    def test_heartbeat_runner_rejects_missing_runner(self):
+        with _HttpHarness() as server:
+            path = "/v1/runners/runner-missing/heartbeat"
+            _CaptureHandler.responses = {("POST", path): {"detail": "runner not found"}}
+            _CaptureHandler.response_statuses = {("POST", path): 404}
+
+            with self.assertRaises(RunnerConnectionError) as caught:
+                heartbeat_runner(server.base_url, "runner-missing")
+
+        self.assertIn("readiness heartbeat", str(caught.exception))
+        self.assertIn("HTTP 404", str(caught.exception))
+        self.assertIn("runner not found", str(caught.exception))
+
+    def test_register_runner_rejects_success_without_exact_acknowledgement(self):
+        with _HttpHarness() as server:
+            _CaptureHandler.responses = {("POST", "/v1/runners/register"): {}}
+
+            with self.assertRaises(RunnerConnectionError) as caught:
+                register_runner(server.base_url, "runner-expected", ["local_native"])
+
+        self.assertIn("did not include the acknowledged runner", str(caught.exception))
+
+    def test_heartbeat_runner_rejects_mismatched_success_identity(self):
+        with _HttpHarness() as server:
+            path = "/v1/runners/runner-expected/heartbeat"
+            _CaptureHandler.responses = {
+                ("POST", path): {"runner": {"runner_id": "runner-different"}}
+            }
+
+            with self.assertRaises(RunnerConnectionError) as caught:
+                heartbeat_runner(server.base_url, "runner-expected")
+
+        self.assertIn("different runner identity", str(caught.exception))
+        self.assertNotIn("runner-different", str(caught.exception))
+
+    def test_register_runner_normalizes_network_failure(self):
+        with mock.patch(
+            "infergrade.transport.urllib_request.urlopen",
+            side_effect=urllib_error.URLError("Bearer network-secret unavailable"),
+        ):
+            with self.assertRaises(RunnerConnectionError) as caught:
+                register_runner("http://localhost:8000", "runner-offline", ["local_native"])
+
+        self.assertIn("could not reach Hub", str(caught.exception))
+        self.assertNotIn("network-secret", str(caught.exception))
+
+    def test_register_runner_accepts_exact_acknowledgement(self):
+        with _HttpHarness() as server:
+            payload = {"runner": {"runner_id": "runner-exact", "status": "starting"}}
+            _CaptureHandler.responses = {("POST", "/v1/runners/register"): payload}
+
+            result = register_runner(server.base_url, "runner-exact", ["local_native"])
+
+        self.assertEqual(result, payload)
 
     def test_run_job_updates_include_lifecycle_timing(self):
         timing = {
