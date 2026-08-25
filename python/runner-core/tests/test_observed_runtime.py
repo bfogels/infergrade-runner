@@ -6,6 +6,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
@@ -13,6 +14,7 @@ from infergrade.adapters.openai_compatible import OpenAICompatibleAdapter
 from infergrade.models import RunRequest
 from infergrade.observed_runtime import (
     FAILURE_CODES,
+    DEFAULT_GENERATION_TIMEOUT_SECONDS,
     OBSERVED_RUNTIME_CONTRACT_VERSION,
     OpenAICompatibleClient,
     ObservedRuntimeError,
@@ -117,6 +119,21 @@ class _ObservedRuntimeServer(object):
 
 
 class ObservedRuntimeTests(unittest.TestCase):
+    def test_probe_and_generation_timeouts_are_separate_and_bounded(self):
+        client = OpenAICompatibleClient(
+            "http://127.0.0.1:12345",
+            timeout_seconds=1.5,
+            generation_timeout_seconds=123,
+        )
+        self.assertEqual(client.timeout_seconds, 1.5)
+        self.assertEqual(client.generation_timeout_seconds, 123.0)
+        self.assertEqual(DEFAULT_GENERATION_TIMEOUT_SECONDS, 300.0)
+        with self.assertRaises(ObservedRuntimeError):
+            OpenAICompatibleClient(
+                "http://127.0.0.1:12345",
+                generation_timeout_seconds=601,
+            )
+
     def test_provider_profiles_are_bounded_and_cover_required_local_servers(self):
         profiles = provider_profiles()
         self.assertEqual(len(profiles), 5)
@@ -449,6 +466,39 @@ class ObservedRuntimeTests(unittest.TestCase):
         self.assertEqual(adapter.runtime_metadata(request)["endpoint_network_scope"], "loopback")
         self.assertNotIn("endpoint_port", adapter.runtime_metadata(request))
         self.assertEqual(adapter.runtime_metadata(request)["runtime_identity_status"], "unknown")
+
+    def test_explicit_model_fails_closed_when_endpoint_reports_no_models(self):
+        request = RunRequest(
+            model="requested/model",
+            backend="openai_compatible_observed",
+            tier="canary",
+            simulate=False,
+        )
+        with _ObservedRuntimeServer() as server:
+            _ObservedRuntimeHandler.models_fixture = "openai_models_empty.json"
+            adapter = OpenAICompatibleAdapter(
+                server.endpoint,
+                provider_hint="llama_server",
+                model_id="requested/model",
+            )
+            result = adapter.generate_text(request, "Return one answer", 16)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"], "model_not_available")
+        self.assertFalse(any(item[0] == "POST" for item in _ObservedRuntimeHandler.requests))
+
+    def test_invalid_tls_configuration_returns_stable_observed_error(self):
+        client = OpenAICompatibleClient("https://127.0.0.1:12345")
+        with mock.patch.dict(
+            os.environ,
+            {"SSL_CERT_FILE": "/Users/alice/private/missing-ca.pem"},
+            clear=False,
+        ):
+            with self.assertRaises(ObservedRuntimeError) as caught:
+                client.probe()
+
+        self.assertEqual(caught.exception.code, "connection_failed")
+        self.assertNotIn("alice", str(caught.exception))
 
     def test_adapter_failure_returns_stable_error_without_private_data(self):
         request = RunRequest(

@@ -271,6 +271,34 @@ class ReasoningConstraintStressV2QualificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "reasoning_v2_policy_enforcement_receipt_missing"):
             score_qualification_predictions(cases, [verified_without_receipt], "canary")
 
+        policy = resolve_generation_policy(
+            REASONING_CONSTRAINT_STRESS_QUALIFICATION_THINKING_POLICY_ID
+        )
+        verified_false = dict(verified_without_receipt)
+        verified_false["generation_policy_fingerprint"] = policy.fingerprint_sha256
+        verified_false["generation_policy_receipt"] = {
+            "policy_id": REASONING_CONSTRAINT_STRESS_QUALIFICATION_THINKING_POLICY_ID,
+            "fingerprint_sha256": policy.fingerprint_sha256,
+            "enforcement_state": "verified",
+            "enforced": False,
+        }
+        with self.assertRaisesRegex(ValueError, "reasoning_v2_policy_enforcement_receipt_missing"):
+            score_qualification_predictions(cases, [verified_false], "canary")
+
+        inconsistent_unverified = dict(verified_false)
+        inconsistent_unverified["generation_policy_enforcement"] = "requested_unverified"
+        inconsistent_unverified["generation_policy_receipt"]["enforced"] = True
+        with self.assertRaisesRegex(ValueError, "reasoning_v2_policy_enforcement_receipt_mismatch"):
+            score_qualification_predictions(cases, [inconsistent_unverified], "canary")
+
+        verified_true = dict(verified_false)
+        verified_true["generation_policy_receipt"] = dict(
+            verified_false["generation_policy_receipt"],
+            enforced=True,
+        )
+        verified_result = score_qualification_predictions(cases, [verified_true], "canary")
+        self.assertEqual(verified_result["metrics"]["policy_enforcement_states"]["verified"], 1)
+
         fingerprint_mismatch = dict(prediction)
         fingerprint_mismatch["generation_policy_id"] = (
             REASONING_CONSTRAINT_STRESS_QUALIFICATION_THINKING_POLICY_ID

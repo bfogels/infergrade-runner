@@ -44,12 +44,31 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, 0)
         help_text = output.getvalue()
-        self.assertIn("{doctor,cache,install-runtime,pair,unpair,start}", help_text)
+        self.assertIn("{doctor,discover-runtimes,cache,install-runtime,pair,unpair,start}", help_text)
         self.assertIn("start               Start a long-lived local runner", help_text)
         self.assertIn("infergrade --all --help", help_text)
         self.assertNotIn("run-job", help_text)
         self.assertNotIn("upload-bundle", help_text)
         self.assertNotIn("show-capabilities", help_text)
+
+    def test_runtime_discovery_prints_only_redacted_receipt_identity(self):
+        receipt = {
+            "provider": "llama_server",
+            "protocol": {"models_endpoint": "compatible"},
+            "identity": {
+                "reported_model_ids": [],
+                "reported_model_id_status": "withheld_unsafe",
+            },
+        }
+        output = io.StringIO()
+        with mock.patch("infergrade.cli.discover_local_runtimes", return_value=[receipt]), redirect_stdout(output):
+            self.assertEqual(main(["discover-runtimes"]), 0)
+
+        text = output.getvalue()
+        self.assertIn("llama_server", text)
+        self.assertIn("model identity withheld", text)
+        self.assertIn("observe-runtime --provider llama_server", text)
+        self.assertNotIn("127.0.0.1", text)
 
     def test_all_help_shows_advanced_commands(self):
         output = io.StringIO()
@@ -62,6 +81,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("run-job", help_text)
         self.assertIn("upload-bundle", help_text)
         self.assertIn("show-capabilities", help_text)
+        self.assertIn("observe-runtime", help_text)
 
     def test_doctor_help_keeps_internal_run_request_flags_hidden(self):
         output = io.StringIO()

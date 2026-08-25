@@ -25,7 +25,9 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
         self.assertEqual(report["status"], "ready")
         self.assertEqual(report["artifact_spec_version"], "0.4.0")
         self.assertEqual(report["catalog_version"], "2026-08-19-reasoning-constraint-stress-v2-content-v1")
-        self.assertEqual(report["varying_tier_benchmark_count"], 15)
+        # Includes the explicitly excluded Reasoning v2 qualification candidate;
+        # readiness counts below continue to omit qualification-only evidence.
+        self.assertEqual(report["varying_tier_benchmark_count"], 16)
         self.assertEqual(report["materialized_native_fixture_count"], 6)
         self.assertEqual(report["native_tier_coverage_contract_count"], 2)
         self.assertEqual(report["verified_static_fixture_manifest_count"], 1)
@@ -34,7 +36,7 @@ class BenchmarkTierAdequacyTests(unittest.TestCase):
         self.assertEqual(report["declared_selection_digest_algorithm_count"], 14)
         self.assertEqual(report["materialized_selection_digest_verified_count"], 8)
         self.assertEqual(report["runtime_only_selection_digest_contract_count"], 6)
-        self.assertEqual(report["quarantined_benchmark_count"], 1)
+        self.assertEqual(report["quarantined_benchmark_count"], 2)
         self.assertEqual(report["errors"], [])
         by_id = {item["benchmark_id"]: item for item in report["benchmarks"]}
         self.assertTrue(

@@ -358,10 +358,10 @@ def score_qualification_predictions(
         if receipt is not None:
             if not isinstance(receipt, dict):
                 raise ValueError("reasoning_v2_generation_policy_receipt_invalid")
-            if receipt.get("policy_id") not in {None, GENERATION_POLICY_ID}:
+            if receipt.get("policy_id") != GENERATION_POLICY_ID:
                 raise ValueError("reasoning_v2_generation_policy_receipt_mismatch")
             receipt_fingerprint = str(receipt.get("fingerprint_sha256") or "").strip()
-            if receipt_fingerprint and receipt_fingerprint != policy.fingerprint_sha256:
+            if receipt_fingerprint != policy.fingerprint_sha256:
                 raise ValueError("reasoning_v2_generation_policy_receipt_mismatch")
         enforcement = str(
             prediction.get("generation_policy_enforcement")
@@ -374,8 +374,17 @@ def score_qualification_predictions(
             raise ValueError("reasoning_v2_policy_enforcement_unknown:%s" % enforcement)
         if enforcement == POLICY_ENFORCEMENT_VERIFIED:
             receipt = prediction.get("generation_policy_receipt")
-            if not isinstance(receipt, dict) or receipt.get("enforced") is None:
+            if (
+                not isinstance(receipt, dict)
+                or receipt.get("enforced") is not True
+                or receipt.get("enforcement_state") != POLICY_ENFORCEMENT_VERIFIED
+            ):
                 raise ValueError("reasoning_v2_policy_enforcement_receipt_missing")
+        elif receipt is not None and (
+            receipt.get("enforced") is not None
+            or receipt.get("enforcement_state") != POLICY_ENFORCEMENT_REQUESTED_UNVERIFIED
+        ):
+            raise ValueError("reasoning_v2_policy_enforcement_receipt_mismatch")
         policy_enforcement_states[enforcement] += 1
         generation_status = str(prediction.get("generation_status") or "failed")
         diagnostics = {

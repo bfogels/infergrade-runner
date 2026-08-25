@@ -29,6 +29,7 @@ class OpenAICompatibleAdapter(BaseAdapter):
         model_id: Optional[str] = None,
         api_key: Optional[str] = None,
         timeout_seconds: float = 2.0,
+        generation_timeout_seconds: float = 300.0,
         max_response_bytes: int = 512 * 1024,
         client: Optional[OpenAICompatibleClient] = None,
     ):
@@ -39,6 +40,7 @@ class OpenAICompatibleAdapter(BaseAdapter):
             provider_hint=provider_hint,
             api_key=api_key,
             timeout_seconds=timeout_seconds,
+            generation_timeout_seconds=generation_timeout_seconds,
             max_response_bytes=max_response_bytes,
         )
         self.model_id = model_id.strip() if isinstance(model_id, str) and model_id.strip() else None
@@ -83,9 +85,7 @@ class OpenAICompatibleAdapter(BaseAdapter):
 
     def _selected_model_id(self, request: Optional[RunRequest], probe: ObservedRuntimeProbe) -> Optional[str]:
         if self.model_id:
-            if probe.model_ids and self.model_id not in probe.model_ids:
-                return None
-            return self.model_id
+            return self.model_id if self.model_id in probe.model_ids else None
         # A request model is only safe to use when the endpoint reported that
         # exact ID.  A single reported model can be selected implicitly; an
         # ambiguous list requires an explicit adapter model ID.
@@ -124,7 +124,7 @@ class OpenAICompatibleAdapter(BaseAdapter):
 
     def preflight_model(self, request: RunRequest) -> None:
         probe = self._probe_or_raise()
-        if self.model_id and probe.model_ids and self.model_id not in probe.model_ids:
+        if self.model_id and self.model_id not in probe.model_ids:
             raise ObservedRuntimeError("model_not_available")
         if not self.model_id and not self._selected_model_id(request, probe):
             raise ObservedRuntimeError("model_not_available")

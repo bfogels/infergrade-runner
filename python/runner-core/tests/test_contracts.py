@@ -157,7 +157,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.36")
+        self.assertEqual(manifest["contract_version"], "0.3.37")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_run_request_contract_accepts_authorized_artifact_download_size(self):
@@ -342,6 +342,22 @@ class ContractExportTests(unittest.TestCase):
         identity = schema["properties"]["identity"]["properties"]
         for field in ("artifact_publisher", "quantization", "artifact_sha256", "runtime_build_id", "runtime_bytes"):
             self.assertIsNone(identity[field]["const"])
+
+    def test_contract_declares_observed_quick_suite_boundary(self):
+        manifest = load_contract_manifest()
+        self.assertEqual(manifest["contract_version"], "0.3.37")
+        self.assertIn("schemas/json/observed_quick_suite.schema.json", manifest["schema_files"])
+        self.assertIn("docs/observed_quick_suite_v1.md", manifest["supporting_docs"])
+        schema = json.loads(
+            (repo_root() / "schemas" / "json" / "observed_quick_suite.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(schema["properties"]["contract_version"]["const"], "observed_quick_suite_v1")
+        self.assertEqual(schema["properties"]["observed_runtime"]["$ref"], "observed_runtime.schema.json")
+        boundary = schema["properties"]["evidence_boundary"]["properties"]
+        self.assertFalse(boundary["promotion_eligible"]["const"])
+        self.assertFalse(boundary["recommendation_eligible"]["const"])
 
     def test_runtime_selector_schema_accepts_emitted_windows_cuda_preflight_selector(self):
         selector_schema = json.loads(

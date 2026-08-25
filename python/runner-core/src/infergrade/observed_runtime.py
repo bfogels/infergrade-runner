@@ -31,6 +31,8 @@ QUICK_GENERATION_PROFILE_VERSION = "quick_generation_v1"
 
 DEFAULT_TIMEOUT_SECONDS = 2.0
 MAX_TIMEOUT_SECONDS = 10.0
+DEFAULT_GENERATION_TIMEOUT_SECONDS = 300.0
+MAX_GENERATION_TIMEOUT_SECONDS = 600.0
 DEFAULT_MAX_RESPONSE_BYTES = 512 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_REQUEST_BYTES = 256 * 1024
@@ -191,6 +193,18 @@ def _bounded_timeout(value: Any) -> float:
     except (TypeError, ValueError):
         raise ObservedRuntimeError("endpoint_invalid")
     if not math.isfinite(timeout) or timeout <= 0 or timeout > MAX_TIMEOUT_SECONDS:
+        raise ObservedRuntimeError("endpoint_invalid")
+    return timeout
+
+
+def _bounded_generation_timeout(value: Any) -> float:
+    if isinstance(value, bool):
+        raise ObservedRuntimeError("endpoint_invalid")
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        raise ObservedRuntimeError("endpoint_invalid")
+    if not math.isfinite(timeout) or timeout <= 0 or timeout > MAX_GENERATION_TIMEOUT_SECONDS:
         raise ObservedRuntimeError("endpoint_invalid")
     return timeout
 
@@ -796,6 +810,7 @@ class OpenAICompatibleClient(object):
         provider_hint: Optional[str] = None,
         api_key: Optional[str] = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        generation_timeout_seconds: float = DEFAULT_GENERATION_TIMEOUT_SECONDS,
         max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     ):
         self.endpoint = parse_local_endpoint(endpoint)
@@ -810,6 +825,7 @@ class OpenAICompatibleClient(object):
         if self._api_key is not None and len(self._api_key) > 4096:
             raise ObservedRuntimeError("endpoint_invalid")
         self.timeout_seconds = _bounded_timeout(timeout_seconds)
+        self.generation_timeout_seconds = _bounded_generation_timeout(generation_timeout_seconds)
         self.max_response_bytes = _bounded_response_limit(max_response_bytes)
         self._last_probe: Optional[ObservedRuntimeProbe] = None
         self._last_generation_profile: Optional[Dict[str, Any]] = None
@@ -845,7 +861,13 @@ class OpenAICompatibleClient(object):
             if isinstance(thinking_control, dict):
                 thinking_control["effective"] = effective
 
-    def _request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None) -> Tuple[bytes, str]:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: Optional[Dict[str, Any]] = None,
+        timeout_seconds: Optional[float] = None,
+    ) -> Tuple[bytes, str]:
         body = None
         headers = {"Accept": "application/json"}
         if payload is not None:
@@ -858,7 +880,8 @@ class OpenAICompatibleClient(object):
         url = _endpoint_url(self.endpoint, path)
         request = urllib_request.Request(url, data=body, headers=headers, method=method.upper())
         try:
-            with _open_no_redirect(request, self.endpoint, self.timeout_seconds) as response:
+            timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
+            with _open_no_redirect(request, self.endpoint, timeout) as response:
                 status = int(response.getcode() or 0)
                 if status < 200 or status >= 300:
                     raise ObservedRuntimeError("http_error", status=status)
@@ -882,6 +905,10 @@ class OpenAICompatibleClient(object):
                 raise ObservedRuntimeError("timeout")
             raise ObservedRuntimeError("connection_failed")
         except (OSError, ssl.SSLError):
+            raise ObservedRuntimeError("connection_failed")
+        except RuntimeError:
+            # TLS trust configuration failures are local diagnostics. Never
+            # expose their path-bearing messages through the observed lane.
             raise ObservedRuntimeError("connection_failed")
 
     def _paths_for_probe(self) -> Tuple[str, ...]:
@@ -964,6 +991,7 @@ class OpenAICompatibleClient(object):
                 "POST",
                 "/v1/chat/completions",
                 payload=request_payload,
+                timeout_seconds=self.generation_timeout_seconds,
             )
         except ObservedRuntimeError:
             self._set_generation_effective("request_failed")
@@ -1063,6 +1091,7 @@ def discover_local_runtimes(
 
 __all__ = [
     "DEFAULT_MAX_RESPONSE_BYTES",
+    "DEFAULT_GENERATION_TIMEOUT_SECONDS",
     "DEFAULT_TIMEOUT_SECONDS",
     "FAILURE_CODES",
     "LocalEndpoint",
