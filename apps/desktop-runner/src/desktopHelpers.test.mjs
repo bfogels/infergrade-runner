@@ -18,6 +18,8 @@ import {
   isPairingIntentDeepLink,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
+  observedRuntimeHandoffFromDeepLink,
+  observedRuntimeHandoffFromParams,
   requiredDesktopReadinessFailure,
   shouldPreserveActiveAssignment,
   shouldClearCompletedHandoff,
@@ -445,6 +447,40 @@ test("rejects first-run handoffs with unsafe API URLs or version text", () => {
   assert.equal(rejected[2], "unapproved handoff API URL");
   assert.equal(rejected[3], "unapproved handoff API URL");
   assert.equal(rejected[4], "unsafe handoff version");
+});
+
+test("parses only the token-free observed-runtime deep link", () => {
+  assert.deepEqual(
+    observedRuntimeHandoffFromDeepLink(
+      "infergrade-runner://observed-runtime?observed_run_id=obs_123&observed_api_url=https%3A%2F%2Fapi.infergrade.com"
+    ),
+    { observedRunId: "obs_123", apiUrl: "https://api.infergrade.com/" }
+  );
+  assert.deepEqual(
+    observedRuntimeHandoffFromParams(
+      new URLSearchParams("observed_run_id=obs_local&observed_api_url=http%3A%2F%2F127.0.0.1%3A8000")
+    ),
+    { observedRunId: "obs_local", apiUrl: "http://127.0.0.1:8000/" }
+  );
+});
+
+test("rejects observed-runtime handoffs with extra or secret parameters", () => {
+  const rejected = [];
+  assert.deepEqual(
+    observedRuntimeHandoffFromDeepLink(
+      "infergrade-runner://observed-runtime?observed_run_id=obs_123&observed_api_url=https%3A%2F%2Fapi.infergrade.com&token=secret",
+      (reason) => rejected.push(reason)
+    ),
+    { observedRunId: "", apiUrl: "" }
+  );
+  assert.match(rejected[0], /sensitive|unexpected/i);
+  assert.deepEqual(
+    observedRuntimeHandoffFromDeepLink(
+      "infergrade-runner://first-run?observed_run_id=obs_123&observed_api_url=https%3A%2F%2Fapi.infergrade.com",
+      (reason) => rejected.push(reason)
+    ),
+    { observedRunId: "", apiUrl: "" }
+  );
 });
 
 test("rejects first-run handoffs with unsafe or sensitive identifier values", () => {

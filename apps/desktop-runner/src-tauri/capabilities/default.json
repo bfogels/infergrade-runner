@@ -71,6 +71,19 @@
             },
             "--select-existing"
           ]
+        },
+        {
+          "name": "binaries/infergrade-sidecar",
+          "sidecar": true,
+          "args": [
+            "observe-runtime",
+            "--endpoint",
+            {
+              "validator": "^(?:https?://(?:localhost|127(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}|\\[::1\\])(?::\\d{1,5})?(?:/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{0,512})?)$"
+            },
+            "--tier",
+            "canary"
+          ]
         }
       ]
     }

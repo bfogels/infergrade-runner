@@ -216,6 +216,26 @@
           </div>
         </section>
 
+        <section class="observed-runtime-surface" data-observed-runtime-panel aria-labelledby="observed-runtime-title">
+          <div class="observed-runtime-copy">
+            <p class="eyebrow">Evaluate what you already run</p>
+            <h2 id="observed-runtime-title">Check a local model endpoint</h2>
+            <p>
+              Give InferGrade one localhost OpenAI-compatible endpoint. Runner will run a fixed five-case canary and upload the result as unverified observed evidence.
+            </p>
+          </div>
+          <div class="observed-runtime-fields">
+            <label>
+              <span>Local endpoint</span>
+              <input name="observedRuntimeEndpoint" type="url" inputmode="url" autocomplete="off" placeholder="http://127.0.0.1:8000/v1" />
+            </label>
+            <div class="button-row">
+              <button type="button" data-observed-runtime-start>Run five-case canary</button>
+            </div>
+            <p class="hint" data-observed-runtime-status aria-live="polite">Open an observed-run link from Hub to start the five-case check.</p>
+          </div>
+        </section>
+
         <details class="support-drawer" data-support-details>
           <summary class="drawer-toggle">
             <span class="drawer-title">

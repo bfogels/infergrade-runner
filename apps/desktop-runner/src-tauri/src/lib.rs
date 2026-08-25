@@ -25,6 +25,7 @@ use serde_json::{json, Value};
 use std::env;
 use std::fs;
 use std::io::Write;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
@@ -33,6 +34,7 @@ use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
 };
+use url::Url;
 
 const KEYRING_SERVICE: &str = "com.infergrade.runner";
 const ACCEPTANCE_KEYRING_SERVICE_PREFIX: &str = "com.infergrade.runner.acceptance.";
@@ -41,6 +43,9 @@ const SIDECAR_BINARY_NAME: &str = "infergrade-sidecar";
 const DESKTOP_EVENT_PREFIX: &str = "INFERGRADE_DESKTOP_EVENT ";
 const DESKTOP_SIDECAR_DIAGNOSTIC_COMMANDS: &[&str] =
     &["--version", "desktop-self-test", "desktop-readiness"];
+const OBSERVED_RUNTIME_MAX_CAPTURED_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
+const OBSERVED_RUNTIME_MAX_ERROR_HINT_BYTES: usize = 1024;
+const OBSERVED_RUNTIME_CONTRACT_VERSION: &str = "observed_quick_suite_v1";
 const STARTER_GGUF_URL: &str = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
 const STARTER_GGUF_FILENAME: &str = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
 const PARTIAL_ARTIFACT_PREFIX: &str = "infergrade-artifact-";
@@ -676,6 +681,302 @@ async fn desktop_sidecar_diagnostic(app: AppHandle, args: Vec<String>) -> Result
         "code": output.status.code().unwrap_or(1),
         "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
         "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
+    }))
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    let normalized = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    normalized == "localhost"
+        || normalized
+            .parse::<IpAddr>()
+            .map(|address| address.is_loopback())
+            .unwrap_or(false)
+}
+
+fn normalize_observed_endpoint(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.is_empty() || value.len() > 512 || value.chars().any(char::is_whitespace) {
+        return Err(
+            "Observed endpoint is invalid. Use a localhost OpenAI-compatible URL.".to_string(),
+        );
+    }
+    let parsed = Url::parse(value)
+        .map_err(|_| "Observed endpoint is invalid. Use a localhost OpenAI-compatible URL.")?;
+    let host = parsed.host_str().ok_or_else(|| {
+        "Observed endpoint is invalid. Use a localhost OpenAI-compatible URL.".to_string()
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || !is_loopback_host(host)
+        || parsed.username() != ""
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err("Observed endpoint must be an HTTP localhost URL without credentials or query parameters.".to_string());
+    }
+    Ok(parsed.to_string())
+}
+
+fn normalize_observed_hub_api_url(raw: &str) -> Result<String, String> {
+    let normalized = normalize_api_url(raw)?;
+    let parsed = Url::parse(&normalized)
+        .map_err(|_| "Observed Hub URL is invalid. Use the configured Hub API URL.".to_string())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "Observed Hub URL must include a host.".to_string())?;
+    let hosted = parsed.scheme() == "https" && host.eq_ignore_ascii_case("api.infergrade.com");
+    let local = parsed.scheme() == "http" && is_loopback_host(host);
+    if (!hosted && !local)
+        || parsed.username() != ""
+        || parsed.password().is_some()
+        || parsed.path() != "/"
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err("Observed Hub URL is not an approved Hub API root.".to_string());
+    }
+    Ok(parsed.to_string())
+}
+
+fn resolve_observed_hub_api_url(
+    paired_api_url: Option<&str>,
+    handoff_api_url: Option<&str>,
+) -> Result<String, String> {
+    let paired_api_url = paired_api_url
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            "Pair this machine with Hub before running an observed check.".to_string()
+        })?;
+    let paired_api_url = normalize_observed_hub_api_url(paired_api_url)?;
+    let handoff_api_url = handoff_api_url
+        .filter(|value| !value.trim().is_empty())
+        .map(normalize_observed_hub_api_url)
+        .transpose()?;
+    if handoff_api_url
+        .as_deref()
+        .is_some_and(|value| value != paired_api_url)
+    {
+        return Err("The observed-run link does not match this Runner's paired Hub.".to_string());
+    }
+    Ok(paired_api_url)
+}
+
+fn append_observed_output(target: &mut Vec<u8>, bytes: &[u8], label: &str) -> Result<(), String> {
+    if target.len().saturating_add(bytes.len()) > OBSERVED_RUNTIME_MAX_CAPTURED_OUTPUT_BYTES {
+        return Err(format!(
+            "Observed Runner {label} output exceeded its safety limit."
+        ));
+    }
+    target.extend_from_slice(bytes);
+    Ok(())
+}
+
+fn observed_runtime_envelope_summary(envelope: &Value) -> Result<Value, String> {
+    let object = envelope
+        .as_object()
+        .ok_or_else(|| "Observed Runner returned a non-object result.".to_string())?;
+    let required = [
+        "contract_version",
+        "status",
+        "suite",
+        "protocol_canary",
+        "observed_runtime",
+        "metrics",
+        "case_results",
+        "evidence_boundary",
+    ];
+    if required.iter().any(|key| !object.contains_key(*key))
+        || object.get("contract_version").and_then(Value::as_str)
+            != Some(OBSERVED_RUNTIME_CONTRACT_VERSION)
+    {
+        return Err("Observed Runner returned an unsupported result envelope.".to_string());
+    }
+    let suite = object
+        .get("suite")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Observed Runner returned an invalid canary suite envelope.".to_string())?;
+    if suite.get("suite_id").and_then(Value::as_str) != Some(OBSERVED_RUNTIME_CONTRACT_VERSION)
+        || suite.get("tier").and_then(Value::as_str) != Some("canary")
+        || suite
+            .get("selection")
+            .and_then(Value::as_object)
+            .and_then(|selection| selection.get("tier"))
+            .and_then(Value::as_str)
+            != Some("canary")
+    {
+        return Err("Observed Runner returned an invalid canary suite envelope.".to_string());
+    }
+    let receipt = object
+        .get("observed_runtime")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Observed Runner returned an invalid runtime receipt.".to_string())?;
+    if receipt.get("contract_version").and_then(Value::as_str) != Some("observed_runtime_v1")
+        || receipt.get("verified") != Some(&Value::Bool(false))
+        || receipt.get("promotion_eligible") != Some(&Value::Bool(false))
+    {
+        return Err(
+            "Observed Runner returned a result outside the observed evidence boundary.".to_string(),
+        );
+    }
+    let boundary = object
+        .get("evidence_boundary")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Observed Runner returned an invalid evidence boundary.".to_string())?;
+    if boundary.get("verification_status").and_then(Value::as_str) != Some("not_verified")
+        || boundary.get("promotion_eligible") != Some(&Value::Bool(false))
+        || boundary.get("recommendation_eligible") != Some(&Value::Bool(false))
+    {
+        return Err(
+            "Observed Runner returned a result outside the observed evidence boundary.".to_string(),
+        );
+    }
+    let metrics = object
+        .get("metrics")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Observed Runner returned invalid canary metrics.".to_string())?;
+    let metric = |key: &str| metrics.get(key).cloned().unwrap_or(Value::Null);
+    Ok(json!({
+        "suite_status": object.get("status").cloned().unwrap_or(Value::Null),
+        "tier": "canary",
+        "metrics": {
+            "exact_signed_integer_accuracy": metric("exact_signed_integer_accuracy"),
+            "correct_count": metric("correct_count"),
+            "completed_case_count": metric("completed_case_count"),
+            "expected_case_count": metric("expected_case_count"),
+            "format_invalid_count": metric("format_invalid_count"),
+            "generation_failure_count": metric("generation_failure_count"),
+        },
+    }))
+}
+
+async fn run_observed_sidecar(app: &AppHandle, endpoint: &str) -> Result<Value, String> {
+    let command = app
+        .shell()
+        .sidecar(SIDECAR_BINARY_NAME)
+        .map_err(|_| "Could not prepare the bundled Runner.".to_string())?
+        .args([
+            "observe-runtime",
+            "--endpoint",
+            endpoint,
+            "--tier",
+            "canary",
+        ]);
+    let (mut events, child) = command
+        .spawn()
+        .map_err(|_| "Could not start the bundled Runner observed check.".to_string())?;
+    let mut stdout = Vec::new();
+    let mut stderr_hint = Vec::new();
+    let mut exit_code = None;
+    while let Some(event) = events.recv().await {
+        match event {
+            CommandEvent::Stdout(bytes) => {
+                if let Err(error) = append_observed_output(&mut stdout, &bytes, "standard") {
+                    let _ = child.kill();
+                    return Err(error);
+                }
+            }
+            CommandEvent::Stderr(bytes) => {
+                if stderr_hint.len().saturating_add(bytes.len())
+                    > OBSERVED_RUNTIME_MAX_ERROR_HINT_BYTES
+                {
+                    let _ = child.kill();
+                    return Err("Observed Runner produced too much diagnostic output.".to_string());
+                }
+                stderr_hint.extend_from_slice(&bytes);
+            }
+            CommandEvent::Error(_) => {
+                let _ = child.kill();
+                return Err("The bundled Runner could not complete the observed check.".to_string());
+            }
+            CommandEvent::Terminated(payload) => {
+                exit_code = payload.code;
+                break;
+            }
+            _ => {}
+        }
+    }
+    if exit_code.is_none() {
+        let _ = child.kill();
+    }
+    let envelope = serde_json::from_slice::<Value>(&stdout)
+        .map_err(|_| {
+            let hint = String::from_utf8_lossy(&stderr_hint);
+            if hint.contains("model_not_available") {
+                "This endpoint reports multiple models. Use an endpoint serving only the model you want to evaluate.".to_string()
+            } else {
+                "The bundled Runner did not return a valid observed result.".to_string()
+            }
+        })?;
+    let summary = observed_runtime_envelope_summary(&envelope)?;
+    if exit_code.is_none() {
+        return Err(
+            "The bundled Runner did not report completion for the observed check.".to_string(),
+        );
+    }
+    Ok(json!({"envelope": envelope, "summary": summary}))
+}
+
+async fn upload_observed_runtime_result(
+    api_url: &str,
+    observed_run_id: &str,
+    envelope: Value,
+) -> Result<Value, String> {
+    let token = DesktopTokenStore
+        .load_runner_token()
+        .map_err(|_| "Pair this machine with Hub before uploading an observed result.".to_string())?
+        .ok_or_else(|| {
+            "Pair this machine with Hub before uploading an observed result.".to_string()
+        })?;
+    let request = build_hub_json_request(
+        HubMethod::Post,
+        api_url,
+        &format!("/v1/observed-runs/{observed_run_id}/result"),
+        Some(json!({"observed_quick_suite": envelope})),
+        Some(&token),
+    )
+    .map_err(|_| "The observed result could not be prepared for Hub.".to_string())?;
+    let response = execute_hub_json_request(&request).await.map_err(|_| {
+        "Hub could not accept the observed result. Check pairing and try again.".to_string()
+    })?;
+    Ok(json!({"status": "uploaded", "hub_status": response.status}))
+}
+
+#[tauri::command]
+async fn run_observed_runtime(
+    app: AppHandle,
+    endpoint: String,
+    observed_run_id: String,
+    observed_api_url: Option<String>,
+) -> Result<Value, String> {
+    let endpoint = normalize_observed_endpoint(&endpoint)?;
+    let observed_run_id = validate_hub_path_id(&observed_run_id, "observed_run_id")
+        .map_err(|_| "The observed Hub run ID is invalid.".to_string())?;
+    let profile = load_runner_profile()?.ok_or_else(|| {
+        "Pair this machine with Hub before running an observed check.".to_string()
+    })?;
+    let api_url = resolve_observed_hub_api_url(
+        profile_string(Some(&profile), "api_url").as_deref(),
+        observed_api_url.as_deref(),
+    )?;
+    let sidecar_result = run_observed_sidecar(&app, &endpoint).await?;
+    let summary = sidecar_result
+        .get("summary")
+        .cloned()
+        .ok_or_else(|| "The observed Runner result summary is unavailable.".to_string())?;
+    let upload = upload_observed_runtime_result(
+        &api_url,
+        observed_run_id,
+        sidecar_result
+            .get("envelope")
+            .cloned()
+            .ok_or_else(|| "The observed Runner result envelope is unavailable.".to_string())?,
+    )
+    .await?;
+    Ok(json!({
+        "status": "uploaded",
+        "observed_run_id": observed_run_id,
+        "summary": summary,
+        "upload": upload,
     }))
 }
 
@@ -1416,6 +1717,7 @@ pub fn run() {
             worker_protocol_preview,
             worker_protocol_ping,
             desktop_sidecar_diagnostic,
+            run_observed_runtime,
             start_runner_listener,
             stop_runner_listener,
             reset_runner_pairing,
@@ -2419,6 +2721,98 @@ mod tests {
         assert_eq!(response["capabilities"]["run_token_supported"], true);
         assert!(!combined.contains("qbhr_secret_token"));
         assert!(!combined.contains("Authorization"));
+    }
+
+    #[test]
+    fn observed_endpoint_and_hub_url_validation_stay_loopback_or_approved() {
+        assert_eq!(
+            normalize_observed_endpoint("http://127.0.0.1:8000/v1").expect("loopback endpoint"),
+            "http://127.0.0.1:8000/v1"
+        );
+        assert!(normalize_observed_endpoint("https://example.com/v1").is_err());
+        assert!(normalize_observed_endpoint("http://localhost:8000/v1?model=x").is_err());
+        assert!(normalize_observed_endpoint("http://localhost:8000@127.0.0.1/v1").is_err());
+        assert_eq!(
+            normalize_observed_hub_api_url("https://api.infergrade.com")
+                .expect("approved Hub root"),
+            "https://api.infergrade.com/"
+        );
+        assert!(normalize_observed_hub_api_url("https://evil.example").is_err());
+        assert!(normalize_observed_hub_api_url("http://localhost:8000/api").is_err());
+    }
+
+    #[test]
+    fn observed_hub_upload_uses_paired_profile_and_rejects_mismatched_handoffs() {
+        assert_eq!(
+            resolve_observed_hub_api_url(
+                Some("https://api.infergrade.com"),
+                Some("https://api.infergrade.com/")
+            )
+            .expect("matching Hub handoff"),
+            "https://api.infergrade.com/"
+        );
+        assert!(resolve_observed_hub_api_url(None, Some("https://api.infergrade.com")).is_err());
+        assert!(resolve_observed_hub_api_url(
+            Some("https://api.infergrade.com"),
+            Some("http://127.0.0.1:8000")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn observed_envelope_summary_requires_canary_boundary_and_excludes_private_fields() {
+        let envelope = json!({
+            "contract_version": "observed_quick_suite_v1",
+            "status": "completed",
+            "suite": {
+                "suite_id": "observed_quick_suite_v1",
+                "tier": "canary",
+                "selection": {"tier": "canary"}
+            },
+            "protocol_canary": {"status": "passed"},
+            "observed_runtime": {
+                "contract_version": "observed_runtime_v1",
+                "verified": false,
+                "promotion_eligible": false,
+                "endpoint": {"network_scope": "loopback"},
+                "private_endpoint_url": "http://127.0.0.1:8000/v1"
+            },
+            "metrics": {
+                "exact_signed_integer_accuracy": 0.8,
+                "correct_count": 4,
+                "completed_case_count": 5,
+                "expected_case_count": 5,
+                "format_invalid_count": 0,
+                "generation_failure_count": 0
+            },
+            "case_results": [],
+            "evidence_boundary": {
+                "verification_status": "not_verified",
+                "promotion_eligible": false,
+                "recommendation_eligible": false
+            }
+        });
+        let summary = observed_runtime_envelope_summary(&envelope).expect("summary");
+        assert_eq!(summary["tier"], "canary");
+        assert_eq!(summary["metrics"]["correct_count"], 4);
+        assert!(!summary.to_string().contains("127.0.0.1"));
+        assert!(observed_runtime_envelope_summary(&json!({
+            "contract_version": "observed_quick_suite_v1",
+            "suite": {"suite_id": "observed_quick_suite_v1", "tier": "standard"}
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn observed_sidecar_output_is_bounded() {
+        let mut output = Vec::new();
+        assert!(append_observed_output(
+            &mut output,
+            &vec![0_u8; OBSERVED_RUNTIME_MAX_CAPTURED_OUTPUT_BYTES],
+            "standard"
+        )
+        .is_ok());
+        assert!(append_observed_output(&mut output, &[0_u8], "standard").is_err());
     }
 
     #[test]
