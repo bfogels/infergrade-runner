@@ -63,11 +63,17 @@ FAILURE_CODES = (
 class ObservedRuntimeError(RuntimeError):
     """An observed-runtime failure with a stable, privacy-safe code."""
 
-    def __init__(self, code: str, status: Optional[int] = None):
+    def __init__(
+        self,
+        code: str,
+        status: Optional[int] = None,
+        optional_controls_rejected: bool = False,
+    ):
         if code not in FAILURE_CODES:
             code = "connection_failed"
         self.code = code
         self.status = status
+        self.optional_controls_rejected = bool(optional_controls_rejected)
         # Do not include a URL, exception text, response body, or path here.
         super().__init__(code)
 
@@ -115,7 +121,7 @@ _PROVIDER_ALIASES = {
     "llama.cpp": "llama_server",
     "text-generation-inference": "tgi",
 }
-_THINKING_CONTROL_PROVIDERS = frozenset(("llama_server", "vllm"))
+_THINKING_CONTROL_PROVIDERS = frozenset(("llama_server", "vllm", "unknown"))
 
 
 def _thinking_controls(provider: str) -> Optional[Dict[str, Any]]:
@@ -128,6 +134,11 @@ def _thinking_controls(provider: str) -> Optional[Dict[str, Any]]:
             "thinking_budget_tokens": 0,
         }
     if provider == "vllm":
+        return {"chat_template_kwargs": {"enable_thinking": False}}
+    if provider == "unknown":
+        # A custom-port OpenAI-compatible endpoint has no trustworthy provider
+        # identity. Try the shared llama.cpp/vLLM extension once, then fall
+        # back to the strict OpenAI payload if the server rejects that field.
         return {"chat_template_kwargs": {"enable_thinking": False}}
     return None
 
@@ -222,7 +233,7 @@ def _bounded_response_limit(value: Any) -> int:
 
 
 def _host_is_loopback(host: str) -> bool:
-    normalized = str(host or "").strip().lower().rstrip(".")
+    normalized = str(host or "").strip().lower()
     if normalized == "localhost":
         # Resolve the conventional name and fail closed if the host mapping
         # has been altered away from loopback.  Arbitrary hostnames are never
@@ -239,10 +250,9 @@ def _host_is_loopback(host: str) -> bool:
         address = ipaddress.ip_address(normalized)
     except ValueError:
         return False
-    if address.is_loopback:
-        return True
-    mapped = getattr(address, "ipv4_mapped", None)
-    return bool(mapped and mapped.is_loopback)
+    if isinstance(address, ipaddress.IPv4Address):
+        return address.packed[0] == 127
+    return address == ipaddress.IPv6Address("::1")
 
 
 def _normalize_base_path(path: str) -> str:
@@ -269,10 +279,13 @@ def parse_local_endpoint(endpoint: str) -> LocalEndpoint:
     raw = str(endpoint or "")
     if not raw or raw != raw.strip() or len(raw) > 512 or any(ch.isspace() for ch in raw):
         raise ObservedRuntimeError("endpoint_invalid")
+    bracketed_host = re.match(r"^https?://\[([^]]+)\]", raw, re.IGNORECASE)
+    if bracketed_host and bracketed_host.group(1).lower() != "::1":
+        raise ObservedRuntimeError("non_loopback_endpoint")
     try:
         parsed = urllib_parse.urlsplit(raw)
         scheme = parsed.scheme.lower()
-        host = (parsed.hostname or "").lower().rstrip(".")
+        host = (parsed.hostname or "").lower()
         port = parsed.port
     except (ValueError, UnicodeError):
         raise ObservedRuntimeError("endpoint_invalid")
@@ -894,10 +907,29 @@ class OpenAICompatibleClient(object):
             # Redirects are rejected by _NoRedirectHandler.  Other statuses
             # remain one stable code, without echoing provider error bodies.
             status = exc.code
+            detail = exc.read(8192) if status in (400, 422) else b""
             exc.close()
             if status in (301, 302, 303, 307, 308):
                 raise ObservedRuntimeError("redirect_not_allowed")
-            raise ObservedRuntimeError("http_error", status=status)
+            normalized_detail = detail.lower()
+            optional_controls_rejected = (
+                b"chat_template_kwargs" in normalized_detail
+                and any(
+                    marker in normalized_detail
+                    for marker in (
+                        b"unknown",
+                        b"unrecognized",
+                        b"unexpected",
+                        b"not permitted",
+                        b"extra",
+                    )
+                )
+            )
+            raise ObservedRuntimeError(
+                "http_error",
+                status=status,
+                optional_controls_rejected=optional_controls_rejected,
+            )
         except (socket.timeout, TimeoutError):
             raise ObservedRuntimeError("timeout")
         except urllib_error.URLError as exc:
@@ -993,9 +1025,31 @@ class OpenAICompatibleClient(object):
                 payload=request_payload,
                 timeout_seconds=self.generation_timeout_seconds,
             )
-        except ObservedRuntimeError:
-            self._set_generation_effective("request_failed")
-            raise
+        except ObservedRuntimeError as exc:
+            if (
+                provider == "unknown"
+                and controls is not None
+                and exc.code == "http_error"
+                and exc.status in (400, 422)
+                and exc.optional_controls_rejected
+            ):
+                fallback_payload = dict(request_payload)
+                for key in controls:
+                    fallback_payload.pop(key, None)
+                self._set_generation_effective("rejected")
+                try:
+                    body, content_type = self._request(
+                        "POST",
+                        "/v1/chat/completions",
+                        payload=fallback_payload,
+                        timeout_seconds=self.generation_timeout_seconds,
+                    )
+                except ObservedRuntimeError:
+                    self._set_generation_effective("request_failed")
+                    raise
+            else:
+                self._set_generation_effective("request_failed")
+                raise
         if stream or "text/event-stream" in content_type.lower() or body.lstrip().startswith(b"data:"):
             try:
                 text = _parse_sse(body)

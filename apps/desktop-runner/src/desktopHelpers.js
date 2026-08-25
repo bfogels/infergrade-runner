@@ -2,6 +2,7 @@ const HOSTED_API_URL = "https://api.infergrade.com";
 const SENSITIVE_HANDOFF_TEXT = /token|secret|authorization|bearer/i;
 const HUB_HANDOFF_ID = /^[A-Za-z0-9_.-]{1,160}$/;
 const HUB_HANDOFF_VERSION = /^[A-Za-z0-9_.+-]{1,80}$/;
+const OBSERVED_RUNTIME_HANDOFF_KEYS = new Set(["observed_run_id", "observed_api_url"]);
 
 function isLocalHost(hostname) {
   const host = String(hostname || "").toLowerCase();
@@ -25,6 +26,10 @@ export function normalizeDesktopApiUrl(value = "") {
   const candidate = raw || HOSTED_API_URL;
   if (/\s/.test(candidate)) {
     throw new Error("Enter a valid Hub API URL, such as https://api.infergrade.com.");
+  }
+  const bracketedHost = candidate.match(/^https?:\/\/\[([^\]]+)\]/i);
+  if (bracketedHost && bracketedHost[1].toLowerCase() !== "::1") {
+    throw new Error("Use canonical [::1] for an IPv6 localhost URL.");
   }
 
   let urlText = candidate;
@@ -167,6 +172,61 @@ export function firstRunHandoffFromDeepLink(value, onRejected = () => {}) {
     return emptyFirstRunHandoff();
   }
   return firstRunHandoffFromParams(parsed.searchParams, onRejected);
+}
+
+function emptyObservedRuntimeHandoff() {
+  return { observedRunId: "", apiUrl: "" };
+}
+
+export function observedRuntimeHandoffFromParams(params, onRejected = () => {}) {
+  const searchParams = params instanceof URLSearchParams ? params : new URLSearchParams(params || "");
+  const keys = [...searchParams.keys()];
+  if (keys.some((key) => SENSITIVE_HANDOFF_TEXT.test(key))) {
+    onRejected("sensitive observed-runtime handoff parameter");
+    return emptyObservedRuntimeHandoff();
+  }
+  if (keys.some((key) => !OBSERVED_RUNTIME_HANDOFF_KEYS.has(key))) {
+    onRejected("unexpected observed-runtime handoff parameter");
+    return emptyObservedRuntimeHandoff();
+  }
+  const runIdValues = searchParams.getAll("observed_run_id");
+  const apiUrlValues = searchParams.getAll("observed_api_url");
+  if (runIdValues.length > 1 || apiUrlValues.length > 1) {
+    onRejected("duplicate observed-runtime handoff parameter");
+    return emptyObservedRuntimeHandoff();
+  }
+  const observedRunId = safeHandoffId(runIdValues[0] || "", onRejected);
+  const apiUrl = safeHandoffApiUrl(apiUrlValues[0] || "", onRejected);
+  if (observedRunId === null || apiUrl === null) {
+    return emptyObservedRuntimeHandoff();
+  }
+  return { observedRunId, apiUrl };
+}
+
+export function observedRuntimeHandoffFromDeepLink(value, onRejected = () => {}) {
+  if (!value || typeof value !== "string") {
+    return emptyObservedRuntimeHandoff();
+  }
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch (_error) {
+    onRejected("invalid observed-runtime handoff URL");
+    return emptyObservedRuntimeHandoff();
+  }
+  if (
+    parsed.protocol !== "infergrade-runner:" ||
+    parsed.hostname !== "observed-runtime" ||
+    parsed.port ||
+    (parsed.pathname !== "" && parsed.pathname !== "/") ||
+    parsed.username ||
+    parsed.password ||
+    parsed.hash
+  ) {
+    onRejected("unexpected observed-runtime handoff URL");
+    return emptyObservedRuntimeHandoff();
+  }
+  return observedRuntimeHandoffFromParams(parsed.searchParams, onRejected);
 }
 
 export function isPairingIntentDeepLink(value) {

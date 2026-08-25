@@ -26,11 +26,14 @@ the bounded requested `max_tokens`, and an explicit stream state. For
 llama-server and vLLM, the adapter requests `chat_template_kwargs` with
 `enable_thinking: false`; llama-server also receives
 `thinking_budget_tokens: 0`. The receipt records whether that control was
-requested and whether its effect is verified. Other providers are diagnostic
-only: they receive the standard deterministic request and the receipt marks
-thinking control as `server_default_uncontrolled`, so those results are not
-treated as comparable or verified. Reasoning-only payloads are never promoted
-to final answer text.
+requested and whether its effect is verified. A custom-port endpoint whose
+provider remains unknown receives the shared `chat_template_kwargs` control
+once; if the server rejects that extension with HTTP 400/422, Runner retries
+once with the strict OpenAI request and records the control as rejected. Other
+known providers receive the standard deterministic request and the receipt
+marks thinking control as `server_default_uncontrolled`. None of these results
+become comparable or verified. Reasoning-only payloads are never promoted to
+final answer text.
 
 ## Validation boundary
 

@@ -17,6 +17,7 @@ import {
   isPairingIntentDeepLink,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
+  observedRuntimeHandoffFromDeepLink,
   requiredDesktopReadinessFailure,
   shouldPreserveActiveAssignment,
   shouldClearCompletedHandoff,
@@ -139,6 +140,9 @@ const assignmentCheck = document.querySelector("[data-assignment-check]");
 const assignmentStartListeningButton = document.querySelector("[data-assignment-start-listening]");
 const assignmentInstallRuntimeButton = document.querySelector("[data-assignment-install-runtime]");
 const assignmentOpenHubButton = document.querySelector("[data-assignment-panel] [data-open-hub]");
+const observedRuntimeEndpointInput = document.querySelector('[name="observedRuntimeEndpoint"]');
+const observedRuntimeStartButton = document.querySelector("[data-observed-runtime-start]");
+const observedRuntimeStatus = document.querySelector("[data-observed-runtime-status]");
 
 let childProcess = null;
 let logLines = [];
@@ -176,6 +180,8 @@ let pendingRequiredRuntime = null;
 let pendingManagedRuntimeRepair = false;
 let currentHandoffRunId = "";
 let currentHandoffWorkerId = "";
+let currentObservedRunId = "";
+let currentObservedApiUrl = "";
 let previewStateApplied = false;
 let pairingAuthFailure = null;
 let currentStatusTone = "idle";
@@ -2469,6 +2475,135 @@ function firstRunHandoffFromDeepLinks(urls) {
   return { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" };
 }
 
+function emptyObservedRuntimeHandoff() {
+  return { observedRunId: "", apiUrl: "" };
+}
+
+function observedRuntimeHandoffFromUrl() {
+  const href = window.location.href || "";
+  if (!href.startsWith("infergrade-runner:")) {
+    return emptyObservedRuntimeHandoff();
+  }
+  return observedRuntimeHandoffFromDeepLink(href, (reason) => {
+    appendLog(`Ignored observed-runtime handoff with ${reason}.`);
+  });
+}
+
+function observedRuntimeHandoffFromDeepLinks(urls) {
+  for (const value of Array.isArray(urls) ? urls : []) {
+    const handoff = observedRuntimeHandoffFromDeepLink(value, (reason) => {
+      appendLog(`Ignored observed-runtime handoff with ${reason}.`);
+    });
+    if (handoff.observedRunId) {
+      return handoff;
+    }
+  }
+  return emptyObservedRuntimeHandoff();
+}
+
+function applyObservedRuntimeHandoff(incomingHandoff = null) {
+  const handoff = incomingHandoff || observedRuntimeHandoffFromUrl();
+  if (!handoff.observedRunId) {
+    if (observedRuntimeStatus && !currentObservedRunId) {
+      observedRuntimeStatus.textContent = "Open an observed-run link from Hub to start the five-case check.";
+    }
+    return;
+  }
+  currentObservedRunId = handoff.observedRunId;
+  currentObservedApiUrl = handoff.apiUrl || currentObservedApiUrl || "";
+  if (observedRuntimeStatus) {
+    observedRuntimeStatus.textContent = "Ready for the local endpoint. Runner will run a fixed five-case canary and upload the observed result.";
+  }
+  if (observedRuntimeEndpointInput) {
+    observedRuntimeEndpointInput.focus();
+  }
+}
+
+function observedRuntimeFailureMessage(message = "") {
+  const text = String(message || "");
+  if (/model_not_available|multiple models/i.test(text)) {
+    return "This endpoint reports multiple models. Use an endpoint serving only the model you want to evaluate, then open the observed-run link again.";
+  }
+  if (/observed-run link expired|expired.*observation/i.test(text)) {
+    return "This observation expired. Start a fresh observed check from Hub.";
+  }
+  if (/already has a different result|terminal conflict/i.test(text)) {
+    return "This observation already contains a different result. Start a fresh observed check from Hub.";
+  }
+  if (/10-minute safety limit|exceeded.*safety limit/i.test(text)) {
+    return "The local check reached its 10-minute safety limit. Confirm the model server is responsive, then start a fresh observed check from Hub.";
+  }
+  if (/Hub API URL|valid Hub API/i.test(text)) {
+    return "Enter the Hub API URL this Runner is paired with, then try the observed check again.";
+  }
+  if (/pair this machine|pairing|token/i.test(text)) {
+    return "Pair this machine with Hub before uploading an observed result.";
+  }
+  if (/localhost|loopback|endpoint/i.test(text)) {
+    return "Use one reachable localhost OpenAI-compatible endpoint, such as http://127.0.0.1:8000/v1.";
+  }
+  return "The observed check could not be completed. Check the local server and try again.";
+}
+
+async function runObservedRuntimeCheck() {
+  const endpoint = observedRuntimeEndpointInput?.value.trim() || "";
+  if (!endpoint) {
+    const message = "Enter the localhost OpenAI-compatible endpoint that is already running.";
+    if (observedRuntimeStatus) observedRuntimeStatus.textContent = message;
+    setStatus("Observed check needs attention", "error");
+    throw new Error(message);
+  }
+  if (!currentObservedRunId) {
+    const message = "Open an observed-run link from Hub before running this check.";
+    if (observedRuntimeStatus) observedRuntimeStatus.textContent = message;
+    setStatus("Observed check needs attention", "error");
+    throw new Error(message);
+  }
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    const message = "Open the desktop app to run an observed local check.";
+    if (observedRuntimeStatus) observedRuntimeStatus.textContent = message;
+    setStatus("Observed check needs attention", "error");
+    throw new Error(message);
+  }
+  if (observedRuntimeStartButton) {
+    observedRuntimeStartButton.disabled = true;
+  }
+  if (observedRuntimeStatus) {
+    observedRuntimeStatus.textContent = "Running the fixed five-case canary against the local endpoint…";
+  }
+  setStatus("Observed check running", "warning");
+  try {
+    const apiUrl = currentObservedApiUrl || normalizeDesktopApiUrl(form.elements.apiUrl.value);
+    const payload = await invoke("run_observed_runtime", {
+      endpoint,
+      observedRunId: currentObservedRunId,
+      observedApiUrl: apiUrl,
+    });
+    const metrics = payload?.summary?.metrics || {};
+    const completed = Number(metrics.completed_case_count || 0);
+    const expected = Number(metrics.expected_case_count || 0);
+    const accuracy = metrics.exact_signed_integer_accuracy;
+    const score = Number.isFinite(Number(accuracy)) ? ` · ${Math.round(Number(accuracy) * 100)}% exact` : "";
+    if (observedRuntimeStatus) {
+      observedRuntimeStatus.textContent = `Uploaded observed canary · ${completed}/${expected} cases completed${score}. This remains unverified evidence.`;
+    }
+    setStatus("Observed result uploaded", "good");
+    return payload;
+  } catch (error) {
+    const message = observedRuntimeFailureMessage(error?.message || error);
+    if (observedRuntimeStatus) {
+      observedRuntimeStatus.textContent = message;
+    }
+    setStatus("Observed check needs attention", "error");
+    throw new Error(message);
+  } finally {
+    if (observedRuntimeStartButton) {
+      observedRuntimeStartButton.disabled = false;
+    }
+  }
+}
+
 function applyPairingIntentFromDeepLinks(urls) {
   if (!(Array.isArray(urls) ? urls : []).some(isPairingIntentDeepLink)) return false;
   form.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -2524,6 +2659,7 @@ function applyFirstRunHandoff(incomingHandoff = null) {
 
 async function initFirstRunDeepLinkHandoff() {
   applyFirstRunHandoff();
+  applyObservedRuntimeHandoff();
   if (!isTauriRuntime()) {
     return;
   }
@@ -2534,6 +2670,10 @@ async function initFirstRunDeepLinkHandoff() {
     const { getCurrent, onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
     const currentUrls = await getCurrent();
     applyPairingIntentFromDeepLinks(currentUrls);
+    const currentObservedHandoff = observedRuntimeHandoffFromDeepLinks(currentUrls);
+    if (currentObservedHandoff.observedRunId) {
+      applyObservedRuntimeHandoff(currentObservedHandoff);
+    }
     const startHandoff = firstRunHandoffFromDeepLinks(currentUrls);
     if (startHandoff.runId) {
       applyFirstRunHandoff(startHandoff);
@@ -2544,6 +2684,11 @@ async function initFirstRunDeepLinkHandoff() {
     }
     await onOpenUrl((urls) => {
       applyPairingIntentFromDeepLinks(urls);
+      const observedHandoff = observedRuntimeHandoffFromDeepLinks(urls);
+      if (observedHandoff.observedRunId) {
+        applyObservedRuntimeHandoff(observedHandoff);
+        setStatus("Observed-run link received", "good");
+      }
       const handoff = firstRunHandoffFromDeepLinks(urls);
       if (!handoff.runId) {
         return;
@@ -3290,6 +3435,12 @@ firstRunStartButton?.addEventListener("click", () => {
     }
     setStatus("First benchmark blocked", "error");
     appendLog(`Could not start native first-run: ${message}`);
+  });
+});
+
+observedRuntimeStartButton?.addEventListener("click", () => {
+  runObservedRuntimeCheck().catch(() => {
+    // The bounded, user-safe failure is already rendered in the observed panel.
   });
 });
 
