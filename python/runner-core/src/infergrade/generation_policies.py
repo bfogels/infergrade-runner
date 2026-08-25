@@ -22,6 +22,12 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 DEFAULT_GENERATION_POLICY_ID = "deterministic_v1"
 DIRECT_ANSWER_GENERATION_POLICY_ID = "deterministic_direct_answer_v1"
 REASONING_CONSTRAINT_STRESS_THINKING_POLICY_ID = "reasoning_constraint_stress_thinking_v2"
+# Keep the original v2 policy immutable.  Qualification uses a separately
+# named, empirically more viable profile so a budget change cannot silently
+# rewrite the identity of the locked policy.
+REASONING_CONSTRAINT_STRESS_QUALIFICATION_THINKING_POLICY_ID = (
+    "reasoning_constraint_stress_qualification_thinking_v1"
+)
 
 POLICY_REVISION = "generation_policy_v1"
 _MAX_OUTPUT_TOKENS = 4096
@@ -38,8 +44,9 @@ _TERMINAL_PROTOCOLS = frozenset(
 )
 _JSON_SCALARS = (bool, int, float, str)
 
-# This is deliberately an ordered tuple rather than an inferred dataclass
-# field list.  It is the public, reviewable policy identity surface.
+# These are deliberately ordered tuples rather than an inferred dataclass
+# field list.  The base tuple is kept byte-compatible for legacy policies;
+# optional fields are added only when a policy opts into them.
 CANONICAL_POLICY_FIELDS = (
     "policy_id",
     "policy_revision",
@@ -61,6 +68,7 @@ CANONICAL_POLICY_FIELDS = (
     "terminal_parser_id",
     "stop_semantics_version",
 )
+OPTIONAL_CANONICAL_POLICY_FIELDS = ("top_k",)
 
 
 class UnknownGenerationPolicyError(ValueError):
@@ -99,6 +107,10 @@ class GenerationPolicy:
     terminal_answer_format: Optional[str]
     terminal_parser_id: str
     stop_semantics_version: str
+    # ``None`` preserves the original v2 policy's canonical JSON and digest.
+    # The qualification profile opts into this llama.cpp sampling control and
+    # therefore includes it in its own canonical identity.
+    top_k: Optional[int] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.policy_id, str) or not _POLICY_ID.fullmatch(self.policy_id):
@@ -115,6 +127,12 @@ class GenerationPolicy:
             raise ValueError("top_p must be numeric")
         if not math.isfinite(float(self.top_p)) or not 0.0 < float(self.top_p) <= 1.0:
             raise ValueError("top_p must be finite and greater than 0 and at most 1")
+        if self.top_k is not None and (
+            not isinstance(self.top_k, int)
+            or isinstance(self.top_k, bool)
+            or not 0 <= self.top_k <= _MAX_OUTPUT_TOKENS
+        ):
+            raise ValueError("top_k must be null or an integer between 0 and 4096")
         if not isinstance(self.seed, int) or isinstance(self.seed, bool) or not 0 <= self.seed <= _MAX_SEED:
             raise ValueError("seed must be an integer between 0 and 2^31-1")
         if self.max_output_tokens is not None and (
@@ -219,7 +237,7 @@ class GenerationPolicy:
     def to_dict(self) -> Dict[str, Any]:
         """Return the canonical policy fields as a fresh JSON-compatible dict."""
 
-        return {
+        payload = {
             "policy_id": self.policy_id,
             "policy_revision": self.policy_revision,
             "protocol_version": self.protocol_version,
@@ -240,6 +258,9 @@ class GenerationPolicy:
             "terminal_parser_id": self.terminal_parser_id,
             "stop_semantics_version": self.stop_semantics_version,
         }
+        if self.top_k is not None:
+            payload["top_k"] = self.top_k
+        return payload
 
     def canonical_json(self) -> str:
         """Serialize policy fields with one stable JSON representation."""
@@ -282,13 +303,17 @@ def _policy(
     stop_semantics_version: str,
     terminal_answer_marker: Optional[str] = None,
     terminal_answer_format: Optional[str] = None,
+    policy_revision: str = POLICY_REVISION,
+    temperature: float = 0.0,
+    top_p: float = 1.0,
+    top_k: Optional[int] = None,
 ) -> GenerationPolicy:
     return GenerationPolicy(
         policy_id=policy_id,
-        policy_revision=POLICY_REVISION,
+        policy_revision=policy_revision,
         protocol_version=protocol_version,
-        temperature=0.0,
-        top_p=1.0,
+        temperature=temperature,
+        top_p=top_p,
         seed=0,
         max_output_tokens=max_output_tokens,
         max_output_token_cap=max_output_token_cap,
@@ -303,6 +328,7 @@ def _policy(
         terminal_answer_format=terminal_answer_format,
         terminal_parser_id=terminal_parser_id,
         stop_semantics_version=stop_semantics_version,
+        top_k=top_k,
     )
 
 
@@ -355,6 +381,30 @@ GENERATION_POLICY_REGISTRY: Mapping[str, GenerationPolicy] = MappingProxyType(
             terminal_parser_id="final_answer_integer_v1",
             stop_semantics_version="natural_or_budget_v1",
         ),
+        REASONING_CONSTRAINT_STRESS_QUALIFICATION_THINKING_POLICY_ID: _policy(
+            REASONING_CONSTRAINT_STRESS_QUALIFICATION_THINKING_POLICY_ID,
+            policy_revision="generation_policy_v2",
+            protocol_version="generation_protocol_v3",
+            temperature=0.6,
+            top_p=0.95,
+            top_k=20,
+            max_output_tokens=1536,
+            max_output_token_cap=1536,
+            thinking_mode="enabled",
+            enable_thinking=True,
+            thinking_budget_tokens=512,
+            cache_prompt=False,
+            prompt_directive=(
+                "After reasoning, output exactly one final line in the form "
+                "FINAL_ANSWER: <signed integer>. Do not write any text after that line."
+            ),
+            prompt_transform_id="reasoning_constraint_stress_terminal_v2",
+            chat_template_kwargs=(("enable_thinking", True),),
+            terminal_answer_marker="FINAL_ANSWER:",
+            terminal_answer_format="integer",
+            terminal_parser_id="final_answer_integer_v1",
+            stop_semantics_version="natural_or_budget_v2",
+        ),
     }
 )
 
@@ -377,12 +427,14 @@ def resolve_generation_policy(policy_id: Optional[str] = None) -> GenerationPoli
 
 __all__ = [
     "CANONICAL_POLICY_FIELDS",
+    "OPTIONAL_CANONICAL_POLICY_FIELDS",
     "DEFAULT_GENERATION_POLICY_ID",
     "DIRECT_ANSWER_GENERATION_POLICY_ID",
     "GENERATION_POLICY_REGISTRY",
     "GenerationPolicy",
     "POLICY_REVISION",
     "REASONING_CONSTRAINT_STRESS_THINKING_POLICY_ID",
+    "REASONING_CONSTRAINT_STRESS_QUALIFICATION_THINKING_POLICY_ID",
     "UnknownGenerationPolicyError",
     "resolve_generation_policy",
 ]

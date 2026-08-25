@@ -26,6 +26,11 @@ from infergrade.gguf import (
     normalize_architecture,
     read_gguf_architecture,
 )
+from infergrade.generation_policies import (
+    REASONING_CONSTRAINT_STRESS_QUALIFICATION_THINKING_POLICY_ID,
+    REASONING_CONSTRAINT_STRESS_THINKING_POLICY_ID,
+    resolve_generation_policy,
+)
 from infergrade.models import DeploymentExecution, FidelityExecution, RunRequest
 from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
 from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cpp_runtime
@@ -68,6 +73,12 @@ _DEFAULT_COMMAND = "llama-cli"
 _DEFAULT_SERVER_COMMAND = "llama-server"
 _DEFAULT_PERPLEXITY_COMMAND = "llama-perplexity"
 _DEFAULT_SERVER_PORT = 8080
+_REASONING_THINKING_POLICY_IDS = frozenset(
+    (
+        REASONING_CONSTRAINT_STRESS_THINKING_POLICY_ID,
+        REASONING_CONSTRAINT_STRESS_QUALIFICATION_THINKING_POLICY_ID,
+    )
+)
 _SERVER_READY_TIMEOUT_SECONDS = 180.0
 _SERVER_REQUEST_TIMEOUT_SECONDS = 300.0
 _CONTAINER_MEMORY_SAMPLE_INTERVAL_SECONDS = 0.25
@@ -462,6 +473,14 @@ class LlamaCppAdapter(BaseAdapter):
                 "Runner container capability generation still uses llama-completion, which cannot safely apply "
                 "Gemma 4's Jinja chat template."
             )
+        if (
+            request.generation_preset in _REASONING_THINKING_POLICY_IDS
+            and not _uses_native_chat_template_server(request)
+        ):
+            raise RuntimeError(
+                "Reasoning v2 qualification requires a llama-server chat-template path so "
+                "the registered enabled-thinking policy and thinking budget can be sent explicitly."
+            )
         if _uses_native_chat_template_server(request):
             return self._generate_native_server_text(
                 request=request,
@@ -783,11 +802,20 @@ class LlamaCppAdapter(BaseAdapter):
         max_tokens: int,
         reuse_session: bool,
     ) -> Dict[str, object]:
-        completion = _stream_server_chat_completion(
-            base_url=str(session["base_url"]),
-            messages=messages,
-            max_tokens=max_tokens,
-        )
+        policy_id = str((prompt_transform or {}).get("policy_id") or "").strip()
+        if policy_id in _REASONING_THINKING_POLICY_IDS:
+            completion = _stream_server_chat_completion(
+                base_url=str(session["base_url"]),
+                messages=messages,
+                max_tokens=max_tokens,
+                generation_policy_id=policy_id,
+            )
+        else:
+            completion = _stream_server_chat_completion(
+                base_url=str(session["base_url"]),
+                messages=messages,
+                max_tokens=max_tokens,
+            )
         _validate_direct_answer_server_completion(completion, prompt_transform)
         parsed = {} if reuse_session else _parse_llama_timings(_read_log_file(str(session["log_path"])))
         report_load_time = not bool(session.get("load_time_reported"))
@@ -819,6 +847,22 @@ class LlamaCppAdapter(BaseAdapter):
             "measurement_source": "llama_cpp_server_chat_timings",
             "load_time_ms": metrics.get("load_time_ms"),
             "prompt_transform": prompt_transform,
+            **(
+                {
+                    "generation_policy_id": completion.get("generation_policy_id") or policy_id,
+                    "generation_policy_fingerprint": completion.get(
+                        "generation_policy_fingerprint"
+                    ),
+                    "generation_policy_enforcement": completion.get(
+                        "generation_policy_enforcement"
+                    ),
+                    "generation_policy_receipt": completion.get(
+                        "generation_policy_receipt"
+                    ),
+                }
+                if policy_id in _REASONING_THINKING_POLICY_IDS
+                else {}
+            ),
         }
 
     def _stop_capability_server_session(self) -> None:
@@ -2063,19 +2107,47 @@ def _stream_server_completion(base_url: str, prompt: str, max_tokens: int) -> Di
     }
 
 
-def _stream_server_chat_completion(base_url: str, messages: List[Dict[str, str]], max_tokens: int) -> Dict[str, Any]:
-    """Stream a templated chat completion while retaining llama.cpp timing extensions."""
+def _stream_server_chat_completion(
+    base_url: str,
+    messages: List[Dict[str, str]],
+    max_tokens: int,
+    generation_policy_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Stream a templated chat completion with an explicit policy payload."""
+    policy = None
+    if generation_policy_id:
+        policy = resolve_generation_policy(generation_policy_id)
+        if policy.max_output_tokens is not None and int(max_tokens) != int(policy.max_output_tokens):
+            raise RuntimeError(
+                "Generation policy max_output_tokens mismatch: %s != %s"
+                % (max_tokens, policy.max_output_tokens)
+            )
     payload = {
         "messages": messages,
         "max_tokens": max_tokens,
-        "temperature": 0,
-        "top_p": 1,
-        "seed": 0,
+        "temperature": policy.temperature if policy is not None else 0,
+        "top_p": policy.top_p if policy is not None else 1,
+        "seed": policy.seed if policy is not None else 0,
         "stream": True,
-        "cache_prompt": False,
-        "chat_template_kwargs": {"enable_thinking": False},
-        "thinking_budget_tokens": 0,
+        "cache_prompt": policy.cache_prompt if policy is not None else False,
+        "chat_template_kwargs": dict(policy.chat_template_kwargs)
+        if policy is not None
+        else {"enable_thinking": False},
+        "thinking_budget_tokens": policy.thinking_budget_tokens if policy is not None else 0,
     }
+    if policy is not None and policy.top_k is not None:
+        payload["top_k"] = policy.top_k
+    policy_receipt = None
+    if policy is not None:
+        policy_receipt = {
+            "policy_id": policy.policy_id,
+            "fingerprint_sha256": policy.fingerprint_sha256,
+            "requested": policy.to_dict(),
+            "enforcement_state": "requested_unverified",
+            # llama.cpp accepts the request fields but does not currently
+            # expose a receipt proving the template enforced them.
+            "enforced": None,
+        }
     choice_grammar = _multiple_choice_grammar(messages)
     if choice_grammar:
         payload["grammar"] = choice_grammar
@@ -2139,11 +2211,29 @@ def _stream_server_chat_completion(base_url: str, messages: List[Dict[str, str]]
             "protocol": "openai_chat_completions",
         }
     )
+    if policy is not None:
+        final_payload["generation_policy_id"] = policy.policy_id
+        final_payload["generation_policy_fingerprint"] = policy.fingerprint_sha256
+        # The request and budget are bound to the payload.  Until llama.cpp
+        # exposes an independent receipt proving the template enforced that
+        # budget, retain the honest requested/unverified state.
+        final_payload["generation_policy_enforcement"] = "requested_unverified"
+        final_payload["generation_policy_receipt"] = policy_receipt
     return {
         "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 2),
         "first_token_ms": first_token_ms,
         "text": "".join(content_chunks).strip(),
         "final_payload": final_payload,
+        **(
+            {
+                "generation_policy_id": policy.policy_id,
+                "generation_policy_fingerprint": policy.fingerprint_sha256,
+                "generation_policy_enforcement": "requested_unverified",
+                "generation_policy_receipt": policy_receipt,
+            }
+            if policy is not None
+            else {}
+        ),
     }
 
 
@@ -2155,6 +2245,13 @@ def _validate_direct_answer_server_completion(
     if not prompt_transform:
         return
     if not str(completion.get("text") or "").strip():
+        if str(prompt_transform.get("policy_id") or "") in _REASONING_THINKING_POLICY_IDS:
+            # An enabled-thinking response may spend the complete output
+            # budget in hidden reasoning.  Keep it as a completed sample so
+            # Runner scoring records a parser miss/token-exhaustion zero in
+            # the model-output denominator instead of laundering it into a
+            # transport failure.
+            return
         raise RuntimeError("Direct-answer deployment completed without visible answer content")
 
 
@@ -2306,13 +2403,26 @@ def _prepare_llama_server_chat(
     )
     if not supports_chat_template or (
         request.generation_preset != DIRECT_ANSWER_GENERATION_PRESET
+        and request.generation_preset not in _REASONING_THINKING_POLICY_IDS
         and not model_requires_chat_template
     ):
         return None, None
-    transform_id = {
-        "gemma4": "gemma4_chat_template_disable_thinking_v2",
-        "mistral3": "mistral3_chat_template_direct_answer_v1",
-    }.get(architecture, "qwen_chat_template_disable_thinking_v2")
+    reasoning_policy = request.generation_preset in _REASONING_THINKING_POLICY_IDS
+    policy = resolve_generation_policy(request.generation_preset) if reasoning_policy else None
+    if reasoning_policy:
+        transform_id = {
+            "gemma4": "gemma4_chat_template_enable_thinking_v1",
+            "mistral3": "mistral3_chat_template_enable_thinking_v1",
+        }.get(architecture, "qwen_chat_template_enable_thinking_v1")
+        transform_state_single = "chat_template_enable_thinking_with_budget_requested_unverified_single_user_prompt"
+        transform_state = "chat_template_enable_thinking_with_budget_requested_unverified"
+    else:
+        transform_id = {
+            "gemma4": "gemma4_chat_template_disable_thinking_v2",
+            "mistral3": "mistral3_chat_template_direct_answer_v1",
+        }.get(architecture, "qwen_chat_template_disable_thinking_v2")
+        transform_state_single = "chat_template_disable_thinking_with_zero_budget_single_user_prompt"
+        transform_state = "chat_template_disable_thinking_with_zero_budget"
     raw = str(prompt or "")
     assistant_marker = "\nAssistant:"
     user_marker = "\nUser:"
@@ -2324,14 +2434,25 @@ def _prepare_llama_server_chat(
         transform = {
             "id": transform_id,
             "policy_id": request.generation_preset or "deterministic_v1",
-            "state": "chat_template_disable_thinking_with_zero_budget_single_user_prompt",
+            "state": transform_state_single,
             "placement": "structured_messages",
         }
+        user_content = raw.strip()
+        if policy is not None:
+            transform["thinking_budget_tokens"] = str(policy.thinking_budget_tokens)
+            if policy.top_k is not None:
+                transform["top_k"] = str(policy.top_k)
+            transform["policy_fingerprint"] = policy.fingerprint_sha256
+            transform["policy_enforcement"] = "requested_unverified"
+            if policy.prompt_directive:
+                transform["prompt_directive"] = policy.prompt_directive
+            if policy.prompt_directive:
+                user_content = "%s\n\n%s" % (user_content, policy.prompt_directive)
         if _is_mmlu_choice_prompt(raw):
             transform["generation_constraint"] = "mmlu_choice_a_j_grammar_v1"
         elif _is_gpqa_choice_prompt(raw):
             transform["generation_constraint"] = "gpqa_choice_a_d_grammar_v1"
-        return [{"role": "user", "content": raw.strip()}], transform
+        return [{"role": "user", "content": user_content}], transform
     system_content = raw[:user_index].strip()
     user_content = raw[user_index + len(user_marker) : assistant_index].strip()
     if not user_content:
@@ -2339,13 +2460,24 @@ def _prepare_llama_server_chat(
     messages: List[Dict[str, str]] = []
     if system_content:
         messages.append({"role": "system", "content": system_content})
+    if policy is not None and policy.prompt_directive:
+        user_content = "%s\n\n%s" % (user_content, policy.prompt_directive)
     messages.append({"role": "user", "content": user_content})
-    return messages, {
+    transform = {
         "id": transform_id,
         "policy_id": request.generation_preset or "deterministic_v1",
-        "state": "chat_template_disable_thinking_with_zero_budget",
+        "state": transform_state,
         "placement": "structured_messages",
     }
+    if policy is not None:
+        transform["thinking_budget_tokens"] = str(policy.thinking_budget_tokens)
+        if policy.top_k is not None:
+            transform["top_k"] = str(policy.top_k)
+        transform["policy_fingerprint"] = policy.fingerprint_sha256
+        transform["policy_enforcement"] = "requested_unverified"
+        if policy.prompt_directive:
+            transform["prompt_directive"] = policy.prompt_directive
+    return messages, transform
 
 
 def _is_mmlu_choice_prompt(prompt: str) -> bool:
