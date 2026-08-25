@@ -320,6 +320,24 @@ class ContractExportTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "contains"):
             _validate_schema_subset(undeclared_artifact_coverage, artifact_schema)
 
+    def test_contract_declares_observed_runtime_boundary(self):
+        manifest = load_contract_manifest()
+        self.assertIn("schemas/json/observed_runtime.schema.json", manifest["schema_files"])
+        self.assertIn("schemas/examples/observed_runtime.example.json", manifest["example_files"])
+        self.assertIn("docs/observed_runtime_v1.md", manifest["supporting_docs"])
+        schema = json.loads(
+            (repo_root() / "schemas" / "json" / "observed_runtime.schema.json").read_text(encoding="utf-8")
+        )
+        example = json.loads(
+            (repo_root() / "schemas" / "examples" / "observed_runtime.example.json").read_text(encoding="utf-8")
+        )
+        _validate_schema_subset(example, schema)
+        self.assertEqual(schema["properties"]["contract_version"]["const"], "observed_runtime_v1")
+        self.assertNotIn("endpoint_url", schema["properties"])
+        identity = schema["properties"]["identity"]["properties"]
+        for field in ("artifact_publisher", "quantization", "artifact_sha256", "runtime_build_id", "runtime_bytes"):
+            self.assertIsNone(identity[field]["const"])
+
     def test_runtime_selector_schema_accepts_emitted_windows_cuda_preflight_selector(self):
         selector_schema = json.loads(
             (repo_root() / "schemas" / "json" / "runtime_selector.schema.json").read_text(encoding="utf-8")

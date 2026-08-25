@@ -1,0 +1,43 @@
+{
+  "contract_version": "observed_runtime_v1",
+  "evidence_kind": "observed_runtime",
+  "evidence_lane": "observed",
+  "verification_status": "not_verified",
+  "verified": false,
+  "promotion_eligible": false,
+  "provider": "ollama",
+  "provider_status": "compatibility_hint",
+  "endpoint": {
+    "network_scope": "loopback",
+    "port": 11434
+  },
+  "protocol": {
+    "name": "openai_chat_completions_v1",
+    "models_endpoint": "compatible",
+    "chat_completions": "compatible"
+  },
+  "identity": {
+    "reported_model_id": "qwen3.5:9b",
+    "reported_model_ids": ["qwen3.5:9b"],
+    "artifact_publisher": null,
+    "quantization": null,
+    "artifact_sha256": null,
+    "runtime_build_id": null,
+    "runtime_bytes": null,
+    "status": "reported_only"
+  },
+  "claim_boundary": {
+    "artifact_publisher": "unknown",
+    "quantization": "unknown",
+    "artifact_checksum": "unknown",
+    "runtime_build": "unknown",
+    "runtime_bytes": "unknown"
+  },
+  "privacy": {
+    "endpoint_url_recorded": false,
+    "credentials_recorded": false,
+    "local_paths_recorded": false,
+    "raw_outputs_recorded": false
+  },
+  "failure_code": null
+}

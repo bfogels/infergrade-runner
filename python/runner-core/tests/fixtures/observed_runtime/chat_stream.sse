@@ -1,0 +1,7 @@
+data: {"id":"chatcmpl-fixture","choices":[{"index":0,"delta":{"role":"assistant","content":"fixture "}}]}
+
+data: {"id":"chatcmpl-fixture","choices":[{"index":0,"delta":{"content":"stream answer"}}]}
+
+data: {"id":"chatcmpl-fixture","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]

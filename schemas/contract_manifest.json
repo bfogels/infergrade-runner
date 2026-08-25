@@ -9,6 +9,7 @@
     "schemas/json/capability_summary.schema.json",
     "schemas/json/manifest.schema.json",
     "schemas/json/model_ontology.schema.json",
+    "schemas/json/observed_runtime.schema.json",
     "schemas/json/result_record.schema.json",
     "schemas/json/run_config.schema.json",
     "schemas/json/run_request.schema.json",
@@ -19,6 +20,7 @@
   ],
   "example_files": [
     "schemas/examples/model_ontology.qwen2.5-7b-instruct.gguf.json",
+    "schemas/examples/observed_runtime.example.json",
     "schemas/examples/runtime_receipt.example.json",
     "schemas/examples/runtime_selector.macos_metal_managed.json",
     "schemas/examples/runtime_selector.windows_cuda_preview.json",
@@ -45,6 +47,7 @@
     "docs/local_benchmark_methodology.md",
     "docs/local_capability_score.md",
     "docs/model_quant_identity.md",
+    "docs/observed_runtime_v1.md",
     "docs/managed_llama_cpp_runtime.md",
     "docs/runtime_catalog_operations.md",
     "docs/schema_draft.md",
