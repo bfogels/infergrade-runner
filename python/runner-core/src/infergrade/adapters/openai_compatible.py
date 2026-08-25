@@ -49,6 +49,38 @@ class OpenAICompatibleAdapter(BaseAdapter):
     def _probe_or_raise(self) -> ObservedRuntimeProbe:
         return self.client.last_probe or self.probe()
 
+    def _failure_receipt(
+        self,
+        error: ObservedRuntimeError,
+        selected_model_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        probe = self.client.last_probe
+        if probe is None:
+            probe = ObservedRuntimeProbe(
+                endpoint=self.client.endpoint,
+                provider=self.client.provider_hint or "unknown",
+                model_ids=[],
+                model_endpoint_status="unavailable",
+                failure_code=error.code,
+                generation_profile=self.client.last_generation_profile or {},
+            )
+        else:
+            # Do not mutate a prior successful probe into a failure receipt.
+            # Copy its reported IDs and make the failed chat status explicit.
+            chat_endpoint_status = (
+                "unavailable" if self.client.last_generation_profile is not None else "not_probed"
+            )
+            probe = ObservedRuntimeProbe(
+                endpoint=probe.endpoint,
+                provider=probe.provider,
+                model_ids=list(probe.model_ids),
+                model_endpoint_status=probe.model_endpoint_status,
+                chat_endpoint_status=chat_endpoint_status,
+                failure_code=error.code,
+                generation_profile=self.client.last_generation_profile or {},
+            )
+        return probe.to_receipt(selected_model_id=selected_model_id)
+
     def _selected_model_id(self, request: Optional[RunRequest], probe: ObservedRuntimeProbe) -> Optional[str]:
         if self.model_id:
             if probe.model_ids and self.model_id not in probe.model_ids:
@@ -70,10 +102,9 @@ class OpenAICompatibleAdapter(BaseAdapter):
             "evidence_lane": "observed",
             "provider": probe.provider,
             "endpoint_network_scope": "loopback",
-            "endpoint_port": probe.endpoint.port,
             "model_identity_status": "reported_only",
             "artifact_identity_status": "unknown",
-            "runtime_identity_status": "reported_only",
+            "runtime_identity_status": "unknown",
             "verified": False,
         }
 
@@ -101,12 +132,14 @@ class OpenAICompatibleAdapter(BaseAdapter):
     def generate_text(self, request: RunRequest, prompt: str, max_tokens: int) -> Dict[str, object]:
         if request.simulate:
             return super().generate_text(request, prompt, max_tokens)
+        self.client.reset_generation_profile()
+        selected_model_id = None
         try:
             probe = self._probe_or_raise()
-            model_id = self._selected_model_id(request, probe)
-            if not model_id:
+            selected_model_id = self._selected_model_id(request, probe)
+            if not selected_model_id:
                 raise ObservedRuntimeError("model_not_available")
-            text = self.client.complete(model_id, prompt, max_tokens, stream=False)
+            text = self.client.complete(selected_model_id, prompt, max_tokens, stream=False)
             if self.client.last_probe is not None:
                 self.client.last_probe.chat_endpoint_status = "compatible"
             return {
@@ -116,17 +149,7 @@ class OpenAICompatibleAdapter(BaseAdapter):
                 "observed_runtime": self.observed_runtime_receipt(request),
             }
         except ObservedRuntimeError as exc:
-            probe = self.client.last_probe
-            if probe is None:
-                provider = self.client.provider_hint or "unknown"
-                probe = ObservedRuntimeProbe(
-                    endpoint=self.client.endpoint,
-                    provider=provider,
-                    model_ids=[],
-                    model_endpoint_status="unavailable",
-                    failure_code=exc.code,
-                )
-            receipt = probe.to_receipt()
+            receipt = self._failure_receipt(exc, selected_model_id=selected_model_id)
             return {
                 "text": "",
                 "status": "failed",
@@ -143,12 +166,14 @@ class OpenAICompatibleAdapter(BaseAdapter):
         """Exercise the same seam with SSE while keeping receipt semantics."""
         if request.simulate:
             return super().generate_text(request, prompt, max_tokens)
+        self.client.reset_generation_profile()
+        selected_model_id = None
         try:
             probe = self._probe_or_raise()
-            model_id = self._selected_model_id(request, probe)
-            if not model_id:
+            selected_model_id = self._selected_model_id(request, probe)
+            if not selected_model_id:
                 raise ObservedRuntimeError("model_not_available")
-            text = self.client.complete(model_id, prompt, max_tokens, stream=True)
+            text = self.client.complete(selected_model_id, prompt, max_tokens, stream=True)
             if self.client.last_probe is not None:
                 self.client.last_probe.chat_endpoint_status = "compatible"
             return {
@@ -158,17 +183,7 @@ class OpenAICompatibleAdapter(BaseAdapter):
                 "observed_runtime": self.observed_runtime_receipt(request),
             }
         except ObservedRuntimeError as exc:
-            probe = self.client.last_probe
-            if probe is None:
-                provider = self.client.provider_hint or "unknown"
-                probe = ObservedRuntimeProbe(
-                    endpoint=self.client.endpoint,
-                    provider=provider,
-                    model_ids=[],
-                    model_endpoint_status="unavailable",
-                    failure_code=exc.code,
-                )
-            receipt = probe.to_receipt()
+            receipt = self._failure_receipt(exc, selected_model_id=selected_model_id)
             return {
                 "text": "",
                 "status": "failed",

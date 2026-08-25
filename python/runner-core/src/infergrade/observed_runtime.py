@@ -13,9 +13,10 @@ callers can report a useful failure without echoing request or response data.
 import ipaddress
 import json
 import math
+import re
 import socket
 import ssl
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
@@ -26,6 +27,7 @@ from infergrade.tls import verified_https_context
 
 OBSERVED_RUNTIME_CONTRACT_VERSION = "observed_runtime_v1"
 OPENAI_CHAT_COMPLETIONS_PROTOCOL = "openai_chat_completions_v1"
+QUICK_GENERATION_PROFILE_VERSION = "quick_generation_v1"
 
 DEFAULT_TIMEOUT_SECONDS = 2.0
 MAX_TIMEOUT_SECONDS = 10.0
@@ -83,7 +85,7 @@ class LocalEndpoint:
 
     def safe_metadata(self) -> Dict[str, Any]:
         """Return the only endpoint facts allowed into an observed receipt."""
-        return {"network_scope": self.network_scope, "port": self.port}
+        return {"network_scope": self.network_scope}
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,62 @@ _PROVIDER_ALIASES = {
     "llama.cpp": "llama_server",
     "text-generation-inference": "tgi",
 }
+_THINKING_CONTROL_PROVIDERS = frozenset(("llama_server", "vllm"))
+
+
+def _thinking_controls(provider: str) -> Optional[Dict[str, Any]]:
+    """Return explicitly supported no-thinking request extensions."""
+    if provider not in _THINKING_CONTROL_PROVIDERS:
+        return None
+    if provider == "llama_server":
+        return {
+            "chat_template_kwargs": {"enable_thinking": False},
+            "thinking_budget_tokens": 0,
+        }
+    if provider == "vllm":
+        return {"chat_template_kwargs": {"enable_thinking": False}}
+    return None
+
+
+def _default_generation_profile() -> Dict[str, Any]:
+    return {
+        "profile_version": QUICK_GENERATION_PROFILE_VERSION,
+        "temperature": 0.0,
+        "max_tokens": None,
+        "stream": None,
+        "thinking_control": {
+            "requested": False,
+            "effective": "not_run",
+        },
+    }
+
+
+def _receipt_generation_profile(profile: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Normalize the bounded generation facts carried by a receipt."""
+    result = _default_generation_profile()
+    if not isinstance(profile, dict):
+        return result
+    max_tokens = profile.get("max_tokens")
+    if isinstance(max_tokens, int) and not isinstance(max_tokens, bool) and 1 <= max_tokens <= 4096:
+        result["max_tokens"] = max_tokens
+    stream = profile.get("stream")
+    if isinstance(stream, bool):
+        result["stream"] = stream
+    thinking_control = profile.get("thinking_control")
+    if isinstance(thinking_control, dict):
+        requested = thinking_control.get("requested")
+        effective = thinking_control.get("effective")
+        if isinstance(requested, bool):
+            result["thinking_control"]["requested"] = requested
+        if effective in (
+            "not_run",
+            "not_verified",
+            "server_default_uncontrolled",
+            "rejected",
+            "request_failed",
+        ):
+            result["thinking_control"]["effective"] = effective
+    return result
 
 
 def _canonical_provider(value: Any) -> Optional[str]:
@@ -276,10 +334,90 @@ def _read_bounded(response: Any, limit: int) -> bytes:
 
 
 def _model_id(value: Any) -> Optional[str]:
+    """Normalize a model ID for in-memory protocol use only.
+
+    This is intentionally less restrictive than the receipt-label filter:
+    llama-server can report an absolute artifact path that may still be needed
+    to address a running endpoint.  Callers must use
+    :func:`safe_receipt_model_label` before persisting an ID.
+    """
     if not isinstance(value, str):
         return None
     normalized = value.strip()
-    if not normalized or len(normalized) > MAX_MODEL_ID_LENGTH:
+    if (
+        not normalized
+        or len(normalized) > MAX_MODEL_ID_LENGTH
+        or any(ord(character) < 32 or ord(character) == 127 for character in normalized)
+    ):
+        return None
+    return normalized
+
+
+_SAFE_RECEIPT_MODEL_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:+/-"
+)
+_ASCII_ALPHANUMERIC = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+)
+_WINDOWS_DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def safe_receipt_model_label(value: Any) -> Optional[str]:
+    """Return a public-safe reported model label, or ``None`` to withhold it.
+
+    Endpoint model IDs are untrusted strings.  In particular, a llama-server
+    ``/v1/models`` response may contain the local absolute GGUF path.  The
+    receipt filter rejects absolute/Windows paths, URLs, traversal, controls,
+    query/fragment/credential-like syntax, and whitespace while allowing
+    ordinary ``owner/model`` labels and Ollama ``model:tag`` names.
+    """
+    if not isinstance(value, str) or value != value.strip():
+        return None
+    normalized = _model_id(value)
+    if normalized is None or any(character not in _SAFE_RECEIPT_MODEL_CHARS for character in normalized):
+        return None
+    if normalized[0] not in _ASCII_ALPHANUMERIC:
+        return None
+    lowered = normalized.lower()
+    if (
+        normalized.startswith(("/", "~"))
+        or _WINDOWS_DRIVE_PATH_RE.match(normalized)
+        or "//" in normalized
+        or "?" in normalized
+        or "#" in normalized
+        or "=" in normalized
+        or "@" in normalized
+        or "://" in normalized
+        or lowered.startswith(("file:", "http:", "https:"))
+    ):
+        return None
+    parts = normalized.split("/")
+    if (
+        not parts
+        or normalized.count("/") > 1
+        or any(part in ("", ".", "..") for part in parts)
+        or any(part[0] not in _ASCII_ALPHANUMERIC for part in parts)
+        or lowered.endswith((".gguf", ".bin", ".safetensors", ".pt", ".pth", ".onnx"))
+    ):
+        return None
+    if any(
+        marker in lowered
+        for marker in (
+            "password",
+            "passwd",
+            "bearer",
+            "credential",
+            "authorization",
+            "api_key",
+            "apikey",
+            "auth:",
+            "key=",
+            "token=",
+            "token:",
+            "secret=",
+            "secret:",
+        )
+    ):
         return None
     return normalized
 
@@ -343,6 +481,26 @@ def _extract_chat_text(payload: Any) -> str:
     return text
 
 
+def _payload_has_reasoning(payload: Any) -> bool:
+    """Detect reasoning-only chat content without persisting its text."""
+    if not isinstance(payload, dict):
+        return False
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return False
+    for choice in choices[:1]:
+        if not isinstance(choice, dict):
+            continue
+        for container_key in ("message", "delta"):
+            container = choice.get(container_key)
+            if not isinstance(container, dict):
+                continue
+            for key in ("reasoning_content", "reasoning", "thinking"):
+                if container.get(key):
+                    return True
+    return False
+
+
 def _parse_sse(body: bytes) -> str:
     try:
         text = body.decode("utf-8")
@@ -397,13 +555,54 @@ class ObservedRuntimeProbe:
     model_endpoint_status: str
     chat_endpoint_status: str = "not_probed"
     failure_code: Optional[str] = None
+    generation_profile: Dict[str, Any] = field(default_factory=dict)
 
     def to_receipt(self, selected_model_id: Optional[str] = None) -> Dict[str, Any]:
-        reported_model_id = _model_id(selected_model_id)
-        if reported_model_id not in self.model_ids:
-            reported_model_id = None
-        if reported_model_id is None and self.model_ids:
-            reported_model_id = self.model_ids[0]
+        # Keep the endpoint's raw reported IDs in this in-memory probe so the
+        # adapter can address a server that uses an absolute artifact path as
+        # its model selector.  Only receipt-safe labels cross this boundary.
+        raw_model_ids: List[str] = []
+        for value in list(self.model_ids[:64]):
+            normalized = _model_id(value)
+            if normalized and normalized not in raw_model_ids:
+                raw_model_ids.append(normalized)
+        safe_model_ids: List[str] = []
+        for value in raw_model_ids:
+            label = safe_receipt_model_label(value)
+            if label and label not in safe_model_ids:
+                safe_model_ids.append(label)
+        withheld_model_id_count = len(raw_model_ids) - len(safe_model_ids)
+
+        selected_requested = selected_model_id is not None
+        selected_raw_model_id = _model_id(selected_model_id)
+        selected_is_reported = (
+            selected_raw_model_id is not None and selected_raw_model_id in raw_model_ids
+        )
+        selected_label = (
+            safe_receipt_model_label(selected_raw_model_id)
+            if selected_is_reported
+            else None
+        )
+        if selected_requested:
+            reported_model_id = selected_label
+            selected_model_id_status = (
+                "reported"
+                if selected_is_reported and selected_label is not None
+                else "withheld_unsafe"
+                if selected_is_reported
+                else "not_reported"
+            )
+        else:
+            reported_model_id = safe_model_ids[0] if safe_model_ids else None
+            selected_model_id_status = "not_selected"
+        if not raw_model_ids:
+            model_id_status = "unavailable"
+        elif withheld_model_id_count and safe_model_ids:
+            model_id_status = "reported_with_withheld"
+        elif withheld_model_id_count:
+            model_id_status = "withheld_unsafe"
+        else:
+            model_id_status = "reported"
         provider = self.provider if isinstance(self.provider, str) and self.provider in _PROVIDER_BY_NAME else "unknown"
         receipt = {
             "contract_version": OBSERVED_RUNTIME_CONTRACT_VERSION,
@@ -420,9 +619,14 @@ class ObservedRuntimeProbe:
                 "models_endpoint": self.model_endpoint_status,
                 "chat_completions": self.chat_endpoint_status,
             },
+            "generation_profile": _receipt_generation_profile(self.generation_profile),
             "identity": {
                 "reported_model_id": reported_model_id,
-                "reported_model_ids": list(self.model_ids[:64]),
+                "reported_model_ids": safe_model_ids,
+                "reported_model_id_status": model_id_status,
+                "reported_model_id_count": len(raw_model_ids),
+                "withheld_model_id_count": withheld_model_id_count,
+                "selected_model_id_status": selected_model_id_status,
                 "artifact_publisher": None,
                 "quantization": None,
                 "artifact_sha256": None,
@@ -463,6 +667,7 @@ def validate_observed_runtime_receipt(receipt: Dict[str, Any]) -> None:
         "api_key",
         "token",
         "password",
+        "port",
         "path",
         "local_path",
         "raw_output",
@@ -487,11 +692,91 @@ def validate_observed_runtime_receipt(receipt: Dict[str, Any]) -> None:
         raise ValueError("observed runtime receipt trust boundary is invalid")
     if receipt.get("promotion_eligible") is not False:
         raise ValueError("observed runtime receipt cannot be promotion eligible")
+    if receipt.get("endpoint") != {"network_scope": "loopback"}:
+        raise ValueError("observed runtime endpoint metadata is invalid")
     identity = receipt.get("identity") or {}
     if any(identity.get(key) is not None for key in ("artifact_publisher", "quantization", "artifact_sha256", "runtime_build_id", "runtime_bytes")):
         raise ValueError("observed runtime receipt contains an unverified identity claim")
     if identity.get("status") != "reported_only":
         raise ValueError("observed runtime identity must remain reported_only")
+    reported_model_ids = identity.get("reported_model_ids")
+    if not isinstance(reported_model_ids, list) or len(reported_model_ids) > 64:
+        raise ValueError("observed runtime reported model IDs are invalid")
+    if not all(isinstance(model_id, str) for model_id in reported_model_ids):
+        raise ValueError("observed runtime reported model IDs are invalid")
+    if len(reported_model_ids) != len(set(reported_model_ids)):
+        raise ValueError("observed runtime reported model IDs are not unique")
+    for model_id in reported_model_ids:
+        if safe_receipt_model_label(model_id) != model_id:
+            raise ValueError("observed runtime receipt contains an unsafe model ID")
+    reported_model_id = identity.get("reported_model_id")
+    if reported_model_id is not None and safe_receipt_model_label(reported_model_id) != reported_model_id:
+        raise ValueError("observed runtime receipt contains an unsafe selected model ID")
+    selected_model_id_status = identity.get("selected_model_id_status")
+    if selected_model_id_status not in ("reported", "withheld_unsafe", "not_reported", "not_selected"):
+        raise ValueError("observed runtime selected model ID status is invalid")
+    if selected_model_id_status == "reported" and reported_model_id is None:
+        raise ValueError("observed runtime selected model ID status is inconsistent")
+    if selected_model_id_status in ("withheld_unsafe", "not_reported") and reported_model_id is not None:
+        raise ValueError("observed runtime selected model ID must be withheld")
+    if reported_model_id is not None and reported_model_id not in reported_model_ids:
+        raise ValueError("observed runtime selected model ID is not reported")
+    model_id_status = identity.get("reported_model_id_status")
+    if model_id_status not in ("reported", "reported_with_withheld", "withheld_unsafe", "unavailable"):
+        raise ValueError("observed runtime model ID status is invalid")
+    model_id_count = identity.get("reported_model_id_count")
+    withheld_model_id_count = identity.get("withheld_model_id_count")
+    if (
+        isinstance(model_id_count, bool)
+        or not isinstance(model_id_count, int)
+        or model_id_count < len(reported_model_ids)
+        or model_id_count > 64
+        or isinstance(withheld_model_id_count, bool)
+        or not isinstance(withheld_model_id_count, int)
+        or withheld_model_id_count < 0
+        or withheld_model_id_count > model_id_count
+        or model_id_count - withheld_model_id_count != len(reported_model_ids)
+    ):
+        raise ValueError("observed runtime model ID counts are invalid")
+    expected_status = (
+        "unavailable"
+        if model_id_count == 0
+        else "reported_with_withheld"
+        if withheld_model_id_count and reported_model_ids
+        else "withheld_unsafe"
+        if withheld_model_id_count
+        else "reported"
+    )
+    if model_id_status != expected_status:
+        raise ValueError("observed runtime model ID status does not match counts")
+    generation_profile = receipt.get("generation_profile")
+    if not isinstance(generation_profile, dict):
+        raise ValueError("observed runtime generation profile is missing")
+    if generation_profile.get("profile_version") != QUICK_GENERATION_PROFILE_VERSION:
+        raise ValueError("observed runtime generation profile is unsupported")
+    if generation_profile.get("temperature") != 0.0:
+        raise ValueError("observed runtime generation temperature is not bounded")
+    max_tokens = generation_profile.get("max_tokens")
+    if max_tokens is not None and (
+        isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1 or max_tokens > 4096
+    ):
+        raise ValueError("observed runtime generation max_tokens is invalid")
+    stream = generation_profile.get("stream")
+    if stream is not None and not isinstance(stream, bool):
+        raise ValueError("observed runtime generation stream state is invalid")
+    thinking_control = generation_profile.get("thinking_control")
+    if not isinstance(thinking_control, dict):
+        raise ValueError("observed runtime thinking control is missing")
+    if not isinstance(thinking_control.get("requested"), bool):
+        raise ValueError("observed runtime thinking control request state is invalid")
+    if thinking_control.get("effective") not in (
+        "not_run",
+        "not_verified",
+        "server_default_uncontrolled",
+        "rejected",
+        "request_failed",
+    ):
+        raise ValueError("observed runtime thinking control effective state is invalid")
     privacy = receipt.get("privacy") or {}
     if any(privacy.get(key) is not False for key in (
         "endpoint_url_recorded",
@@ -527,10 +812,38 @@ class OpenAICompatibleClient(object):
         self.timeout_seconds = _bounded_timeout(timeout_seconds)
         self.max_response_bytes = _bounded_response_limit(max_response_bytes)
         self._last_probe: Optional[ObservedRuntimeProbe] = None
+        self._last_generation_profile: Optional[Dict[str, Any]] = None
 
     @property
     def last_probe(self) -> Optional[ObservedRuntimeProbe]:
         return self._last_probe
+
+    @property
+    def last_generation_profile(self) -> Optional[Dict[str, Any]]:
+        return self._last_generation_profile
+
+    def reset_generation_profile(self) -> None:
+        """Clear per-call generation facts before a new adapter attempt."""
+        self._last_generation_profile = None
+
+    def _effective_provider(self) -> str:
+        if self._last_probe is not None and self._last_probe.provider in _PROVIDER_BY_NAME:
+            return self._last_probe.provider
+        if self.provider_hint in _PROVIDER_BY_NAME:
+            return self.provider_hint
+        return _PROVIDER_BY_PORT.get(self.endpoint.port, "unknown")
+
+    def _record_generation_profile(self, profile: Dict[str, Any]) -> None:
+        self._last_generation_profile = profile
+        if self._last_probe is not None:
+            self._last_probe.generation_profile = profile
+
+    def _set_generation_effective(self, effective: str) -> None:
+        profile = self._last_generation_profile
+        if isinstance(profile, dict):
+            thinking_control = profile.get("thinking_control")
+            if isinstance(thinking_control, dict):
+                thinking_control["effective"] = effective
 
     def _request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None) -> Tuple[bytes, str]:
         body = None
@@ -557,9 +870,11 @@ class OpenAICompatibleClient(object):
         except urllib_error.HTTPError as exc:
             # Redirects are rejected by _NoRedirectHandler.  Other statuses
             # remain one stable code, without echoing provider error bodies.
-            if exc.code in (301, 302, 303, 307, 308):
+            status = exc.code
+            exc.close()
+            if status in (301, 302, 303, 307, 308):
                 raise ObservedRuntimeError("redirect_not_allowed")
-            raise ObservedRuntimeError("http_error", status=exc.code)
+            raise ObservedRuntimeError("http_error", status=status)
         except (socket.timeout, TimeoutError):
             raise ObservedRuntimeError("timeout")
         except urllib_error.URLError as exc:
@@ -612,6 +927,7 @@ class OpenAICompatibleClient(object):
         raise ObservedRuntimeError("connection_failed")
 
     def complete(self, model_id: str, prompt: str, max_tokens: int, stream: bool = False) -> str:
+        self._last_generation_profile = None
         normalized_model = _model_id(model_id)
         if normalized_model is None:
             raise ObservedRuntimeError("model_not_available")
@@ -621,28 +937,62 @@ class OpenAICompatibleClient(object):
             raise ObservedRuntimeError("request_too_large")
         if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1 or max_tokens > 4096:
             raise ObservedRuntimeError("endpoint_invalid")
-        body, content_type = self._request(
-            "POST",
-            "/v1/chat/completions",
-            payload={
-                "model": normalized_model,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": max_tokens,
-                "temperature": 0,
-                "stream": bool(stream),
+        provider = self._effective_provider()
+        controls = _thinking_controls(provider)
+        generation_profile = {
+            "profile_version": QUICK_GENERATION_PROFILE_VERSION,
+            "temperature": 0.0,
+            "max_tokens": max_tokens,
+            "stream": bool(stream),
+            "thinking_control": {
+                "requested": controls is not None,
+                "effective": "not_verified" if controls is not None else "server_default_uncontrolled",
             },
-        )
+        }
+        self._record_generation_profile(generation_profile)
+        request_payload = {
+            "model": normalized_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": 0,
+            "stream": bool(stream),
+        }
+        if controls is not None:
+            request_payload.update(controls)
+        try:
+            body, content_type = self._request(
+                "POST",
+                "/v1/chat/completions",
+                payload=request_payload,
+            )
+        except ObservedRuntimeError:
+            self._set_generation_effective("request_failed")
+            raise
         if stream or "text/event-stream" in content_type.lower() or body.lstrip().startswith(b"data:"):
-            text = _parse_sse(body)
+            try:
+                text = _parse_sse(body)
+            except ObservedRuntimeError:
+                self._set_generation_effective("request_failed")
+                raise
         else:
             try:
                 payload = json.loads(body.decode("utf-8"))
             except (UnicodeDecodeError, ValueError):
+                self._set_generation_effective("request_failed")
                 raise ObservedRuntimeError("invalid_json")
-            text = _extract_chat_text(payload)
+            try:
+                text = _extract_chat_text(payload)
+            except ObservedRuntimeError:
+                self._set_generation_effective("request_failed")
+                raise
             if not text:
+                if _payload_has_reasoning(payload):
+                    self._set_generation_effective("rejected")
+                else:
+                    self._set_generation_effective("request_failed")
                 raise ObservedRuntimeError("empty_response")
         if len(text) > MAX_OUTPUT_CHARS:
+            self._set_generation_effective("request_failed")
             raise ObservedRuntimeError("response_too_large")
         if self._last_probe is not None:
             self._last_probe.chat_endpoint_status = "compatible"
@@ -719,6 +1069,7 @@ __all__ = [
     "MAX_DISCOVERY_ENDPOINTS",
     "OPENAI_CHAT_COMPLETIONS_PROTOCOL",
     "OBSERVED_RUNTIME_CONTRACT_VERSION",
+    "QUICK_GENERATION_PROFILE_VERSION",
     "ObservedRuntimeError",
     "ObservedRuntimeProbe",
     "OpenAICompatibleClient",
@@ -726,5 +1077,6 @@ __all__ = [
     "discover_local_runtimes",
     "parse_local_endpoint",
     "provider_profiles",
+    "safe_receipt_model_label",
     "validate_observed_runtime_receipt",
 ]

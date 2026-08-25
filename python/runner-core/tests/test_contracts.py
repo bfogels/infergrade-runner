@@ -157,7 +157,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.35")
+        self.assertEqual(manifest["contract_version"], "0.3.36")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_run_request_contract_accepts_authorized_artifact_download_size(self):
@@ -334,6 +334,11 @@ class ContractExportTests(unittest.TestCase):
         _validate_schema_subset(example, schema)
         self.assertEqual(schema["properties"]["contract_version"]["const"], "observed_runtime_v1")
         self.assertNotIn("endpoint_url", schema["properties"])
+        self.assertNotIn("port", schema["properties"]["endpoint"]["properties"])
+        self.assertEqual(
+            schema["properties"]["generation_profile"]["properties"]["profile_version"]["const"],
+            "quick_generation_v1",
+        )
         identity = schema["properties"]["identity"]["properties"]
         for field in ("artifact_publisher", "quantization", "artifact_sha256", "runtime_build_id", "runtime_bytes"):
             self.assertIsNone(identity[field]["const"])

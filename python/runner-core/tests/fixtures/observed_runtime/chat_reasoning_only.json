@@ -1,0 +1,14 @@
+{
+  "id": "fixture-reasoning-only",
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "reasoning_content": "hidden chain content must not become the answer"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}

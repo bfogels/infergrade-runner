@@ -8,17 +8,30 @@
   "provider": "ollama",
   "provider_status": "compatibility_hint",
   "endpoint": {
-    "network_scope": "loopback",
-    "port": 11434
+    "network_scope": "loopback"
   },
   "protocol": {
     "name": "openai_chat_completions_v1",
     "models_endpoint": "compatible",
     "chat_completions": "compatible"
   },
+  "generation_profile": {
+    "profile_version": "quick_generation_v1",
+    "temperature": 0,
+    "max_tokens": null,
+    "stream": null,
+    "thinking_control": {
+      "requested": false,
+      "effective": "not_run"
+    }
+  },
   "identity": {
     "reported_model_id": "qwen3.5:9b",
     "reported_model_ids": ["qwen3.5:9b"],
+    "reported_model_id_status": "reported",
+    "reported_model_id_count": 1,
+    "withheld_model_id_count": 0,
+    "selected_model_id_status": "not_selected",
     "artifact_publisher": null,
     "quantization": null,
     "artifact_sha256": null,
