@@ -60,7 +60,12 @@ class BaseAdapter(object):
         request: RunRequest,
         progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
     ) -> CapabilityExecution:
-        if request.capability == "none" or not request.use_case:
+        has_explicit_selection = bool(
+            request.benchmark_check_ids
+            or request.benchmark_group_ids
+            or request.capability_suite_ids
+        )
+        if request.capability == "none" or (not request.use_case and not has_explicit_selection):
             return CapabilityExecution(
                 use_case=request.use_case,
                 suite_id=None,

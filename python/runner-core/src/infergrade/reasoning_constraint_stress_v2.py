@@ -29,6 +29,10 @@ MAX_INTEGER_DIGITS = 64
 
 _SIGNED_INTEGER = re.compile(r"[+-]?[0-9]+\Z")
 _MARKER_LIKE = re.compile(r"(?i)\bfinal[ _-]*answer(?:\s*[:=]|\s+|$)")
+_DIAGNOSTIC_TERMINAL_LINE = re.compile(
+    r"\Afinal[ _-]*answer\s*[:=]\s*([+-]?[0-9]+)\Z",
+    re.IGNORECASE | re.ASCII,
+)
 _FENCE = re.compile(r"(?:```|~~~)")
 
 
@@ -54,6 +58,25 @@ class FinalAnswerParseResult:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "ok": self.ok,
+            "value": self.value,
+            "code": self.code,
+        }
+
+
+@dataclass(frozen=True)
+class DiagnosticTerminalCandidate:
+    """Privacy-safe, score-inert candidate extracted from one terminal line."""
+
+    value: Optional[int]
+    code: str
+
+    @property
+    def available(self) -> bool:
+        return self.code == "candidate"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "available": self.available,
             "value": self.value,
             "code": self.code,
         }
@@ -110,6 +133,38 @@ def parse_final_answer(response: str) -> FinalAnswerParseResult:
     except (TypeError, ValueError, OverflowError):
         return FinalAnswerParseResult(None, "non_integer_answer")
     return FinalAnswerParseResult(value, "ok")
+
+
+def extract_diagnostic_terminal_integer_candidate(
+    response: str,
+) -> DiagnosticTerminalCandidate:
+    """Extract a flexible terminal integer for diagnostics only.
+
+    This deliberately does not participate in strict scoring.  Only the final
+    non-empty line is considered, and that line must be exactly a flexible
+    ``FINAL ANSWER``/``FINAL_ANSWER``-style marker with one ASCII signed
+    integer.  The result contains only an integer and a stable code; it never
+    retains response text or an excerpt, so prose integers cannot become
+    semantic candidates.
+    """
+
+    if not isinstance(response, str):
+        return DiagnosticTerminalCandidate(None, "invalid_input")
+    non_empty_lines = [line.strip() for line in response.splitlines() if line.strip()]
+    if not non_empty_lines:
+        return DiagnosticTerminalCandidate(None, "unavailable_empty")
+    match = _DIAGNOSTIC_TERMINAL_LINE.fullmatch(non_empty_lines[-1])
+    if match is None:
+        return DiagnosticTerminalCandidate(None, "unavailable_terminal_line")
+    answer_text = match.group(1)
+    digits = answer_text[1:] if answer_text[:1] in "+-" else answer_text
+    if len(digits) > MAX_INTEGER_DIGITS:
+        return DiagnosticTerminalCandidate(None, "unavailable_integer_too_large")
+    try:
+        value = int(answer_text, 10)
+    except (TypeError, ValueError, OverflowError):
+        return DiagnosticTerminalCandidate(None, "unavailable_non_integer")
+    return DiagnosticTerminalCandidate(value, "candidate")
 
 
 # Names kept explicit for callers that identify the protocol by benchmark
@@ -224,6 +279,8 @@ __all__ = [
     "FIXTURE_SHA256",
     "FULL_FIXTURE_SHA256",
     "FinalAnswerParseResult",
+    "DiagnosticTerminalCandidate",
+    "extract_diagnostic_terminal_integer_candidate",
     "parse_final_answer",
     "parse_reasoning_constraint_stress_v2_answer",
     "parse_terminal_integer",

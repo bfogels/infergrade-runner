@@ -474,7 +474,7 @@ def _missing_requirements(request: RunRequest, artifact_sha256: Any) -> List[str
         missing.append("quant_artifact")
     if request.quant_artifact and not artifact_sha256:
         missing.append("quant_artifact_sha256")
-    if (
+    if request.capability != "none" and (
         not request.simulate
         and request.backend == "llama.cpp"
         and request.execution_mode == "local_native"
@@ -596,7 +596,14 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
     request.generation_preset = resolve_generation_preset(request.generation_preset)
     normalize_request_selection(request)
     request.deployment_profiles = resolve_deployment_profiles(request.use_case, request.deployment_profiles)
-    request.capability = resolve_capability_behavior(request.tier, request.use_case, request.capability)
+    if request.capability != "none" and (
+        request.benchmark_check_ids
+        or request.benchmark_group_ids
+        or request.capability_suite_ids
+    ):
+        request.capability = "auto"
+    else:
+        request.capability = resolve_capability_behavior(request.tier, request.use_case, request.capability)
     _enforce_runtime_selector_before_execution(request)
     adapter = get_adapter(request.backend)
     if not request.backend_flags:

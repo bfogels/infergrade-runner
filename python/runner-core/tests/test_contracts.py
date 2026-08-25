@@ -157,7 +157,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.35")
+        self.assertEqual(manifest["contract_version"], "0.3.37")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_run_request_contract_accepts_authorized_artifact_download_size(self):
@@ -319,6 +319,45 @@ class ContractExportTests(unittest.TestCase):
         undeclared_artifact_coverage["role_files"][0]["roles"].append("perplexity")
         with self.assertRaisesRegex(AssertionError, "contains"):
             _validate_schema_subset(undeclared_artifact_coverage, artifact_schema)
+
+    def test_contract_declares_observed_runtime_boundary(self):
+        manifest = load_contract_manifest()
+        self.assertIn("schemas/json/observed_runtime.schema.json", manifest["schema_files"])
+        self.assertIn("schemas/examples/observed_runtime.example.json", manifest["example_files"])
+        self.assertIn("docs/observed_runtime_v1.md", manifest["supporting_docs"])
+        schema = json.loads(
+            (repo_root() / "schemas" / "json" / "observed_runtime.schema.json").read_text(encoding="utf-8")
+        )
+        example = json.loads(
+            (repo_root() / "schemas" / "examples" / "observed_runtime.example.json").read_text(encoding="utf-8")
+        )
+        _validate_schema_subset(example, schema)
+        self.assertEqual(schema["properties"]["contract_version"]["const"], "observed_runtime_v1")
+        self.assertNotIn("endpoint_url", schema["properties"])
+        self.assertNotIn("port", schema["properties"]["endpoint"]["properties"])
+        self.assertEqual(
+            schema["properties"]["generation_profile"]["properties"]["profile_version"]["const"],
+            "quick_generation_v1",
+        )
+        identity = schema["properties"]["identity"]["properties"]
+        for field in ("artifact_publisher", "quantization", "artifact_sha256", "runtime_build_id", "runtime_bytes"):
+            self.assertIsNone(identity[field]["const"])
+
+    def test_contract_declares_observed_quick_suite_boundary(self):
+        manifest = load_contract_manifest()
+        self.assertEqual(manifest["contract_version"], "0.3.37")
+        self.assertIn("schemas/json/observed_quick_suite.schema.json", manifest["schema_files"])
+        self.assertIn("docs/observed_quick_suite_v1.md", manifest["supporting_docs"])
+        schema = json.loads(
+            (repo_root() / "schemas" / "json" / "observed_quick_suite.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(schema["properties"]["contract_version"]["const"], "observed_quick_suite_v1")
+        self.assertEqual(schema["properties"]["observed_runtime"]["$ref"], "observed_runtime.schema.json")
+        boundary = schema["properties"]["evidence_boundary"]["properties"]
+        self.assertFalse(boundary["promotion_eligible"]["const"])
+        self.assertFalse(boundary["recommendation_eligible"]["const"])
 
     def test_runtime_selector_schema_accepts_emitted_windows_cuda_preflight_selector(self):
         selector_schema = json.loads(
