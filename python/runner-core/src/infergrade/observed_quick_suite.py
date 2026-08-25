@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 from infergrade.adapters.openai_compatible import OpenAICompatibleAdapter
 from infergrade.models import RunRequest
 from infergrade.observed_runtime import (
+    FAILURE_CODES,
     QUICK_GENERATION_PROFILE_VERSION,
     validate_observed_runtime_receipt,
 )
@@ -43,14 +44,7 @@ CLAIM_BOUNDARY = (
     "publisher, and quantization are not independently verified. Scores are not "
     "comparable, promotion-eligible, recommendation evidence, or headline capability evidence."
 )
-STABLE_GENERATION_FAILURE_CODES = {
-    "connection_failed",
-    "http_error",
-    "model_not_available",
-    "response_invalid",
-    "response_too_large",
-    "timeout",
-}
+STABLE_GENERATION_FAILURE_CODES = frozenset(FAILURE_CODES)
 
 
 def _stable_generation_failure_code(value: Any) -> str:
@@ -137,7 +131,12 @@ def run_observed_quick_suite(
     content_identity = validate_locked_content_pack()
     request = _request()
 
-    canary_generation = adapter.generate_text(request, PROTOCOL_CANARY_PROMPT, min(max_tokens, 32))
+    try:
+        canary_generation = adapter.generate_text(request, PROTOCOL_CANARY_PROMPT, min(max_tokens, 32))
+    except Exception:
+        # A first-call exception has no trustworthy receipt to normalize into
+        # a result. Fail with one stable code and never echo adapter text.
+        raise ValueError("observed_quick_suite_generation_failed")
     runtime_receipt = dict(canary_generation.get("observed_runtime") or {})
     validate_observed_runtime_receipt(runtime_receipt)
     canary_parse = parse_final_answer(str(canary_generation.get("text") or ""))
@@ -190,7 +189,16 @@ def run_observed_quick_suite(
             str(case["prompt"]),
             OBSERVED_QUICK_PROMPT_DIRECTIVE,
         )
-        generation = adapter.generate_text(request, generation_prompt, max_tokens)
+        try:
+            generation = adapter.generate_text(request, generation_prompt, max_tokens)
+        except Exception:
+            # The protocol canary already supplied a validated receipt. Reuse
+            # it for a bounded failure row without exposing exception text.
+            generation = {
+                "status": "failed",
+                "error": "generation_failed",
+                "observed_runtime": runtime_receipt,
+            }
         runtime_receipt = dict(generation.get("observed_runtime") or runtime_receipt)
         validate_observed_runtime_receipt(runtime_receipt)
         diagnostics = {

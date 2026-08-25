@@ -151,6 +151,54 @@ class ObservedQuickSuiteTests(unittest.TestCase):
         self.assertNotIn("/Users/alice", serialized)
         self.assertNotIn("secret", serialized)
 
+    def test_unexpected_adapter_exception_is_bounded_after_canary(self):
+        adapter = _AnsweringAdapter()
+        original = adapter.generate_text
+
+        def explode_after_canary(request, prompt, max_tokens):
+            if prompt == PROTOCOL_CANARY_PROMPT:
+                return original(request, prompt, max_tokens)
+            raise RuntimeError("/Users/alice/private/token=secret")
+
+        adapter.generate_text = explode_after_canary
+        payload = run_observed_quick_suite(adapter, tier="canary")
+        serialized = json.dumps(payload, sort_keys=True)
+        self.assertEqual(payload["metrics"]["generation_failure_code_counts"], {"generation_failed": 1})
+        self.assertNotIn("/Users/alice", serialized)
+        self.assertNotIn("secret", serialized)
+
+    def test_unexpected_canary_exception_reaches_cli_as_stable_message(self):
+        with mock.patch("infergrade.cli.OpenAICompatibleAdapter") as adapter_mock:
+            adapter_mock.return_value.generate_text.side_effect = RuntimeError(
+                "/Users/alice/private/token=secret"
+            )
+            with self.assertRaises(SystemExit) as caught:
+                main([
+                    "--all",
+                    "observe-runtime",
+                    "--endpoint",
+                    PRIVATE_ENDPOINT,
+                    "--provider",
+                    "llama_server",
+                    "--model-id",
+                    PRIVATE_MODEL_PATH,
+                ])
+
+        message = str(caught.exception)
+        self.assertEqual(
+            message,
+            "Observed quick suite rejected the request: observed_quick_suite_generation_failed",
+        )
+        self.assertNotIn("alice", message)
+        self.assertNotIn("secret", message)
+
+    def test_all_canonical_runtime_failure_codes_remain_distinct(self):
+        for code in ("invalid_json", "invalid_response", "malformed_sse", "empty_response", "provider_error", "request_too_large"):
+            adapter = _AnsweringAdapter(fail_at=3)
+            adapter.failure_code = code
+            payload = run_observed_quick_suite(adapter, tier="canary")
+            self.assertEqual(payload["metrics"]["generation_failure_code_counts"], {code: 1})
+
     def test_invalid_token_budget_fails_before_generation(self):
         adapter = _AnsweringAdapter()
         with self.assertRaisesRegex(ValueError, "observed_quick_suite_invalid_max_tokens"):
