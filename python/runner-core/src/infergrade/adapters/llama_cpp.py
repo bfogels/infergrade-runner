@@ -15,7 +15,10 @@ from urllib import request as urllib_request
 
 from infergrade import __version__
 from infergrade.adapters.base import BaseAdapter
-from infergrade.benchmark_catalog import fidelity_enabled_for_request
+from infergrade.benchmark_catalog import (
+    REASONING_EXACT_ANSWER_GENERATION_CONSTRAINT_ID,
+    fidelity_enabled_for_request,
+)
 from infergrade.container_runtime import (
     docker_available,
     sample_total_gpu_memory_used_mb,
@@ -847,6 +850,14 @@ class LlamaCppAdapter(BaseAdapter):
             "measurement_source": "llama_cpp_server_chat_timings",
             "load_time_ms": metrics.get("load_time_ms"),
             "prompt_transform": prompt_transform,
+            **(
+                {
+                    "generation_constraint_id": completion.get("generation_constraint_id"),
+                    "generation_constraint_receipt": completion.get("generation_constraint_receipt"),
+                }
+                if completion.get("generation_constraint_receipt")
+                else {}
+            ),
             **(
                 {
                     "generation_policy_id": completion.get("generation_policy_id") or policy_id,
@@ -2148,9 +2159,9 @@ def _stream_server_chat_completion(
             # expose a receipt proving the template enforced them.
             "enforced": None,
         }
-    choice_grammar = _multiple_choice_grammar(messages)
-    if choice_grammar:
-        payload["grammar"] = choice_grammar
+    answer_constraint = _deterministic_answer_constraint_for_messages(messages)
+    if answer_constraint:
+        payload["grammar"] = answer_constraint[1]
     request = urllib_request.Request(
         "%s/v1/chat/completions" % base_url,
         data=json.dumps(payload).encode("utf-8"),
@@ -2219,11 +2230,27 @@ def _stream_server_chat_completion(
         # budget, retain the honest requested/unverified state.
         final_payload["generation_policy_enforcement"] = "requested_unverified"
         final_payload["generation_policy_receipt"] = policy_receipt
+    if answer_constraint:
+        constraint_receipt = {
+            "constraint_protocol_id": _generation_constraint_protocol_id(answer_constraint[0]),
+            "constraint_id": answer_constraint[0],
+            "grammar_sha256": stable_hash(answer_constraint[1], length=64),
+            "enforcement_state": "requested_unverified",
+        }
+        final_payload["generation_constraint_receipt"] = constraint_receipt
     return {
         "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 2),
         "first_token_ms": first_token_ms,
         "text": "".join(content_chunks).strip(),
         "final_payload": final_payload,
+        **(
+            {
+                "generation_constraint_id": answer_constraint[0],
+                "generation_constraint_receipt": constraint_receipt,
+            }
+            if answer_constraint
+            else {}
+        ),
         **(
             {
                 "generation_policy_id": policy.policy_id,
@@ -2448,10 +2475,12 @@ def _prepare_llama_server_chat(
                 transform["prompt_directive"] = policy.prompt_directive
             if policy.prompt_directive:
                 user_content = "%s\n\n%s" % (user_content, policy.prompt_directive)
-        if _is_mmlu_choice_prompt(raw):
-            transform["generation_constraint"] = "mmlu_choice_a_j_grammar_v1"
-        elif _is_gpqa_choice_prompt(raw):
-            transform["generation_constraint"] = "gpqa_choice_a_d_grammar_v1"
+        generation_constraint = _deterministic_answer_constraint(raw)
+        if generation_constraint:
+            transform["generation_constraint_protocol"] = _generation_constraint_protocol_id(
+                generation_constraint[0]
+            )
+            transform["generation_constraint"] = generation_constraint[0]
         return [{"role": "user", "content": user_content}], transform
     system_content = raw[:user_index].strip()
     user_content = raw[user_index + len(user_marker) : assistant_index].strip()
@@ -2477,6 +2506,12 @@ def _prepare_llama_server_chat(
         transform["policy_enforcement"] = "requested_unverified"
         if policy.prompt_directive:
             transform["prompt_directive"] = policy.prompt_directive
+    generation_constraint = _deterministic_answer_constraint(user_content)
+    if generation_constraint:
+        transform["generation_constraint_protocol"] = _generation_constraint_protocol_id(
+            generation_constraint[0]
+        )
+        transform["generation_constraint"] = generation_constraint[0]
     return messages, transform
 
 
@@ -2499,15 +2534,36 @@ def _is_gpqa_choice_prompt(prompt: str) -> bool:
     )
 
 
-def _multiple_choice_grammar(messages: List[Dict[str, str]]) -> Optional[str]:
+def _deterministic_answer_constraint(prompt: str) -> Optional[Tuple[str, str]]:
+    content = str(prompt or "").strip()
+    if _is_mmlu_choice_prompt(content):
+        return "mmlu_choice_a_j_grammar_v1", "root ::= [A-J]"
+    if _is_gpqa_choice_prompt(content):
+        return "gpqa_choice_a_d_grammar_v1", "root ::= [A-D]"
+    if content.startswith("Answer exactly yes or no.\n"):
+        return "reasoning_exact_yes_no_grammar_v1", 'root ::= "yes" | "no" | "Yes" | "No" | "YES" | "NO"'
+    if content.startswith("Answer only the number.\n"):
+        return "reasoning_exact_number_grammar_v1", 'root ::= "-"? [0-9]+'
+    if content.startswith("Answer only the option letter.\n"):
+        return "reasoning_exact_option_grammar_v1", "root ::= [A-Za-z]"
+    return None
+
+
+def _generation_constraint_protocol_id(constraint_id: str) -> str:
+    if str(constraint_id or "").startswith("reasoning_exact_"):
+        return REASONING_EXACT_ANSWER_GENERATION_CONSTRAINT_ID
+    return str(constraint_id or "")
+
+
+def _deterministic_answer_constraint_for_messages(
+    messages: List[Dict[str, str]],
+) -> Optional[Tuple[str, str]]:
     for message in messages:
         if message.get("role") != "user":
             continue
-        content = str(message.get("content") or "")
-        if _is_mmlu_choice_prompt(content):
-            return "root ::= [A-J]"
-        if _is_gpqa_choice_prompt(content):
-            return "root ::= [A-D]"
+        constraint = _deterministic_answer_constraint(str(message.get("content") or ""))
+        if constraint:
+            return constraint
     return None
 
 

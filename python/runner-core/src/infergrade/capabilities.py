@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from infergrade import __version__
 from infergrade.benchmark_catalog import (
+    REASONING_EXACT_ANSWER_GENERATION_CONSTRAINT_ID,
     benchmark_evidence_exclusion_reason,
     capability_benchmark_ids_for_request,
     normalize_request_selection,
@@ -3889,7 +3890,7 @@ def _host_mount_path(path: str) -> str:
     return normalized_path
 
 
-_CASE_CHECKPOINT_VERSION = "capability_case_checkpoint_v1"
+_CASE_CHECKPOINT_VERSION = "capability_case_checkpoint_v2"
 
 
 def _case_checkpoint_path(request: RunRequest, benchmark_id: str) -> str:
@@ -3919,10 +3920,19 @@ def _case_checkpoint_fingerprint(
                     "multiple_choice_letter_grammar_v1"
                     if spec.benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS
                     else (
-                        "unified_diff_only_v1"
-                        if spec.benchmark_id == "repository_edit_smoke_v1"
-                        else "default_generation_v1"
+                        REASONING_EXACT_ANSWER_GENERATION_CONSTRAINT_ID
+                        if spec.benchmark_id == "reasoning_exact_answer_v1"
+                        else (
+                            "unified_diff_only_v1"
+                            if spec.benchmark_id == "repository_edit_smoke_v1"
+                            else "default_generation_v1"
+                        )
                     )
+                ),
+                "direct_answer_recovery_protocol": (
+                    "model_specific_direct_answer_recovery_v2"
+                    if spec.benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS
+                    else None
                 ),
             },
             "cases": cases,
@@ -4062,10 +4072,7 @@ def _supports_direct_answer_recovery(request: RunRequest) -> bool:
     from infergrade.gguf import infer_llama_cpp_architecture
 
     architecture = str(infer_llama_cpp_architecture(request) or "")
-    return (
-        architecture.startswith(("qwen35", "qwen36"))
-        or architecture in {"gemma4", "mistral3"}
-    )
+    return architecture.startswith("qwen3") or architecture in {"gemma4", "mistral3"}
 
 
 def _generate_predictions(
@@ -4281,6 +4288,9 @@ def _generate_predictions(
             record["generation_failure_kind"] = generation_failure_kind
         if generated.get("prompt_transform"):
             record["generation_prompt_transform"] = generated["prompt_transform"]
+        if generated.get("generation_constraint_receipt"):
+            record["generation_constraint_id"] = generated.get("generation_constraint_id")
+            record["generation_constraint_receipt"] = generated["generation_constraint_receipt"]
         if protocol_recovery:
             record["direct_answer_protocol_recovery"] = protocol_recovery
         if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:

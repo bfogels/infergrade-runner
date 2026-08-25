@@ -1031,6 +1031,43 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertIn("refusing unsafe reuse", result["error"])
 
+    def test_resume_rejects_pre_direct_answer_protocol_checkpoint_version(self):
+        request = RunRequest(
+            model="Qwen/Qwen3-8B",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="reasoning",
+            benchmark_check_ids=["reasoning_exact_answer_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+        with self.assertRaises(KeyboardInterrupt):
+            execute_capability_suite(_InterruptingCompositionalAdapter(interrupt_after=1), request)
+
+        checkpoint_path = os.path.join(
+            self.tempdir,
+            "artifacts",
+            "capability",
+            "reasoning_exact_answer_v1",
+            "case-checkpoint.jsonl",
+        )
+        with open(checkpoint_path, "r", encoding="utf-8") as handle:
+            lines = handle.readlines()
+        header = json.loads(lines[0])
+        header["checkpoint_version"] = "capability_case_checkpoint_v1"
+        with open(checkpoint_path, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(header) + "\n")
+            handle.writelines(lines[1:])
+
+        request.resume = True
+        adapter = _InterruptingCompositionalAdapter()
+        execution = execute_capability_suite(adapter, request)
+
+        result = execution.benchmark_results["reasoning_exact_answer_v1"]
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("refusing unsafe reuse", result["error"])
+
     def test_compositional_standard_fixture_retains_twenty_four_pinned_cases(self):
         cases = _native_benchmark_cases(CAPABILITY_BENCHMARKS["assistant_compositional_instruction_v2"])
 
@@ -3383,6 +3420,38 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(len(predictions), 2)
         self.assertEqual(predictions[0]["direct_answer_protocol_recovery"]["status"], "recovered")
         self.assertNotIn("initial_completion", predictions[0]["direct_answer_protocol_recovery"])
+
+    @mock.patch("infergrade.gguf.infer_llama_cpp_architecture", return_value="qwen3")
+    def test_qwen3_mmlu_protocol_canary_uses_direct_answer_recovery(self, _architecture_mock):
+        adapter = mock.Mock()
+        adapter.generate_text.side_effect = [
+            {
+                "text": "analysis without a final answer",
+                "status": "completed",
+                "output_tokens": 64,
+                "token_budget_exhausted": True,
+            },
+            {"text": "C", "status": "completed", "output_tokens": 1},
+        ]
+        request = RunRequest(
+            model="Qwen/Qwen3-4B",
+            backend="llama.cpp",
+            tier="canary",
+            use_case="reasoning",
+            benchmark_check_ids=["mmlu_pro_reference_v1"],
+            output_dir=self.tempdir,
+            simulate=False,
+        )
+
+        predictions = _generate_predictions(
+            adapter,
+            request,
+            CAPABILITY_BENCHMARKS["mmlu_pro_reference_v1"],
+            [{"case_id": "mmlu/1", "task_id": "mmlu/1", "prompt": "Question one"}],
+        )
+
+        self.assertEqual([call.kwargs["max_tokens"] for call in adapter.generate_text.call_args_list], [64, 512])
+        self.assertEqual(predictions[0]["direct_answer_protocol_recovery"]["status"], "recovered")
 
     @mock.patch("infergrade.gguf.infer_llama_cpp_architecture", return_value="gemma4")
     def test_mmlu_protocol_canary_fails_fast_when_recovery_cannot_emit_answer(self, _architecture_mock):

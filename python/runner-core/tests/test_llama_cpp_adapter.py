@@ -697,6 +697,45 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(transform["id"], "qwen_chat_template_disable_thinking_v2")
         self.assertEqual(transform["placement"], "structured_messages")
 
+    def test_qwen3_reasoning_exact_answer_records_matching_grammar_constraint(self):
+        request = RunRequest(
+            model="Qwen/Qwen3-4B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        expected_constraints = [
+            "reasoning_exact_yes_no_grammar_v1",
+            "reasoning_exact_number_grammar_v1",
+            "reasoning_exact_option_grammar_v1",
+        ]
+        for case, expected_constraint in zip(_reasoning_exact_answer_cases(), expected_constraints):
+            with self.subTest(case_id=case["case_id"]):
+                _messages, transform = _prepare_llama_server_chat(request, case["prompt"])
+                self.assertEqual(
+                    transform["generation_constraint_protocol"],
+                    "reasoning_exact_answer_mixed_grammar_v1",
+                )
+                self.assertEqual(transform["generation_constraint"], expected_constraint)
+
+    def test_qwen3_structured_reasoning_exact_answer_records_grammar_constraint(self):
+        request = RunRequest(
+            model="Qwen/Qwen3-4B",
+            quant_artifact=self.model_path,
+            backend="llama.cpp",
+            tier="canary",
+            generation_preset=DIRECT_ANSWER_GENERATION_PRESET,
+        )
+        messages, transform = _prepare_llama_server_chat(
+            request,
+            "Benchmark system.\n\nUser: Answer only the number.\nWhat is 2 + 2?\nAssistant:",
+        )
+
+        self.assertEqual(messages[0], {"role": "system", "content": "Benchmark system."})
+        self.assertEqual(transform["generation_constraint_protocol"], "reasoning_exact_answer_mixed_grammar_v1")
+        self.assertEqual(transform["generation_constraint"], "reasoning_exact_number_grammar_v1")
+
     @mock.patch.object(LlamaCppAdapter, "_generate_native_server_text")
     @mock.patch.object(LlamaCppAdapter, "_require_local_gguf_artifact", return_value="/models/qwen3.gguf")
     @mock.patch.object(LlamaCppAdapter, "_ensure_backend_model_compatibility")
@@ -1057,6 +1096,36 @@ class LlamaCppAdapterTests(unittest.TestCase):
 
         sent = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
         self.assertEqual(sent["grammar"], "root ::= [A-D]")
+
+    @mock.patch("infergrade.adapters.llama_cpp.urllib_request.urlopen")
+    def test_stream_chat_completion_constrains_reasoning_exact_answer_shapes(self, urlopen_mock):
+        expected_grammars = [
+            'root ::= "yes" | "no" | "Yes" | "No" | "YES" | "NO"',
+            'root ::= "-"? [0-9]+',
+            "root ::= [A-Za-z]",
+        ]
+        for case, expected_grammar in zip(_reasoning_exact_answer_cases(), expected_grammars):
+            with self.subTest(case_id=case["case_id"]):
+                response = mock.MagicMock()
+                response.__enter__.return_value = response
+                response.readline.side_effect = [
+                    b'data: {"choices":[{"delta":{"content":"B"},"finish_reason":"stop"}]}\n',
+                    b'data: [DONE]\n',
+                ]
+                urlopen_mock.return_value = response
+
+                completion = _stream_server_chat_completion(
+                    "http://127.0.0.1:8080",
+                    [{"role": "user", "content": case["prompt"]}],
+                    32,
+                )
+
+                sent = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
+                self.assertEqual(sent["grammar"], expected_grammar)
+                receipt = completion["generation_constraint_receipt"]
+                self.assertEqual(receipt["constraint_protocol_id"], "reasoning_exact_answer_mixed_grammar_v1")
+                self.assertEqual(receipt["enforcement_state"], "requested_unverified")
+                self.assertRegex(receipt["grammar_sha256"], r"^[0-9a-f]{64}$")
 
     def test_direct_answer_deployment_rejects_empty_but_keeps_visible_fixed_budget_output(self):
         transform = {"id": "qwen_chat_template_disable_thinking_v2"}
