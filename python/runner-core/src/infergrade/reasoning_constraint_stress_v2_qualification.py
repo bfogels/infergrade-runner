@@ -22,6 +22,7 @@ from infergrade.generation_policies import (
 from infergrade.reasoning_constraint_stress_v2 import (
     FINAL_ANSWER_PARSER_ID,
     SCORING_POLICY,
+    extract_diagnostic_terminal_integer_candidate,
     parse_final_answer,
 )
 from infergrade.reasoning_constraint_stress_v2_content import (
@@ -306,6 +307,21 @@ def _metric_group(case_results: List[Dict[str, Any]], field: str) -> Dict[str, A
     return output
 
 
+def _diagnostic_failure_class(
+    score: Any,
+    diagnostic_semantic_correct: Any,
+) -> str:
+    """Partition strict non-passes without changing the strict score."""
+
+    if score == 1.0:
+        return "none"
+    if diagnostic_semantic_correct is True:
+        return "format_only"
+    if diagnostic_semantic_correct is False:
+        return "substantive_wrong"
+    return "unavailable"
+
+
 def score_qualification_predictions(
     cases: List[Dict[str, Any]],
     predictions: List[Dict[str, Any]],
@@ -387,6 +403,11 @@ def score_qualification_predictions(
                     "format_valid": None,
                     "parser_code": "not_attempted",
                     "error_class": error_class,
+                    "diagnostic_semantic_candidate": None,
+                    "diagnostic_semantic_candidate_available": False,
+                    "diagnostic_semantic_correct": None,
+                    "diagnostic_semantic_candidate_code": "unavailable_generation_failure",
+                    "diagnostic_failure_class": "unavailable",
                 }
             )
             parser_codes["not_attempted"] += 1
@@ -399,6 +420,11 @@ def score_qualification_predictions(
             or ""
         )
         parsed = parse_final_answer(response)
+        diagnostic_candidate = extract_diagnostic_terminal_integer_candidate(response)
+        diagnostic_semantic_correct = (
+            diagnostic_candidate.available
+            and diagnostic_candidate.value == int(expected[task_id], 10)
+        )
         parser_codes[parsed.code] += 1
         token_exhausted = prediction.get("token_budget_exhausted") is True
         semantic_correct = parsed.ok and str(parsed.value) == expected[task_id]
@@ -418,6 +444,26 @@ def score_qualification_predictions(
                 "parser_code": parsed.code,
                 "error_class": error_class,
                 "parsed_value": parsed.value if parsed.ok else None,
+                "diagnostic_semantic_candidate": (
+                    diagnostic_candidate.value
+                    if diagnostic_candidate.available
+                    else None
+                ),
+                "diagnostic_semantic_candidate_available": diagnostic_candidate.available,
+                "diagnostic_semantic_correct": (
+                    bool(diagnostic_semantic_correct)
+                    if diagnostic_candidate.available
+                    else None
+                ),
+                "diagnostic_semantic_candidate_code": diagnostic_candidate.code,
+                "diagnostic_failure_class": _diagnostic_failure_class(
+                    1.0 if semantic_correct else 0.0,
+                    (
+                        bool(diagnostic_semantic_correct)
+                        if diagnostic_candidate.available
+                        else None
+                    ),
+                ),
             }
         )
 
@@ -441,6 +487,27 @@ def score_qualification_predictions(
     )
     token_budget_exhaustion_count = len(
         [result for result in scored if result.get("error_class") == "token_budget_exhausted"]
+    )
+    diagnostic_candidate_count = len(
+        [
+            result
+            for result in case_results
+            if result.get("diagnostic_semantic_candidate_available") is True
+        ]
+    )
+    diagnostic_semantic_correct_count = len(
+        [result for result in case_results if result.get("diagnostic_semantic_correct") is True]
+    )
+    diagnostic_semantic_incorrect_count = len(
+        [result for result in case_results if result.get("diagnostic_semantic_correct") is False]
+    )
+    diagnostic_semantic_unavailable_count = len(
+        [result for result in case_results if result.get("diagnostic_semantic_correct") is None]
+    )
+    diagnostic_failure_classes = Counter(
+        str(result.get("diagnostic_failure_class") or "unavailable")
+        for result in case_results
+        if result.get("score") != 1.0
     )
     status = "completed"
     if generation_failure_count == len(case_results):
@@ -482,6 +549,25 @@ def score_qualification_predictions(
         "format_invalid_count": format_invalid_count,
         "model_output_diagnostic_count": malformed_output_count,
         "token_budget_exhaustion_count": token_budget_exhaustion_count,
+        # These are score-inert diagnostics.  Failure-class counts partition
+        # strict non-passes; generation failures are therefore unavailable and
+        # remain excluded from the strict denominator.
+        "diagnostic_semantic_candidate_count": diagnostic_candidate_count,
+        "diagnostic_semantic_correct_count": diagnostic_semantic_correct_count,
+        "diagnostic_semantic_incorrect_count": diagnostic_semantic_incorrect_count,
+        "diagnostic_semantic_unavailable_count": diagnostic_semantic_unavailable_count,
+        "diagnostic_failure_class_counts": {
+            "format_only": diagnostic_failure_classes.get("format_only", 0),
+            "substantive_wrong": diagnostic_failure_classes.get("substantive_wrong", 0),
+            "unavailable": diagnostic_failure_classes.get("unavailable", 0),
+        },
+        "diagnostic_format_only_failure_count": diagnostic_failure_classes.get(
+            "format_only", 0
+        ),
+        "diagnostic_substantive_wrong_count": diagnostic_failure_classes.get(
+            "substantive_wrong", 0
+        ),
+        "diagnostic_unavailable_count": diagnostic_failure_classes.get("unavailable", 0),
         "parser_code_counts": dict(sorted(parser_codes.items())),
         "parser_total_count": sum(parser_codes.values()) - parser_codes.get("not_attempted", 0),
         "family_metrics": _metric_group(case_results, "family"),

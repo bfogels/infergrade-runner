@@ -20,6 +20,9 @@ from infergrade.generation_policies import (
     resolve_generation_policy,
 )
 from infergrade.models import RunRequest
+from infergrade.reasoning_constraint_stress_v2 import (
+    extract_diagnostic_terminal_integer_candidate,
+)
 from infergrade.reasoning_constraint_stress_v2_qualification import (
     BENCHMARK_ID,
     FAILURE_DENOMINATOR_POLICY_ID,
@@ -72,6 +75,14 @@ class ReasoningConstraintStressV2QualificationTests(unittest.TestCase):
                 self.assertEqual(
                     artifact["subject"]["generation_policy"]["requested_policy"]["top_k"],
                     20,
+                )
+                self.assertIn(
+                    "diagnostic_failure_class_counts",
+                    artifact["summary"],
+                )
+                self.assertIn(
+                    "diagnostic_semantic_candidate",
+                    artifact["tasks"][0],
                 )
 
     def test_locked_pack_and_exact_prefix_identity(self):
@@ -133,6 +144,107 @@ class ReasoningConstraintStressV2QualificationTests(unittest.TestCase):
         )
         self.assertEqual(result["case_results"][2]["score"], 0.0)
         self.assertEqual(result["case_results"][2]["error_class"], "token_budget_exhausted")
+
+    def test_diagnostic_candidate_is_terminal_only_and_privacy_safe(self):
+        candidate = extract_diagnostic_terminal_integer_candidate(
+            "The reasoning mentions FINAL ANSWER: 999.\nFINAL ANSWER = +22"
+        )
+        self.assertTrue(candidate.available)
+        self.assertEqual(candidate.value, 22)
+        self.assertEqual(candidate.code, "candidate")
+        self.assertNotIn("999", candidate.to_dict())
+
+        adversarial_responses = (
+            "The reasoning mentions 22 but has no terminal marker.",
+            "FINAL ANSWER: 22\nThe prose mentions integer 23.",
+            "Reasoning includes FINAL_ANSWER: 22\nThe answer is 22.",
+            "FINAL ANSWER: 2 2",
+            "FINAL ANSWER: 22 extra prose",
+        )
+        for response in adversarial_responses:
+            with self.subTest(response=response):
+                result = extract_diagnostic_terminal_integer_candidate(response)
+                self.assertFalse(result.available)
+                self.assertIsNone(result.value)
+
+    def test_diagnostic_semantics_separate_format_and_substantive_failures(self):
+        cases = qualification_cases_for_tier("canary")
+        policy_id = REASONING_CONSTRAINT_STRESS_QUALIFICATION_THINKING_POLICY_ID
+        predictions = [
+            {
+                "case_id": cases[0]["case_id"],
+                "generation_status": "completed",
+                "completion": "FINAL_ANSWER: %s" % cases[0]["expected_answers"][0],
+                "generation_policy_id": policy_id,
+            },
+            {
+                "case_id": cases[1]["case_id"],
+                "generation_status": "completed",
+                "completion": (
+                    "The reasoning mentions 999.\nFINAL ANSWER = %s"
+                    % cases[1]["expected_answers"][0]
+                ),
+                "generation_policy_id": policy_id,
+            },
+            {
+                "case_id": cases[2]["case_id"],
+                "generation_status": "completed",
+                "completion": "The reasoning mentions 4 but has no terminal answer.",
+                "generation_policy_id": policy_id,
+            },
+            {
+                "case_id": cases[3]["case_id"],
+                "generation_status": "completed",
+                "completion": "Reasoning first.\nFINAL_ANSWER: 999",
+                "generation_policy_id": policy_id,
+            },
+            {
+                "case_id": cases[4]["case_id"],
+                "generation_status": "failed",
+                "generation_failure_kind": "runtime",
+                "generation_policy_id": policy_id,
+            },
+        ]
+        result = score_qualification_predictions(cases, predictions, "canary")
+        metrics = result["metrics"]
+
+        # The strict score remains one exact answer out of four completed rows.
+        self.assertEqual(metrics["correct_count"], 1)
+        self.assertEqual(metrics["total_count"], 4)
+        self.assertEqual(metrics["exact_signed_integer_accuracy"], 0.25)
+        self.assertEqual(metrics["generation_failure_count"], 1)
+        self.assertEqual(metrics["diagnostic_semantic_candidate_count"], 3)
+        self.assertEqual(metrics["diagnostic_semantic_correct_count"], 2)
+        self.assertEqual(metrics["diagnostic_semantic_incorrect_count"], 1)
+        self.assertEqual(metrics["diagnostic_semantic_unavailable_count"], 2)
+        self.assertEqual(metrics["diagnostic_format_only_failure_count"], 1)
+        self.assertEqual(metrics["diagnostic_substantive_wrong_count"], 1)
+        self.assertEqual(metrics["diagnostic_unavailable_count"], 2)
+        self.assertEqual(
+            metrics["diagnostic_failure_class_counts"],
+            {"format_only": 1, "substantive_wrong": 1, "unavailable": 2},
+        )
+
+        format_only = result["case_results"][1]
+        self.assertEqual(format_only["score"], 0.0)
+        self.assertFalse(format_only["semantic_correct"])
+        self.assertEqual(format_only["diagnostic_semantic_candidate"], 22)
+        self.assertTrue(format_only["diagnostic_semantic_correct"])
+        self.assertEqual(format_only["diagnostic_failure_class"], "format_only")
+
+        substantive_wrong = result["case_results"][3]
+        self.assertEqual(substantive_wrong["diagnostic_semantic_candidate"], 999)
+        self.assertFalse(substantive_wrong["diagnostic_semantic_correct"])
+        self.assertEqual(substantive_wrong["diagnostic_failure_class"], "substantive_wrong")
+
+        unavailable = result["case_results"][2]
+        self.assertIsNone(unavailable["diagnostic_semantic_candidate"])
+        self.assertIsNone(unavailable["diagnostic_semantic_correct"])
+        self.assertEqual(unavailable["diagnostic_failure_class"], "unavailable")
+
+        generation_failure = result["case_results"][4]
+        self.assertEqual(generation_failure["diagnostic_failure_class"], "unavailable")
+        self.assertNotIn("completion", generation_failure)
 
     def test_generation_policy_and_prediction_identity_fail_closed(self):
         cases = qualification_cases_for_tier("canary")

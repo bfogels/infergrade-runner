@@ -2121,6 +2121,21 @@ def _write_native_capability_run_artifact(
                         or case.get("structural_level"),
                         "variant": case_score.get("variant") or case.get("variant"),
                         "parser_code": case_score.get("parser_code"),
+                        "diagnostic_semantic_candidate": case_score.get(
+                            "diagnostic_semantic_candidate"
+                        ),
+                        "diagnostic_semantic_candidate_available": case_score.get(
+                            "diagnostic_semantic_candidate_available"
+                        ),
+                        "diagnostic_semantic_correct": case_score.get(
+                            "diagnostic_semantic_correct"
+                        ),
+                        "diagnostic_semantic_candidate_code": case_score.get(
+                            "diagnostic_semantic_candidate_code"
+                        ),
+                        "diagnostic_failure_class": case_score.get(
+                            "diagnostic_failure_class"
+                        ),
                         "generation_policy_id": prediction.get("generation_policy_id"),
                         "generation_policy_fingerprint": prediction.get(
                             "generation_policy_fingerprint"
@@ -2327,6 +2342,32 @@ def _write_native_capability_run_artifact(
                     ),
                     "semantic_incorrect_format_valid_count": summary.get("metrics", {}).get(
                         "semantic_incorrect_format_valid_count", 0
+                    ),
+                    "diagnostic_semantic_candidate_count": summary.get("metrics", {}).get(
+                        "diagnostic_semantic_candidate_count", 0
+                    ),
+                    "diagnostic_semantic_correct_count": summary.get("metrics", {}).get(
+                        "diagnostic_semantic_correct_count", 0
+                    ),
+                    "diagnostic_semantic_incorrect_count": summary.get("metrics", {}).get(
+                        "diagnostic_semantic_incorrect_count", 0
+                    ),
+                    "diagnostic_semantic_unavailable_count": summary.get("metrics", {}).get(
+                        "diagnostic_semantic_unavailable_count", 0
+                    ),
+                    "diagnostic_failure_class_counts": dict(
+                        summary.get("metrics", {}).get(
+                            "diagnostic_failure_class_counts", {}
+                        )
+                    ),
+                    "diagnostic_format_only_failure_count": summary.get("metrics", {}).get(
+                        "diagnostic_format_only_failure_count", 0
+                    ),
+                    "diagnostic_substantive_wrong_count": summary.get("metrics", {}).get(
+                        "diagnostic_substantive_wrong_count", 0
+                    ),
+                    "diagnostic_unavailable_count": summary.get("metrics", {}).get(
+                        "diagnostic_unavailable_count", 0
                     ),
                     "generation_failure_count": summary.get("metrics", {}).get(
                         "generation_failure_count", 0
