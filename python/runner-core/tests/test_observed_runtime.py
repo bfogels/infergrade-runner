@@ -40,6 +40,8 @@ class _ObservedRuntimeHandler(BaseHTTPRequestHandler):
     chat_status = 200
     reasoning_only = False
     models_fixture = "openai_models.json"
+    reject_chat_template_controls = False
+    reject_chat_request_unrelated = False
 
     def log_message(self, format, *args):  # pragma: no cover
         return
@@ -82,6 +84,16 @@ class _ObservedRuntimeHandler(BaseHTTPRequestHandler):
             self._send(200, "application/json", _fixture("chat_reasoning_only.json"))
             return
         payload = json.loads(body.decode("utf-8"))
+        if self.__class__.reject_chat_template_controls and "chat_template_kwargs" in payload:
+            self._send(
+                422,
+                "application/json",
+                '{"error":{"message":"extra input not permitted: chat_template_kwargs"}}',
+            )
+            return
+        if self.__class__.reject_chat_request_unrelated:
+            self._send(422, "application/json", '{"error":{"message":"model is unavailable"}}')
+            return
         if payload.get("stream"):
             self._send(200, "text/event-stream", _fixture("chat_stream.sse"))
         else:
@@ -102,6 +114,8 @@ class _ObservedRuntimeServer(object):
         _ObservedRuntimeHandler.chat_status = 200
         _ObservedRuntimeHandler.reasoning_only = False
         _ObservedRuntimeHandler.models_fixture = "openai_models.json"
+        _ObservedRuntimeHandler.reject_chat_template_controls = False
+        _ObservedRuntimeHandler.reject_chat_request_unrelated = False
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -147,6 +161,8 @@ class ObservedRuntimeTests(unittest.TestCase):
         for value, code in (
             ("http://192.168.1.10:8000", "non_loopback_endpoint"),
             ("http://example.com:8000", "non_loopback_endpoint"),
+            ("http://[0:0:0:0:0:0:0:1]:8000", "non_loopback_endpoint"),
+            ("http://localhost.:8000", "non_loopback_endpoint"),
             ("ftp://127.0.0.1:8000", "unsupported_scheme"),
             ("http://user:secret@127.0.0.1:8000", "endpoint_invalid"),
             ("http://127.0.0.1:8000?token=secret", "endpoint_invalid"),
@@ -372,6 +388,61 @@ class ObservedRuntimeTests(unittest.TestCase):
         chat_payload = json.loads(chat_request[3].decode("utf-8"))
         self.assertEqual(chat_payload["chat_template_kwargs"], {"enable_thinking": False})
         self.assertNotIn("thinking_budget_tokens", chat_payload)
+
+    def test_custom_port_tries_generic_thinking_control_without_claiming_a_provider(self):
+        with _ObservedRuntimeServer() as server:
+            client = OpenAICompatibleClient(server.endpoint)
+            probe = client.probe()
+            answer = client.complete("qwen3.5:9b", "Say hello", 16)
+            receipt = probe.to_receipt(selected_model_id="qwen3.5:9b")
+
+        self.assertEqual(answer, "fixture answer")
+        self.assertEqual(receipt["provider"], "unknown")
+        self.assertEqual(receipt["generation_profile"]["thinking_control"], {
+            "requested": True,
+            "effective": "not_verified",
+        })
+        chat_request = next(item for item in _ObservedRuntimeHandler.requests if item[0] == "POST")
+        chat_payload = json.loads(chat_request[3].decode("utf-8"))
+        self.assertEqual(chat_payload["chat_template_kwargs"], {"enable_thinking": False})
+        self.assertNotIn("thinking_budget_tokens", chat_payload)
+
+    def test_custom_port_falls_back_once_when_generic_thinking_control_is_rejected(self):
+        with _ObservedRuntimeServer() as server:
+            _ObservedRuntimeHandler.reject_chat_template_controls = True
+            client = OpenAICompatibleClient(server.endpoint)
+            probe = client.probe()
+            answer = client.complete("qwen3.5:9b", "Say hello", 16)
+            receipt = probe.to_receipt(selected_model_id="qwen3.5:9b")
+
+        self.assertEqual(answer, "fixture answer")
+        posts = [item for item in _ObservedRuntimeHandler.requests if item[0] == "POST"]
+        self.assertEqual(len(posts), 2)
+        first = json.loads(posts[0][3].decode("utf-8"))
+        second = json.loads(posts[1][3].decode("utf-8"))
+        self.assertIn("chat_template_kwargs", first)
+        self.assertNotIn("chat_template_kwargs", second)
+        self.assertEqual(receipt["generation_profile"]["thinking_control"], {
+            "requested": True,
+            "effective": "rejected",
+        })
+
+    def test_custom_port_does_not_retry_an_unrelated_422(self):
+        with _ObservedRuntimeServer() as server:
+            _ObservedRuntimeHandler.reject_chat_request_unrelated = True
+            client = OpenAICompatibleClient(server.endpoint)
+            probe = client.probe()
+            with self.assertRaises(ObservedRuntimeError) as raised:
+                client.complete("qwen3.5:9b", "Say hello", 16)
+            receipt = probe.to_receipt(selected_model_id="qwen3.5:9b")
+
+        self.assertEqual(raised.exception.code, "http_error")
+        posts = [item for item in _ObservedRuntimeHandler.requests if item[0] == "POST"]
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(receipt["generation_profile"]["thinking_control"], {
+            "requested": True,
+            "effective": "request_failed",
+        })
 
     def test_post_probe_chat_failure_is_unavailable_with_actual_code_and_does_not_mutate_probe(self):
         request = RunRequest(

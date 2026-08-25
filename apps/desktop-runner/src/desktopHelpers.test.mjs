@@ -464,6 +464,23 @@ test("parses only the token-free observed-runtime deep link", () => {
   );
 });
 
+test("observed-runtime handoffs keep one canonical loopback allowlist", () => {
+  assert.deepEqual(
+    observedRuntimeHandoffFromParams(
+      new URLSearchParams("observed_run_id=obs_local&observed_api_url=http%3A%2F%2F%5B%3A%3A1%5D%3A8000")
+    ),
+    { observedRunId: "obs_local", apiUrl: "http://[::1]:8000/" }
+  );
+  for (const apiUrl of ["http://[0:0:0:0:0:0:0:1]:8000", "http://localhost.:8000"]) {
+    assert.deepEqual(
+      observedRuntimeHandoffFromParams(
+        new URLSearchParams(`observed_run_id=obs_local&observed_api_url=${encodeURIComponent(apiUrl)}`)
+      ),
+      { observedRunId: "", apiUrl: "" }
+    );
+  }
+});
+
 test("rejects observed-runtime handoffs with extra or secret parameters", () => {
   const rejected = [];
   assert.deepEqual(
@@ -477,6 +494,13 @@ test("rejects observed-runtime handoffs with extra or secret parameters", () => 
   assert.deepEqual(
     observedRuntimeHandoffFromDeepLink(
       "infergrade-runner://first-run?observed_run_id=obs_123&observed_api_url=https%3A%2F%2Fapi.infergrade.com",
+      (reason) => rejected.push(reason)
+    ),
+    { observedRunId: "", apiUrl: "" }
+  );
+  assert.deepEqual(
+    observedRuntimeHandoffFromDeepLink(
+      "infergrade-runner://observed-runtime:9999?observed_run_id=obs_123&observed_api_url=https%3A%2F%2Fapi.infergrade.com",
       (reason) => rejected.push(reason)
     ),
     { observedRunId: "", apiUrl: "" }

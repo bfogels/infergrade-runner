@@ -303,6 +303,9 @@ fn run_command(
     if let Some(value) = path_with_macos_gui_defaults(env::var_os("PATH")) {
         command.env("PATH", value);
     }
+    #[cfg(windows)]
+    return run_in_kill_on_close_job(command);
+    #[cfg(not(windows))]
     command.status()
 }
 
@@ -346,7 +349,60 @@ fn run_bundled_python(
     if let Some(value) = path_with_macos_gui_defaults(env::var_os("PATH")) {
         command.env("PATH", value);
     }
+    #[cfg(windows)]
+    return run_in_kill_on_close_job(command);
+    #[cfg(not(windows))]
     command.status()
+}
+
+#[cfg(windows)]
+fn run_in_kill_on_close_job(mut command: Command) -> std::io::Result<ExitStatus> {
+    use std::mem::size_of;
+    use std::os::windows::io::AsRawHandle;
+    use std::ptr;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    unsafe {
+        let job = CreateJobObjectW(ptr::null(), ptr::null());
+        if job.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+            size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        ) == 0
+        {
+            let error = std::io::Error::last_os_error();
+            CloseHandle(job);
+            return Err(error);
+        }
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                CloseHandle(job);
+                return Err(error);
+            }
+        };
+        if AssignProcessToJobObject(job, child.as_raw_handle() as _) == 0 {
+            let error = std::io::Error::last_os_error();
+            let _ = child.kill();
+            let _ = child.wait();
+            CloseHandle(job);
+            return Err(error);
+        }
+        let status = child.wait();
+        CloseHandle(job);
+        status
+    }
 }
 
 fn run_bundled_python_output(
@@ -717,10 +773,10 @@ fn python_programs() -> &'static [&'static str] {
 }
 
 #[cfg(unix)]
-fn is_listener_start_command(args: &[OsString]) -> bool {
+fn is_long_running_command(args: &[OsString]) -> bool {
     args.first()
         .and_then(|value| value.to_str())
-        .map(|value| value == "start")
+        .map(|value| matches!(value, "start" | "observe-runtime"))
         .unwrap_or(false)
 }
 
@@ -744,7 +800,7 @@ fn main() {
     }
 
     #[cfg(unix)]
-    if is_listener_start_command(&args) {
+    if is_long_running_command(&args) {
         if let Some(repo_root) = fallback_repo_root() {
             if let Err(error) = exec_repo_python(&repo_root, &args) {
                 eprintln!("{error}");
@@ -863,12 +919,15 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn listener_start_command_is_the_long_running_worker() {
-        assert!(is_listener_start_command(&[OsString::from("start")]));
-        assert!(!is_listener_start_command(&[OsString::from(
+    fn long_running_commands_replace_the_unix_sidecar_process() {
+        assert!(is_long_running_command(&[OsString::from("start")]));
+        assert!(is_long_running_command(&[OsString::from(
+            "observe-runtime"
+        )]));
+        assert!(!is_long_running_command(&[OsString::from(
             "desktop-readiness"
         )]));
-        assert!(!is_listener_start_command(&[OsString::from(
+        assert!(!is_long_running_command(&[OsString::from(
             "desktop-self-test"
         )]));
     }

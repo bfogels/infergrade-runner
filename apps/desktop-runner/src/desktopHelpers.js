@@ -27,6 +27,10 @@ export function normalizeDesktopApiUrl(value = "") {
   if (/\s/.test(candidate)) {
     throw new Error("Enter a valid Hub API URL, such as https://api.infergrade.com.");
   }
+  const bracketedHost = candidate.match(/^https?:\/\/\[([^\]]+)\]/i);
+  if (bracketedHost && bracketedHost[1].toLowerCase() !== "::1") {
+    throw new Error("Use canonical [::1] for an IPv6 localhost URL.");
+  }
 
   let urlText = candidate;
   if (!hasScheme(urlText)) {
@@ -213,6 +217,7 @@ export function observedRuntimeHandoffFromDeepLink(value, onRejected = () => {})
   if (
     parsed.protocol !== "infergrade-runner:" ||
     parsed.hostname !== "observed-runtime" ||
+    parsed.port ||
     (parsed.pathname !== "" && parsed.pathname !== "/") ||
     parsed.username ||
     parsed.password ||

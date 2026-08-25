@@ -2524,6 +2524,18 @@ function observedRuntimeFailureMessage(message = "") {
   if (/model_not_available|multiple models/i.test(text)) {
     return "This endpoint reports multiple models. Use an endpoint serving only the model you want to evaluate, then open the observed-run link again.";
   }
+  if (/observed-run link expired|expired.*observation/i.test(text)) {
+    return "This observation expired. Start a fresh observed check from Hub.";
+  }
+  if (/already has a different result|terminal conflict/i.test(text)) {
+    return "This observation already contains a different result. Start a fresh observed check from Hub.";
+  }
+  if (/10-minute safety limit|exceeded.*safety limit/i.test(text)) {
+    return "The local check reached its 10-minute safety limit. Confirm the model server is responsive, then start a fresh observed check from Hub.";
+  }
+  if (/Hub API URL|valid Hub API/i.test(text)) {
+    return "Enter the Hub API URL this Runner is paired with, then try the observed check again.";
+  }
   if (/pair this machine|pairing|token/i.test(text)) {
     return "Pair this machine with Hub before uploading an observed result.";
   }
@@ -2554,7 +2566,6 @@ async function runObservedRuntimeCheck() {
     setStatus("Observed check needs attention", "error");
     throw new Error(message);
   }
-  const apiUrl = currentObservedApiUrl || normalizeDesktopApiUrl(form.elements.apiUrl.value);
   if (observedRuntimeStartButton) {
     observedRuntimeStartButton.disabled = true;
   }
@@ -2563,6 +2574,7 @@ async function runObservedRuntimeCheck() {
   }
   setStatus("Observed check running", "warning");
   try {
+    const apiUrl = currentObservedApiUrl || normalizeDesktopApiUrl(form.elements.apiUrl.value);
     const payload = await invoke("run_observed_runtime", {
       endpoint,
       observedRunId: currentObservedRunId,

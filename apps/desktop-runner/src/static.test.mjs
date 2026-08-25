@@ -32,6 +32,13 @@ test("desktop observed intake stays narrow, token-free, and endpoint-private", (
   assert.ok(js.includes('invoke("run_observed_runtime"'));
   assert.ok(js.includes("observedRuntimeHandoffFromDeepLink"));
   assert.ok(js.includes("currentObservedRunId"));
+  assert.ok(js.includes("This observation expired. Start a fresh observed check from Hub."));
+  assert.ok(js.includes("This observation already contains a different result."));
+  assert.ok(js.includes("10-minute safety limit"));
+  const observedStart = js.indexOf("async function runObservedRuntimeCheck");
+  const observedEnd = js.indexOf("function applyPairingIntentFromDeepLinks", observedStart);
+  const observedCheck = js.slice(observedStart, observedEnd);
+  assert.ok(observedCheck.indexOf("try {") < observedCheck.indexOf("normalizeDesktopApiUrl"));
   assert.equal(js.includes("localStorage.setItem(\"infergrade.runner.observedEndpoint\""), false);
   assert.equal(js.includes("localStorage.setItem(API_URL_STORAGE_KEY, handoff.apiUrl)"), false);
   assert.ok(helpers.includes("observed_run_id"));
@@ -41,7 +48,9 @@ test("desktop observed intake stays narrow, token-free, and endpoint-private", (
   assert.ok(rust.includes("/v1/observed-runs/{observed_run_id}/result"));
   assert.ok(rust.includes("OBSERVED_RUNTIME_MAX_CAPTURED_OUTPUT_BYTES"));
   assert.ok(rust.includes("observed_quick_suite"));
-  assert.ok(rust.includes("Pair this machine with Hub before uploading an observed result."));
+  assert.ok(rust.includes("Pair this machine with Hub before running an observed check."));
+  assert.ok(rust.includes("OBSERVED_RUNTIME_MAX_SECONDS"));
+  assert.ok(rust.includes("observed_exit_matches_suite"));
   assert.equal(rust.includes("DESKTOP_SIDECAR_DIAGNOSTIC_COMMANDS: &[&str] =\n    &[\"--version\", \"desktop-self-test\", \"desktop-readiness\", \"observe-runtime\"]"), false);
 });
 
@@ -571,6 +580,16 @@ test("tauri commands prepare the platform sidecar before startup", () => {
   assert.ok(prepareScript.includes("copyFileSync"));
   assert.ok(prepareScript.includes("spawnSync"));
   assert.equal(prepareScript.includes("bash"), false);
+});
+
+test("desktop enforces one process around shared pairing state", () => {
+  const cargo = readFileSync(new URL("../src-tauri/Cargo.toml", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+
+  assert.ok(cargo.includes('tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }'));
+  assert.ok(rust.includes("tauri_plugin_single_instance::init"));
+  assert.ok(rust.includes("PAIRING_STATE_LOCK.read().await"));
+  assert.ok(rust.includes("PAIRING_STATE_LOCK.write().await"));
 });
 
 test("desktop legacy support actions stay token-free and out of the visible drawer", () => {
