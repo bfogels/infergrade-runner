@@ -733,7 +733,13 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertEqual(request.benchmark_group_ids, ["reasoning_exact_answer"])
         self.assertEqual(request.benchmark_check_ids, ["reasoning_exact_answer_v1"])
         self.assertEqual(capability_benchmark_ids_for_request(request), ["reasoning_exact_answer_v1"])
+        self.assertEqual(request.generation_preset, "deterministic_direct_answer_v1")
         self.assertEqual(request.capability, "auto")
+        metadata = selection_metadata_for_request(request)
+        self.assertEqual(
+            metadata["benchmark_checks"][0]["generation_constraint_id"],
+            "reasoning_exact_answer_mixed_grammar_v1",
+        )
 
     def test_reasoning_headroom_diagnostic_is_explicit_and_zero_weight(self):
         request = RunRequest(

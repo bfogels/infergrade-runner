@@ -878,6 +878,7 @@
       "fixture_or_dataset_revision_status": "pinned_runner_fixture",
       "harness_status": "native_harness_implemented",
       "scoring_policy_id": "reasoning_exact_answer_v1",
+      "generation_constraint_id": "reasoning_exact_answer_mixed_grammar_v1",
       "sample_policy": "Three pinned synthetic exact-answer cases for quick local reasoning setup guidance.",
       "expected_duration_token_volume_status": "estimated_static_catalog",
       "sandbox_requirement": "none_native_generation_only",
@@ -2566,6 +2567,7 @@
       },
       "higher_is_better": true,
       "score_policy_id": "reasoning_exact_answer_v1",
+      "generation_constraint_id": "reasoning_exact_answer_mixed_grammar_v1",
       "score_breakdown_fields": [
         "correct_count",
         "total_count",

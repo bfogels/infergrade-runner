@@ -72,10 +72,12 @@ SUPPORTED_COVERAGE_GENERATION_PRESETS = {
     DIRECT_ANSWER_GENERATION_PRESET,
 }
 DIRECT_ANSWER_PROTOCOL_CHECK_IDS = {
+    "reasoning_exact_answer_v1",
     "mmlu_pro_reference_v1",
     "gpqa_diamond_reference_v1",
     "longbench_v2_local_reference_v1",
 }
+REASONING_EXACT_ANSWER_GENERATION_CONSTRAINT_ID = "reasoning_exact_answer_mixed_grammar_v1"
 
 # Keep the legacy fixture and scorer available for forensic/unit-test use, but
 # make the known direct-answer reasoning protocol impossible to select as a
