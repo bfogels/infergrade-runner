@@ -20,7 +20,9 @@ import {
   normalizeDesktopApiUrl,
   observedRuntimeHandoffFromDeepLink,
   observedRuntimeHandoffFromParams,
+  observedRuntimeUploadPresentation,
   requiredDesktopReadinessFailure,
+  shouldPreserveObservedRuntimeStatus,
   shouldPreserveActiveAssignment,
   shouldClearCompletedHandoff,
   shouldAppendAssignmentEventLog,
@@ -462,6 +464,50 @@ test("parses only the token-free observed-runtime deep link", () => {
     ),
     { observedRunId: "obs_local", apiUrl: "http://127.0.0.1:8000/" }
   );
+});
+
+test("observed upload presentation separates a completed check from an uploaded failure", () => {
+  const completed = observedRuntimeUploadPresentation({
+    suite_status: "completed",
+    metrics: {
+      completed_case_count: 5,
+      expected_case_count: 5,
+      exact_signed_integer_accuracy: 0.8,
+    },
+  });
+  assert.equal(completed.tone, "good");
+  assert.equal(completed.hubLabel, "Open observed result");
+  assert.match(completed.message, /5\/5 completed · 80% exact/);
+  assert.match(completed.message, /review the result and available next steps/);
+  assert.match(completed.message, /does not yet verify the exact model artifact or runtime/);
+
+  for (const summary of [
+    {
+      suite_status: "failed",
+      metrics: { completed_case_count: 0, expected_case_count: 5, exact_signed_integer_accuracy: null },
+    },
+    {
+      suite_status: "partial",
+      metrics: { completed_case_count: 3, expected_case_count: 5, exact_signed_integer_accuracy: 0.4 },
+    },
+  ]) {
+    const incomplete = observedRuntimeUploadPresentation(summary);
+    assert.equal(incomplete.tone, "warning");
+    assert.equal(incomplete.hubLabel, "Review observed result");
+    assert.match(incomplete.message, /did not complete successfully/);
+  }
+  assert.equal(observedRuntimeUploadPresentation({
+    suite_status: "failed",
+    metrics: { completed_case_count: 0, expected_case_count: 5, exact_signed_integer_accuracy: null },
+  }).message.includes("0% exact"), false);
+});
+
+test("observed handoff status survives asynchronous startup updates", () => {
+  assert.equal(shouldPreserveObservedRuntimeStatus("obs_123", "Listening"), true);
+  assert.equal(shouldPreserveObservedRuntimeStatus("obs_123", "Pairing needed"), true);
+  assert.equal(shouldPreserveObservedRuntimeStatus("obs_123", "Local check running"), false);
+  assert.equal(shouldPreserveObservedRuntimeStatus("obs_123", "Local result needs review"), false);
+  assert.equal(shouldPreserveObservedRuntimeStatus("", "Listening"), false);
 });
 
 test("observed-runtime handoffs keep one canonical loopback allowlist", () => {

@@ -229,6 +229,40 @@ export function observedRuntimeHandoffFromDeepLink(value, onRejected = () => {})
   return observedRuntimeHandoffFromParams(parsed.searchParams, onRejected);
 }
 
+export function observedRuntimeUploadPresentation(summary = {}) {
+  const metrics = summary && typeof summary === "object" && summary.metrics && typeof summary.metrics === "object"
+    ? summary.metrics
+    : {};
+  const completedValue = Number(metrics.completed_case_count);
+  const expectedValue = Number(metrics.expected_case_count);
+  const completed = Number.isInteger(completedValue) && completedValue >= 0 ? completedValue : 0;
+  const expected = Number.isInteger(expectedValue) && expectedValue > 0 ? expectedValue : 0;
+  const accuracy = metrics.exact_signed_integer_accuracy;
+  const score = typeof accuracy === "number" && Number.isFinite(accuracy) && accuracy >= 0 && accuracy <= 1
+    ? ` · ${Math.round(accuracy * 100)}% exact`
+    : "";
+  const count = expected ? `${completed}/${expected} completed` : `${completed} completed`;
+  const completedSuccessfully = summary.suite_status === "completed" && expected > 0 && completed === expected;
+  if (completedSuccessfully) {
+    return {
+      message: `Local check uploaded · ${count}${score}. Return to Hub to review the result and available next steps. This does not yet verify the exact model artifact or runtime.`,
+      status: "Local check uploaded",
+      tone: "good",
+      hubLabel: "Open observed result",
+    };
+  }
+  return {
+    message: `Local result uploaded · ${count}${score}. The short check did not complete successfully. Return to Hub to review it and start again.`,
+    status: "Local result needs review",
+    tone: "warning",
+    hubLabel: "Review observed result",
+  };
+}
+
+export function shouldPreserveObservedRuntimeStatus(observedRunId, nextStatus) {
+  return Boolean(String(observedRunId || "").trim()) && !/^Local (check|result)/.test(String(nextStatus || ""));
+}
+
 export function isPairingIntentDeepLink(value) {
   if (!value || typeof value !== "string") return false;
   try {

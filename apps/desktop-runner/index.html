@@ -221,18 +221,20 @@
             <p class="eyebrow">Evaluate what you already run</p>
             <h2 id="observed-runtime-title">Check a local model endpoint</h2>
             <p>
-              Give InferGrade one localhost OpenAI-compatible endpoint. Runner will run a fixed five-case canary and upload the result as unverified observed evidence.
+              Paste one localhost OpenAI-compatible URL. Runner chooses five short checks—no benchmark setup required—and uploads a redacted result; safe model labels and scores are included when available. The endpoint address and full responses stay on this machine.
             </p>
           </div>
           <div class="observed-runtime-fields">
             <label>
-              <span>Local endpoint</span>
+              <span>OpenAI-compatible API base URL</span>
               <input name="observedRuntimeEndpoint" type="url" inputmode="url" autocomplete="off" placeholder="http://127.0.0.1:8000/v1" />
+              <small>Usually ends in /v1. Do not paste the full /chat/completions route.</small>
             </label>
             <div class="button-row">
-              <button type="button" data-observed-runtime-start>Run five-case canary</button>
+              <button type="button" data-observed-runtime-start disabled>Run local check</button>
+              <button type="button" class="button-secondary" data-observed-runtime-open-hub data-open-hub data-hub-target="build" hidden>Open observed result</button>
             </div>
-            <p class="hint" data-observed-runtime-status aria-live="polite">Open an observed-run link from Hub to start the five-case check.</p>
+            <p class="hint" data-observed-runtime-status aria-live="polite">Start this check from Hub, then paste the URL your model server already exposes.</p>
           </div>
         </section>
 
