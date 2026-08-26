@@ -430,6 +430,11 @@ h4 {
   color: var(--text-soft);
 }
 
+.observed-runtime-fields label small {
+  font-weight: 500;
+  line-height: 1.4;
+}
+
 .backend-panel {
   padding: 26px;
 }

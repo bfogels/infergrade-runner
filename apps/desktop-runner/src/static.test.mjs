@@ -28,13 +28,27 @@ test("desktop observed intake stays narrow, token-free, and endpoint-private", (
 
   assert.ok(html.includes("Check a local model endpoint"));
   assert.ok(html.includes('name="observedRuntimeEndpoint"'));
-  assert.ok(html.includes("Run five-case canary"));
+  assert.ok(html.includes("data-observed-runtime-start disabled>Run local check"));
+  assert.ok(html.includes("Open observed result"));
+  assert.ok(html.includes("OpenAI-compatible API base URL"));
+  assert.ok(html.includes("Do not paste the full /chat/completions route."));
+  assert.ok(html.includes("no benchmark setup required"));
+  assert.ok(html.includes("The endpoint address and full responses stay on this machine."));
+  assert.equal(html.includes("five-case canary"), false);
+  assert.equal(html.includes("unverified observed evidence"), false);
   assert.ok(js.includes('invoke("run_observed_runtime"'));
   assert.ok(js.includes("observedRuntimeHandoffFromDeepLink"));
   assert.ok(js.includes("currentObservedRunId"));
   assert.ok(js.includes("This observation expired. Start a fresh observed check from Hub."));
   assert.ok(js.includes("This observation already contains a different result."));
   assert.ok(js.includes("10-minute safety limit"));
+  assert.ok(helpers.includes("review the result and available next steps"));
+  assert.ok(helpers.includes("does not yet verify the exact model artifact or runtime"));
+  assert.equal(js.includes("fixed five-case canary"), false);
+  assert.ok(js.includes("showObservedRuntimeHubAction(presentation.hubLabel)"));
+  assert.ok(js.includes("showObservedRuntimeUncertainFailureActions()"));
+  assert.ok(js.includes('hubUrl.searchParams.set("tab", "build")'));
+  assert.ok(js.includes("if (observedRuntimeCheckRunning)"));
   const observedStart = js.indexOf("async function runObservedRuntimeCheck");
   const observedEnd = js.indexOf("function applyPairingIntentFromDeepLinks", observedStart);
   const observedCheck = js.slice(observedStart, observedEnd);
