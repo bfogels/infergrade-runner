@@ -23,6 +23,7 @@ fn typed_register_request_matches_existing_payload_shape() {
         "capabilities": {
             "run_token_supported": true,
             "auto_upload": true,
+            "observed_runtime_v1": true,
         },
         "version": env!("CARGO_PKG_VERSION"),
         "environment": desktop_environment(),
@@ -35,6 +36,13 @@ fn typed_register_request_matches_existing_payload_shape() {
     assert_eq!(typed.runner_id, "runner_123");
     assert_eq!(typed.execution_modes, vec!["local_native".to_string()]);
     assert_eq!(typed.runner_kind, "local_listener");
+}
+
+#[test]
+fn cloud_registration_does_not_advertise_desktop_observed_runtime_intake() {
+    let typed = RunnerRegisterRequest::new("runner_cloud", "cloud_container", None);
+
+    assert!(!typed.capabilities.observed_runtime_v1);
 }
 
 #[test]
