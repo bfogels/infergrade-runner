@@ -41,6 +41,16 @@ from infergrade.reasoning_constraint_stress_v2_content import (
     TIER_SELECTION_DIGESTS as CONTENT_PACK_TIER_SELECTION_DIGESTS,
     VARIANT_ORDER as CONTENT_PACK_VARIANT_ORDER,
 )
+from infergrade.reasoning_constraint_stress_v2_qualification import (
+    BENCHMARK_ID as REASONING_V2_QUALIFICATION_BENCHMARK_ID,
+    CLAIM_BOUNDARY as REASONING_V2_QUALIFICATION_CLAIM_BOUNDARY,
+    CONTENT_PACK_BENCHMARK_ID as REASONING_V2_QUALIFICATION_CONTENT_PACK_ID,
+    FAILURE_DENOMINATOR_POLICY_ID as REASONING_V2_FAILURE_DENOMINATOR_POLICY_ID,
+    GENERATION_POLICY_ID as REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID,
+    QUALIFICATION_REVISION as REASONING_V2_QUALIFICATION_REVISION,
+    POLICY_ENFORCEMENT_REQUESTED_UNVERIFIED as REASONING_V2_POLICY_ENFORCEMENT_STATE,
+    qualification_tier_metadata,
+)
 
 FALLBACK_METADATA_ORDERING = {
     "effort_level": ["short", "low", "balanced", "medium", "deep", "high"],
@@ -62,10 +72,12 @@ SUPPORTED_COVERAGE_GENERATION_PRESETS = {
     DIRECT_ANSWER_GENERATION_PRESET,
 }
 DIRECT_ANSWER_PROTOCOL_CHECK_IDS = {
+    "reasoning_exact_answer_v1",
     "mmlu_pro_reference_v1",
     "gpqa_diamond_reference_v1",
     "longbench_v2_local_reference_v1",
 }
+REASONING_EXACT_ANSWER_GENERATION_CONSTRAINT_ID = "reasoning_exact_answer_mixed_grammar_v1"
 
 # Keep the legacy fixture and scorer available for forensic/unit-test use, but
 # make the known direct-answer reasoning protocol impossible to select as a
@@ -224,6 +236,107 @@ CONTENT_PACK_BENCHMARKS = {
     }
 }
 CONTENT_PACK_STATUS_BENCHMARKS = json.loads(json.dumps(CONTENT_PACK_BENCHMARKS))
+
+REASONING_V2_QUALIFICATION_DISPLAY_NAME = "Reasoning constraint stress v2 qualification"
+REASONING_V2_QUALIFICATION_DESCRIPTION = (
+    "Runner-owned qualification-only execution over the immutable reasoning v2 content pack; "
+    "it is excluded from headline score, readiness, recommendation, and release evidence."
+)
+REASONING_V2_QUALIFICATION_SELECTION_GUIDANCE = (
+    "Explicit qualification-only Runner execution is available at exact canary, standard, "
+    "or gold prefixes. The result is diagnostic and must not be treated as current capability evidence."
+)
+REASONING_V2_QUALIFICATION_PROMOTION_BLOCKERS = [
+    "Verify backend enforcement of the enabled-thinking budget from runtime receipts; accepted request fields alone are insufficient.",
+    "Run current-model repeats with malformed-output, token-exhaustion, and cross-family headroom reporting.",
+    "Complete independent review of the content pack, selection identity, parser, and publication boundaries before any evidence role.",
+]
+REASONING_V2_QUALIFICATION_BENCHMARKS = {
+    REASONING_V2_QUALIFICATION_BENCHMARK_ID: {
+        "check_id": REASONING_V2_QUALIFICATION_BENCHMARK_ID,
+        "qualification_only": True,
+        "display_name": REASONING_V2_QUALIFICATION_DISPLAY_NAME,
+        "description": REASONING_V2_QUALIFICATION_DESCRIPTION,
+        "capability_facets": ["constraint_reasoning_stress_v2"],
+        "temporal_scope": "static_pinned",
+        "selection_guidance": REASONING_V2_QUALIFICATION_SELECTION_GUIDANCE,
+        "claim_boundary": REASONING_V2_QUALIFICATION_CLAIM_BOUNDARY,
+        "status": "qualification_only",
+        "runnable_status": "runnable_qualification_only",
+        "maturity": "thin_local_sample",
+        "default_inclusion_status": "excluded_qualification_only",
+        "fixture_or_dataset_revision_status": "pinned_runner_content_pack_qualification",
+        "harness_status": "native_reasoning_v2_qualification_implemented",
+        "expected_duration_token_volume_status": "estimated_qualification_5_to_40_cases",
+        "sandbox_requirement": "none_native_generation_only",
+        "sample_policy": (
+            "Exact prefixes of the immutable 40-case content pack: canary 5, standard 20, and gold 40. "
+            "Each prefix preserves locked selection identity and family/level/variant metrics."
+        ),
+        "promotion_blockers": list(REASONING_V2_QUALIFICATION_PROMOTION_BLOCKERS),
+        "evidence_kind": "capability",
+        "surface_id": "local_reasoning_capability",
+        "evidence_lane_id": "reference",
+        "suite_scope": "reference",
+        "group_id": None,
+        "runner_target": REASONING_V2_QUALIFICATION_BENCHMARK_ID,
+        "effort_level": "deep",
+        "expected_duration_band": "5-45 min",
+        "token_volume_band": "medium",
+        "resumability_boundary": "case",
+        "execution_pattern": "native_reasoning_v2_qualification",
+        "score_dimension": "constraint_reasoning_stress_v2_qualification",
+        "primary_score_metric": "exact_signed_integer_accuracy",
+        "score_floor": 0.0,
+        "primary_score_weight": 0.0,
+        "score_role": "qualification_only",
+        "discrimination_status": "unreviewed",
+        "higher_is_better": True,
+        "score_policy_id": SCORING_POLICY,
+        "scoring_policy_id": SCORING_POLICY,
+        "generation_constraint_id": FINAL_ANSWER_PARSER_ID,
+        "generation_policy_id": REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID,
+        "failure_denominator_policy_id": REASONING_V2_FAILURE_DENOMINATOR_POLICY_ID,
+        "policy_enforcement_state": REASONING_V2_POLICY_ENFORCEMENT_STATE,
+        "score_breakdown_fields": [
+            "correct_count",
+            "total_count",
+            "case_accuracy",
+            "generation_failure_count",
+            "not_attempted_count",
+            "generation_failure_count_includes_not_attempted",
+            "family_metrics",
+            "structural_level_metrics",
+            "variant_metrics",
+            "parser_code_counts",
+        ],
+        "content_pack_benchmark_id": REASONING_V2_QUALIFICATION_CONTENT_PACK_ID,
+        "qualification_revision": REASONING_V2_QUALIFICATION_REVISION,
+        "tier_prefix_counts": {"canary": 5, "standard": 20, "gold": 40},
+        "fixture_revision": CONTENT_PACK_FIXTURE_REVISION,
+        "fixture_sha256": CONTENT_PACK_LOCKED_FIXTURE_SHA256,
+        "full_fixture_sha256": CONTENT_PACK_LOCKED_FIXTURE_SHA256,
+        "full_selection_sha256": CONTENT_PACK_LOCKED_FULL_SELECTION_SHA256,
+        "generator_seed_sha256": CONTENT_PACK_LOCKED_GENERATOR_SEED_SHA256,
+        "selection_digest_algorithm": CONTENT_PACK_SELECTION_DIGEST_ALGORITHM,
+        "tier_selection_digests": dict(CONTENT_PACK_LOCKED_TIER_SELECTION_DIGESTS),
+        "tier_coverage": CONTENT_PACK_LOCKED_TIER_COVERAGE,
+        "family_order": list(CONTENT_PACK_FAMILY_ORDER),
+        "structural_level_order": list(CONTENT_PACK_STRUCTURAL_LEVEL_ORDER),
+        "variant_order": list(CONTENT_PACK_VARIANT_ORDER),
+        "allowed_tiers": ["canary", "standard", "gold"],
+        "attestation_state": "unreviewed",
+        "excluded_from_default_groups": True,
+        "excluded_from_suites": True,
+        "excluded_from_weighted_score": True,
+        "excluded_from_readiness": True,
+        "excluded_from_recommendation": True,
+        "excluded_from_release_evidence": True,
+    }
+}
+REASONING_V2_QUALIFICATION_STATUS_BENCHMARKS = json.loads(
+    json.dumps(REASONING_V2_QUALIFICATION_BENCHMARKS)
+)
 
 
 def _foundation_field_matches(actual: Any, expected: Any) -> bool:
@@ -449,6 +562,36 @@ def _content_pack_placement_error(
         ("benchmark_status_matrix", status_rows[0], "check_id"),
         ("benchmark_status_matrix", status_rows[0], "runner_target"),
     }
+    # The qualification candidate is allowed to name the immutable content
+    # pack explicitly.  This does not make the content pack itself runnable or
+    # permit any other catalog placement of its identity.
+    qualification_check_rows = [
+        index
+        for index, item in enumerate(raw_checks)
+        if isinstance(item, dict)
+        and item.get("check_id") == REASONING_V2_QUALIFICATION_BENCHMARK_ID
+    ]
+    qualification_status_rows = [
+        index
+        for index, item in enumerate(raw_statuses)
+        if isinstance(item, dict)
+        and item.get("check_id") == REASONING_V2_QUALIFICATION_BENCHMARK_ID
+    ]
+    if len(qualification_check_rows) == 1 and len(qualification_status_rows) == 1:
+        allowed_paths.update(
+            {
+                (
+                    "checks",
+                    qualification_check_rows[0],
+                    "content_pack_benchmark_id",
+                ),
+                (
+                    "benchmark_status_matrix",
+                    qualification_status_rows[0],
+                    "content_pack_benchmark_id",
+                ),
+            }
+        )
     try:
         occurrence_paths = _normalized_string_occurrence_paths(catalog, check_id)
         occurrence_path_set = set(occurrence_paths)
@@ -524,6 +667,102 @@ def _raise_on_malformed_content_pack_metadata(
                 "%s:%s:%s"
                 % (BENCHMARK_IDENTITY_ONLY_PREFIX, check_id, CONTENT_PACK_METADATA_ERROR)
             )
+
+
+def _qualification_placement_error(
+    check_id: str,
+    catalog: Dict[str, Any],
+) -> Optional[str]:
+    """Keep the runnable candidate identity in its paired check/status rows."""
+    raw_checks = catalog.get("checks")
+    raw_statuses = catalog.get("benchmark_status_matrix")
+    if not isinstance(raw_checks, list) or not isinstance(raw_statuses, list):
+        return "metadata_invalid"
+    check_rows = [
+        index
+        for index, item in enumerate(raw_checks)
+        if isinstance(item, dict) and item.get("check_id") == check_id
+    ]
+    status_rows = [
+        index
+        for index, item in enumerate(raw_statuses)
+        if isinstance(item, dict) and item.get("check_id") == check_id
+    ]
+    if len(check_rows) != 1 or len(status_rows) != 1:
+        return "metadata_invalid"
+    allowed_paths = {
+        ("checks", check_rows[0], "check_id"),
+        ("checks", check_rows[0], "runner_target"),
+        ("benchmark_status_matrix", status_rows[0], "check_id"),
+        ("benchmark_status_matrix", status_rows[0], "runner_target"),
+        ("checks", check_rows[0], "qualification_revision"),
+        ("benchmark_status_matrix", status_rows[0], "qualification_revision"),
+    }
+    try:
+        occurrence_paths = _normalized_string_occurrence_paths(catalog, check_id)
+    except Exception:
+        return "metadata_invalid"
+    if set(occurrence_paths) != allowed_paths or len(occurrence_paths) != len(allowed_paths):
+        return "metadata_invalid"
+    return None
+
+
+def _qualification_metadata_error(
+    check_id: str,
+    catalog: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Return a stable error when the qualification candidate drifts."""
+    check_key = str(check_id or "").strip()
+    if check_key not in REASONING_V2_QUALIFICATION_BENCHMARKS:
+        return None
+    payload = catalog or load_capability_catalog()
+    if _qualification_placement_error(check_key, payload):
+        return "metadata_invalid"
+    # The candidate references the content pack; validate that identity first.
+    if _content_pack_metadata_error(REASONING_V2_QUALIFICATION_CONTENT_PACK_ID, payload):
+        return "content_pack_metadata_invalid"
+    expected_check = REASONING_V2_QUALIFICATION_BENCHMARKS.get(check_key)
+    expected_status = REASONING_V2_QUALIFICATION_STATUS_BENCHMARKS.get(check_key)
+    check = check_index(payload).get(check_key)
+    status = benchmark_status_index(payload).get(check_key)
+    if (
+        not isinstance(expected_check, dict)
+        or not isinstance(expected_status, dict)
+        or not isinstance(check, dict)
+        or not isinstance(status, dict)
+        or not _foundation_field_matches(check, expected_check)
+        or not _foundation_field_matches(status, expected_status)
+    ):
+        return "metadata_invalid"
+    try:
+        qualification_tier_metadata("gold")
+    except Exception:
+        return "content_pack_metadata_invalid"
+    return None
+
+
+def _raise_on_malformed_qualification_metadata(
+    catalog: Optional[Dict[str, Any]] = None,
+) -> None:
+    payload = catalog or load_capability_catalog()
+    for check_id in REASONING_V2_QUALIFICATION_BENCHMARKS:
+        error = _qualification_metadata_error(check_id, payload)
+        if error:
+            raise ValueError(
+                "benchmark_qualification_only:%s:%s" % (check_id, error)
+            )
+
+
+def is_benchmark_qualification_only(
+    check_id: str,
+    catalog: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Return whether the selected check is runnable only in qualification mode."""
+    payload = catalog or load_capability_catalog()
+    check_key = str(check_id or "").strip()
+    if check_key not in REASONING_V2_QUALIFICATION_BENCHMARKS:
+        return False
+    return _qualification_metadata_error(check_key, payload) is None
 
 
 def _foundation_canary_metadata_error(
@@ -676,6 +915,11 @@ def benchmark_evidence_exclusion_reason(
         if content_pack_error:
             return "%s:%s" % (BENCHMARK_IDENTITY_ONLY_PREFIX, content_pack_error)
         return "%s:planned" % BENCHMARK_IDENTITY_ONLY_PREFIX
+    if check_key in REASONING_V2_QUALIFICATION_BENCHMARKS:
+        qualification_error = _qualification_metadata_error(check_key, payload)
+        if qualification_error:
+            return "benchmark_qualification_only:%s" % qualification_error
+        return "benchmark_qualification_only:unreviewed"
     quarantined = benchmark_quarantine_reason(check_id, payload)
     if quarantined:
         return quarantined
@@ -724,6 +968,7 @@ def reject_tier_restricted_benchmarks(
     payload = catalog or load_capability_catalog()
     _raise_on_malformed_foundation_canary_metadata(payload)
     _raise_on_malformed_content_pack_metadata(payload)
+    _raise_on_malformed_qualification_metadata(payload)
     checks = check_index(payload)
     derived_tier = derive_tier_from_selection(
         check_ids,
@@ -1217,6 +1462,8 @@ def resolve_request_selection(request: RunRequest, catalog: Optional[Dict[str, A
     """Resolve explicit suite/group/check selections for a request."""
     payload = catalog or load_capability_catalog()
     _raise_on_malformed_foundation_canary_metadata(payload)
+    _raise_on_malformed_content_pack_metadata(payload)
+    _raise_on_malformed_qualification_metadata(payload)
     suites = suite_index(payload)
     groups = group_index(payload)
     checks = check_index(payload)
@@ -1273,6 +1520,16 @@ def resolve_request_selection(request: RunRequest, catalog: Optional[Dict[str, A
         "group_ids": group_ids,
         "check_ids": check_ids,
     }
+    if REASONING_V2_QUALIFICATION_BENCHMARK_ID in selection["check_ids"]:
+        if (
+            len(selection["check_ids"]) != 1
+            or selection["suite_ids"]
+            or selection["group_ids"]
+        ):
+            raise ValueError(
+                "benchmark_qualification_only:%s:selection_must_be_exclusive"
+                % REASONING_V2_QUALIFICATION_BENCHMARK_ID
+            )
     reject_quarantined_benchmarks(selection["check_ids"], payload)
     reject_tier_restricted_benchmarks(
         selection["check_ids"],
@@ -1300,6 +1557,21 @@ def normalize_request_selection(request: RunRequest, catalog: Optional[Dict[str,
     request.benchmark_check_ids = check_ids
     if DIRECT_ANSWER_PROTOCOL_CHECK_IDS.intersection(check_ids):
         request.generation_preset = DIRECT_ANSWER_GENERATION_PRESET
+    if REASONING_V2_QUALIFICATION_BENCHMARK_ID in check_ids:
+        requested_policy = request.generation_preset
+        if requested_policy not in (
+            None,
+            DEFAULT_GENERATION_PRESET,
+            REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID,
+        ):
+            raise ValueError(
+                "benchmark_qualification_only:%s:generation_policy_mismatch:%s"
+                % (REASONING_V2_QUALIFICATION_BENCHMARK_ID, requested_policy)
+            )
+        # run_infergrade resolves the ordinary deterministic default before it
+        # calls this function.  The qualification candidate is the one narrow
+        # exception: its benchmark contract owns the exact reasoning policy.
+        request.generation_preset = REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID
 
     if check_ids and not request.tier_was_explicit:
         request.tier = derive_tier_from_selection(check_ids, group_ids=group_ids, suite_ids=suite_ids, catalog=payload)
@@ -1350,7 +1622,10 @@ def capability_benchmark_ids_for_request(
         item
         for item in _dedupe_strings(selection.get("check_ids"))
         if checks.get(item, {}).get("evidence_kind") == "capability"
-        and not is_benchmark_excluded_from_evidence(item, payload)
+        and (
+            not is_benchmark_excluded_from_evidence(item, payload)
+            or is_benchmark_qualification_only(item, payload)
+        )
     ]
 
 
@@ -1395,6 +1670,7 @@ def benchmark_scope_summary_for_selection(
     payload = catalog or load_capability_catalog()
     _raise_on_malformed_foundation_canary_metadata(payload)
     _raise_on_malformed_content_pack_metadata(payload)
+    _raise_on_malformed_qualification_metadata(payload)
     checks = check_index(payload)
     selected_ids = [item for item in _dedupe_strings(check_ids) if item in checks]
     selected = [checks[item] for item in selected_ids]
@@ -1431,6 +1707,31 @@ def benchmark_scope_summary_for_selection(
             item for item in excluded_ids
             if item in EXPECTED_CONTENT_PACK_BENCHMARK_IDS
         ]
+        qualification_ids = [
+            item
+            for item in excluded_ids
+            if item in REASONING_V2_QUALIFICATION_BENCHMARKS
+        ]
+        if qualification_ids:
+            return {
+                "scope": "qualification_only",
+                "scope_label": "Qualification-only Runner execution",
+                "qualification_only": True,
+                "eligible_benchmark_check_ids": [],
+                "identity_only_benchmark_check_ids": [],
+                "qualification_only_benchmark_check_ids": qualification_ids,
+                "excluded_benchmark_check_ids": excluded_ids,
+                "evidence_exclusion_reasons": exclusion_reasons,
+                "selection_guidance": REASONING_V2_QUALIFICATION_SELECTION_GUIDANCE,
+                "claim_boundary": REASONING_V2_QUALIFICATION_CLAIM_BOUNDARY,
+                "effort_level": "deep",
+                "expected_duration_band": "5-45 min",
+                "token_volume_band": "medium",
+                "metadata_sources": _metadata_sources(payload, []),
+                "metadata_confidence": _metadata_confidence(_metadata_sources(payload, [])),
+                "execution_patterns": ["native_reasoning_v2_qualification"],
+                "resumability_boundaries": ["case"],
+            }
         return {
             "scope": "identity_only",
             "scope_label": (
@@ -1440,7 +1741,12 @@ def benchmark_scope_summary_for_selection(
             ),
             "identity_only": True,
             "eligible_benchmark_check_ids": [],
-            "identity_only_benchmark_check_ids": excluded_ids,
+            "identity_only_benchmark_check_ids": [
+                item for item in excluded_ids
+                if item in EXPECTED_CONTENT_PACK_BENCHMARK_IDS
+                or item in FOUNDATION_CANARY_BENCHMARKS
+            ],
+            "qualification_only_benchmark_check_ids": [],
             "excluded_benchmark_check_ids": excluded_ids,
             "evidence_exclusion_reasons": exclusion_reasons,
             "selection_guidance": (
@@ -1484,6 +1790,9 @@ def benchmark_scope_summary_for_selection(
         "reference_checks_included": scope == "reference",
         "eligible_benchmark_check_ids": eligible_ids,
         "identity_only_benchmark_check_ids": excluded_ids,
+        "qualification_only_benchmark_check_ids": [
+            item for item in excluded_ids if item in REASONING_V2_QUALIFICATION_BENCHMARKS
+        ],
         "excluded_benchmark_check_ids": excluded_ids,
         "evidence_exclusion_reasons": exclusion_reasons,
     }
@@ -1497,6 +1806,7 @@ def capability_coverage_guidance_for_selection(
     payload = catalog or load_capability_catalog()
     _raise_on_malformed_foundation_canary_metadata(payload)
     _raise_on_malformed_content_pack_metadata(payload)
+    _raise_on_malformed_qualification_metadata(payload)
     checks = check_index(payload)
     selected_ids = [item for item in _dedupe_strings(check_ids) if item in checks]
     excluded_ids = [
@@ -1559,7 +1869,14 @@ def capability_coverage_guidance_for_selection(
         "selected_reference_check_ids": selected_reference,
         "selected_benchmark_check_ids": selected_ids,
         "eligible_benchmark_check_ids": eligible_ids,
-        "identity_only_benchmark_check_ids": excluded_ids,
+        "identity_only_benchmark_check_ids": [
+            item for item in excluded_ids
+            if item in EXPECTED_CONTENT_PACK_BENCHMARK_IDS
+            or item in FOUNDATION_CANARY_BENCHMARKS
+        ],
+        "qualification_only_benchmark_check_ids": [
+            item for item in excluded_ids if item in REASONING_V2_QUALIFICATION_BENCHMARKS
+        ],
         "excluded_benchmark_check_ids": excluded_ids,
         "evidence_exclusion_reasons": {
             item: benchmark_evidence_exclusion_reason(item, payload)
@@ -1592,6 +1909,14 @@ def selection_metadata_for_request(
     eligible_ids = [
         item for item in normalized["check_ids"] if item not in excluded_ids
     ]
+    identity_only_ids = [
+        item for item in excluded_ids
+        if item in EXPECTED_CONTENT_PACK_BENCHMARK_IDS
+        or item in FOUNDATION_CANARY_BENCHMARKS
+    ]
+    qualification_only_ids = [
+        item for item in excluded_ids if item in REASONING_V2_QUALIFICATION_BENCHMARKS
+    ]
     return {
         "catalog_version": payload.get("catalog_version"),
         "shortcut_id": request.benchmark_shortcut_id,
@@ -1601,7 +1926,8 @@ def selection_metadata_for_request(
         "benchmark_group_ids": list(normalized["group_ids"]),
         "benchmark_check_ids": list(normalized["check_ids"]),
         "eligible_benchmark_check_ids": eligible_ids,
-        "identity_only_benchmark_check_ids": excluded_ids,
+        "identity_only_benchmark_check_ids": identity_only_ids,
+        "qualification_only_benchmark_check_ids": qualification_only_ids,
         "excluded_benchmark_check_ids": excluded_ids,
         "capability_suites": [
             {
@@ -1663,6 +1989,7 @@ def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dic
     identity = (
         FOUNDATION_CANARY_BENCHMARKS.get(check_id)
         or CONTENT_PACK_BENCHMARKS.get(check_id)
+        or REASONING_V2_QUALIFICATION_BENCHMARKS.get(check_id)
     ) if excluded else None
     lane_id = None if excluded else _evidence_lane_id_for_item(catalog, check)
     lane = {} if excluded else _evidence_lane_payload(catalog, lane_id)
@@ -1716,7 +2043,8 @@ def _benchmark_check_metadata(catalog: Dict[str, Any], check_id: str, check: Dic
         "quarantine_reason_code": benchmark_quarantine_reason(check_id, catalog),
         "evidence_exclusion_reason": benchmark_evidence_exclusion_reason(check_id, catalog),
         "runnable_evidence": not excluded,
-        "identity_only": excluded,
+        "identity_only": bool(excluded and check_id not in REASONING_V2_QUALIFICATION_BENCHMARKS),
+        "qualification_only": bool(check_id in REASONING_V2_QUALIFICATION_BENCHMARKS),
         "canary_only": bool(check.get("canary_only")),
         "allowed_tiers": list(check.get("allowed_tiers") or []),
         "attestation_state": check.get("attestation_state"),

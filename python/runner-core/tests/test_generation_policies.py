@@ -12,6 +12,8 @@ from infergrade.generation_policies import (
     DEFAULT_GENERATION_POLICY_ID,
     DIRECT_ANSWER_GENERATION_POLICY_ID,
     GENERATION_POLICY_REGISTRY,
+    OPTIONAL_CANONICAL_POLICY_FIELDS,
+    REASONING_CONSTRAINT_STRESS_QUALIFICATION_THINKING_POLICY_ID,
     REASONING_CONSTRAINT_STRESS_THINKING_POLICY_ID,
     UnknownGenerationPolicyError,
     resolve_generation_policy,
@@ -235,6 +237,27 @@ class GenerationPolicyTests(unittest.TestCase):
             policy = resolve_generation_policy(policy_id)
             self.assertEqual(policy.canonical_json(), canonical_json)
             self.assertEqual(policy.fingerprint_sha256, fingerprint)
+
+    def test_qualification_policy_versions_sampling_controls_without_mutating_legacy(self):
+        policy = resolve_generation_policy(
+            REASONING_CONSTRAINT_STRESS_QUALIFICATION_THINKING_POLICY_ID
+        )
+        self.assertEqual(policy.temperature, 0.6)
+        self.assertEqual(policy.top_p, 0.95)
+        self.assertEqual(policy.top_k, 20)
+        self.assertEqual(policy.max_output_tokens, 1536)
+        self.assertEqual(policy.thinking_budget_tokens, 512)
+        self.assertEqual(policy.prompt_transform_id, "reasoning_constraint_stress_terminal_v2")
+        self.assertIn("FINAL_ANSWER:", policy.prompt_directive)
+        self.assertEqual(policy.to_dict()["top_k"], 20)
+        self.assertIn('"top_k":20', policy.canonical_json())
+        changed = replace(policy, top_k=21)
+        self.assertNotEqual(policy.fingerprint_sha256, changed.fingerprint_sha256)
+        self.assertEqual(
+            tuple(resolve_generation_policy(REASONING_CONSTRAINT_STRESS_THINKING_POLICY_ID).to_dict()),
+            CANONICAL_POLICY_FIELDS,
+        )
+        self.assertEqual(OPTIONAL_CANONICAL_POLICY_FIELDS, ("top_k",))
 
 
 if __name__ == "__main__":

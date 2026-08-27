@@ -20,6 +20,32 @@ class RunnerTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tempdir)
 
+    def test_explicit_qualification_selection_runs_without_use_case(self):
+        request = RunRequest(
+            model="fixture/reasoning-v2",
+            backend="llama.cpp",
+            tier="canary",
+            tier_was_explicit=True,
+            benchmark_check_ids=["reasoning_constraint_stress_v2_qualification_v1"],
+            output_dir=self.tempdir,
+            simulate=True,
+        )
+
+        result = run_infergrade(request)
+        with open(
+            os.path.join(result["output_dir"], "results", "interactive_chat_v1.json"),
+            "r",
+            encoding="utf-8",
+        ) as handle:
+            record = json.load(handle)
+
+        self.assertEqual(request.capability, "auto")
+        self.assertNotEqual(record["capability"]["capability_status"], "skipped")
+        self.assertIn(
+            "reasoning_constraint_stress_v2_qualification_v1",
+            record["capability"]["benchmark_selection"]["benchmark_check_ids"],
+        )
+
     def test_native_runtime_provenance_bounds_verified_tier(self):
         request = RunRequest(
             model="Qwen/Qwen3.5-4B",

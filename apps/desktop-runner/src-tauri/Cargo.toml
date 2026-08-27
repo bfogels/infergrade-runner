@@ -1,6 +1,6 @@
 [package]
 name = "infergrade_desktop_runner"
-version = "0.3.57"
+version = "0.3.58"
 description = "Desktop companion app for the InferGrade Runner"
 authors = ["Brian Fogelson"]
 license = "Apache-2.0"
@@ -23,4 +23,7 @@ tauri-plugin-deep-link = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 tauri-plugin-shell = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-updater = "2"
+tokio = { version = "1", features = ["macros", "rt", "time"] }
+url = "2.5.4"

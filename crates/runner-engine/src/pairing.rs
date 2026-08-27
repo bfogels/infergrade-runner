@@ -85,8 +85,14 @@ where
             )
         })?;
 
-    profile_store.save_profile(&profile)?;
+    // Persist the secret first so a keyring failure cannot leave a new Hub
+    // destination paired with an older Hub's token. If profile persistence
+    // then fails, clear the new token and leave pairing fail-closed.
     token_store.save_runner_token(access_token)?;
+    if let Err(error) = profile_store.save_profile(&profile) {
+        let _ = token_store.clear_runner_token();
+        return Err(error);
+    }
 
     body["runner_profile"] = serde_json::to_value(profile.sanitized()).map_err(|error| {
         RunnerError::new(

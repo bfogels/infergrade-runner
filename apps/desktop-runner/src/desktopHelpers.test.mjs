@@ -18,7 +18,11 @@ import {
   isPairingIntentDeepLink,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
+  observedRuntimeHandoffFromDeepLink,
+  observedRuntimeHandoffFromParams,
+  observedRuntimeUploadPresentation,
   requiredDesktopReadinessFailure,
+  shouldPreserveObservedRuntimeStatus,
   shouldPreserveActiveAssignment,
   shouldClearCompletedHandoff,
   shouldAppendAssignmentEventLog,
@@ -445,6 +449,108 @@ test("rejects first-run handoffs with unsafe API URLs or version text", () => {
   assert.equal(rejected[2], "unapproved handoff API URL");
   assert.equal(rejected[3], "unapproved handoff API URL");
   assert.equal(rejected[4], "unsafe handoff version");
+});
+
+test("parses only the token-free observed-runtime deep link", () => {
+  assert.deepEqual(
+    observedRuntimeHandoffFromDeepLink(
+      "infergrade-runner://observed-runtime?observed_run_id=obs_123&observed_api_url=https%3A%2F%2Fapi.infergrade.com"
+    ),
+    { observedRunId: "obs_123", apiUrl: "https://api.infergrade.com/" }
+  );
+  assert.deepEqual(
+    observedRuntimeHandoffFromParams(
+      new URLSearchParams("observed_run_id=obs_local&observed_api_url=http%3A%2F%2F127.0.0.1%3A8000")
+    ),
+    { observedRunId: "obs_local", apiUrl: "http://127.0.0.1:8000/" }
+  );
+});
+
+test("observed upload presentation separates a completed check from an uploaded failure", () => {
+  const completed = observedRuntimeUploadPresentation({
+    suite_status: "completed",
+    metrics: {
+      completed_case_count: 5,
+      expected_case_count: 5,
+      exact_signed_integer_accuracy: 0.8,
+    },
+  });
+  assert.equal(completed.tone, "good");
+  assert.equal(completed.hubLabel, "Open observed result");
+  assert.match(completed.message, /5\/5 completed · 80% exact/);
+  assert.match(completed.message, /review the result and available next steps/);
+  assert.match(completed.message, /does not yet verify the exact model artifact or runtime/);
+
+  for (const summary of [
+    {
+      suite_status: "failed",
+      metrics: { completed_case_count: 0, expected_case_count: 5, exact_signed_integer_accuracy: null },
+    },
+    {
+      suite_status: "partial",
+      metrics: { completed_case_count: 3, expected_case_count: 5, exact_signed_integer_accuracy: 0.4 },
+    },
+  ]) {
+    const incomplete = observedRuntimeUploadPresentation(summary);
+    assert.equal(incomplete.tone, "warning");
+    assert.equal(incomplete.hubLabel, "Review observed result");
+    assert.match(incomplete.message, /did not complete successfully/);
+  }
+  assert.equal(observedRuntimeUploadPresentation({
+    suite_status: "failed",
+    metrics: { completed_case_count: 0, expected_case_count: 5, exact_signed_integer_accuracy: null },
+  }).message.includes("0% exact"), false);
+});
+
+test("observed handoff status survives asynchronous startup updates", () => {
+  assert.equal(shouldPreserveObservedRuntimeStatus("obs_123", "Listening"), true);
+  assert.equal(shouldPreserveObservedRuntimeStatus("obs_123", "Pairing needed"), true);
+  assert.equal(shouldPreserveObservedRuntimeStatus("obs_123", "Local check running"), false);
+  assert.equal(shouldPreserveObservedRuntimeStatus("obs_123", "Local result needs review"), false);
+  assert.equal(shouldPreserveObservedRuntimeStatus("", "Listening"), false);
+});
+
+test("observed-runtime handoffs keep one canonical loopback allowlist", () => {
+  assert.deepEqual(
+    observedRuntimeHandoffFromParams(
+      new URLSearchParams("observed_run_id=obs_local&observed_api_url=http%3A%2F%2F%5B%3A%3A1%5D%3A8000")
+    ),
+    { observedRunId: "obs_local", apiUrl: "http://[::1]:8000/" }
+  );
+  for (const apiUrl of ["http://[0:0:0:0:0:0:0:1]:8000", "http://localhost.:8000"]) {
+    assert.deepEqual(
+      observedRuntimeHandoffFromParams(
+        new URLSearchParams(`observed_run_id=obs_local&observed_api_url=${encodeURIComponent(apiUrl)}`)
+      ),
+      { observedRunId: "", apiUrl: "" }
+    );
+  }
+});
+
+test("rejects observed-runtime handoffs with extra or secret parameters", () => {
+  const rejected = [];
+  assert.deepEqual(
+    observedRuntimeHandoffFromDeepLink(
+      "infergrade-runner://observed-runtime?observed_run_id=obs_123&observed_api_url=https%3A%2F%2Fapi.infergrade.com&token=secret",
+      (reason) => rejected.push(reason)
+    ),
+    { observedRunId: "", apiUrl: "" }
+  );
+  assert.match(rejected[0], /sensitive|unexpected/i);
+  assert.deepEqual(
+    observedRuntimeHandoffFromDeepLink(
+      "infergrade-runner://first-run?observed_run_id=obs_123&observed_api_url=https%3A%2F%2Fapi.infergrade.com",
+      (reason) => rejected.push(reason)
+    ),
+    { observedRunId: "", apiUrl: "" }
+  );
+  assert.deepEqual(
+    observedRuntimeHandoffFromDeepLink(
+      "infergrade-runner://observed-runtime:9999?observed_run_id=obs_123&observed_api_url=https%3A%2F%2Fapi.infergrade.com",
+      (reason) => rejected.push(reason)
+    ),
+    { observedRunId: "", apiUrl: "" }
+  );
 });
 
 test("rejects first-run handoffs with unsafe or sensitive identifier values", () => {

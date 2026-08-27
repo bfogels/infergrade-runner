@@ -17,7 +17,10 @@ import {
   isPairingIntentDeepLink,
   isTerminalHandoffStatus,
   normalizeDesktopApiUrl,
+  observedRuntimeHandoffFromDeepLink,
+  observedRuntimeUploadPresentation,
   requiredDesktopReadinessFailure,
+  shouldPreserveObservedRuntimeStatus,
   shouldPreserveActiveAssignment,
   shouldClearCompletedHandoff,
   shouldAppendAssignmentEventLog,
@@ -139,6 +142,10 @@ const assignmentCheck = document.querySelector("[data-assignment-check]");
 const assignmentStartListeningButton = document.querySelector("[data-assignment-start-listening]");
 const assignmentInstallRuntimeButton = document.querySelector("[data-assignment-install-runtime]");
 const assignmentOpenHubButton = document.querySelector("[data-assignment-panel] [data-open-hub]");
+const observedRuntimeEndpointInput = document.querySelector('[name="observedRuntimeEndpoint"]');
+const observedRuntimeStartButton = document.querySelector("[data-observed-runtime-start]");
+const observedRuntimeOpenHubButton = document.querySelector("[data-observed-runtime-open-hub]");
+const observedRuntimeStatus = document.querySelector("[data-observed-runtime-status]");
 
 let childProcess = null;
 let logLines = [];
@@ -176,6 +183,9 @@ let pendingRequiredRuntime = null;
 let pendingManagedRuntimeRepair = false;
 let currentHandoffRunId = "";
 let currentHandoffWorkerId = "";
+let currentObservedRunId = "";
+let currentObservedApiUrl = "";
+let observedRuntimeCheckRunning = false;
 let previewStateApplied = false;
 let pairingAuthFailure = null;
 let currentStatusTone = "idle";
@@ -242,6 +252,8 @@ function hubWebUrl(target = "home") {
     const hubUrl = new URL(base);
     if (target === "setup") {
       hubUrl.searchParams.set("tab", "setup");
+    } else if (target === "build") {
+      hubUrl.searchParams.set("tab", "build");
     } else if (target === "assignment") {
       if (currentAssignmentResultId) {
         hubUrl.searchParams.set("result", currentAssignmentResultId);
@@ -256,6 +268,9 @@ function hubWebUrl(target = "home") {
   } catch (_error) {
     if (target === "setup") {
       return "https://infergrade.com/?tab=setup";
+    }
+    if (target === "build") {
+      return "https://infergrade.com/?tab=build";
     }
     if (target === "assignment") {
       return currentAssignmentResultId
@@ -1640,6 +1655,9 @@ async function updateTokenState() {
 }
 
 function setStatus(status, tone = "idle") {
+  if (shouldPreserveObservedRuntimeStatus(currentObservedRunId, status)) {
+    return;
+  }
   currentStatusTone = tone;
   if (statusText) {
     statusText.textContent = status;
@@ -2469,6 +2487,179 @@ function firstRunHandoffFromDeepLinks(urls) {
   return { runId: "", workerId: "", apiUrl: "", expectedRunnerVersion: "", expectedContractVersion: "" };
 }
 
+function emptyObservedRuntimeHandoff() {
+  return { observedRunId: "", apiUrl: "" };
+}
+
+function showObservedRuntimeStartAction() {
+  if (observedRuntimeStartButton) {
+    observedRuntimeStartButton.textContent = "Run local check";
+    observedRuntimeStartButton.hidden = false;
+    observedRuntimeStartButton.disabled = false;
+  }
+  if (observedRuntimeOpenHubButton) {
+    observedRuntimeOpenHubButton.hidden = true;
+  }
+}
+
+function showObservedRuntimeHubAction(label, target = "build") {
+  currentObservedRunId = "";
+  currentObservedApiUrl = "";
+  if (observedRuntimeStartButton) {
+    observedRuntimeStartButton.disabled = true;
+    observedRuntimeStartButton.hidden = true;
+  }
+  if (observedRuntimeOpenHubButton) {
+    observedRuntimeOpenHubButton.textContent = label;
+    observedRuntimeOpenHubButton.dataset.hubTarget = target;
+    observedRuntimeOpenHubButton.hidden = false;
+  }
+}
+
+function showObservedRuntimeUncertainFailureActions() {
+  if (observedRuntimeStartButton) {
+    observedRuntimeStartButton.textContent = "Retry local check";
+    observedRuntimeStartButton.hidden = false;
+  }
+  if (observedRuntimeOpenHubButton) {
+    observedRuntimeOpenHubButton.textContent = "Check status in Hub";
+    observedRuntimeOpenHubButton.dataset.hubTarget = "build";
+    observedRuntimeOpenHubButton.hidden = false;
+  }
+}
+
+function observedRuntimeHandoffFromUrl() {
+  const href = window.location.href || "";
+  if (!href.startsWith("infergrade-runner:")) {
+    return emptyObservedRuntimeHandoff();
+  }
+  return observedRuntimeHandoffFromDeepLink(href, (reason) => {
+    appendLog(`Ignored observed-runtime handoff with ${reason}.`);
+  });
+}
+
+function observedRuntimeHandoffFromDeepLinks(urls) {
+  for (const value of Array.isArray(urls) ? urls : []) {
+    const handoff = observedRuntimeHandoffFromDeepLink(value, (reason) => {
+      appendLog(`Ignored observed-runtime handoff with ${reason}.`);
+    });
+    if (handoff.observedRunId) {
+      return handoff;
+    }
+  }
+  return emptyObservedRuntimeHandoff();
+}
+
+function applyObservedRuntimeHandoff(incomingHandoff = null) {
+  const handoff = incomingHandoff || observedRuntimeHandoffFromUrl();
+  if (!handoff.observedRunId) {
+    if (observedRuntimeStatus && !currentObservedRunId) {
+      observedRuntimeStatus.textContent = "Start this check from Hub, then paste the URL your model server already exposes.";
+    }
+    return;
+  }
+  if (observedRuntimeCheckRunning) {
+    appendLog("Ignored a new observed check while the current local check is running.");
+    return;
+  }
+  currentObservedRunId = handoff.observedRunId;
+  currentObservedApiUrl = handoff.apiUrl || currentObservedApiUrl || "";
+  showObservedRuntimeStartAction();
+  if (observedRuntimeStatus) {
+    observedRuntimeStatus.textContent = "Paste the endpoint URL below. Runner will choose and run five short checks.";
+  }
+  setStatus("Local check ready", "good");
+  if (observedRuntimeEndpointInput) {
+    observedRuntimeEndpointInput.focus();
+  }
+}
+
+function observedRuntimeFailureMessage(message = "") {
+  const text = String(message || "");
+  if (/model_not_available|multiple models/i.test(text)) {
+    return "Runner could not select exactly one model from this endpoint. Make sure it exposes one model, then start a fresh check from Hub.";
+  }
+  if (/observed-run link expired|expired.*observation/i.test(text)) {
+    return "This observation expired. Start a fresh observed check from Hub.";
+  }
+  if (/already has a different result|terminal conflict/i.test(text)) {
+    return "This observation already contains a different result. Start a fresh observed check from Hub.";
+  }
+  if (/10-minute safety limit|exceeded.*safety limit/i.test(text)) {
+    return "The local check reached its 10-minute safety limit. Confirm the model server is responsive, then start a fresh observed check from Hub.";
+  }
+  if (/Hub API URL|valid Hub API/i.test(text)) {
+    return "Enter the Hub API URL this Runner is paired with, then try the observed check again.";
+  }
+  if (/pair this machine|pairing|token/i.test(text)) {
+    return "Pair this machine with Hub before uploading a local check.";
+  }
+  if (/localhost|loopback|endpoint/i.test(text)) {
+    return "Use one reachable localhost OpenAI-compatible endpoint, such as http://127.0.0.1:8000/v1.";
+  }
+  return "The local check could not be completed. Check the model server and try again.";
+}
+
+async function runObservedRuntimeCheck() {
+  const endpoint = observedRuntimeEndpointInput?.value.trim() || "";
+  if (!endpoint) {
+    const message = "Enter the localhost OpenAI-compatible endpoint that is already running.";
+    if (observedRuntimeStatus) observedRuntimeStatus.textContent = message;
+    setStatus("Local check needs attention", "error");
+    throw new Error(message);
+  }
+  if (!currentObservedRunId) {
+    const message = "Start this check from Hub before entering the local endpoint.";
+    if (observedRuntimeStatus) observedRuntimeStatus.textContent = message;
+    setStatus("Local check needs attention", "error");
+    throw new Error(message);
+  }
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    const message = "Open the desktop app to run this local check.";
+    if (observedRuntimeStatus) observedRuntimeStatus.textContent = message;
+    setStatus("Local check needs attention", "error");
+    throw new Error(message);
+  }
+  if (observedRuntimeStartButton) {
+    observedRuntimeStartButton.disabled = true;
+  }
+  observedRuntimeCheckRunning = true;
+  if (observedRuntimeStatus) {
+    observedRuntimeStatus.textContent = "Running five short checks. This may take several minutes on a cold or slow model; keep the model server open…";
+  }
+  setStatus("Local check running", "warning");
+  try {
+    const apiUrl = currentObservedApiUrl || normalizeDesktopApiUrl(form.elements.apiUrl.value);
+    const payload = await invoke("run_observed_runtime", {
+      endpoint,
+      observedRunId: currentObservedRunId,
+      observedApiUrl: apiUrl,
+    });
+    const presentation = observedRuntimeUploadPresentation(payload?.summary);
+    if (observedRuntimeStatus) {
+      observedRuntimeStatus.textContent = presentation.message;
+    }
+    setStatus(presentation.status, presentation.tone);
+    showObservedRuntimeHubAction(presentation.hubLabel);
+    return payload;
+  } catch (error) {
+    const rawMessage = String(error?.message || error || "");
+    const message = observedRuntimeFailureMessage(rawMessage);
+    if (observedRuntimeStatus) {
+      observedRuntimeStatus.textContent = `${message} Check Hub before retrying; it may already have recorded the failure.`;
+    }
+    setStatus("Local check needs attention", "error");
+    showObservedRuntimeUncertainFailureActions();
+    throw new Error(message);
+  } finally {
+    observedRuntimeCheckRunning = false;
+    if (observedRuntimeStartButton) {
+      observedRuntimeStartButton.disabled = false;
+    }
+  }
+}
+
 function applyPairingIntentFromDeepLinks(urls) {
   if (!(Array.isArray(urls) ? urls : []).some(isPairingIntentDeepLink)) return false;
   form.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -2524,6 +2715,7 @@ function applyFirstRunHandoff(incomingHandoff = null) {
 
 async function initFirstRunDeepLinkHandoff() {
   applyFirstRunHandoff();
+  applyObservedRuntimeHandoff();
   if (!isTauriRuntime()) {
     return;
   }
@@ -2534,6 +2726,10 @@ async function initFirstRunDeepLinkHandoff() {
     const { getCurrent, onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
     const currentUrls = await getCurrent();
     applyPairingIntentFromDeepLinks(currentUrls);
+    const currentObservedHandoff = observedRuntimeHandoffFromDeepLinks(currentUrls);
+    if (currentObservedHandoff.observedRunId) {
+      applyObservedRuntimeHandoff(currentObservedHandoff);
+    }
     const startHandoff = firstRunHandoffFromDeepLinks(currentUrls);
     if (startHandoff.runId) {
       applyFirstRunHandoff(startHandoff);
@@ -2544,6 +2740,10 @@ async function initFirstRunDeepLinkHandoff() {
     }
     await onOpenUrl((urls) => {
       applyPairingIntentFromDeepLinks(urls);
+      const observedHandoff = observedRuntimeHandoffFromDeepLinks(urls);
+      if (observedHandoff.observedRunId) {
+        applyObservedRuntimeHandoff(observedHandoff);
+      }
       const handoff = firstRunHandoffFromDeepLinks(urls);
       if (!handoff.runId) {
         return;
@@ -3293,6 +3493,12 @@ firstRunStartButton?.addEventListener("click", () => {
   });
 });
 
+observedRuntimeStartButton?.addEventListener("click", () => {
+  runObservedRuntimeCheck().catch(() => {
+    // The bounded, user-safe failure is already rendered in the observed panel.
+  });
+});
+
 firstRunAgainButton?.addEventListener("click", () => {
   clearFirstRunLocalState();
   runNativeFirstRun().catch((error) => {
@@ -3376,6 +3582,8 @@ checkDesktopReadiness()
   .catch((error) => appendLog(`Could not check desktop runtime readiness: ${error.message || error}`));
 refreshModelCache().catch((error) => appendLog(`Could not inspect model cache: ${error.message || error}`));
 restoreFormState().catch((error) => appendLog(`Could not restore pairing state: ${error.message || error}`));
-setStatus("Idle", "idle");
+if (!currentObservedRunId) {
+  setStatus("Idle", "idle");
+}
 renderLocalReadinessChecklist();
 window.setTimeout(applyPreviewStateFromUrl, 50);

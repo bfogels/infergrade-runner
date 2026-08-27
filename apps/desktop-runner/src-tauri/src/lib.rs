@@ -27,12 +27,13 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
 };
+use url::Url;
 
 const KEYRING_SERVICE: &str = "com.infergrade.runner";
 const ACCEPTANCE_KEYRING_SERVICE_PREFIX: &str = "com.infergrade.runner.acceptance.";
@@ -41,6 +42,13 @@ const SIDECAR_BINARY_NAME: &str = "infergrade-sidecar";
 const DESKTOP_EVENT_PREFIX: &str = "INFERGRADE_DESKTOP_EVENT ";
 const DESKTOP_SIDECAR_DIAGNOSTIC_COMMANDS: &[&str] =
     &["--version", "desktop-self-test", "desktop-readiness"];
+const OBSERVED_RUNTIME_MAX_CAPTURED_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
+const OBSERVED_RUNTIME_MAX_ERROR_HINT_BYTES: usize = 1024;
+const OBSERVED_RUNTIME_MAX_SECONDS: u64 = 10 * 60;
+const OBSERVED_RUNTIME_TERMINATION_GRACE_SECONDS: u64 = 5;
+const OBSERVED_RUNTIME_CONTRACT_VERSION: &str = "observed_quick_suite_v1";
+const OBSERVED_EVIDENCE_CLAIM_BOUNDARY: &str = "Local observed diagnostic only. The endpoint, runtime build, model artifact, publisher, and quantization are not independently verified. Scores are not comparable, promotion-eligible, recommendation evidence, or headline capability evidence.";
+static PAIRING_STATE_LOCK: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 const STARTER_GGUF_URL: &str = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
 const STARTER_GGUF_FILENAME: &str = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
 const PARTIAL_ARTIFACT_PREFIX: &str = "infergrade-artifact-";
@@ -107,7 +115,7 @@ impl TokenStore for DesktopTokenStore {
         let had_token = load_runner_token_value()
             .map_err(|error| RunnerError::new("token_load_failed", error))?
             .is_some();
-        clear_runner_token()
+        clear_runner_token_value()
             .map(|_| had_token)
             .map_err(|error| RunnerError::new("token_clear_failed", error))
     }
@@ -358,7 +366,8 @@ fn save_runner_token_value(token: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn save_runner_token(token: String) -> Result<(), String> {
+async fn save_runner_token(token: String) -> Result<(), String> {
+    let _pairing_guard = PAIRING_STATE_LOCK.write().await;
     save_runner_token_value(&token)
 }
 
@@ -379,7 +388,12 @@ fn load_runner_token_value() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn clear_runner_token() -> Result<(), String> {
+async fn clear_runner_token() -> Result<(), String> {
+    let _pairing_guard = PAIRING_STATE_LOCK.write().await;
+    clear_runner_token_value()
+}
+
+fn clear_runner_token_value() -> Result<(), String> {
     match runner_token_entry()?.delete_credential() {
         Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
         Err(error) if is_user_canceled(&error) => Ok(()),
@@ -679,8 +693,964 @@ async fn desktop_sidecar_diagnostic(app: AppHandle, args: Vec<String>) -> Result
     }))
 }
 
+fn is_loopback_host(host: &str) -> bool {
+    let normalized = host.trim().to_ascii_lowercase();
+    let address_text = normalized
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(&normalized);
+    if normalized == "localhost" || address_text == "::1" {
+        return true;
+    }
+    address_text
+        .parse::<std::net::Ipv4Addr>()
+        .map(|address| address.octets()[0] == 127)
+        .unwrap_or(false)
+}
+
+fn normalize_observed_endpoint(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.is_empty() || value.len() > 512 || value.chars().any(char::is_whitespace) {
+        return Err(
+            "Observed endpoint is invalid. Use a localhost OpenAI-compatible URL.".to_string(),
+        );
+    }
+    let lower = value.to_ascii_lowercase();
+    if (lower.starts_with("http://[") && !lower.starts_with("http://[::1]"))
+        || (lower.starts_with("https://[") && !lower.starts_with("https://[::1]"))
+    {
+        return Err(
+            "Observed endpoint is invalid. Use a localhost OpenAI-compatible URL.".to_string(),
+        );
+    }
+    let parsed = Url::parse(value)
+        .map_err(|_| "Observed endpoint is invalid. Use a localhost OpenAI-compatible URL.")?;
+    let host = parsed.host_str().ok_or_else(|| {
+        "Observed endpoint is invalid. Use a localhost OpenAI-compatible URL.".to_string()
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || !is_loopback_host(host)
+        || parsed.username() != ""
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err("Observed endpoint must be an HTTP localhost URL without credentials or query parameters.".to_string());
+    }
+    Ok(parsed.to_string())
+}
+
+fn normalize_observed_hub_api_url(raw: &str) -> Result<String, String> {
+    let normalized = normalize_api_url(raw)?;
+    let parsed = Url::parse(&normalized)
+        .map_err(|_| "Observed Hub URL is invalid. Use the configured Hub API URL.".to_string())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "Observed Hub URL must include a host.".to_string())?;
+    let hosted = parsed.scheme() == "https" && host.eq_ignore_ascii_case("api.infergrade.com");
+    let local = parsed.scheme() == "http" && is_loopback_host(host);
+    if (!hosted && !local)
+        || parsed.username() != ""
+        || parsed.password().is_some()
+        || parsed.path() != "/"
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err("Observed Hub URL is not an approved Hub API root.".to_string());
+    }
+    Ok(parsed.to_string())
+}
+
+fn resolve_observed_hub_api_url(
+    paired_api_url: Option<&str>,
+    handoff_api_url: Option<&str>,
+) -> Result<String, String> {
+    let paired_api_url = paired_api_url
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            "Pair this machine with Hub before running an observed check.".to_string()
+        })?;
+    let paired_api_url = normalize_observed_hub_api_url(paired_api_url)?;
+    let handoff_api_url = handoff_api_url
+        .filter(|value| !value.trim().is_empty())
+        .map(normalize_observed_hub_api_url)
+        .transpose()?;
+    if handoff_api_url
+        .as_deref()
+        .is_some_and(|value| value != paired_api_url)
+    {
+        return Err("The observed-run link does not match this Runner's paired Hub.".to_string());
+    }
+    Ok(paired_api_url)
+}
+
+fn append_observed_output(target: &mut Vec<u8>, bytes: &[u8], label: &str) -> Result<(), String> {
+    if target.len().saturating_add(bytes.len()) > OBSERVED_RUNTIME_MAX_CAPTURED_OUTPUT_BYTES {
+        return Err(format!(
+            "Observed Runner {label} output exceeded its safety limit."
+        ));
+    }
+    target.extend_from_slice(bytes);
+    Ok(())
+}
+
+async fn terminate_observed_child(
+    child: CommandChild,
+    events: &mut tauri::async_runtime::Receiver<CommandEvent>,
+) {
+    let _ = child.kill();
+    let _ = tokio::time::timeout(
+        Duration::from_secs(OBSERVED_RUNTIME_TERMINATION_GRACE_SECONDS),
+        async {
+            while let Some(event) = events.recv().await {
+                if matches!(event, CommandEvent::Terminated(_)) {
+                    break;
+                }
+            }
+        },
+    )
+    .await;
+}
+
+fn observed_exit_matches_suite(exit_code: Option<i32>, suite_status: Option<&str>) -> bool {
+    matches!(
+        (exit_code, suite_status),
+        (Some(0), Some("completed")) | (Some(1), Some("failed" | "partial"))
+    )
+}
+
+fn observed_upload_error_message(message: &str) -> String {
+    if message.contains("HTTP 410") {
+        "This observed-run link expired. Start a fresh observation in Hub.".to_string()
+    } else if message.contains("HTTP 409") {
+        "This observation already has a different result. Start a fresh observation in Hub."
+            .to_string()
+    } else if message.contains("HTTP 401") || message.contains("HTTP 403") {
+        "Hub rejected this Runner pairing. Pair this machine again.".to_string()
+    } else {
+        "Hub could not accept the observed result. Check pairing and try again.".to_string()
+    }
+}
+
+fn observed_upload_receipt(
+    observed_run_id: &str,
+    hub_status: u16,
+    body: &Value,
+) -> Result<Value, String> {
+    let observed_run = body
+        .get("observed_run")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Hub returned an invalid observed upload receipt.".to_string())?;
+    let replayed = body
+        .pointer("/idempotency/replayed")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "Hub returned an invalid observed upload receipt.".to_string())?;
+    if observed_run.get("observed_run_id").and_then(Value::as_str) != Some(observed_run_id)
+        || observed_run.get("status").and_then(Value::as_str) != Some("completed")
+    {
+        return Err("Hub returned an invalid observed upload receipt.".to_string());
+    }
+    Ok(json!({
+        "status": "uploaded",
+        "hub_status": hub_status,
+        "replayed": replayed,
+    }))
+}
+
+fn exact_observed_object<'a>(
+    value: &'a Value,
+    keys: &[&str],
+    label: &str,
+) -> Result<&'a serde_json::Map<String, Value>, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| format!("Observed Runner returned an invalid {label}."))?;
+    if object.len() != keys.len() || keys.iter().any(|key| !object.contains_key(*key)) {
+        return Err(format!("Observed Runner returned an invalid {label}."));
+    }
+    Ok(object)
+}
+
+fn observed_value_contains_private_data(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => object.iter().any(|(key, nested)| {
+            let lower = key.to_ascii_lowercase();
+            let explicitly_safe = matches!(
+                lower.as_str(),
+                "endpoint"
+                    | "models_endpoint"
+                    | "max_tokens"
+                    | "endpoint_url_recorded"
+                    | "credentials_recorded"
+                    | "local_paths_recorded"
+                    | "raw_outputs_recorded"
+            );
+            (!explicitly_safe
+                && [
+                    "url",
+                    "path",
+                    "token",
+                    "secret",
+                    "credential",
+                    "prompt",
+                    "raw",
+                ]
+                .iter()
+                .any(|marker| lower.contains(marker)))
+                || observed_value_contains_private_data(nested)
+        }),
+        Value::Array(items) => items.iter().any(observed_value_contains_private_data),
+        Value::String(text) => {
+            let lower = text.to_ascii_lowercase();
+            lower.contains("://")
+                || lower.starts_with("bearer ")
+                || lower.starts_with("qbhr_")
+                || lower.starts_with("qbhs_")
+                || lower.starts_with("igrp_")
+                || lower.starts_with("sk-")
+                || text.starts_with('/')
+                || (text.len() > 2
+                    && text.as_bytes()[1] == b':'
+                    && matches!(text.as_bytes()[2], b'\\' | b'/'))
+        }
+        _ => false,
+    }
+}
+
+fn observed_count(value: Option<&Value>, maximum: u64) -> Option<u64> {
+    value
+        .and_then(Value::as_u64)
+        .filter(|count| *count <= maximum)
+}
+
+fn observed_safe_model_label(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    !value.is_empty()
+        && value.len() <= 512
+        && value == value.trim()
+        && value.as_bytes()[0].is_ascii_alphanumeric()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._:+/-".contains(&byte))
+        && !value.starts_with('/')
+        && !value.starts_with('~')
+        && !(value.len() > 2
+            && value.as_bytes()[0].is_ascii_alphabetic()
+            && value.as_bytes()[1] == b':'
+            && matches!(value.as_bytes()[2], b'/' | b'\\'))
+        && !value.contains("//")
+        && !value
+            .chars()
+            .any(|character| matches!(character, '?' | '#' | '=' | '@'))
+        && !lower.starts_with("file:")
+        && value.matches('/').count() <= 1
+        && value.split('/').all(|part| {
+            !part.is_empty()
+                && part != "."
+                && part != ".."
+                && part.as_bytes()[0].is_ascii_alphanumeric()
+        })
+        && ![".gguf", ".bin", ".safetensors", ".pt", ".pth", ".onnx"]
+            .iter()
+            .any(|suffix| lower.ends_with(suffix))
+        && ![
+            "password",
+            "passwd",
+            "bearer",
+            "credential",
+            "authorization",
+            "api_key",
+            "apikey",
+            "auth:",
+            "key=",
+            "token=",
+            "token:",
+            "secret=",
+            "secret:",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
+fn validate_observed_envelope_shape(envelope: &Value) -> Result<(), String> {
+    let object = exact_observed_object(
+        envelope,
+        &[
+            "contract_version",
+            "status",
+            "suite",
+            "protocol_canary",
+            "observed_runtime",
+            "metrics",
+            "case_results",
+            "evidence_boundary",
+        ],
+        "observed result envelope",
+    )?;
+    if observed_value_contains_private_data(envelope) {
+        return Err("Observed Runner result contained private or unbounded data.".to_string());
+    }
+    let suite = exact_observed_object(
+        &object["suite"],
+        &[
+            "suite_id",
+            "tier",
+            "generation_policy_id",
+            "generation_profile_version",
+            "content_pack_benchmark_id",
+            "content_pack_fixture_revision",
+            "content_pack_full_fixture_sha256",
+            "content_pack_full_selection_sha256",
+            "selection",
+        ],
+        "canary suite envelope",
+    )?;
+    exact_observed_object(
+        &suite["selection"],
+        &[
+            "tier",
+            "case_count",
+            "selection_digest_algorithm",
+            "selection_sha256",
+            "coverage",
+        ],
+        "canary selection",
+    )?;
+    let canary = exact_observed_object(
+        &object["protocol_canary"],
+        &[
+            "canary_id",
+            "status",
+            "generation_status",
+            "format_valid",
+            "answer_correct",
+            "parser_code",
+            "error_class",
+        ],
+        "protocol canary",
+    )?;
+    if canary["format_valid"].as_bool().is_none()
+        || canary["answer_correct"].as_bool().is_none()
+        || canary["parser_code"].as_str().is_none()
+    {
+        return Err("Observed Runner returned an invalid protocol canary.".to_string());
+    }
+    let metrics = exact_observed_object(
+        &object["metrics"],
+        &[
+            "exact_signed_integer_accuracy",
+            "correct_count",
+            "completed_case_count",
+            "expected_case_count",
+            "format_invalid_count",
+            "generation_failure_count",
+            "not_attempted_count",
+            "parser_code_counts",
+            "generation_failure_code_counts",
+            "diagnostic_semantic_candidate_count",
+            "diagnostic_semantic_correct_count",
+            "diagnostic_semantic_incorrect_count",
+            "diagnostic_semantic_unavailable_count",
+            "diagnostic_failure_class_counts",
+            "failure_denominator_policy",
+        ],
+        "canary metrics",
+    )?;
+    exact_observed_object(
+        &metrics["failure_denominator_policy"],
+        &[
+            "model_output_failures",
+            "generation_failures",
+            "not_attempted",
+        ],
+        "failure denominator policy",
+    )?;
+    let expected = observed_count(metrics.get("expected_case_count"), 40)
+        .filter(|count| matches!(*count, 5 | 20 | 40))
+        .ok_or_else(|| "Observed Runner returned invalid canary metrics.".to_string())?;
+    let completed = observed_count(metrics.get("completed_case_count"), expected)
+        .ok_or_else(|| "Observed Runner returned invalid canary metrics.".to_string())?;
+    let correct = observed_count(metrics.get("correct_count"), completed)
+        .ok_or_else(|| "Observed Runner returned invalid canary metrics.".to_string())?;
+    for key in [
+        "format_invalid_count",
+        "not_attempted_count",
+        "diagnostic_semantic_candidate_count",
+        "diagnostic_semantic_correct_count",
+        "diagnostic_semantic_incorrect_count",
+        "diagnostic_semantic_unavailable_count",
+    ] {
+        observed_count(metrics.get(key), expected)
+            .ok_or_else(|| "Observed Runner returned invalid canary metrics.".to_string())?;
+    }
+    observed_count(metrics.get("generation_failure_count"), 1)
+        .ok_or_else(|| "Observed Runner returned invalid canary metrics.".to_string())?;
+    let accuracy = metrics
+        .get("exact_signed_integer_accuracy")
+        .unwrap_or(&Value::Null);
+    if let Some(value) = accuracy.as_f64() {
+        if !(0.0..=1.0).contains(&value) {
+            return Err("Observed Runner returned invalid canary metrics.".to_string());
+        }
+    } else if !accuracy.is_null() {
+        return Err("Observed Runner returned invalid canary metrics.".to_string());
+    }
+    if completed > 0 && accuracy.is_null() || correct > completed {
+        return Err("Observed Runner returned invalid canary metrics.".to_string());
+    }
+    let cases = object["case_results"]
+        .as_array()
+        .filter(|items| items.len() == expected as usize)
+        .ok_or_else(|| "Observed Runner returned invalid canary case results.".to_string())?;
+    for case in cases {
+        let case = exact_observed_object(
+            case,
+            &[
+                "case_id",
+                "task_id",
+                "family",
+                "structural_level",
+                "variant",
+                "state",
+                "score",
+                "format_valid",
+                "parser_code",
+                "error_class",
+                "diagnostic_semantic_candidate",
+                "diagnostic_semantic_candidate_available",
+                "diagnostic_semantic_correct",
+                "diagnostic_semantic_candidate_code",
+                "diagnostic_failure_class",
+            ],
+            "canary case result",
+        )?;
+        if case["case_id"].as_str().is_none()
+            || case["task_id"].as_str().is_none()
+            || case["parser_code"].as_str().is_none()
+            || case["diagnostic_semantic_candidate_available"]
+                .as_bool()
+                .is_none()
+        {
+            return Err("Observed Runner returned invalid canary case results.".to_string());
+        }
+        if let Some(score) = case["score"].as_f64() {
+            if !(0.0..=1.0).contains(&score) {
+                return Err("Observed Runner returned invalid canary case results.".to_string());
+            }
+        } else if !case["score"].is_null() {
+            return Err("Observed Runner returned invalid canary case results.".to_string());
+        }
+    }
+    let runtime = exact_observed_object(
+        &object["observed_runtime"],
+        &[
+            "contract_version",
+            "evidence_kind",
+            "evidence_lane",
+            "verification_status",
+            "verified",
+            "promotion_eligible",
+            "provider",
+            "provider_status",
+            "endpoint",
+            "protocol",
+            "generation_profile",
+            "identity",
+            "claim_boundary",
+            "privacy",
+            "failure_code",
+        ],
+        "runtime receipt",
+    )?;
+    if runtime["contract_version"].as_str() != Some("observed_runtime_v1")
+        || runtime["evidence_kind"].as_str() != Some("observed_runtime")
+        || runtime["evidence_lane"].as_str() != Some("observed")
+        || runtime["verification_status"].as_str() != Some("not_verified")
+        || runtime["verified"] != Value::Bool(false)
+        || runtime["promotion_eligible"] != Value::Bool(false)
+        || runtime["provider_status"].as_str() != Some("compatibility_hint")
+        || !matches!(
+            runtime["provider"].as_str(),
+            Some("ollama" | "lm_studio" | "llama_server" | "vllm" | "tgi" | "unknown")
+        )
+    {
+        return Err("Observed Runner returned an invalid runtime trust boundary.".to_string());
+    }
+    let endpoint = exact_observed_object(
+        &runtime["endpoint"],
+        &["network_scope"],
+        "runtime endpoint receipt",
+    )?;
+    if endpoint["network_scope"].as_str() != Some("loopback") {
+        return Err("Observed Runner returned an invalid runtime endpoint receipt.".to_string());
+    }
+    exact_observed_object(
+        &runtime["protocol"],
+        &["name", "models_endpoint", "chat_completions"],
+        "runtime protocol receipt",
+    )?;
+    let generation = exact_observed_object(
+        &runtime["generation_profile"],
+        &[
+            "profile_version",
+            "temperature",
+            "max_tokens",
+            "stream",
+            "thinking_control",
+        ],
+        "generation receipt",
+    )?;
+    exact_observed_object(
+        &generation["thinking_control"],
+        &["requested", "effective"],
+        "thinking-control receipt",
+    )?;
+    let identity = exact_observed_object(
+        &runtime["identity"],
+        &[
+            "reported_model_id",
+            "reported_model_ids",
+            "reported_model_id_status",
+            "reported_model_id_count",
+            "withheld_model_id_count",
+            "selected_model_id_status",
+            "artifact_publisher",
+            "quantization",
+            "artifact_sha256",
+            "runtime_build_id",
+            "runtime_bytes",
+            "status",
+        ],
+        "reported runtime identity",
+    )?;
+    if identity["status"].as_str() != Some("reported_only")
+        || [
+            "artifact_publisher",
+            "quantization",
+            "artifact_sha256",
+            "runtime_build_id",
+            "runtime_bytes",
+        ]
+        .iter()
+        .any(|key| !identity[*key].is_null())
+    {
+        return Err("Observed Runner returned an unverified runtime identity claim.".to_string());
+    }
+    let reported_ids = identity["reported_model_ids"]
+        .as_array()
+        .filter(|values| values.len() <= 64)
+        .ok_or_else(|| "Observed Runner returned unsafe reported model labels.".to_string())?;
+    let mut unique_reported_ids = std::collections::HashSet::new();
+    if reported_ids.iter().any(|value| {
+        value
+            .as_str()
+            .filter(|label| observed_safe_model_label(label))
+            .map(|label| !unique_reported_ids.insert(label))
+            .unwrap_or(true)
+    }) || identity["reported_model_id"]
+        .as_str()
+        .is_some_and(|label| !observed_safe_model_label(label))
+    {
+        return Err("Observed Runner returned unsafe reported model labels.".to_string());
+    }
+    let claim_boundary = exact_observed_object(
+        &runtime["claim_boundary"],
+        &[
+            "artifact_publisher",
+            "quantization",
+            "artifact_checksum",
+            "runtime_build",
+            "runtime_bytes",
+        ],
+        "runtime claim boundary",
+    )?;
+    if claim_boundary
+        .values()
+        .any(|value| value.as_str() != Some("unknown"))
+    {
+        return Err("Observed Runner returned an invalid runtime claim boundary.".to_string());
+    }
+    let privacy = exact_observed_object(
+        &runtime["privacy"],
+        &[
+            "endpoint_url_recorded",
+            "credentials_recorded",
+            "local_paths_recorded",
+            "raw_outputs_recorded",
+        ],
+        "runtime privacy receipt",
+    )?;
+    if privacy.values().any(|value| value != &Value::Bool(false)) {
+        return Err("Observed Runner returned an invalid runtime privacy receipt.".to_string());
+    }
+    let evidence_boundary = exact_observed_object(
+        &object["evidence_boundary"],
+        &[
+            "verification_status",
+            "comparison_grade",
+            "promotion_eligible",
+            "recommendation_eligible",
+            "headline_capability_eligible",
+            "claim_boundary",
+        ],
+        "evidence boundary",
+    )?;
+    if evidence_boundary["verification_status"].as_str() != Some("not_verified")
+        || evidence_boundary["comparison_grade"].as_str() != Some("informational_only")
+        || evidence_boundary["promotion_eligible"] != Value::Bool(false)
+        || evidence_boundary["recommendation_eligible"] != Value::Bool(false)
+        || evidence_boundary["headline_capability_eligible"] != Value::Bool(false)
+        || evidence_boundary["claim_boundary"].as_str() != Some(OBSERVED_EVIDENCE_CLAIM_BOUNDARY)
+    {
+        return Err("Observed Runner returned an invalid evidence boundary.".to_string());
+    }
+    Ok(())
+}
+
+fn observed_runtime_envelope_summary(envelope: &Value) -> Result<Value, String> {
+    validate_observed_envelope_shape(envelope)?;
+    let object = envelope.as_object().expect("shape validated");
+    if object.get("contract_version").and_then(Value::as_str)
+        != Some(OBSERVED_RUNTIME_CONTRACT_VERSION)
+    {
+        return Err("Observed Runner returned an unsupported result envelope.".to_string());
+    }
+    let suite = object
+        .get("suite")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Observed Runner returned an invalid canary suite envelope.".to_string())?;
+    if suite.get("suite_id").and_then(Value::as_str) != Some(OBSERVED_RUNTIME_CONTRACT_VERSION)
+        || suite.get("tier").and_then(Value::as_str) != Some("canary")
+        || suite
+            .get("selection")
+            .and_then(Value::as_object)
+            .and_then(|selection| selection.get("tier"))
+            .and_then(Value::as_str)
+            != Some("canary")
+    {
+        return Err("Observed Runner returned an invalid canary suite envelope.".to_string());
+    }
+    let receipt = object
+        .get("observed_runtime")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Observed Runner returned an invalid runtime receipt.".to_string())?;
+    if receipt.get("contract_version").and_then(Value::as_str) != Some("observed_runtime_v1")
+        || receipt.get("verified") != Some(&Value::Bool(false))
+        || receipt.get("promotion_eligible") != Some(&Value::Bool(false))
+    {
+        return Err(
+            "Observed Runner returned a result outside the observed evidence boundary.".to_string(),
+        );
+    }
+    let boundary = object
+        .get("evidence_boundary")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Observed Runner returned an invalid evidence boundary.".to_string())?;
+    if boundary.get("verification_status").and_then(Value::as_str) != Some("not_verified")
+        || boundary.get("promotion_eligible") != Some(&Value::Bool(false))
+        || boundary.get("recommendation_eligible") != Some(&Value::Bool(false))
+    {
+        return Err(
+            "Observed Runner returned a result outside the observed evidence boundary.".to_string(),
+        );
+    }
+    let metrics = object
+        .get("metrics")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Observed Runner returned invalid canary metrics.".to_string())?;
+    let metric = |key: &str| metrics.get(key).cloned().unwrap_or(Value::Null);
+    Ok(json!({
+        "suite_status": object.get("status").cloned().unwrap_or(Value::Null),
+        "tier": "canary",
+        "metrics": {
+            "exact_signed_integer_accuracy": metric("exact_signed_integer_accuracy"),
+            "correct_count": metric("correct_count"),
+            "completed_case_count": metric("completed_case_count"),
+            "expected_case_count": metric("expected_case_count"),
+            "format_invalid_count": metric("format_invalid_count"),
+            "generation_failure_count": metric("generation_failure_count"),
+        },
+    }))
+}
+
+async fn run_observed_sidecar(app: &AppHandle, endpoint: &str) -> Result<Value, String> {
+    let command = app
+        .shell()
+        .sidecar(SIDECAR_BINARY_NAME)
+        .map_err(|_| "Could not prepare the bundled Runner.".to_string())?
+        .args([
+            "observe-runtime",
+            "--endpoint",
+            endpoint,
+            "--tier",
+            "canary",
+        ]);
+    let (mut events, child) = command
+        .spawn()
+        .map_err(|_| "Could not start the bundled Runner observed check.".to_string())?;
+    let mut stdout = Vec::new();
+    let mut stderr_hint = Vec::new();
+    let mut exit_code = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(OBSERVED_RUNTIME_MAX_SECONDS);
+    loop {
+        let event = match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Some(event)) => event,
+            Ok(None) => break,
+            Err(_) => {
+                terminate_observed_child(child, &mut events).await;
+                return Err("The observed check exceeded its 10-minute safety limit.".to_string());
+            }
+        };
+        match event {
+            CommandEvent::Stdout(bytes) => {
+                if let Err(error) = append_observed_output(&mut stdout, &bytes, "standard") {
+                    terminate_observed_child(child, &mut events).await;
+                    return Err(error);
+                }
+            }
+            CommandEvent::Stderr(bytes) => {
+                if stderr_hint.len().saturating_add(bytes.len())
+                    > OBSERVED_RUNTIME_MAX_ERROR_HINT_BYTES
+                {
+                    terminate_observed_child(child, &mut events).await;
+                    return Err("Observed Runner produced too much diagnostic output.".to_string());
+                }
+                stderr_hint.extend_from_slice(&bytes);
+            }
+            CommandEvent::Error(_) => {
+                terminate_observed_child(child, &mut events).await;
+                return Err("The bundled Runner could not complete the observed check.".to_string());
+            }
+            CommandEvent::Terminated(payload) => {
+                exit_code = payload.code;
+                break;
+            }
+            _ => {}
+        }
+    }
+    if exit_code.is_none() {
+        terminate_observed_child(child, &mut events).await;
+        return Err(
+            "The bundled Runner did not report completion for the observed check.".to_string(),
+        );
+    }
+    let envelope = serde_json::from_slice::<Value>(&stdout)
+        .map_err(|_| {
+            let hint = String::from_utf8_lossy(&stderr_hint);
+            if hint.contains("model_not_available") {
+                "This endpoint reports multiple models. Use an endpoint serving only the model you want to evaluate.".to_string()
+            } else {
+                "The bundled Runner did not return a valid observed result.".to_string()
+            }
+        })?;
+    let summary = observed_runtime_envelope_summary(&envelope)?;
+    if !observed_exit_matches_suite(
+        exit_code,
+        summary.get("suite_status").and_then(Value::as_str),
+    ) {
+        return Err(
+            "The bundled Runner exit status did not match its observed result.".to_string(),
+        );
+    }
+    Ok(json!({"envelope": envelope, "summary": summary}))
+}
+
+async fn upload_observed_runtime_result(
+    api_url: &str,
+    observed_run_id: &str,
+    envelope: Value,
+    token: &str,
+) -> Result<Value, String> {
+    let request = build_hub_json_request(
+        HubMethod::Post,
+        api_url,
+        &format!("/v1/observed-runs/{observed_run_id}/result"),
+        Some(json!({"observed_quick_suite": envelope})),
+        Some(token),
+    )
+    .map_err(|_| "The observed result could not be prepared for Hub.".to_string())?;
+    let response = execute_hub_json_request(&request)
+        .await
+        .map_err(|error| observed_upload_error_message(error.message()))?;
+    observed_upload_receipt(observed_run_id, response.status, &response.body)
+}
+
+fn observed_failure_reason_code(message: &str) -> &'static str {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("multiple models") || lower.contains("model_not_available") {
+        "model_not_available"
+    } else if lower.contains("10-minute") || lower.contains("safety limit") {
+        "runner_timeout"
+    } else if lower.contains("pairing changed") {
+        "pairing_changed"
+    } else if lower.contains("hub could not accept")
+        || lower.contains("upload receipt")
+        || lower.contains("observed-run link expired")
+        || lower.contains("different result")
+    {
+        "hub_upload_failed"
+    } else if lower.contains("could not prepare")
+        || lower.contains("could not start")
+        || lower.contains("could not complete")
+        || lower.contains("bundled runner")
+    {
+        "runner_process_failed"
+    } else if lower.contains("endpoint") || lower.contains("localhost") {
+        "endpoint_unreachable"
+    } else {
+        "observed_check_failed"
+    }
+}
+
+fn validate_observed_failure_receipt(
+    body: &Value,
+    observed_run_id: &str,
+    reason_code: &str,
+) -> Result<(), String> {
+    let observed_run = body
+        .get("observed_run")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Hub returned an invalid observed failure receipt.".to_string())?;
+    if observed_run.get("observed_run_id").and_then(Value::as_str) != Some(observed_run_id)
+        || observed_run.get("status").and_then(Value::as_str) != Some("failed")
+        || observed_run
+            .get("failure_reason_code")
+            .and_then(Value::as_str)
+            != Some(reason_code)
+        || body
+            .pointer("/idempotency/replayed")
+            .and_then(Value::as_bool)
+            .is_none()
+    {
+        return Err("Hub returned an invalid observed failure receipt.".to_string());
+    }
+    Ok(())
+}
+
+async fn upload_observed_runtime_failure(
+    api_url: &str,
+    observed_run_id: &str,
+    reason_code: &str,
+    token: &str,
+) -> Result<(), String> {
+    let request = build_hub_json_request(
+        HubMethod::Post,
+        api_url,
+        &format!("/v1/observed-runs/{observed_run_id}/failure"),
+        Some(json!({"reason_code": reason_code})),
+        Some(token),
+    )
+    .map_err(|_| "Could not prepare the observed failure callback.".to_string())?;
+    let response = execute_hub_json_request(&request)
+        .await
+        .map_err(|_| "Hub could not accept the observed failure callback.".to_string())?;
+    validate_observed_failure_receipt(&response.body, observed_run_id, reason_code)
+}
+
+async fn report_observed_failure_best_effort(
+    api_url: &str,
+    observed_run_id: &str,
+    token: &str,
+    message: &str,
+) {
+    let _ = upload_observed_runtime_failure(
+        api_url,
+        observed_run_id,
+        observed_failure_reason_code(message),
+        token,
+    )
+    .await;
+}
+
 #[tauri::command]
-fn reset_runner_pairing() -> Result<Value, String> {
+async fn run_observed_runtime(
+    app: AppHandle,
+    endpoint: String,
+    observed_run_id: String,
+    observed_api_url: Option<String>,
+) -> Result<Value, String> {
+    // Pairing mutation takes the write side of this lock. Keeping the read
+    // guard through the terminal upload closes the profile/token TOCTOU gap.
+    let _pairing_guard = PAIRING_STATE_LOCK.read().await;
+    let observed_run_id = validate_hub_path_id(&observed_run_id, "observed_run_id")
+        .map_err(|_| "The observed Hub run ID is invalid.".to_string())?;
+    let profile = load_runner_profile()?.ok_or_else(|| {
+        "Pair this machine with Hub before running an observed check.".to_string()
+    })?;
+    let api_url = resolve_observed_hub_api_url(
+        profile_string(Some(&profile), "api_url").as_deref(),
+        observed_api_url.as_deref(),
+    )?;
+    let token = DesktopTokenStore
+        .load_runner_token()
+        .map_err(|_| "Pair this machine with Hub before running an observed check.".to_string())?
+        .ok_or_else(|| {
+            "Pair this machine with Hub before running an observed check.".to_string()
+        })?;
+    let endpoint = match normalize_observed_endpoint(&endpoint) {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            report_observed_failure_best_effort(&api_url, observed_run_id, &token, &error).await;
+            return Err(error);
+        }
+    };
+    let sidecar_result = match run_observed_sidecar(&app, &endpoint).await {
+        Ok(result) => result,
+        Err(error) => {
+            report_observed_failure_best_effort(&api_url, observed_run_id, &token, &error).await;
+            return Err(error);
+        }
+    };
+    let summary = sidecar_result
+        .get("summary")
+        .cloned()
+        .ok_or_else(|| "The observed Runner result summary is unavailable.".to_string())?;
+    let pairing_error = "Runner pairing changed during the observed check. Start it again.";
+    let pairing_still_matches = load_runner_profile()
+        .ok()
+        .flatten()
+        .and_then(|current_profile| {
+            resolve_observed_hub_api_url(
+                profile_string(Some(&current_profile), "api_url").as_deref(),
+                observed_api_url.as_deref(),
+            )
+            .ok()
+        })
+        .filter(|current_api_url| current_api_url == &api_url)
+        .and_then(|_| DesktopTokenStore.load_runner_token().ok().flatten())
+        .is_some_and(|current_token| current_token == token);
+    if !pairing_still_matches {
+        report_observed_failure_best_effort(&api_url, observed_run_id, &token, pairing_error).await;
+        return Err(pairing_error.to_string());
+    }
+    let upload = match upload_observed_runtime_result(
+        &api_url,
+        observed_run_id,
+        sidecar_result
+            .get("envelope")
+            .cloned()
+            .ok_or_else(|| "The observed Runner result envelope is unavailable.".to_string())?,
+        &token,
+    )
+    .await
+    {
+        Ok(upload) => upload,
+        Err(error) => {
+            report_observed_failure_best_effort(&api_url, observed_run_id, &token, &error).await;
+            return Err(error);
+        }
+    };
+    Ok(json!({
+        "status": "uploaded",
+        "observed_run_id": observed_run_id,
+        "summary": summary,
+        "upload": upload,
+    }))
+}
+
+#[tauri::command]
+async fn reset_runner_pairing() -> Result<Value, String> {
+    let _pairing_guard = PAIRING_STATE_LOCK.write().await;
     let profile_path = runner_profile_path()?;
     reset_pairing_state(
         &DesktopProfileStore,
@@ -1389,6 +2359,7 @@ async fn redeem_runner_pairing(
         ));
     }
     let body = parsed.ok_or_else(|| "Hub pairing response was not valid JSON.".to_string())?;
+    let _pairing_guard = PAIRING_STATE_LOCK.write().await;
     let profile_path = runner_profile_path()?;
     complete_pairing_response(
         body,
@@ -1402,6 +2373,12 @@ async fn redeem_runner_pairing(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(ListenerProcess::default())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1416,6 +2393,7 @@ pub fn run() {
             worker_protocol_preview,
             worker_protocol_ping,
             desktop_sidecar_diagnostic,
+            run_observed_runtime,
             start_runner_listener,
             stop_runner_listener,
             reset_runner_pairing,
@@ -2419,6 +3397,350 @@ mod tests {
         assert_eq!(response["capabilities"]["run_token_supported"], true);
         assert!(!combined.contains("qbhr_secret_token"));
         assert!(!combined.contains("Authorization"));
+    }
+
+    #[test]
+    fn observed_endpoint_and_hub_url_validation_stay_loopback_or_approved() {
+        assert_eq!(
+            normalize_observed_endpoint("http://127.0.0.1:8000/v1").expect("loopback endpoint"),
+            "http://127.0.0.1:8000/v1"
+        );
+        assert!(normalize_observed_endpoint("https://example.com/v1").is_err());
+        assert!(normalize_observed_endpoint("http://localhost:8000/v1?model=x").is_err());
+        assert!(normalize_observed_endpoint("http://localhost:8000@127.0.0.1/v1").is_err());
+        assert_eq!(
+            normalize_observed_endpoint("http://[::1]:8000/v1").expect("IPv6 loopback endpoint"),
+            "http://[::1]:8000/v1"
+        );
+        assert!(normalize_observed_endpoint("http://[0:0:0:0:0:0:0:1]:8000/v1").is_err());
+        assert!(normalize_observed_endpoint("http://localhost.:8000/v1").is_err());
+        assert_eq!(
+            normalize_observed_hub_api_url("https://api.infergrade.com")
+                .expect("approved Hub root"),
+            "https://api.infergrade.com/"
+        );
+        assert!(normalize_observed_hub_api_url("https://evil.example").is_err());
+        assert!(normalize_observed_hub_api_url("http://localhost:8000/api").is_err());
+        assert_eq!(
+            normalize_observed_hub_api_url("http://[::1]:8000").expect("IPv6 loopback Hub root"),
+            "http://[::1]:8000/"
+        );
+    }
+
+    #[test]
+    fn observed_hub_upload_uses_paired_profile_and_rejects_mismatched_handoffs() {
+        assert_eq!(
+            resolve_observed_hub_api_url(
+                Some("https://api.infergrade.com"),
+                Some("https://api.infergrade.com/")
+            )
+            .expect("matching Hub handoff"),
+            "https://api.infergrade.com/"
+        );
+        assert!(resolve_observed_hub_api_url(None, Some("https://api.infergrade.com")).is_err());
+        assert!(resolve_observed_hub_api_url(
+            Some("https://api.infergrade.com"),
+            Some("http://127.0.0.1:8000")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn observed_envelope_summary_requires_canary_boundary_and_excludes_private_fields() {
+        let case = json!({
+            "case_id": "case-1",
+            "task_id": "task-1",
+            "family": "state_reconciliation",
+            "structural_level": "foundation",
+            "variant": "alpha",
+            "state": "scored",
+            "score": 1.0,
+            "format_valid": true,
+            "parser_code": "exact_signed_integer",
+            "error_class": null,
+            "diagnostic_semantic_candidate": 1,
+            "diagnostic_semantic_candidate_available": true,
+            "diagnostic_semantic_correct": true,
+            "diagnostic_semantic_candidate_code": "available",
+            "diagnostic_failure_class": null
+        });
+        let envelope = json!({
+            "contract_version": "observed_quick_suite_v1",
+            "status": "completed",
+            "suite": {
+                "suite_id": "observed_quick_suite_v1",
+                "tier": "canary",
+                "generation_policy_id": "observed_quick_generation_v1",
+                "generation_profile_version": "quick_generation_v1",
+                "content_pack_benchmark_id": "reasoning_constraint_stress_v2_content_v1",
+                "content_pack_fixture_revision": "fixture-v1",
+                "content_pack_full_fixture_sha256": "a".repeat(64),
+                "content_pack_full_selection_sha256": "b".repeat(64),
+                "selection": {
+                    "tier": "canary",
+                    "case_count": 5,
+                    "selection_digest_algorithm": "sorted_json_string_array_sha256_v1",
+                    "selection_sha256": "c".repeat(64),
+                    "coverage": {}
+                }
+            },
+            "protocol_canary": {
+                "canary_id": "strict_terminal_integer_canary_v1",
+                "status": "passed",
+                "generation_status": "completed",
+                "format_valid": true,
+                "answer_correct": true,
+                "parser_code": "exact_signed_integer",
+                "error_class": null
+            },
+            "observed_runtime": {
+                "contract_version": "observed_runtime_v1",
+                "evidence_kind": "observed_runtime",
+                "evidence_lane": "observed",
+                "verification_status": "not_verified",
+                "verified": false,
+                "promotion_eligible": false,
+                "endpoint": {"network_scope": "loopback"},
+                "provider": "unknown",
+                "provider_status": "compatibility_hint",
+                "protocol": {
+                    "name": "openai_chat_completions_v1",
+                    "models_endpoint": "compatible",
+                    "chat_completions": "compatible"
+                },
+                "generation_profile": {
+                    "profile_version": "quick_generation_v1",
+                    "temperature": 0,
+                    "max_tokens": 64,
+                    "stream": false,
+                    "thinking_control": {"requested": true, "effective": "not_verified"}
+                },
+                "identity": {
+                    "reported_model_id": "qwen3.5:9b",
+                    "reported_model_ids": ["qwen3.5:9b"],
+                    "reported_model_id_status": "reported",
+                    "reported_model_id_count": 1,
+                    "withheld_model_id_count": 0,
+                    "selected_model_id_status": "reported",
+                    "artifact_publisher": null,
+                    "quantization": null,
+                    "artifact_sha256": null,
+                    "runtime_build_id": null,
+                    "runtime_bytes": null,
+                    "status": "reported_only"
+                },
+                "claim_boundary": {
+                    "artifact_publisher": "unknown",
+                    "quantization": "unknown",
+                    "artifact_checksum": "unknown",
+                    "runtime_build": "unknown",
+                    "runtime_bytes": "unknown"
+                },
+                "privacy": {
+                    "endpoint_url_recorded": false,
+                    "credentials_recorded": false,
+                    "local_paths_recorded": false,
+                    "raw_outputs_recorded": false
+                },
+                "failure_code": null
+            },
+            "metrics": {
+                "exact_signed_integer_accuracy": 1.0,
+                "correct_count": 5,
+                "completed_case_count": 5,
+                "expected_case_count": 5,
+                "format_invalid_count": 0,
+                "generation_failure_count": 0,
+                "not_attempted_count": 0,
+                "parser_code_counts": {"exact_signed_integer": 5},
+                "generation_failure_code_counts": {},
+                "diagnostic_semantic_candidate_count": 5,
+                "diagnostic_semantic_correct_count": 5,
+                "diagnostic_semantic_incorrect_count": 0,
+                "diagnostic_semantic_unavailable_count": 0,
+                "diagnostic_failure_class_counts": {},
+                "failure_denominator_policy": {
+                    "model_output_failures": "scored_zero",
+                    "generation_failures": "excluded_unscored",
+                    "not_attempted": "excluded_unscored"
+                }
+            },
+            "case_results": [case.clone(), case.clone(), case.clone(), case.clone(), case],
+            "evidence_boundary": {
+                "verification_status": "not_verified",
+                "comparison_grade": "informational_only",
+                "promotion_eligible": false,
+                "recommendation_eligible": false,
+                "headline_capability_eligible": false,
+                "claim_boundary": OBSERVED_EVIDENCE_CLAIM_BOUNDARY
+            }
+        });
+        let summary = observed_runtime_envelope_summary(&envelope).expect("summary");
+        assert_eq!(summary["tier"], "canary");
+        assert_eq!(summary["metrics"]["correct_count"], 5);
+        assert!(!summary.to_string().contains("127.0.0.1"));
+        let mut private = envelope.clone();
+        private["suite"]["selection"]["coverage"]["private_path"] =
+            Value::String("/Users/example/model.gguf".to_string());
+        assert!(observed_runtime_envelope_summary(&private).is_err());
+        let mut malformed = envelope.clone();
+        malformed["metrics"]["completed_case_count"] = Value::String("five".to_string());
+        assert!(observed_runtime_envelope_summary(&malformed).is_err());
+        let mut non_loopback = envelope.clone();
+        non_loopback["observed_runtime"]["endpoint"]["network_scope"] =
+            Value::String("network".to_string());
+        assert!(observed_runtime_envelope_summary(&non_loopback).is_err());
+        let mut claimed_publisher = envelope.clone();
+        claimed_publisher["observed_runtime"]["identity"]["artifact_publisher"] =
+            Value::String("unverified-publisher".to_string());
+        assert!(observed_runtime_envelope_summary(&claimed_publisher).is_err());
+        let mut claimed_quant = envelope.clone();
+        claimed_quant["observed_runtime"]["claim_boundary"]["quantization"] =
+            Value::String("verified".to_string());
+        assert!(observed_runtime_envelope_summary(&claimed_quant).is_err());
+        let mut relative_path = envelope.clone();
+        relative_path["observed_runtime"]["identity"]["reported_model_id"] =
+            Value::String("models/private.gguf".to_string());
+        relative_path["observed_runtime"]["identity"]["reported_model_ids"] =
+            json!(["models/private.gguf"]);
+        assert!(observed_runtime_envelope_summary(&relative_path).is_err());
+        let mut credential_label = envelope.clone();
+        credential_label["observed_runtime"]["identity"]["reported_model_id"] =
+            Value::String("user:password@host".to_string());
+        credential_label["observed_runtime"]["identity"]["reported_model_ids"] =
+            json!(["user:password@host"]);
+        assert!(observed_runtime_envelope_summary(&credential_label).is_err());
+        let mut headline_claim = envelope.clone();
+        headline_claim["evidence_boundary"]["headline_capability_eligible"] = Value::Bool(true);
+        assert!(observed_runtime_envelope_summary(&headline_claim).is_err());
+        assert!(observed_runtime_envelope_summary(&json!({
+            "contract_version": "observed_quick_suite_v1",
+            "suite": {"suite_id": "observed_quick_suite_v1", "tier": "standard"}
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn observed_sidecar_output_is_bounded() {
+        let mut output = Vec::new();
+        assert!(append_observed_output(
+            &mut output,
+            &vec![0_u8; OBSERVED_RUNTIME_MAX_CAPTURED_OUTPUT_BYTES],
+            "standard"
+        )
+        .is_ok());
+        assert!(append_observed_output(&mut output, &[0_u8], "standard").is_err());
+    }
+
+    #[tokio::test]
+    async fn pairing_mutation_waits_for_an_observed_upload_guard() {
+        let observed_guard = PAIRING_STATE_LOCK.read().await;
+        let mut pairing_change = tokio::spawn(async {
+            let _pairing_guard = PAIRING_STATE_LOCK.write().await;
+            true
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut pairing_change)
+                .await
+                .is_err()
+        );
+        drop(observed_guard);
+        assert!(tokio::time::timeout(Duration::from_secs(1), pairing_change)
+            .await
+            .expect("pairing mutation should resume")
+            .expect("pairing task"));
+    }
+
+    #[test]
+    fn observed_sidecar_exit_code_must_match_the_reported_suite_status() {
+        assert!(observed_exit_matches_suite(Some(0), Some("completed")));
+        assert!(observed_exit_matches_suite(Some(1), Some("failed")));
+        assert!(observed_exit_matches_suite(Some(1), Some("partial")));
+        assert!(!observed_exit_matches_suite(Some(0), Some("failed")));
+        assert!(!observed_exit_matches_suite(Some(1), Some("completed")));
+        assert!(!observed_exit_matches_suite(Some(2), Some("failed")));
+        assert!(!observed_exit_matches_suite(None, Some("completed")));
+    }
+
+    #[test]
+    fn observed_upload_receipt_requires_the_expected_completed_intake() {
+        let receipt = observed_upload_receipt(
+            "observed_123",
+            200,
+            &json!({
+                "observed_run": {
+                    "observed_run_id": "observed_123",
+                    "status": "completed"
+                },
+                "idempotency": {"replayed": true}
+            }),
+        )
+        .expect("valid receipt");
+        assert_eq!(receipt["status"], "uploaded");
+        assert_eq!(receipt["replayed"], true);
+        assert!(observed_upload_receipt(
+            "observed_123",
+            200,
+            &json!({
+                "observed_run": {
+                    "observed_run_id": "observed_other",
+                    "status": "completed"
+                },
+                "idempotency": {"replayed": false}
+            }),
+        )
+        .is_err());
+        assert!(observed_upload_receipt(
+            "observed_123",
+            200,
+            &json!({
+                "observed_run": {
+                    "observed_run_id": "observed_123",
+                    "status": "pending"
+                },
+                "idempotency": {"replayed": false}
+            }),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn observed_upload_errors_keep_safe_actionable_classes() {
+        assert!(observed_upload_error_message("HTTP 410").contains("expired"));
+        assert!(observed_upload_error_message("HTTP 409").contains("different result"));
+        assert!(observed_upload_error_message("HTTP 401").contains("Pair"));
+        assert!(!observed_upload_error_message("secret detail").contains("secret"));
+    }
+
+    #[test]
+    fn observed_failure_callbacks_use_bounded_codes_and_receipts() {
+        assert_eq!(
+            observed_failure_reason_code("The observed check exceeded its 10-minute safety limit."),
+            "runner_timeout"
+        );
+        assert_eq!(
+            observed_failure_reason_code("Runner pairing changed during the observed check."),
+            "pairing_changed"
+        );
+        assert_eq!(
+            observed_failure_reason_code("private unexpected detail"),
+            "observed_check_failed"
+        );
+        let receipt = json!({
+            "observed_run": {
+                "observed_run_id": "observed_123",
+                "status": "failed",
+                "failure_reason_code": "runner_timeout"
+            },
+            "idempotency": {"replayed": false}
+        });
+        assert!(
+            validate_observed_failure_receipt(&receipt, "observed_123", "runner_timeout").is_ok()
+        );
+        assert!(
+            validate_observed_failure_receipt(&receipt, "observed_other", "runner_timeout")
+                .is_err()
+        );
     }
 
     #[test]

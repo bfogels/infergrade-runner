@@ -1,0 +1,10 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "/Users/alice/private/secret.gguf",
+      "object": "model",
+      "owned_by": "local"
+    }
+  ]
+}

@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infergrade.dev/schemas/observed_runtime.schema.json",
+  "title": "InferGrade Observed Local Runtime Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "evidence_kind",
+    "evidence_lane",
+    "verification_status",
+    "verified",
+    "promotion_eligible",
+    "provider",
+    "provider_status",
+    "endpoint",
+    "protocol",
+    "generation_profile",
+    "identity",
+    "claim_boundary",
+    "privacy",
+    "failure_code"
+  ],
+  "properties": {
+    "contract_version": { "const": "observed_runtime_v1" },
+    "evidence_kind": { "const": "observed_runtime" },
+    "evidence_lane": { "const": "observed" },
+    "verification_status": { "const": "not_verified" },
+    "verified": { "const": false },
+    "promotion_eligible": { "const": false },
+    "provider": {
+      "enum": ["ollama", "lm_studio", "llama_server", "vllm", "tgi", "unknown"]
+    },
+    "provider_status": { "const": "compatibility_hint" },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["network_scope"],
+      "properties": {
+        "network_scope": { "const": "loopback" }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "models_endpoint", "chat_completions"],
+      "properties": {
+        "name": { "const": "openai_chat_completions_v1" },
+        "models_endpoint": {
+          "enum": ["compatible", "unavailable", "not_probed"]
+        },
+        "chat_completions": {
+          "enum": ["compatible", "unavailable", "not_probed"]
+        }
+      }
+    },
+    "generation_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_version", "temperature", "max_tokens", "stream", "thinking_control"],
+      "properties": {
+        "profile_version": { "const": "quick_generation_v1" },
+        "temperature": { "const": 0 },
+        "max_tokens": { "type": ["integer", "null"], "minimum": 1, "maximum": 4096 },
+        "stream": { "type": ["boolean", "null"] },
+        "thinking_control": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requested", "effective"],
+          "properties": {
+            "requested": { "type": "boolean" },
+            "effective": {
+              "enum": ["not_run", "not_verified", "server_default_uncontrolled", "rejected", "request_failed"]
+            }
+          }
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reported_model_id",
+        "reported_model_ids",
+        "reported_model_id_status",
+        "reported_model_id_count",
+        "withheld_model_id_count",
+        "selected_model_id_status",
+        "artifact_publisher",
+        "quantization",
+        "artifact_sha256",
+        "runtime_build_id",
+        "runtime_bytes",
+        "status"
+      ],
+      "properties": {
+        "reported_model_id": {
+          "type": ["string", "null"],
+          "maxLength": 512,
+          "pattern": "^(?![A-Za-z]:)(?!.*\\.(?:[gG][gG][uU][Ff]|[bB][iI][nN]|[sS][aA][fF][eE][tT][eE][nN][sS][oO][rR][sS]|[pP][tT][hH]?|[oO][nN][nN][xX])$)[A-Za-z0-9][A-Za-z0-9._:+_-]*(?:/[A-Za-z0-9][A-Za-z0-9._:+_-]*)?$"
+        },
+        "reported_model_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^(?![A-Za-z]:)(?!.*\\.(?:[gG][gG][uU][Ff]|[bB][iI][nN]|[sS][aA][fF][eE][tT][eE][nN][sS][oO][rR][sS]|[pP][tT][hH]?|[oO][nN][nN][xX])$)[A-Za-z0-9][A-Za-z0-9._:+_-]*(?:/[A-Za-z0-9][A-Za-z0-9._:+_-]*)?$"
+          },
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "reported_model_id_status": {
+          "enum": ["reported", "reported_with_withheld", "withheld_unsafe", "unavailable"]
+        },
+        "reported_model_id_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "withheld_model_id_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "selected_model_id_status": {
+          "enum": ["reported", "withheld_unsafe", "not_reported", "not_selected"]
+        },
+        "artifact_publisher": { "const": null },
+        "quantization": { "const": null },
+        "artifact_sha256": { "const": null },
+        "runtime_build_id": { "const": null },
+        "runtime_bytes": { "const": null },
+        "status": { "const": "reported_only" }
+      }
+    },
+    "claim_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_publisher",
+        "quantization",
+        "artifact_checksum",
+        "runtime_build",
+        "runtime_bytes"
+      ],
+      "properties": {
+        "artifact_publisher": { "const": "unknown" },
+        "quantization": { "const": "unknown" },
+        "artifact_checksum": { "const": "unknown" },
+        "runtime_build": { "const": "unknown" },
+        "runtime_bytes": { "const": "unknown" }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpoint_url_recorded",
+        "credentials_recorded",
+        "local_paths_recorded",
+        "raw_outputs_recorded"
+      ],
+      "properties": {
+        "endpoint_url_recorded": { "const": false },
+        "credentials_recorded": { "const": false },
+        "local_paths_recorded": { "const": false },
+        "raw_outputs_recorded": { "const": false }
+      }
+    },
+    "failure_code": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "endpoint_invalid",
+        "non_loopback_endpoint",
+        "unsupported_scheme",
+        "redirect_not_allowed",
+        "timeout",
+        "connection_failed",
+        "http_error",
+        "response_too_large",
+        "invalid_json",
+        "invalid_response",
+        "malformed_sse",
+        "empty_response",
+        "model_not_available",
+        "provider_error",
+        "request_too_large"
+      ]
+    }
+  }
+}

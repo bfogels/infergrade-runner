@@ -4,6 +4,26 @@ use infergrade_runner_engine::{
 };
 use serde_json::{json, Value};
 
+#[derive(Default)]
+struct FailingTokenStore;
+
+impl TokenStore for FailingTokenStore {
+    fn save_runner_token(&self, _token: &str) -> Result<(), infergrade_runner_engine::RunnerError> {
+        Err(infergrade_runner_engine::RunnerError::new(
+            "token_save_failed",
+            "injected failure",
+        ))
+    }
+
+    fn load_runner_token(&self) -> Result<Option<String>, infergrade_runner_engine::RunnerError> {
+        Ok(Some("old_hub_token".to_string()))
+    }
+
+    fn clear_runner_token(&self) -> Result<bool, infergrade_runner_engine::RunnerError> {
+        Ok(true)
+    }
+}
+
 #[test]
 fn pairing_request_trims_input_and_keeps_runtime_context_in_engine() {
     let request = build_pairing_redeem_request(
@@ -100,4 +120,37 @@ fn pairing_completion_rejects_profile_without_token() {
     assert_eq!(error.code(), "pairing_token_missing");
     assert!(profiles.load_profile().unwrap().is_none());
     assert!(tokens.load_runner_token().unwrap().is_none());
+}
+
+#[test]
+fn pairing_token_failure_cannot_persist_a_new_destination() {
+    let profiles = MemoryProfileStore::default();
+    profiles
+        .save_profile(&infergrade_runner_engine::RunnerProfile {
+            api_url: "https://old.example/".to_string(),
+            access_token: None,
+            runner_id: "runner_old".to_string(),
+            label: None,
+            preferred_execution_mode: None,
+            paired_at: None,
+            expires_at: None,
+            user: None,
+        })
+        .expect("old profile");
+    let body = json!({
+        "runner_profile": {
+            "api_url": "https://api.infergrade.com/",
+            "access_token": "qbhr_new_secret",
+            "runner_id": "runner_new"
+        }
+    });
+
+    let error = complete_pairing_response(body, &profiles, &FailingTokenStore, "/tmp/profile.json")
+        .expect_err("token failure");
+
+    assert_eq!(error.code(), "token_save_failed");
+    assert_eq!(
+        profiles.load_profile().unwrap().unwrap().api_url,
+        "https://old.example/"
+    );
 }

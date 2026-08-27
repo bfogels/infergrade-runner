@@ -1,0 +1,10 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "qwen3.5:9b",
+      "object": "model",
+      "owned_by": "reported-by-endpoint"
+    }
+  ]
+}

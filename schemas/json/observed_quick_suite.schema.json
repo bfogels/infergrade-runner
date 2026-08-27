@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infergrade.dev/schemas/observed_quick_suite.schema.json",
+  "title": "InferGrade Observed Quick Suite Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "status",
+    "suite",
+    "protocol_canary",
+    "observed_runtime",
+    "metrics",
+    "case_results",
+    "evidence_boundary"
+  ],
+  "properties": {
+    "contract_version": { "const": "observed_quick_suite_v1" },
+    "status": { "enum": ["completed", "partial", "failed"] },
+    "suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suite_id",
+        "tier",
+        "generation_policy_id",
+        "generation_profile_version",
+        "content_pack_benchmark_id",
+        "content_pack_fixture_revision",
+        "content_pack_full_fixture_sha256",
+        "content_pack_full_selection_sha256",
+        "selection"
+      ],
+      "properties": {
+        "suite_id": { "const": "observed_quick_suite_v1" },
+        "tier": { "enum": ["canary", "standard", "gold"] },
+        "generation_policy_id": { "const": "observed_quick_generation_v1" },
+        "generation_profile_version": { "const": "quick_generation_v1" },
+        "content_pack_benchmark_id": { "const": "reasoning_constraint_stress_v2_content_v1" },
+        "content_pack_fixture_revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "content_pack_full_fixture_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "content_pack_full_selection_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "selection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tier", "case_count", "selection_digest_algorithm", "selection_sha256", "coverage"],
+          "properties": {
+            "tier": { "enum": ["canary", "standard", "gold"] },
+            "case_count": { "enum": [5, 20, 40] },
+            "selection_digest_algorithm": { "const": "sorted_json_string_array_sha256_v1" },
+            "selection_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "coverage": { "type": "object" }
+          }
+        }
+      }
+    },
+    "protocol_canary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canary_id", "status", "generation_status", "format_valid", "answer_correct", "parser_code", "error_class"],
+      "properties": {
+        "canary_id": { "const": "strict_terminal_integer_canary_v1" },
+        "status": { "enum": ["passed", "failed"] },
+        "generation_status": { "enum": ["completed", "failed"] },
+        "format_valid": { "type": "boolean" },
+        "answer_correct": { "type": "boolean" },
+        "parser_code": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "error_class": { "type": ["string", "null"], "maxLength": 64 }
+      }
+    },
+    "observed_runtime": { "$ref": "observed_runtime.schema.json" },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exact_signed_integer_accuracy",
+        "correct_count",
+        "completed_case_count",
+        "expected_case_count",
+        "format_invalid_count",
+        "generation_failure_count",
+        "not_attempted_count",
+        "parser_code_counts",
+        "generation_failure_code_counts",
+        "diagnostic_semantic_candidate_count",
+        "diagnostic_semantic_correct_count",
+        "diagnostic_semantic_incorrect_count",
+        "diagnostic_semantic_unavailable_count",
+        "diagnostic_failure_class_counts",
+        "failure_denominator_policy"
+      ],
+      "properties": {
+        "exact_signed_integer_accuracy": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "correct_count": { "type": "integer", "minimum": 0, "maximum": 40 },
+        "completed_case_count": { "type": "integer", "minimum": 0, "maximum": 40 },
+        "expected_case_count": { "enum": [5, 20, 40] },
+        "format_invalid_count": { "type": "integer", "minimum": 0, "maximum": 40 },
+        "generation_failure_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "not_attempted_count": { "type": "integer", "minimum": 0, "maximum": 40 },
+        "parser_code_counts": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 40 }
+        },
+        "generation_failure_code_counts": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 1 }
+        },
+        "diagnostic_semantic_candidate_count": { "type": "integer", "minimum": 0, "maximum": 40 },
+        "diagnostic_semantic_correct_count": { "type": "integer", "minimum": 0, "maximum": 40 },
+        "diagnostic_semantic_incorrect_count": { "type": "integer", "minimum": 0, "maximum": 40 },
+        "diagnostic_semantic_unavailable_count": { "type": "integer", "minimum": 0, "maximum": 40 },
+        "diagnostic_failure_class_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["format_only", "substantive_wrong", "unavailable"],
+          "properties": {
+            "format_only": { "type": "integer", "minimum": 0, "maximum": 40 },
+            "substantive_wrong": { "type": "integer", "minimum": 0, "maximum": 40 },
+            "unavailable": { "type": "integer", "minimum": 0, "maximum": 40 }
+          }
+        },
+        "failure_denominator_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model_output_failures", "generation_failures", "not_attempted"],
+          "properties": {
+            "model_output_failures": { "const": "scored_zero" },
+            "generation_failures": { "const": "excluded_unscored" },
+            "not_attempted": { "const": "excluded_unscored" }
+          }
+        }
+      }
+    },
+    "case_results": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "task_id",
+          "family",
+          "structural_level",
+          "variant",
+          "state",
+          "score",
+          "format_valid",
+          "parser_code",
+          "error_class",
+          "diagnostic_semantic_candidate",
+          "diagnostic_semantic_candidate_available",
+          "diagnostic_semantic_correct",
+          "diagnostic_semantic_candidate_code",
+          "diagnostic_failure_class"
+        ],
+        "properties": {
+          "case_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "task_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "family": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "structural_level": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "variant": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "state": { "enum": ["scored", "failed", "not_attempted"] },
+          "score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+          "format_valid": { "type": ["boolean", "null"] },
+          "parser_code": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "error_class": { "type": ["string", "null"], "maxLength": 64 },
+          "diagnostic_semantic_candidate": { "type": ["integer", "null"] },
+          "diagnostic_semantic_candidate_available": { "type": "boolean" },
+          "diagnostic_semantic_correct": { "type": ["boolean", "null"] },
+          "diagnostic_semantic_candidate_code": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "diagnostic_failure_class": { "type": ["string", "null"], "enum": ["format_only", "substantive_wrong", "unavailable", null] }
+        }
+      }
+    },
+    "evidence_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verification_status",
+        "comparison_grade",
+        "promotion_eligible",
+        "recommendation_eligible",
+        "headline_capability_eligible",
+        "claim_boundary"
+      ],
+      "properties": {
+        "verification_status": { "const": "not_verified" },
+        "comparison_grade": { "const": "informational_only" },
+        "promotion_eligible": { "const": false },
+        "recommendation_eligible": { "const": false },
+        "headline_capability_eligible": { "const": false },
+        "claim_boundary": { "type": "string", "minLength": 1, "maxLength": 768 }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "models": [
+    {
+      "name": "qwen3.5:9b",
+      "model": "qwen3.5:9b",
+      "size": 123456789
+    }
+  ]
+}

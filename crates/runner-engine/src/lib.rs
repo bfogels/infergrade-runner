@@ -124,7 +124,12 @@ fn is_local_http_host(host: &str) -> bool {
     if host == "localhost" {
         return true;
     }
-    host.parse::<IpAddr>()
+    let address_text = host
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(host);
+    address_text
+        .parse::<IpAddr>()
         .map(|address| address.is_loopback())
         .unwrap_or(false)
 }
@@ -3256,6 +3261,10 @@ mod tests {
             normalize_api_url("127.0.0.1:8000").expect("loopback shorthand"),
             "http://127.0.0.1:8000/"
         );
+        assert_eq!(
+            normalize_api_url("[::1]:8000").expect("IPv6 loopback shorthand"),
+            "http://[::1]:8000/"
+        );
     }
 
     #[test]
@@ -4543,6 +4552,7 @@ mod tests {
         assert_eq!(register["runner_kind"], "local_listener");
         assert_eq!(register["capabilities"]["run_token_supported"], true);
         assert_eq!(register["capabilities"]["auto_upload"], true);
+        assert_eq!(register["capabilities"]["observed_runtime_v1"], true);
         assert_eq!(register["environment"]["source"], "desktop_rust_supervisor");
 
         let heartbeat = runner_heartbeat_payload(

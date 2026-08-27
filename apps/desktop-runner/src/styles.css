@@ -392,10 +392,47 @@ h4 {
 
 .backend-panel,
 .assignment-panel,
+.observed-runtime-surface,
 .support-drawer {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-muted) 72%, transparent);
+}
+
+.observed-runtime-surface {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1fr);
+  gap: 26px;
+  align-items: start;
+  margin: 0 22px 26px;
+  padding: 24px 26px;
+  background: var(--surface-muted);
+}
+
+.observed-runtime-copy h2 {
+  margin: 0 0 8px;
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+}
+
+.observed-runtime-copy p:last-child {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.5;
+}
+
+.observed-runtime-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.observed-runtime-fields .hint {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.observed-runtime-fields label small {
+  font-weight: 500;
+  line-height: 1.4;
 }
 
 .backend-panel {
@@ -1185,6 +1222,7 @@ h4 {
   .primary-surface,
   .pairing-surface,
   .listener-surface,
+  .observed-runtime-surface,
   .drawer-grid {
     grid-template-columns: 1fr;
   }
@@ -1216,6 +1254,11 @@ h4 {
 
   .listener-surface {
     align-items: start;
+  }
+
+  .observed-runtime-surface {
+    margin: 0 14px 18px;
+    padding: 20px;
   }
 
   .listener-actions {

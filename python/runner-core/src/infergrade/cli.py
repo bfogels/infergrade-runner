@@ -16,6 +16,13 @@ from infergrade.benchmark_catalog import load_capability_catalog
 from infergrade.doctor import run_doctor
 from infergrade.environment import capture_environment
 from infergrade.images import install_known_images
+from infergrade.adapters.openai_compatible import OpenAICompatibleAdapter
+from infergrade.observed_runtime import (
+    ObservedRuntimeError,
+    discover_local_runtimes,
+    provider_profiles,
+)
+from infergrade.observed_quick_suite import run_observed_quick_suite
 from infergrade.pairing import (
     clear_runner_profile,
     preferred_local_execution_mode,
@@ -36,6 +43,7 @@ from infergrade.support import build_support_export, write_support_export
 from infergrade.templates import render_run_config_template, render_run_request_template
 from infergrade.transport import (
     InsecureApiUrlError,
+    RunnerConnectionError,
     RunnerTokenInvalidError,
     fetch_run_config,
     list_run_configs,
@@ -67,8 +75,9 @@ ADVANCED_COMMANDS = {
     "install-images",
     "show-profiles",
     "show-capabilities",
+    "observe-runtime",
 }
-DEFAULT_COMMANDS = ("doctor", "cache", "install-runtime", "pair", "unpair", "start")
+DEFAULT_COMMANDS = ("doctor", "discover-runtimes", "cache", "install-runtime", "pair", "unpair", "start")
 
 
 class _InferGradeHelpFormatter(argparse.HelpFormatter):
@@ -166,6 +175,13 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     doctor_api_token = _add_api_token_argument(doctor_parser)
     doctor_api_token.help = argparse.SUPPRESS
     doctor_parser.add_argument("--json", action="store_true", help="Print the complete machine-readable report.")
+
+    discover_parser = subparsers.add_parser(
+        "discover-runtimes",
+        help="Find supported model servers on their standard loopback ports.",
+    )
+    discover_parser.add_argument("--timeout-seconds", type=float, default=0.35)
+    discover_parser.add_argument("--json", action="store_true", help="Print redacted observed-runtime receipts.")
 
     validate_parser = subparsers.add_parser("validate-bundle", help=_command_help("validate-bundle", "Validate an existing bundle.", show_advanced))
     validate_parser.add_argument("path")
@@ -356,6 +372,38 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
 
     capabilities_parser = subparsers.add_parser("show-capabilities", help=_command_help("show-capabilities", "Show capability suites.", show_advanced))
     capabilities_parser.set_defaults(_capabilities=True)
+
+    observe_parser = subparsers.add_parser(
+        "observe-runtime",
+        help=_command_help(
+            "observe-runtime",
+            "Run a non-comparable quick suite against an existing local model server.",
+            show_advanced,
+        ),
+    )
+    observe_parser.add_argument(
+        "--endpoint",
+        help="Loopback OpenAI-compatible server URL; optional with a provider on its standard port.",
+    )
+    observe_parser.add_argument(
+        "--provider",
+        choices=("ollama", "lm_studio", "llama_server", "vllm", "tgi"),
+        help="Optional compatibility hint; this is not verified runtime identity.",
+    )
+    observe_parser.add_argument(
+        "--model-id",
+        help="In-memory model selector; receipts retain only labels that pass the public-label filter.",
+    )
+    observe_parser.add_argument(
+        "--model-id-stdin",
+        action="store_true",
+        help="Read the in-memory model selector from stdin to avoid shell history.",
+    )
+    observe_parser.add_argument("--tier", choices=("canary", "standard", "gold"), default="canary")
+    observe_parser.add_argument("--max-tokens", type=int, default=512)
+    observe_parser.add_argument("--probe-timeout-seconds", type=float, default=2.0)
+    observe_parser.add_argument("--generation-timeout-seconds", type=float, default=300.0)
+    observe_parser.add_argument("--output", help="Optional path for the redacted observed result.")
 
     return parser
 
@@ -584,6 +632,75 @@ def main(argv: Optional[list] = None) -> int:
     if args.command == "show-capabilities":
         print(json.dumps(load_capability_catalog(), indent=2, sort_keys=True))
         return 0
+
+    if args.command == "discover-runtimes":
+        try:
+            payload = discover_local_runtimes(timeout_seconds=args.timeout_seconds)
+        except ObservedRuntimeError as exc:
+            raise SystemExit("Local runtime discovery could not run: %s" % exc.code)
+        if args.json:
+            print(json.dumps({"observed_runtimes": payload}, indent=2, sort_keys=True))
+            return 0
+        compatible = [
+            item
+            for item in payload
+            if (item.get("protocol") or {}).get("models_endpoint") == "compatible"
+        ]
+        if not compatible:
+            print("No supported local model server was detected on a standard loopback port.")
+            return 0
+        lines = ["Detected local model servers"]
+        for item in compatible:
+            identity = item.get("identity") or {}
+            labels = list(identity.get("reported_model_ids") or [])
+            model_summary = ", ".join(labels[:3]) if labels else "model identity withheld"
+            lines.append("- %s · %s" % (item.get("provider") or "unknown", model_summary))
+        if len(compatible) == 1:
+            lines.append(
+                "Run `infergrade --all observe-runtime --provider %s` for a redacted canary."
+                % compatible[0].get("provider")
+            )
+        print("\n".join(lines))
+        return 0
+
+    if args.command == "observe-runtime":
+        if args.model_id and args.model_id_stdin:
+            raise SystemExit("Use only one of --model-id or --model-id-stdin.")
+        model_id = args.model_id
+        if args.model_id_stdin:
+            model_id = sys.stdin.readline().rstrip("\r\n")
+            if not model_id:
+                raise SystemExit("No model ID was provided on stdin.")
+        endpoint = args.endpoint
+        if not endpoint:
+            profiles = {profile.provider: profile for profile in provider_profiles()}
+            profile = profiles.get(args.provider)
+            if profile is None:
+                raise SystemExit("Provide --endpoint, or choose --provider for a standard local port.")
+            endpoint = "http://127.0.0.1:%d" % profile.default_port
+        try:
+            adapter = OpenAICompatibleAdapter(
+                endpoint=endpoint,
+                provider_hint=args.provider,
+                model_id=model_id,
+                timeout_seconds=args.probe_timeout_seconds,
+                generation_timeout_seconds=args.generation_timeout_seconds,
+            )
+            payload = run_observed_quick_suite(
+                adapter,
+                tier=args.tier,
+                max_tokens=args.max_tokens,
+            )
+        except ObservedRuntimeError as exc:
+            raise SystemExit("Observed runtime could not be used: %s" % exc.code)
+        except ValueError as exc:
+            raise SystemExit("Observed quick suite rejected the request: %s" % exc)
+        text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        if args.output:
+            write_text(args.output, text)
+        else:
+            print(text, end="")
+        return 0 if payload["status"] == "completed" else 1
 
     if args.command == "doctor":
         if args.api_url:
@@ -977,6 +1094,8 @@ def main(argv: Optional[list] = None) -> int:
                 )
             except RunnerTokenInvalidError as exc:
                 _exit_for_invalid_runner_token(exc)
+            except RunnerConnectionError as exc:
+                raise SystemExit(str(exc))
         if args.json:
             print(json.dumps(result, indent=2, sort_keys=True))
         elif args.once:
@@ -1034,6 +1153,8 @@ def main(argv: Optional[list] = None) -> int:
                 )
             except RunnerTokenInvalidError as exc:
                 _exit_for_invalid_runner_token(exc)
+            except RunnerConnectionError as exc:
+                raise SystemExit(str(exc))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 

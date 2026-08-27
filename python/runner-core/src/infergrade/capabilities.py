@@ -10,8 +10,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from infergrade import __version__
 from infergrade.benchmark_catalog import (
+    REASONING_EXACT_ANSWER_GENERATION_CONSTRAINT_ID,
     benchmark_evidence_exclusion_reason,
     capability_benchmark_ids_for_request,
+    normalize_request_selection,
     resolve_request_selection,
     selection_metadata_for_request,
 )
@@ -31,6 +33,16 @@ from infergrade.reasoning_constraint_stress import (
     SCORING_POLICY as REASONING_CONSTRAINT_STRESS_SCORING_POLICY,
     reasoning_constraint_stress_cases,
 )
+from infergrade.reasoning_constraint_stress_v2_qualification import (
+    BENCHMARK_ID as REASONING_V2_QUALIFICATION_BENCHMARK_ID,
+    FAILURE_DENOMINATOR_POLICY_ID as REASONING_V2_FAILURE_DENOMINATOR_POLICY_ID,
+    GENERATION_POLICY_ID as REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID,
+    POLICY_ENFORCEMENT_REQUESTED_UNVERIFIED as REASONING_V2_POLICY_ENFORCEMENT_STATE,
+    score_qualification_predictions,
+    qualification_cases_for_tier,
+    validate_tier_cases,
+)
+from infergrade.generation_policies import resolve_generation_policy
 from infergrade.selection_identity import (
     SORTED_JSON_STRING_ARRAY_SHA256_V1,
     SORTED_UTF8_NEWLINE_SHA256_V1,
@@ -91,6 +103,7 @@ NATIVE_SCORED_MODEL_OUTPUT_BENCHMARKS = {
     "reasoning_exact_answer_v1",
     "reasoning_constraint_stress_v1",
     "context_retrieval_reference_v1",
+    REASONING_V2_QUALIFICATION_BENCHMARK_ID,
 }
 
 
@@ -230,6 +243,18 @@ CAPABILITY_BENCHMARKS: Dict[str, CapabilityBenchmarkSpec] = {
         generation_max_tokens=64,
         execution_mode="native",
         case_limits={"canary": 6, "standard": 24, "gold": 48},
+        binomial_success_count_field="correct_count",
+        binomial_observation_count_field="total_count",
+        binomial_observation_unit="task",
+    ),
+    REASONING_V2_QUALIFICATION_BENCHMARK_ID: CapabilityBenchmarkSpec(
+        benchmark_id=REASONING_V2_QUALIFICATION_BENCHMARK_ID,
+        display_name="Reasoning constraint stress v2 qualification",
+        benchmark_kind="constraint_reasoning_qualification",
+        primary_metric_name="exact_signed_integer_accuracy",
+        generation_max_tokens=1536,
+        execution_mode="native",
+        case_limits={"canary": 5, "standard": 20, "gold": 40},
         binomial_success_count_field="correct_count",
         binomial_observation_count_field="total_count",
         binomial_observation_unit="task",
@@ -500,6 +525,33 @@ def _case_benchmark_protocol_identity(
         generation_identity["generation_constraint_id"] = generation_constraint_id
     if generation_preset_ids:
         generation_identity["generation_preset_ids"] = generation_preset_ids
+    generation_policy_ids = sorted(
+        {
+            str(item.get("generation_policy_id") or "").strip()
+            for item in predictions
+            if str(item.get("generation_policy_id") or "").strip()
+        }
+    )
+    generation_policy_fingerprints = sorted(
+        {
+            str(item.get("generation_policy_fingerprint") or "").strip()
+            for item in predictions
+            if str(item.get("generation_policy_fingerprint") or "").strip()
+        }
+    )
+    policy_enforcement_states = sorted(
+        {
+            str(item.get("generation_policy_enforcement") or "").strip()
+            for item in predictions
+            if str(item.get("generation_policy_enforcement") or "").strip()
+        }
+    )
+    if generation_policy_ids:
+        generation_identity["generation_policy_ids"] = generation_policy_ids
+    if generation_policy_fingerprints:
+        generation_identity["generation_policy_fingerprints"] = generation_policy_fingerprints
+    if policy_enforcement_states:
+        generation_identity["policy_enforcement_states"] = policy_enforcement_states
     if generation_prompt_transforms:
         generation_identity["generation_prompt_transforms"] = generation_prompt_transforms
     if benchmark_prompt_transforms:
@@ -1247,6 +1299,12 @@ def execute_capability_suite(
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> CapabilityExecution:
     selection = resolve_request_selection(request)
+    if REASONING_V2_QUALIFICATION_BENCHMARK_ID in list(selection.get("check_ids") or []):
+        # Direct callers of the Runner capability API may not have passed
+        # through run_infergrade's ordinary preset resolution.  Normalize the
+        # one candidate lane here so it cannot accidentally inherit defaults.
+        normalize_request_selection(request)
+        selection = resolve_request_selection(request)
     selection_metadata = selection_metadata_for_request(request)
     benchmark_ids = capability_benchmark_ids_for_request(request)
     suite_ids = list(selection.get("suite_ids") or [])
@@ -2056,6 +2114,43 @@ def _write_native_capability_run_artifact(
                     if spec.benchmark_id == "reasoning_constraint_stress_v1"
                     else {}
                 ),
+                **(
+                    {
+                        "category": case_score.get("category") or case.get("category"),
+                        "family": case_score.get("family") or case.get("category"),
+                        "structural_level": case_score.get("structural_level")
+                        or case.get("structural_level"),
+                        "variant": case_score.get("variant") or case.get("variant"),
+                        "parser_code": case_score.get("parser_code"),
+                        "diagnostic_semantic_candidate": case_score.get(
+                            "diagnostic_semantic_candidate"
+                        ),
+                        "diagnostic_semantic_candidate_available": case_score.get(
+                            "diagnostic_semantic_candidate_available"
+                        ),
+                        "diagnostic_semantic_correct": case_score.get(
+                            "diagnostic_semantic_correct"
+                        ),
+                        "diagnostic_semantic_candidate_code": case_score.get(
+                            "diagnostic_semantic_candidate_code"
+                        ),
+                        "diagnostic_failure_class": case_score.get(
+                            "diagnostic_failure_class"
+                        ),
+                        "generation_policy_id": prediction.get("generation_policy_id"),
+                        "generation_policy_fingerprint": prediction.get(
+                            "generation_policy_fingerprint"
+                        ),
+                        "generation_policy_enforcement": prediction.get(
+                            "generation_policy_enforcement"
+                        ),
+                        "generation_policy_receipt": prediction.get(
+                            "generation_policy_receipt"
+                        ),
+                    }
+                    if spec.benchmark_id == REASONING_V2_QUALIFICATION_BENCHMARK_ID
+                    else {}
+                ),
             }
         )
     task_counts = _native_artifact_task_counts(tasks)
@@ -2107,6 +2202,52 @@ def _write_native_capability_run_artifact(
                 "generation_preset_id": request.generation_preset,
                 "max_tokens": spec.generation_max_tokens,
             },
+            **(
+                {
+                    "generation_policy": {
+                        "policy_id": request.generation_preset,
+                        "fingerprint_sha256": next(
+                            (
+                                item.get("generation_policy_fingerprint")
+                                for item in predictions
+                                if item.get("generation_policy_fingerprint")
+                            ),
+                            None,
+                        ),
+                        "enforcement_state": sorted(
+                            {
+                                str(item.get("generation_policy_enforcement") or "")
+                                for item in predictions
+                                if item.get("generation_policy_enforcement")
+                            }
+                        ),
+                        "requested_policy": next(
+                            (
+                                (item.get("generation_policy_receipt") or {}).get(
+                                    "requested"
+                                )
+                                for item in predictions
+                                if (item.get("generation_policy_receipt") or {}).get(
+                                    "requested"
+                                )
+                            ),
+                            None,
+                        ),
+                        "enforced_policy": next(
+                            (
+                                (item.get("generation_policy_receipt") or {}).get(
+                                    "enforced"
+                                )
+                                for item in predictions
+                                if "enforced" in (item.get("generation_policy_receipt") or {})
+                            ),
+                            None,
+                        ),
+                    }
+                }
+                if spec.benchmark_id == REASONING_V2_QUALIFICATION_BENCHMARK_ID
+                else {}
+            ),
         },
         "protocol": {
             "task_family": spec.benchmark_kind,
@@ -2121,6 +2262,46 @@ def _write_native_capability_run_artifact(
             "scorer_type": _native_scorer_type(spec),
             "scoring_policy": summary.get("scoring_policy") or _native_scoring_policy(spec),
             "repetitions": 1,
+            **(
+                {
+                    "generation_policy_id": request.generation_preset,
+                    "generation_policy_fingerprint": next(
+                        (
+                            item.get("generation_policy_fingerprint")
+                            for item in predictions
+                            if item.get("generation_policy_fingerprint")
+                        ),
+                        None,
+                    ),
+                    "generation_policy_enforcement": sorted(
+                        {
+                            str(item.get("generation_policy_enforcement") or "")
+                            for item in predictions
+                            if item.get("generation_policy_enforcement")
+                        }
+                    ),
+                    "generation_policy_receipt_states": sorted(
+                        {
+                            str(
+                                (item.get("generation_policy_receipt") or {}).get(
+                                    "enforcement_state"
+                                )
+                                or ""
+                            )
+                            for item in predictions
+                            if item.get("generation_policy_receipt")
+                        }
+                    ),
+                    "content_pack_benchmark_id": (
+                        _selected_check_metadata(request, spec.benchmark_id).get(
+                            "content_pack_benchmark_id"
+                        )
+                    ),
+                    "failure_denominator_policy_id": REASONING_V2_FAILURE_DENOMINATOR_POLICY_ID,
+                }
+                if spec.benchmark_id == REASONING_V2_QUALIFICATION_BENCHMARK_ID
+                else {}
+            ),
         },
         "summary": {
             "state": summary_state,
@@ -2143,6 +2324,70 @@ def _write_native_capability_run_artifact(
             ),
             "token_budget_exhaustion_count": summary.get("metrics", {}).get(
                 "token_budget_exhaustion_count", 0
+            ),
+            **(
+                {
+                    "family_metrics": dict(summary.get("metrics", {}).get("family_metrics") or {}),
+                    "structural_level_metrics": dict(
+                        summary.get("metrics", {}).get("structural_level_metrics") or {}
+                    ),
+                    "variant_metrics": dict(summary.get("metrics", {}).get("variant_metrics") or {}),
+                    "parser_code_counts": dict(
+                        summary.get("metrics", {}).get("parser_code_counts") or {}
+                    ),
+                    "semantic_correct_count": summary.get("metrics", {}).get(
+                        "semantic_correct_count", 0
+                    ),
+                    "format_valid_count": summary.get("metrics", {}).get(
+                        "format_valid_count", 0
+                    ),
+                    "semantic_incorrect_format_valid_count": summary.get("metrics", {}).get(
+                        "semantic_incorrect_format_valid_count", 0
+                    ),
+                    "diagnostic_semantic_candidate_count": summary.get("metrics", {}).get(
+                        "diagnostic_semantic_candidate_count", 0
+                    ),
+                    "diagnostic_semantic_correct_count": summary.get("metrics", {}).get(
+                        "diagnostic_semantic_correct_count", 0
+                    ),
+                    "diagnostic_semantic_incorrect_count": summary.get("metrics", {}).get(
+                        "diagnostic_semantic_incorrect_count", 0
+                    ),
+                    "diagnostic_semantic_unavailable_count": summary.get("metrics", {}).get(
+                        "diagnostic_semantic_unavailable_count", 0
+                    ),
+                    "diagnostic_failure_class_counts": dict(
+                        summary.get("metrics", {}).get(
+                            "diagnostic_failure_class_counts", {}
+                        )
+                    ),
+                    "diagnostic_format_only_failure_count": summary.get("metrics", {}).get(
+                        "diagnostic_format_only_failure_count", 0
+                    ),
+                    "diagnostic_substantive_wrong_count": summary.get("metrics", {}).get(
+                        "diagnostic_substantive_wrong_count", 0
+                    ),
+                    "diagnostic_unavailable_count": summary.get("metrics", {}).get(
+                        "diagnostic_unavailable_count", 0
+                    ),
+                    "generation_failure_count": summary.get("metrics", {}).get(
+                        "generation_failure_count", 0
+                    ),
+                    "not_attempted_count": summary.get("metrics", {}).get(
+                        "not_attempted_count", 0
+                    ),
+                    "generation_failure_count_includes_not_attempted": summary.get(
+                        "metrics", {}
+                    ).get("generation_failure_count_includes_not_attempted", True),
+                    "unscored_generation_failure_count": summary.get("metrics", {}).get(
+                        "unscored_generation_failure_count", 0
+                    ),
+                    "failure_denominator_policy": dict(
+                        summary.get("metrics", {}).get("failure_denominator_policy") or {}
+                    ),
+                }
+                if spec.benchmark_id == REASONING_V2_QUALIFICATION_BENCHMARK_ID
+                else {}
             ),
             **_artifact_summary_performance(summary.get("task_performance")),
             **(
@@ -2900,7 +3145,11 @@ def _native_scorer_type(spec: CapabilityBenchmarkSpec) -> str:
         return "strict_json_equality"
     if spec.benchmark_id == "coding_static_repair_v1":
         return "static_check"
-    if spec.benchmark_id in {"reasoning_exact_answer_v1", "reasoning_constraint_stress_v1"}:
+    if spec.benchmark_id in {
+        "reasoning_exact_answer_v1",
+        "reasoning_constraint_stress_v1",
+        REASONING_V2_QUALIFICATION_BENCHMARK_ID,
+    }:
         return "exact_match"
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return "exact_match"
@@ -2920,6 +3169,8 @@ def _native_scoring_policy(spec: CapabilityBenchmarkSpec) -> str:
         return "deterministic_exact_answer_v1"
     if spec.benchmark_id == "reasoning_constraint_stress_v1":
         return REASONING_CONSTRAINT_STRESS_SCORING_POLICY
+    if spec.benchmark_id == REASONING_V2_QUALIFICATION_BENCHMARK_ID:
+        return "reasoning_constraint_stress_v2_exact_signed_integer_v1"
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return "deterministic_context_key_retrieval_v1"
     if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
@@ -2938,6 +3189,8 @@ def _native_fixture_revision(spec: CapabilityBenchmarkSpec) -> str:
         return REASONING_EXACT_ANSWER_FIXTURE_REVISION
     if spec.benchmark_id == "reasoning_constraint_stress_v1":
         return REASONING_CONSTRAINT_STRESS_FIXTURE_REVISION
+    if spec.benchmark_id == REASONING_V2_QUALIFICATION_BENCHMARK_ID:
+        return "2026-08-reasoning-constraint-stress-v2-content-v1"
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return CONTEXT_RETRIEVAL_FIXTURE_REVISION
     if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
@@ -3192,11 +3445,44 @@ def _native_artifact_claim_boundary(spec: CapabilityBenchmarkSpec, state: str) -
         return _reasoning_artifact_claim_boundary(state)
     if spec.benchmark_id == "reasoning_constraint_stress_v1":
         return _reasoning_constraint_stress_artifact_claim_boundary(state)
+    if spec.benchmark_id == REASONING_V2_QUALIFICATION_BENCHMARK_ID:
+        return _reasoning_v2_qualification_artifact_claim_boundary(state)
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return _context_retrieval_artifact_claim_boundary(state)
     if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
         return _stateful_tool_loop_artifact_claim_boundary(state)
     raise ValueError("Unsupported native capability benchmark: %s" % spec.benchmark_id)
+
+
+def _reasoning_v2_qualification_artifact_claim_boundary(
+    state: str,
+) -> Dict[str, List[str]]:
+    unsupported = [
+        "This qualification artifact is not headline capability evidence, a readiness signal, a recommendation, or a release gate.",
+        "This does not prove broad reasoning, intelligence, factual knowledge, expert reasoning, leaderboard performance, or contamination resistance.",
+        "This does not prove that backend thinking-budget enforcement was verified; the receipt records requested_unverified until a backend exposes that proof.",
+        "A high score does not establish headroom or promotion without current-model repeats, discrimination, and cross-family ceiling evidence.",
+    ]
+    if state == "scored":
+        supported = [
+            "This Runner completed the selected exact prefix of the immutable reasoning v2 content pack in qualification mode.",
+            "The artifact records strict FINAL_ANSWER signed-integer parsing with family, structural-level, variant, parser, and denominator metrics.",
+        ]
+    elif state == "partial":
+        supported = [
+            "This Runner attempted the selected immutable reasoning v2 content prefix in qualification mode with partial generation failures.",
+            "Completed model outputs remain scored while runtime/generation failures remain outside the score denominator.",
+        ]
+    elif state == "failed":
+        supported = [
+            "This Runner attempted the selected immutable reasoning v2 content prefix in qualification mode.",
+            "Selection, policy, parser, and generation failures remain explicit rather than being converted into a headline score.",
+        ]
+    else:
+        supported = [
+            "This qualification artifact records that the selected immutable reasoning v2 content prefix was not fully scored.",
+        ]
+    return {"supported_claims": supported, "unsupported_claims": unsupported}
 
 
 def _assistant_compositional_artifact_claim_boundary(state: str) -> Dict[str, List[str]]:
@@ -3604,7 +3890,7 @@ def _host_mount_path(path: str) -> str:
     return normalized_path
 
 
-_CASE_CHECKPOINT_VERSION = "capability_case_checkpoint_v1"
+_CASE_CHECKPOINT_VERSION = "capability_case_checkpoint_v2"
 
 
 def _case_checkpoint_path(request: RunRequest, benchmark_id: str) -> str:
@@ -3634,10 +3920,19 @@ def _case_checkpoint_fingerprint(
                     "multiple_choice_letter_grammar_v1"
                     if spec.benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS
                     else (
-                        "unified_diff_only_v1"
-                        if spec.benchmark_id == "repository_edit_smoke_v1"
-                        else "default_generation_v1"
+                        REASONING_EXACT_ANSWER_GENERATION_CONSTRAINT_ID
+                        if spec.benchmark_id == "reasoning_exact_answer_v1"
+                        else (
+                            "unified_diff_only_v1"
+                            if spec.benchmark_id == "repository_edit_smoke_v1"
+                            else "default_generation_v1"
+                        )
                     )
+                ),
+                "direct_answer_recovery_protocol": (
+                    "model_specific_direct_answer_recovery_v2"
+                    if spec.benchmark_id in MULTIPLE_CHOICE_REFERENCE_IDS
+                    else None
                 ),
             },
             "cases": cases,
@@ -3777,10 +4072,7 @@ def _supports_direct_answer_recovery(request: RunRequest) -> bool:
     from infergrade.gguf import infer_llama_cpp_architecture
 
     architecture = str(infer_llama_cpp_architecture(request) or "")
-    return (
-        architecture.startswith(("qwen35", "qwen36"))
-        or architecture in {"gemma4", "mistral3"}
-    )
+    return architecture.startswith("qwen3") or architecture in {"gemma4", "mistral3"}
 
 
 def _generate_predictions(
@@ -3792,6 +4084,19 @@ def _generate_predictions(
 ) -> List[Dict[str, Any]]:
     predictions = []
     total_cases = len(cases)
+    qualification_policy = None
+    if spec.benchmark_id == REASONING_V2_QUALIFICATION_BENCHMARK_ID:
+        qualification_policy = resolve_generation_policy(request.generation_preset)
+        if qualification_policy.policy_id != REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID:
+            raise ValueError(
+                "reasoning_v2_generation_policy_mismatch:%s"
+                % (request.generation_preset or "missing")
+            )
+        if qualification_policy.max_output_tokens != spec.generation_max_tokens:
+            raise ValueError(
+                "reasoning_v2_generation_policy_budget_mismatch:%s:%s"
+                % (qualification_policy.max_output_tokens, spec.generation_max_tokens)
+            )
     checkpoint_path = _case_checkpoint_path(request, spec.benchmark_id)
     checkpoint_fingerprint = _case_checkpoint_fingerprint(request, spec, cases)
     if request.resume and os.path.exists(checkpoint_path):
@@ -3805,6 +4110,29 @@ def _generate_predictions(
         case_id = case.get("case_id") or case.get("task_id") or stable_hash(case, length=12)
         checkpoint_prediction = completed_checkpoint.get(str(case_id))
         if checkpoint_prediction is not None:
+            if qualification_policy is not None:
+                checkpoint_prediction = dict(checkpoint_prediction)
+                checkpoint_prediction.setdefault(
+                    "generation_policy_id", qualification_policy.policy_id
+                )
+                checkpoint_prediction.setdefault(
+                    "generation_policy_fingerprint",
+                    qualification_policy.fingerprint_sha256,
+                )
+                checkpoint_prediction.setdefault(
+                    "generation_policy_enforcement",
+                    REASONING_V2_POLICY_ENFORCEMENT_STATE,
+                )
+                checkpoint_prediction.setdefault(
+                    "generation_policy_receipt",
+                    {
+                        "policy_id": qualification_policy.policy_id,
+                        "fingerprint_sha256": qualification_policy.fingerprint_sha256,
+                        "requested": qualification_policy.to_dict(),
+                        "enforcement_state": REASONING_V2_POLICY_ENFORCEMENT_STATE,
+                        "enforced": None,
+                    },
+                )
             predictions.append(checkpoint_prediction)
             recovery = checkpoint_prediction.get("direct_answer_protocol_recovery") or {}
             if recovery.get("status") == "recovered":
@@ -3858,6 +4186,16 @@ def _generate_predictions(
                 )
                 or {}
             )
+            if qualification_policy is not None:
+                generated_policy_id = str(
+                    generated.get("generation_policy_id")
+                    or qualification_policy.policy_id
+                )
+                if generated_policy_id != qualification_policy.policy_id:
+                    raise ValueError(
+                        "reasoning_v2_generation_policy_mismatch:%s"
+                        % generated_policy_id
+                    )
             if _non_negative_integer(generated.get("output_token_budget")) is None:
                 generated["output_token_budget"] = adaptive_max_tokens
             if not protocol_canary_complete and _supports_direct_answer_recovery(request):
@@ -3930,10 +4268,29 @@ def _generate_predictions(
             **performance,
             "generation_preset_id": request.generation_preset,
         }
+        if qualification_policy is not None:
+            record["generation_policy_id"] = qualification_policy.policy_id
+            record["generation_policy_fingerprint"] = qualification_policy.fingerprint_sha256
+            record["generation_policy_enforcement"] = str(
+                generated.get("generation_policy_enforcement")
+                or REASONING_V2_POLICY_ENFORCEMENT_STATE
+            )
+            record["generation_policy_receipt"] = generated.get(
+                "generation_policy_receipt"
+            ) or {
+                "policy_id": qualification_policy.policy_id,
+                "fingerprint_sha256": qualification_policy.fingerprint_sha256,
+                "requested": qualification_policy.to_dict(),
+                "enforcement_state": record["generation_policy_enforcement"],
+                "enforced": None,
+            }
         if generation_failure_kind:
             record["generation_failure_kind"] = generation_failure_kind
         if generated.get("prompt_transform"):
             record["generation_prompt_transform"] = generated["prompt_transform"]
+        if generated.get("generation_constraint_receipt"):
+            record["generation_constraint_id"] = generated.get("generation_constraint_id")
+            record["generation_constraint_receipt"] = generated["generation_constraint_receipt"]
         if protocol_recovery:
             record["direct_answer_protocol_recovery"] = protocol_recovery
         if spec.benchmark_id in {"evalplus_humaneval", "evalplus_mbpp"}:
@@ -4531,12 +4888,25 @@ def _prepare_native_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir
     limit = spec.case_limits.get(tier)
     if limit:
         cases = cases[:limit]
+    if spec.benchmark_id == REASONING_V2_QUALIFICATION_BENCHMARK_ID:
+        validate_tier_cases(cases, tier)
     _write_jsonl(os.path.join(benchmark_dir, "cases.jsonl"), cases)
 
 
 def _evaluate_native_benchmark(spec: CapabilityBenchmarkSpec, benchmark_dir: str) -> Dict[str, Any]:
     if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
         return _evaluate_stateful_tool_loop_benchmark(spec, benchmark_dir)
+    if spec.benchmark_id == REASONING_V2_QUALIFICATION_BENCHMARK_ID:
+        cases = _read_jsonl(os.path.join(benchmark_dir, "cases.jsonl"))
+        predictions = _read_jsonl(os.path.join(benchmark_dir, "predictions.jsonl"))
+        tier_by_count = {5: "canary", 20: "standard", 40: "gold"}
+        tier = tier_by_count.get(len(cases))
+        if tier is None:
+            raise ValueError(
+                "reasoning_v2_selection_identity_mismatch:unknown_case_count:%s"
+                % len(cases)
+            )
+        return score_qualification_predictions(cases, predictions, tier)
     cases_by_id = {
         str(item.get("case_id") or item.get("task_id") or stable_hash(item, length=12)): item
         for item in _read_jsonl(os.path.join(benchmark_dir, "cases.jsonl"))
@@ -5100,6 +5470,8 @@ def _native_benchmark_cases(spec: CapabilityBenchmarkSpec) -> List[Dict[str, Any
         return _reasoning_exact_answer_cases()
     if spec.benchmark_id == "reasoning_constraint_stress_v1":
         return reasoning_constraint_stress_cases()
+    if spec.benchmark_id == REASONING_V2_QUALIFICATION_BENCHMARK_ID:
+        return qualification_cases_for_tier("gold")
     if spec.benchmark_id == "context_retrieval_reference_v1":
         return _context_retrieval_cases()
     if spec.benchmark_id == "stateful_tool_loop_diagnostic_v1":
