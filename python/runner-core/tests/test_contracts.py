@@ -157,7 +157,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.37")
+        self.assertEqual(manifest["contract_version"], "0.3.38")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_run_request_contract_accepts_authorized_artifact_download_size(self):
@@ -345,7 +345,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_contract_declares_observed_quick_suite_boundary(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.37")
+        self.assertEqual(manifest["contract_version"], "0.3.38")
         self.assertIn("schemas/json/observed_quick_suite.schema.json", manifest["schema_files"])
         self.assertIn("docs/observed_quick_suite_v1.md", manifest["supporting_docs"])
         schema = json.loads(
