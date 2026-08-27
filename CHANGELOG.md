@@ -7,6 +7,27 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.58 (contract 0.3.38)
+
+- Evaluates an already-running localhost OpenAI-compatible model through a
+  privacy-safe observed quick suite, preserving incomplete model identity as
+  reported or unknown instead of silently upgrading it to verified evidence.
+- Adds a Desktop-first observed endpoint flow with explicit capability,
+  pairing, connection, progress, and failure states, while keeping endpoint
+  values and raw generations out of Hub-bound receipts.
+- Adds qualification-only Reasoning v2 material and separates semantic
+  outcomes from format/protocol failures; deterministic generation constraints
+  now make exact-answer checks scoreable and auditable.
+- Strengthens benchmark trust gates for selection provenance, representative
+  sample breadth, task-scoped challenger evidence, saturation/headroom,
+  independent replication, and component-level failure quarantine.
+- Adds repository-edit, tool-use, stateful agent-loop, LongBench, LiveCodeBench,
+  and harder reasoning diagnostics without promoting unqualified results into
+  headline capability claims.
+- Hardens Desktop runtime recovery, worker connection truth, release CI, and
+  cross-platform dependency retries so failed or rejected states remain
+  actionable rather than appearing ready.
+
 ## 0.3.57 (contract 0.3.29)
 
 - Keeps a completed Hub assignment visible in Desktop Runner with its observed
