@@ -7,6 +7,19 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.60 (contract 0.3.38)
+
+- Makes qualification-only reasoning diagnostics readable in the local bundle
+  report without adding them to canonical capability scores or promotion.
+- Separates selected, completed, and strictly correct case counts, including
+  partial executions; missing or contradictory metadata stays unavailable.
+- Shows format failures, token-budget exhaustion, diagnostic failure classes,
+  frozen policy identity, and requested-versus-enforced policy truth alongside
+  fixed links to the retained diagnostic artifacts.
+- Preserves strict scores and original evidence. Verified report rendering on
+  a real local canary is not a claim of benchmark headroom, release readiness,
+  broader model capability, or new hardware support.
+
 ## 0.3.59 (contract 0.3.38)
 
 - Keeps observed localhost inference off environment and system HTTP/HTTPS
