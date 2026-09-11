@@ -20,6 +20,10 @@ canary. A failed canary stops the run. The first transport failure also stops
 remaining work and records the completed, failed, and not-attempted buckets
 separately.
 
+Desktop uses bounded recovery hints from that failure receipt. It distinguishes
+an endpoint with no model from one with multiple models, and offers local-server,
+timeout, and incomplete-chat guidance without exposing model IDs or server output.
+
 Endpoint discovery uses a short bounded timeout. Generation has a separate
 bounded timeout (300 seconds by default) because local CPU and memory-constrained
 inference can legitimately take much longer than a health probe.

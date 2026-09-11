@@ -1359,9 +1359,26 @@ fn observed_runtime_envelope_summary(envelope: &Value) -> Result<Value, String> 
         .and_then(Value::as_object)
         .ok_or_else(|| "Observed Runner returned invalid canary metrics.".to_string())?;
     let metric = |key: &str| metrics.get(key).cloned().unwrap_or(Value::Null);
+    let failure_code = envelope["protocol_canary"]["error_class"]
+        .as_str()
+        .or_else(|| envelope["observed_runtime"]["failure_code"].as_str());
+    let recovery_hint = match failure_code {
+        Some("model_not_available") => {
+            match envelope["observed_runtime"]["identity"]["reported_model_id_count"].as_u64() {
+                Some(0) => "load_model",
+                Some(count) if count > 1 => "serve_one_model",
+                _ => "check_loaded_model",
+            }
+        }
+        Some("connection_failed") => "start_local_server",
+        Some("timeout") => "check_server_load",
+        Some("invalid_response" | "malformed_sse" | "empty_response") => "check_chat_response",
+        _ => "review_result",
+    };
     Ok(json!({
         "suite_status": object.get("status").cloned().unwrap_or(Value::Null),
         "tier": "canary",
+        "recovery_hint": recovery_hint,
         "metrics": {
             "exact_signed_integer_accuracy": metric("exact_signed_integer_accuracy"),
             "correct_count": metric("correct_count"),
@@ -3579,6 +3596,36 @@ mod tests {
         assert_eq!(summary["tier"], "canary");
         assert_eq!(summary["metrics"]["correct_count"], 5);
         assert!(!summary.to_string().contains("127.0.0.1"));
+        for (count, expected) in [
+            (0, "load_model"),
+            (1, "check_loaded_model"),
+            (2, "serve_one_model"),
+        ] {
+            let mut failed = envelope.clone();
+            failed["status"] = json!("failed");
+            failed["protocol_canary"]["error_class"] = json!("model_not_available");
+            failed["observed_runtime"]["identity"]["reported_model_id_count"] = json!(count);
+            let summary = observed_runtime_envelope_summary(&failed).expect("failure summary");
+            assert_eq!(summary["recovery_hint"], expected);
+            assert!(!summary.to_string().contains("qwen3.5"));
+        }
+        let mut failed = envelope.clone();
+        failed["status"] = json!("failed");
+        failed["protocol_canary"]["error_class"] = json!("unknown-detail");
+        let summary = observed_runtime_envelope_summary(&failed).expect("unknown failure summary");
+        assert_eq!(summary["recovery_hint"], "review_result");
+        assert!(!summary.to_string().contains("unknown-detail"));
+        for (code, expected) in [
+            ("timeout", "check_server_load"),
+            ("invalid_response", "check_chat_response"),
+            ("connection_failed", "start_local_server"),
+        ] {
+            let mut partial = envelope.clone();
+            partial["status"] = json!("partial");
+            partial["observed_runtime"]["failure_code"] = json!(code);
+            let summary = observed_runtime_envelope_summary(&partial).expect("partial summary");
+            assert_eq!(summary["recovery_hint"], expected);
+        }
         let mut private = envelope.clone();
         private["suite"]["selection"]["coverage"]["private_path"] =
             Value::String("/Users/example/model.gguf".to_string());

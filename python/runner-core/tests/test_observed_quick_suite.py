@@ -8,13 +8,14 @@ from unittest import mock
 sys.path.insert(0, "python/runner-core/src")
 
 from infergrade.cli import main
+from infergrade.adapters.openai_compatible import OpenAICompatibleAdapter
 from infergrade.observed_quick_suite import (
     OBSERVED_QUICK_PROMPT_DIRECTIVE,
     OBSERVED_QUICK_SUITE_VERSION,
     PROTOCOL_CANARY_PROMPT,
     run_observed_quick_suite,
 )
-from infergrade.observed_runtime import ObservedRuntimeProbe, parse_local_endpoint
+from infergrade.observed_runtime import OpenAICompatibleClient, ObservedRuntimeProbe, parse_local_endpoint
 from infergrade.reasoning_constraint_stress_v2_qualification import qualification_cases_for_tier
 
 
@@ -81,6 +82,32 @@ class _AnsweringAdapter(object):
 
 
 class ObservedQuickSuiteTests(unittest.TestCase):
+    def test_truncated_terminal_text_cannot_pass_canary_or_score_content(self):
+        for truncate_canary in (True, False):
+            with self.subTest(truncate_canary=truncate_canary):
+                client = OpenAICompatibleClient(PRIVATE_ENDPOINT)
+                calls = []
+
+                def respond(method, path, **kwargs):
+                    if method == "GET":
+                        return json.dumps({"data": [{"id": "local-model"}]}).encode(), "application/json"
+                    calls.append(kwargs)
+                    canary = kwargs["payload"]["messages"][0]["content"] == PROTOCOL_CANARY_PROMPT
+                    reason = "length" if truncate_canary or not canary else "stop"
+                    body = {"choices": [{"index": 0, "message": {"content": "FINAL_ANSWER: 7"}, "finish_reason": reason}]}
+                    return json.dumps(body).encode(), "application/json"
+
+                with mock.patch.object(client, "_request", side_effect=respond):
+                    payload = run_observed_quick_suite(OpenAICompatibleAdapter(client=client))
+                self.assertEqual(payload["status"], "failed" if truncate_canary else "partial")
+                self.assertEqual(len(calls), 1 if truncate_canary else 2)
+                self.assertEqual(payload["metrics"]["correct_count"], 0)
+                self.assertEqual(payload["metrics"]["completed_case_count"], 0)
+                self.assertIsNone(payload["metrics"]["exact_signed_integer_accuracy"])
+                self.assertEqual(payload["metrics"]["not_attempted_count"], 5 if truncate_canary else 4)
+                self.assertEqual(payload["metrics"]["generation_failure_count"], 0 if truncate_canary else 1)
+                self.assertNotIn("FINAL_ANSWER", json.dumps(payload))
+
     def test_exact_tiers_score_without_persisting_endpoint_model_prompt_or_output(self):
         for tier, count in (("canary", 5), ("standard", 20), ("gold", 40)):
             with self.subTest(tier=tier):

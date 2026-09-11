@@ -331,7 +331,9 @@ class _NoRedirectHandler(urllib_request.HTTPRedirectHandler):
 
 
 def _open_no_redirect(request: urllib_request.Request, endpoint: LocalEndpoint, timeout: float):
-    handlers: List[Any] = [_NoRedirectHandler()]
+    # Loopback validation must also hold when the host has environment or
+    # system proxies configured. Never send local prompts or keys to a proxy.
+    handlers: List[Any] = [urllib_request.ProxyHandler({}), _NoRedirectHandler()]
     if endpoint.scheme == "https":
         handlers.append(urllib_request.HTTPSHandler(context=verified_https_context(_endpoint_url(endpoint, "/"))))
     opener = urllib_request.build_opener(*handlers)
@@ -491,15 +493,22 @@ def _extract_text(value: Any) -> str:
     return ""
 
 
-def _extract_chat_text(payload: Any) -> str:
+def _chat_choice(payload: Any) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ObservedRuntimeError("invalid_response")
     if payload.get("error"):
         raise ObservedRuntimeError("provider_error")
     choices = payload.get("choices")
-    if not isinstance(choices, list) or not choices:
+    if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict):
         raise ObservedRuntimeError("invalid_response")
-    first = choices[0] if isinstance(choices[0], dict) else {}
+    first = choices[0]
+    if "index" in first and (type(first["index"]) is not int or first["index"] != 0):
+        raise ObservedRuntimeError("invalid_response")
+    return first
+
+
+def _extract_chat_text(payload: Any) -> str:
+    first = _chat_choice(payload)
     message = first.get("message")
     delta = first.get("delta")
     text = _extract_text((message or {}).get("content") if isinstance(message, dict) else None)
@@ -535,7 +544,8 @@ def _parse_sse(body: bytes) -> str:
         text = body.decode("utf-8", errors="replace")
     pieces: List[str] = []
     total_chars = 0
-    saw_event = False
+    stopped = False
+    done = False
     for line in text.splitlines():
         if len(line) > 64 * 1024:
             raise ObservedRuntimeError("response_too_large")
@@ -544,27 +554,34 @@ def _parse_sse(body: bytes) -> str:
         if not line.startswith("data:"):
             continue
         data = line[5:].lstrip()
+        if done:
+            raise ObservedRuntimeError("malformed_sse")
         if data == "[DONE]":
-            saw_event = True
+            done = True
             continue
         try:
             payload = json.loads(data)
         except (TypeError, ValueError):
             raise ObservedRuntimeError("malformed_sse")
-        saw_event = True
-        try:
-            piece = _extract_chat_text(payload)
-        except ObservedRuntimeError as exc:
-            if exc.code == "invalid_response":
-                # Some providers send a terminal chunk with no delta.
-                piece = ""
-            else:
-                raise
+        # OpenAI permits a trailing usage chunk with no choices. It cannot
+        # establish completion or hide a provider error.
+        if isinstance(payload, dict) and payload.get("error"):
+            raise ObservedRuntimeError("provider_error")
+        if isinstance(payload, dict) and payload.get("choices") == [] and isinstance(payload.get("usage"), dict):
+            continue
+        choice = _chat_choice(payload)
+        reason = choice.get("finish_reason")
+        if reason is not None and reason != "stop":
+            raise ObservedRuntimeError("invalid_response")
+        piece = _extract_chat_text(payload)
+        if stopped and (piece or reason is not None):
+            raise ObservedRuntimeError("malformed_sse")
+        stopped = stopped or reason == "stop"
         pieces.append(piece)
         total_chars += len(piece)
         if total_chars > MAX_OUTPUT_CHARS:
             raise ObservedRuntimeError("response_too_large")
-    if not saw_event:
+    if not stopped:
         raise ObservedRuntimeError("malformed_sse")
     result = "".join(pieces)
     if not result:
@@ -1063,6 +1080,10 @@ class OpenAICompatibleClient(object):
                 self._set_generation_effective("request_failed")
                 raise ObservedRuntimeError("invalid_json")
             try:
+                # A plausible final answer can still be a token-limited or
+                # filtered prefix. Only a normal terminal stop is scoreable.
+                if _chat_choice(payload).get("finish_reason") != "stop":
+                    raise ObservedRuntimeError("invalid_response")
                 text = _extract_chat_text(payload)
             except ObservedRuntimeError:
                 self._set_generation_effective("request_failed")

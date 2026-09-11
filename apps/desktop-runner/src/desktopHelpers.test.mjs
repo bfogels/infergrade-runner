@@ -502,6 +502,26 @@ test("observed upload presentation separates a completed check from an uploaded 
   }).message.includes("0% exact"), false);
 });
 
+test("observed failure recovery uses bounded hints without echoing server details", () => {
+  for (const [hint, expected] of [
+    ["load_model", "Load a model"],
+    ["serve_one_model", "endpoint reports multiple models"],
+    ["check_loaded_model", "intended model is still loaded"],
+    ["start_local_server", "Start your local server"],
+    ["check_server_load", "server timed out"],
+    ["check_chat_response", "complete chat answer"],
+  ]) {
+    const view = observedRuntimeUploadPresentation({ suite_status: "failed", recovery_hint: hint });
+    assert.equal(view.tone, "warning");
+    assert.ok(view.message.includes(expected));
+  }
+  for (const hint of ["/Users/private/token=secret", "toString", "__proto__", null]) {
+    const view = observedRuntimeUploadPresentation({ suite_status: "failed", recovery_hint: hint });
+    assert.match(view.message, /Return to Hub to review it and start again/);
+    assert.equal(view.message.includes("secret"), false);
+  }
+});
+
 test("observed handoff status survives asynchronous startup updates", () => {
   assert.equal(shouldPreserveObservedRuntimeStatus("obs_123", "Listening"), true);
   assert.equal(shouldPreserveObservedRuntimeStatus("obs_123", "Pairing needed"), true);
