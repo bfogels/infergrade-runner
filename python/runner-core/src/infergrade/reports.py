@@ -1,10 +1,23 @@
 """Human-readable Runner report artifacts."""
 
 import os
+import posixpath
 from typing import Any, Dict, List, Optional
 
-from infergrade.models import RunRequest
+from infergrade.models import CapabilityExecution, RunRequest
+from infergrade.reasoning_constraint_stress_v2_qualification import (
+    BENCHMARK_ID as REASONING_V2_QUALIFICATION_BENCHMARK_ID,
+    GENERATION_POLICY_ID as REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID,
+    POLICY_ENFORCEMENT_REQUESTED_UNVERIFIED,
+    POLICY_ENFORCEMENT_VERIFIED,
+)
 from infergrade.utils import ensure_dir
+
+
+_REASONING_V2_QUALIFICATION_DISPLAY_NAME = "Reasoning constraint stress v2 qualification"
+_REASONING_V2_QUALIFICATION_ENFORCEMENT_STATES = frozenset(
+    (POLICY_ENFORCEMENT_REQUESTED_UNVERIFIED, POLICY_ENFORCEMENT_VERIFIED)
+)
 
 
 def write_bundle_report(
@@ -13,10 +26,21 @@ def write_bundle_report(
     summary: Dict[str, Any],
     validation: Dict[str, Any],
     results: List[Dict[str, Any]],
+    capability_execution: Optional[CapabilityExecution] = None,
 ) -> str:
     """Write a standalone Markdown report for a completed bundle."""
     report_path = os.path.join(output_dir, "report.md")
-    _write_text(report_path, render_bundle_report(manifest, summary, validation, results))
+    _write_text(
+        report_path,
+        render_bundle_report(
+            manifest,
+            summary,
+            validation,
+            results,
+            capability_execution=capability_execution,
+            output_dir=output_dir,
+        ),
+    )
     return report_path
 
 
@@ -67,6 +91,8 @@ def render_bundle_report(
     summary: Dict[str, Any],
     validation: Dict[str, Any],
     results: List[Dict[str, Any]],
+    capability_execution: Optional[CapabilityExecution] = None,
+    output_dir: Optional[str] = None,
 ) -> str:
     """Render a completed bundle into a compact Markdown report."""
     representative = results[0] if results else {}
@@ -149,7 +175,278 @@ def render_bundle_report(
             "- Created at: %s" % _dash(manifest.get("created_at")),
         ]
     )
+    qualification_lines = _qualification_diagnostics_lines(output_dir, capability_execution)
+    if qualification_lines:
+        lines.extend([""] + qualification_lines)
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _qualification_diagnostics_lines(
+    output_dir: Optional[str],
+    execution: Optional[CapabilityExecution],
+) -> List[str]:
+    """Render the excluded reasoning qualification sidecar without changing the result contract."""
+    if not _qualification_execution_requested(execution):
+        return []
+
+    benchmark_results = getattr(execution, "benchmark_results", None)
+    result = (
+        benchmark_results.get(REASONING_V2_QUALIFICATION_BENCHMARK_ID)
+        if isinstance(benchmark_results, dict)
+        else None
+    )
+    links = _qualification_artifact_links(output_dir)
+    if not isinstance(result, dict) or not result:
+        return [
+            "## Qualification Diagnostics",
+            "",
+            "- Diagnostic result: unavailable; the qualification execution did not record a benchmark result.",
+            "- Strict result (diagnostic only): n/a",
+            "- Cases completed: n/a",
+            "- Format-invalid outputs: n/a",
+            "- Token-budget exhaustions: n/a",
+            "- Generation failures: n/a",
+            "- Generation policy: n/a",
+            "- Frozen policy fingerprint: `n/a`",
+            "- Enforcement truth: n/a",
+            "- Evidence role: diagnostic only; excluded from headline capability evidence and canonical promotion.",
+            "- Claim boundary: not headline capability evidence, a readiness signal, a recommendation, a release gate, or canonical promotion.",
+            "- Artifact links: %s" % links,
+        ]
+
+    metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+    task_performance = result.get("task_performance") if isinstance(result.get("task_performance"), dict) else {}
+    selection = result.get("selection") if isinstance(result.get("selection"), dict) else {}
+    protocol = result.get("protocol") if isinstance(result.get("protocol"), dict) else {}
+    total_cases = _consistent_valid_count(
+        result.get("total_cases"),
+        metrics.get("total_count"),
+        selection.get("case_count"),
+    )
+    completed_cases = _bounded_count(
+        _consistent_valid_count(result.get("completed_cases"), metrics.get("completed_case_count")),
+        total_cases,
+    )
+    completed_bound = completed_cases if completed_cases is not None else total_cases
+    strict_correct = _bounded_count(metrics.get("correct_count"), completed_bound)
+    format_invalid = _bounded_count(metrics.get("format_invalid_count"), completed_bound)
+    budget_exhaustions = _bounded_count(
+        _consistent_valid_count(
+            metrics.get("token_budget_exhaustion_count"),
+            task_performance.get("token_budget_exhaustion_count"),
+        ),
+        completed_bound,
+    )
+    generation_failures = _bounded_count(
+        _consistent_valid_count(
+            result.get("generation_failure_count"),
+            metrics.get("generation_failure_count"),
+        ),
+        total_cases,
+    )
+    unscored_failures = _bounded_count(
+        _consistent_valid_count(
+            result.get("unscored_generation_failure_count"),
+            metrics.get("unscored_generation_failure_count"),
+        ),
+        total_cases,
+    )
+    if (
+        generation_failures is not None
+        and unscored_failures is not None
+        and unscored_failures > generation_failures
+    ):
+        unscored_failures = None
+    diagnostic_candidates = _bounded_count(
+        metrics.get("diagnostic_semantic_candidate_count"), total_cases
+    )
+    diagnostic_correct = (
+        _bounded_count(metrics.get("diagnostic_semantic_correct_count"), diagnostic_candidates)
+        if diagnostic_candidates is not None
+        else None
+    )
+    diagnostic_unavailable = _bounded_count(
+        metrics.get("diagnostic_semantic_unavailable_count"), total_cases
+    )
+    failure_classes = metrics.get("diagnostic_failure_class_counts")
+    format_only = _bounded_count(
+        failure_classes.get("format_only") if isinstance(failure_classes, dict) else None,
+        total_cases,
+    )
+    substantive_wrong = _bounded_count(
+        failure_classes.get("substantive_wrong") if isinstance(failure_classes, dict) else None,
+        total_cases,
+    )
+    unavailable = _bounded_count(
+        failure_classes.get("unavailable") if isinstance(failure_classes, dict) else None,
+        total_cases,
+    )
+    failure_class_counts = (format_only, substantive_wrong, unavailable)
+    if (
+        total_cases is not None
+        and all(count is not None for count in failure_class_counts)
+        and sum(failure_class_counts) > total_cases
+    ):
+        format_only = substantive_wrong = unavailable = None
+    generation_policy = (
+        REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID
+        if result.get("generation_policy_id")
+        == REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID
+        or protocol.get("generation_policy_id")
+        == REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID
+        else None
+    )
+    fingerprint = _sha256_fingerprint(
+        result.get("generation_policy_fingerprint")
+        or protocol.get("generation_policy_fingerprint")
+    )
+
+    return [
+        "## Qualification Diagnostics",
+        "",
+        "- Benchmark: %s" % _REASONING_V2_QUALIFICATION_DISPLAY_NAME,
+        "- Strict result (diagnostic only): %s correct"
+        % _report_fraction(strict_correct, total_cases),
+        "- Cases completed: %s" % _report_fraction(completed_cases, total_cases),
+        "- Format-invalid outputs: %s" % _report_count(format_invalid),
+        "- Token-budget exhaustions: %s" % _report_count(budget_exhaustions),
+        "- Generation failures: %s (unscored: %s)"
+        % (_report_count(generation_failures), _report_count(unscored_failures)),
+        "- Diagnostic semantic candidates: %s (correct: %s; unavailable: %s)"
+        % (
+            _report_count(diagnostic_candidates),
+            _report_count(diagnostic_correct),
+            _report_count(diagnostic_unavailable),
+        ),
+        "- Diagnostic failure classes: format-only %s; substantive wrong %s; unavailable %s"
+        % (
+            _report_count(format_only),
+            _report_count(substantive_wrong),
+            _report_count(unavailable),
+        ),
+        "- Generation policy: %s" % (generation_policy or "n/a"),
+        "- Frozen policy fingerprint: `%s`" % (fingerprint or "n/a"),
+        "- Enforcement truth: %s"
+        % _format_policy_enforcement(result, metrics, protocol, total_cases),
+        "- Evidence role: diagnostic only; excluded from headline capability evidence and canonical promotion.",
+        "- Claim boundary: not headline capability evidence, a readiness signal, a recommendation, a release gate, or canonical promotion.",
+        "- Artifact links: %s" % links,
+    ]
+
+
+def _qualification_execution_requested(execution: Optional[CapabilityExecution]) -> bool:
+    if execution is None:
+        return False
+    check_ids = getattr(execution, "benchmark_check_ids", ())
+    if isinstance(check_ids, str):
+        check_ids = (check_ids,)
+    if REASONING_V2_QUALIFICATION_BENCHMARK_ID in check_ids:
+        return True
+    for attribute in ("benchmark_results", "artifacts"):
+        payload = getattr(execution, attribute, None)
+        if isinstance(payload, dict) and REASONING_V2_QUALIFICATION_BENCHMARK_ID in payload:
+            return True
+    return False
+
+
+def _consistent_valid_count(*payload_keys: Any) -> Optional[int]:
+    values = []
+    for value in payload_keys:
+        if value is None:
+            continue
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return None
+        values.append(value)
+    if not values or len(set(values)) != 1:
+        return None
+    return values[0]
+
+
+def _bounded_count(value: Any, total: Optional[int]) -> Optional[int]:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        return None
+    if total is not None and value > total:
+        return None
+    return value
+
+
+def _report_count(value: Optional[int]) -> str:
+    return "n/a" if value is None else str(value)
+
+
+def _report_fraction(numerator: Optional[int], denominator: Optional[int]) -> str:
+    if numerator is None or denominator is None:
+        return "n/a"
+    return "%s/%s" % (numerator, denominator)
+
+
+def _format_policy_enforcement(
+    result: Dict[str, Any],
+    metrics: Dict[str, Any],
+    protocol: Dict[str, Any],
+    total_cases: Optional[int],
+) -> str:
+    raw_states = metrics.get("policy_enforcement_states")
+    if raw_states is None:
+        raw_states = protocol.get("generation_policy_enforcement")
+    states: Dict[str, int] = {}
+    if isinstance(raw_states, dict):
+        for state, count in raw_states.items():
+            safe_state = _allowed_enforcement_state(state)
+            if safe_state is None:
+                return "n/a"
+            valid_count = _bounded_count(count, total_cases)
+            if valid_count is None:
+                return "n/a"
+            states[safe_state] = valid_count
+    elif isinstance(raw_states, list):
+        for state in raw_states:
+            safe_state = _allowed_enforcement_state(state)
+            if safe_state is None:
+                return "n/a"
+            states[safe_state] = states.get(safe_state, 0) + 1
+        if total_cases is not None and len(raw_states) > total_cases:
+            return "n/a"
+    else:
+        state = _allowed_enforcement_state(result.get("generation_policy_enforcement"))
+        if state:
+            return "%s (case count unavailable)" % state
+    if not states:
+        return "n/a"
+    if total_cases is not None and sum(states.values()) > total_cases:
+        return "n/a"
+    return "; ".join(
+        "%s (%s/%s cases)" % (state, count, _report_count(total_cases))
+        for state, count in sorted(states.items())[:8]
+    )
+
+
+def _allowed_enforcement_state(value: Any) -> Optional[str]:
+    if isinstance(value, str) and value in _REASONING_V2_QUALIFICATION_ENFORCEMENT_STATES:
+        return value
+    return None
+
+
+def _qualification_artifact_links(output_dir: Optional[str]) -> str:
+    relative_dir = posixpath.join(
+        "artifacts",
+        "capability",
+        REASONING_V2_QUALIFICATION_BENCHMARK_ID,
+    )
+    links = []
+    for filename in ("summary.json", "capability_run.json"):
+        relative_path = posixpath.join(relative_dir, filename)
+        if output_dir is None or os.path.isfile(os.path.join(output_dir, *relative_path.split("/"))):
+            links.append("[%s](%s)" % (filename, relative_path))
+    return "; ".join(links) if links else "n/a (qualification artifacts not materialized)"
+
+
+def _sha256_fingerprint(value: Any) -> Optional[str]:
+    if not isinstance(value, str) or len(value) != 64:
+        return None
+    if any(character not in "0123456789abcdefABCDEF" for character in value):
+        return None
+    return value
 
 
 def _deployment_rows(results: List[Dict[str, Any]]) -> List[str]:
