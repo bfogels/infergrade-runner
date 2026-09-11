@@ -245,10 +245,11 @@ export function observedRuntimeUploadPresentation(summary = {}) {
   const completedSuccessfully = summary.suite_status === "completed" && expected > 0 && completed === expected;
   if (completedSuccessfully) {
     const correct = metrics.correct_count;
-    const answers = Number.isInteger(correct) && correct >= 0 && correct <= completed
+    const hasCorrectCount = Number.isInteger(correct) && correct >= 0 && correct <= completed;
+    const answers = hasCorrectCount
       ? `${correct}/${completed} answers correct · ${count}`
       : `${count}${score}`;
-    const noCorrectAnswers = correct === 0 || accuracy === 0;
+    const noCorrectAnswers = hasCorrectCount ? correct === 0 : accuracy === 0;
     const answerGuidance = noCorrectAnswers
       ? " None of these answers passed the check. This small diagnostic does not establish the model's broader ability."
       : "";

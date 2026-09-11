@@ -526,6 +526,14 @@ test("observed completion distinguishes executed checks from correct answers", (
   assert.equal(legacy.tone, "warning");
   assert.match(legacy.message, /5\/5 completed · 0% exact/);
   assert.equal(legacy.hubLabel, "Review observed result");
+  for (const [correct, accuracy] of [[5, 0], [0, 1]]) {
+    const conflicting = observedRuntimeUploadPresentation({
+      suite_status: "completed",
+      metrics: { completed_case_count: 5, expected_case_count: 5, correct_count: correct, exact_signed_integer_accuracy: accuracy },
+    });
+    assert.equal(conflicting.tone, correct === 0 ? "warning" : "good");
+    assert.equal(conflicting.message.includes("None of these answers passed"), correct === 0);
+  }
 });
 
 test("observed failure recovery uses bounded hints without echoing server details", () => {
