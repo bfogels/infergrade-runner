@@ -1,4 +1,5 @@
 import json
+import io
 import os
 import socket
 import sys
@@ -7,6 +8,8 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
+from urllib import request as urllib_request
+from urllib.response import addinfourl
 
 sys.path.insert(0, "python/runner-core/src")
 
@@ -23,6 +26,7 @@ from infergrade.observed_runtime import (
     parse_local_endpoint,
     provider_profiles,
     safe_receipt_model_label,
+    _open_no_redirect,
 )
 
 
@@ -133,6 +137,85 @@ class _ObservedRuntimeServer(object):
 
 
 class ObservedRuntimeTests(unittest.TestCase):
+    def test_http_and_https_openers_never_retarget_or_tunnel_through_a_proxy(self):
+        for scheme, handler in (("http", urllib_request.HTTPHandler), ("https", urllib_request.HTTPSHandler)):
+            with self.subTest(scheme=scheme):
+                url = "%s://127.0.0.1:19499/v1/chat/completions" % scheme
+                request = urllib_request.Request(url, data=b"private prompt", headers={"Authorization": "Bearer local-key"})
+                response = addinfourl(io.BytesIO(b"{}"), {}, url, 200)
+                response.msg = "OK"
+                with mock.patch("urllib.request.getproxies", return_value={scheme: "http://proxy.invalid:3128"}) as proxies, mock.patch(
+                    "urllib.request.proxy_bypass", return_value=False,
+                ), mock.patch.object(handler, scheme + "_open", return_value=response) as opened:
+                    with _open_no_redirect(request, parse_local_endpoint(url.rsplit("/v1/", 1)[0]), 1):
+                        pass
+                sent = opened.call_args[0][0]
+                self.assertEqual(sent.host, "127.0.0.1:19499")
+                self.assertEqual(sent.selector, "/v1/chat/completions")
+                self.assertIsNone(sent._tunnel_host)
+                proxies.assert_not_called()
+
+    def test_loopback_probe_and_generation_ignore_system_and_environment_proxies(self):
+        with _ObservedRuntimeServer() as server, mock.patch(
+            "urllib.request.getproxies",
+            return_value={"http": "http://127.0.0.1:1", "https": "http://127.0.0.1:1"},
+        ), mock.patch("urllib.request.proxy_bypass", return_value=False):
+            client = OpenAICompatibleClient(server.endpoint, api_key="private-local-key")
+            client.probe()
+            answer = client.complete("qwen3.5:9b", "local prompt", 32)
+
+        self.assertEqual(answer, "fixture answer")
+        self.assertEqual([row[1] for row in _ObservedRuntimeHandler.requests], [
+            "/v1/models", "/v1/chat/completions",
+        ])
+        self.assertEqual(_ObservedRuntimeHandler.requests[-1][2]["Authorization"], "Bearer private-local-key")
+
+    def test_json_requires_a_normal_terminal_stop_before_returning_answer_text(self):
+        for reason in ("length", "content_filter", "tool_calls", "function_call", "unknown", None, 0, {}):
+            with self.subTest(reason=reason):
+                payload = json.loads(_fixture("chat_response.json"))
+                payload["choices"][0]["message"]["content"] = "FINAL_ANSWER: 7"
+                payload["choices"][0]["finish_reason"] = reason
+                client = OpenAICompatibleClient("http://127.0.0.1:12345")
+                with mock.patch.object(client, "_request", return_value=(json.dumps(payload).encode(), "application/json")):
+                    with self.assertRaises(ObservedRuntimeError) as caught:
+                        client.complete("model", "protocol test", 32)
+                self.assertEqual(caught.exception.code, "invalid_response")
+                self.assertEqual(client.last_generation_profile["thinking_control"]["effective"], "request_failed")
+        del payload["choices"][0]["finish_reason"]
+        with mock.patch.object(client, "_request", return_value=(json.dumps(payload).encode(), "application/json")):
+            with self.assertRaises(ObservedRuntimeError):
+                client.complete("model", "protocol test", 32)
+
+    def test_sse_rejects_truncation_and_post_terminal_output(self):
+        content = 'data: {"choices":[{"index":0,"delta":{"content":"FINAL_ANSWER: 7"}}]}\n\n'
+        stop = 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+        done = 'data: [DONE]\n\n'
+        for body, code in (
+            (content, "malformed_sse"),
+            (content + done, "malformed_sse"),
+            (content + stop.replace('"stop"', '"length"') + done, "invalid_response"),
+            (content + stop + content, "malformed_sse"),
+            (content + stop + done + content, "malformed_sse"),
+            (content + stop + done + done, "malformed_sse"),
+            (content + 'data: {"choices":[42]}\n' + stop, "invalid_response"),
+        ):
+            with self.subTest(body=body):
+                client = OpenAICompatibleClient("http://127.0.0.1:12345")
+                with mock.patch.object(client, "_request", return_value=(body.encode(), "text/event-stream")):
+                    with self.assertRaises(ObservedRuntimeError) as caught:
+                        client.complete("model", "protocol test", 32, stream=True)
+                self.assertEqual(caught.exception.code, code)
+
+    def test_sse_allows_normal_stop_with_optional_done_and_trailing_usage(self):
+        body = _fixture("chat_stream.sse").split("data: [DONE]")[0]
+        usage = 'data: {"choices":[],"usage":{"completion_tokens":3}}\n\n'
+        for ending in ("", "data: [DONE]\n", usage, usage + "data: [DONE]\n"):
+            with self.subTest(ending=ending):
+                client = OpenAICompatibleClient("http://127.0.0.1:12345")
+                with mock.patch.object(client, "_request", return_value=((body + ending).encode(), "text/event-stream")):
+                    self.assertEqual(client.complete("model", "protocol test", 32, stream=True), "fixture stream answer")
+
     def test_probe_and_generation_timeouts_are_separate_and_bounded(self):
         client = OpenAICompatibleClient(
             "http://127.0.0.1:12345",

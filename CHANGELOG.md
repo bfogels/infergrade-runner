@@ -7,6 +7,20 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.59 (contract 0.3.38)
+
+- Keeps observed localhost inference off environment and system HTTP/HTTPS
+  proxies, including requests carrying local server credentials.
+- Rejects truncated answers, ambiguous choice payloads, and invalid stream
+  endings before they can count as completed observed benchmark cases.
+- Gives Desktop users specific recovery guidance for unloaded or ambiguous
+  models, unavailable servers, timeouts, and incomplete chat responses without
+  exposing raw server output or private model paths.
+- Reports correct answers separately from completed cases. A zero-correct
+  diagnostic prompts review without implying broad model inability.
+- Validated with real local Qwen observations and a private controlled return;
+  these changes do not qualify broader model capability or new hardware support.
+
 ## 0.3.58 (contract 0.3.38)
 
 - Evaluates an already-running localhost OpenAI-compatible model through a

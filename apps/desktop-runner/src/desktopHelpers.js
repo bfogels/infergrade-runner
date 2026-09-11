@@ -244,15 +244,35 @@ export function observedRuntimeUploadPresentation(summary = {}) {
   const count = expected ? `${completed}/${expected} completed` : `${completed} completed`;
   const completedSuccessfully = summary.suite_status === "completed" && expected > 0 && completed === expected;
   if (completedSuccessfully) {
+    const correct = metrics.correct_count;
+    const hasCorrectCount = Number.isInteger(correct) && correct >= 0 && correct <= completed;
+    const answers = hasCorrectCount
+      ? `${correct}/${completed} answers correct · ${count}`
+      : `${count}${score}`;
+    const noCorrectAnswers = hasCorrectCount ? correct === 0 : accuracy === 0;
+    const answerGuidance = noCorrectAnswers
+      ? " None of these answers passed the check. This small diagnostic does not establish the model's broader ability."
+      : "";
     return {
-      message: `Local check uploaded · ${count}${score}. Return to Hub to review the result and available next steps. This does not yet verify the exact model artifact or runtime.`,
-      status: "Local check uploaded",
-      tone: "good",
-      hubLabel: "Open observed result",
+      message: `Local check uploaded · ${answers}.${answerGuidance} Return to Hub to review the result and available next steps. This does not yet verify the exact model artifact or runtime.`,
+      status: noCorrectAnswers ? "Local check completed — review answers" : "Local check uploaded",
+      tone: noCorrectAnswers ? "warning" : "good",
+      hubLabel: noCorrectAnswers ? "Review observed result" : "Open observed result",
     };
   }
+  const recoveryMessages = {
+    load_model: "Load a model in your local server, then start a new check from Hub.",
+    serve_one_model: "This endpoint reports multiple models. Use an endpoint serving only the model you want to evaluate, then start a new check from Hub.",
+    check_loaded_model: "Check that the intended model is still loaded in your local server, then start a new check from Hub.",
+    start_local_server: "Start your local server and confirm its OpenAI-compatible endpoint, then start a new check from Hub.",
+    check_server_load: "The local server timed out. Wait for other requests to finish or reduce its load, then start a new check from Hub.",
+    check_chat_response: "The server did not return a complete chat answer. Check its output limits and OpenAI-compatible chat support, then start a new check from Hub.",
+  };
+  const recovery = Object.hasOwn(recoveryMessages, summary.recovery_hint)
+    ? recoveryMessages[summary.recovery_hint]
+    : "Return to Hub to review it and start again.";
   return {
-    message: `Local result uploaded · ${count}${score}. The short check did not complete successfully. Return to Hub to review it and start again.`,
+    message: `Local result uploaded · ${count}${score}. The short check did not complete successfully. ${recovery}`,
     status: "Local result needs review",
     tone: "warning",
     hubLabel: "Review observed result",
