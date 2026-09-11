@@ -24,6 +24,10 @@ Desktop uses bounded recovery hints from that failure receipt. It distinguishes
 an endpoint with no model from one with multiple models, and offers local-server,
 timeout, and incomplete-chat guidance without exposing model IDs or server output.
 
+A completed check reports how many answers were correct separately from how
+many cases ran. Zero correct answers prompts review, not a green quality signal;
+the small diagnostic cannot establish the model's broader ability.
+
 Endpoint discovery uses a short bounded timeout. Generation has a separate
 bounded timeout (300 seconds by default) because local CPU and memory-constrained
 inference can legitimately take much longer than a health probe.
