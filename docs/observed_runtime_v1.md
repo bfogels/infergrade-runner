@@ -11,6 +11,15 @@ endpoints must use `http` or `https` and resolve to `localhost`, `127.0.0.0/8`,
 or `::1`; redirects, userinfo, queries, fragments, and non-loopback hosts are
 rejected. Requests have bounded timeouts and response sizes.
 
+Loopback requests bypass environment and system HTTP/HTTPS proxies so local
+prompts and credentials cannot be forwarded by proxy configuration. A generation
+must report `finish_reason: stop` before its text is returned for scoring. Token
+limits, content filters, tool-call completions, and missing/unknown finish reasons
+are `invalid_response` failures, even if the response looks like a valid answer.
+Streaming completions also require a normal stop; a disconnected stream or
+content after a terminal stop/`[DONE]` is rejected. A usage-only chunk may follow
+the stop, and `[DONE]` is optional when the normal stop is already present.
+
 The receipt records only the network scope, the provider compatibility hint
 used for the probe, and receipt-safe labels from the model IDs reported by the
 endpoint. Unsafe IDs such as absolute model paths are withheld and exposed only

@@ -251,8 +251,19 @@ export function observedRuntimeUploadPresentation(summary = {}) {
       hubLabel: "Open observed result",
     };
   }
+  const recoveryMessages = {
+    load_model: "Load a model in your local server, then start a new check from Hub.",
+    serve_one_model: "This endpoint reports multiple models. Use an endpoint serving only the model you want to evaluate, then start a new check from Hub.",
+    check_loaded_model: "Check that the intended model is still loaded in your local server, then start a new check from Hub.",
+    start_local_server: "Start your local server and confirm its OpenAI-compatible endpoint, then start a new check from Hub.",
+    check_server_load: "The local server timed out. Wait for other requests to finish or reduce its load, then start a new check from Hub.",
+    check_chat_response: "The server did not return a complete chat answer. Check its output limits and OpenAI-compatible chat support, then start a new check from Hub.",
+  };
+  const recovery = Object.hasOwn(recoveryMessages, summary.recovery_hint)
+    ? recoveryMessages[summary.recovery_hint]
+    : "Return to Hub to review it and start again.";
   return {
-    message: `Local result uploaded · ${count}${score}. The short check did not complete successfully. Return to Hub to review it and start again.`,
+    message: `Local result uploaded · ${count}${score}. The short check did not complete successfully. ${recovery}`,
     status: "Local result needs review",
     tone: "warning",
     hubLabel: "Review observed result",
