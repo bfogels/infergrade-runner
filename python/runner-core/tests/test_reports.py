@@ -40,9 +40,13 @@ class ReportTests(unittest.TestCase):
                 "completed_cases": 5,
                 "generation_failure_count": 0,
                 "unscored_generation_failure_count": 0,
-                "generation_policy_id": "reasoning_constraint_stress_qualification_thinking_v1",
-                "generation_policy_fingerprint": "a" * 64,
-                "metrics": {
+                    "generation_policy_id": "reasoning_constraint_stress_qualification_thinking_v1",
+                    "generation_policy_fingerprint": "a" * 64,
+                    "protocol": {
+                        "generation_policy_id": "reasoning_constraint_stress_qualification_thinking_v1",
+                        "generation_policy_fingerprint": "a" * 64,
+                    },
+                    "metrics": {
                     "correct_count": 2,
                     "total_count": 5,
                     "format_invalid_count": 3,
@@ -120,6 +124,146 @@ class ReportTests(unittest.TestCase):
         self.assertIn("Token-budget exhaustions: n/a", report)
         self.assertIn("Generation failures: n/a", report)
         self.assertNotIn("0/0", report)
+
+    def test_partial_qualification_diagnostics_separate_expected_and_scored_denominators(self):
+        report = render_bundle_report(
+            {},
+            {},
+            {"valid": True},
+            [{}],
+            capability_execution=self._qualification_execution(
+                {
+                    "benchmark_id": QUALIFICATION_BENCHMARK_ID,
+                    "total_cases": 5,
+                    "completed_cases": 3,
+                    "selection": {"case_count": 5},
+                    "metrics": {
+                        "correct_count": 2,
+                        "total_count": 3,
+                        "expected_case_count": 5,
+                        "completed_case_count": 3,
+                        "format_invalid_count": 1,
+                        "token_budget_exhaustion_count": 1,
+                    },
+                }
+            ),
+            output_dir=self.tempdir,
+        )
+
+        self.assertIn("Strict result (diagnostic only): 2/3 correct", report)
+        self.assertIn("Cases completed: 3/5", report)
+        self.assertIn("Format-invalid outputs: 1", report)
+        self.assertIn("Token-budget exhaustions: 1", report)
+
+    def test_zero_completed_cases_keep_expected_completion_denominator(self):
+        report = render_bundle_report(
+            {},
+            {},
+            {"valid": True},
+            [{}],
+            capability_execution=self._qualification_execution(
+                {
+                    "benchmark_id": QUALIFICATION_BENCHMARK_ID,
+                    "total_cases": 5,
+                    "completed_cases": 0,
+                    "selection": {"case_count": 5},
+                    "metrics": {
+                        "correct_count": 0,
+                        "total_count": 0,
+                        "expected_case_count": 5,
+                        "completed_case_count": 0,
+                        "format_invalid_count": 0,
+                        "token_budget_exhaustion_count": 0,
+                    },
+                }
+            ),
+            output_dir=self.tempdir,
+        )
+
+        self.assertIn("Strict result (diagnostic only): 0/0 correct", report)
+        self.assertIn("Cases completed: 0/5", report)
+
+        empty_report = render_bundle_report(
+            {},
+            {},
+            {"valid": True},
+            [{}],
+            capability_execution=self._qualification_execution(
+                {
+                    "benchmark_id": QUALIFICATION_BENCHMARK_ID,
+                    "total_cases": 0,
+                    "completed_cases": 0,
+                    "selection": {"case_count": 0},
+                    "metrics": {
+                        "correct_count": 0,
+                        "total_count": 0,
+                        "expected_case_count": 0,
+                        "completed_case_count": 0,
+                    },
+                }
+            ),
+            output_dir=self.tempdir,
+        )
+        self.assertIn("Strict result (diagnostic only): 0/0 correct", empty_report)
+        self.assertIn("Cases completed: 0/0", empty_report)
+
+    def test_contradictory_present_denominators_fail_closed(self):
+        report = render_bundle_report(
+            {},
+            {},
+            {"valid": True},
+            [{}],
+            capability_execution=self._qualification_execution(
+                {
+                    "benchmark_id": QUALIFICATION_BENCHMARK_ID,
+                    "total_cases": 5,
+                    "completed_cases": 9,
+                    "selection": {"case_count": 5},
+                    "metrics": {
+                        "correct_count": 2,
+                        "total_count": 5,
+                        "expected_case_count": 5,
+                        "completed_case_count": 5,
+                    },
+                }
+            ),
+            output_dir=self.tempdir,
+        )
+
+        self.assertIn("Strict result (diagnostic only): n/a correct", report)
+        self.assertIn("Cases completed: n/a", report)
+
+    def test_contradictory_policy_metadata_fails_closed(self):
+        policy_id = "reasoning_constraint_stress_qualification_thinking_v1"
+        report = render_bundle_report(
+            {},
+            {},
+            {"valid": True},
+            [{}],
+            capability_execution=self._qualification_execution(
+                {
+                    "benchmark_id": QUALIFICATION_BENCHMARK_ID,
+                    "total_cases": 1,
+                    "completed_cases": 1,
+                    "metrics": {
+                        "correct_count": 1,
+                        "total_count": 1,
+                        "expected_case_count": 1,
+                        "completed_case_count": 1,
+                    },
+                    "generation_policy_id": policy_id,
+                    "generation_policy_fingerprint": "a" * 64,
+                    "protocol": {
+                        "generation_policy_id": "different_policy",
+                        "generation_policy_fingerprint": "b" * 64,
+                    },
+                }
+            ),
+            output_dir=self.tempdir,
+        )
+
+        self.assertIn("- Generation policy: n/a", report)
+        self.assertIn("- Frozen policy fingerprint: `n/a`", report)
 
     def test_invalid_qualification_diagnostic_fields_render_as_unknown(self):
         report = render_bundle_report(

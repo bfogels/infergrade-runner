@@ -218,38 +218,41 @@ def _qualification_diagnostics_lines(
     task_performance = result.get("task_performance") if isinstance(result.get("task_performance"), dict) else {}
     selection = result.get("selection") if isinstance(result.get("selection"), dict) else {}
     protocol = result.get("protocol") if isinstance(result.get("protocol"), dict) else {}
-    total_cases = _consistent_valid_count(
+    expected_cases = _consistent_valid_count(
         result.get("total_cases"),
-        metrics.get("total_count"),
+        metrics.get("expected_case_count"),
         selection.get("case_count"),
     )
-    completed_cases = _bounded_count(
-        _consistent_valid_count(result.get("completed_cases"), metrics.get("completed_case_count")),
-        total_cases,
+    scored_cases = _bounded_count(
+        _consistent_valid_count(
+            result.get("completed_cases"),
+            metrics.get("total_count"),
+            metrics.get("completed_case_count"),
+        ),
+        expected_cases,
     )
-    completed_bound = completed_cases if completed_cases is not None else total_cases
-    strict_correct = _bounded_count(metrics.get("correct_count"), completed_bound)
-    format_invalid = _bounded_count(metrics.get("format_invalid_count"), completed_bound)
+    strict_correct = _bounded_count(metrics.get("correct_count"), scored_cases)
+    format_invalid = _bounded_count(metrics.get("format_invalid_count"), scored_cases)
     budget_exhaustions = _bounded_count(
         _consistent_valid_count(
             metrics.get("token_budget_exhaustion_count"),
             task_performance.get("token_budget_exhaustion_count"),
         ),
-        completed_bound,
+        scored_cases,
     )
     generation_failures = _bounded_count(
         _consistent_valid_count(
             result.get("generation_failure_count"),
             metrics.get("generation_failure_count"),
         ),
-        total_cases,
+        expected_cases,
     )
     unscored_failures = _bounded_count(
         _consistent_valid_count(
             result.get("unscored_generation_failure_count"),
             metrics.get("unscored_generation_failure_count"),
         ),
-        total_cases,
+        expected_cases,
     )
     if (
         generation_failures is not None
@@ -258,7 +261,7 @@ def _qualification_diagnostics_lines(
     ):
         unscored_failures = None
     diagnostic_candidates = _bounded_count(
-        metrics.get("diagnostic_semantic_candidate_count"), total_cases
+        metrics.get("diagnostic_semantic_candidate_count"), expected_cases
     )
     diagnostic_correct = (
         _bounded_count(metrics.get("diagnostic_semantic_correct_count"), diagnostic_candidates)
@@ -266,48 +269,38 @@ def _qualification_diagnostics_lines(
         else None
     )
     diagnostic_unavailable = _bounded_count(
-        metrics.get("diagnostic_semantic_unavailable_count"), total_cases
+        metrics.get("diagnostic_semantic_unavailable_count"), expected_cases
     )
     failure_classes = metrics.get("diagnostic_failure_class_counts")
     format_only = _bounded_count(
         failure_classes.get("format_only") if isinstance(failure_classes, dict) else None,
-        total_cases,
+        expected_cases,
     )
     substantive_wrong = _bounded_count(
         failure_classes.get("substantive_wrong") if isinstance(failure_classes, dict) else None,
-        total_cases,
+        expected_cases,
     )
     unavailable = _bounded_count(
         failure_classes.get("unavailable") if isinstance(failure_classes, dict) else None,
-        total_cases,
+        expected_cases,
     )
     failure_class_counts = (format_only, substantive_wrong, unavailable)
     if (
-        total_cases is not None
+        expected_cases is not None
         and all(count is not None for count in failure_class_counts)
-        and sum(failure_class_counts) > total_cases
+        and sum(failure_class_counts) > expected_cases
     ):
         format_only = substantive_wrong = unavailable = None
-    generation_policy = (
-        REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID
-        if result.get("generation_policy_id")
-        == REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID
-        or protocol.get("generation_policy_id")
-        == REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID
-        else None
-    )
-    fingerprint = _sha256_fingerprint(
-        result.get("generation_policy_fingerprint")
-        or protocol.get("generation_policy_fingerprint")
-    )
+    generation_policy = _consistent_qualification_policy_id(result, protocol)
+    fingerprint = _consistent_fingerprint(result, protocol)
 
     return [
         "## Qualification Diagnostics",
         "",
         "- Benchmark: %s" % _REASONING_V2_QUALIFICATION_DISPLAY_NAME,
         "- Strict result (diagnostic only): %s correct"
-        % _report_fraction(strict_correct, total_cases),
-        "- Cases completed: %s" % _report_fraction(completed_cases, total_cases),
+        % _report_fraction(strict_correct, scored_cases),
+        "- Cases completed: %s" % _report_fraction(scored_cases, expected_cases),
         "- Format-invalid outputs: %s" % _report_count(format_invalid),
         "- Token-budget exhaustions: %s" % _report_count(budget_exhaustions),
         "- Generation failures: %s (unscored: %s)"
@@ -327,7 +320,7 @@ def _qualification_diagnostics_lines(
         "- Generation policy: %s" % (generation_policy or "n/a"),
         "- Frozen policy fingerprint: `%s`" % (fingerprint or "n/a"),
         "- Enforcement truth: %s"
-        % _format_policy_enforcement(result, metrics, protocol, total_cases),
+        % _format_policy_enforcement(result, metrics, protocol, expected_cases),
         "- Evidence role: diagnostic only; excluded from headline capability evidence and canonical promotion.",
         "- Claim boundary: not headline capability evidence, a readiness signal, a recommendation, a release gate, or canonical promotion.",
         "- Artifact links: %s" % links,
@@ -362,10 +355,63 @@ def _consistent_valid_count(*payload_keys: Any) -> Optional[int]:
     return values[0]
 
 
+def _consistent_qualification_policy_id(
+    result: Dict[str, Any],
+    protocol: Dict[str, Any],
+) -> Optional[str]:
+    return _consistent_present_value(
+        (result, protocol),
+        "generation_policy_id",
+        lambda value: (
+            REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID
+            if isinstance(value, str)
+            and value == REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID
+            else None
+        ),
+    )
+
+
+def _consistent_fingerprint(
+    result: Dict[str, Any],
+    protocol: Dict[str, Any],
+) -> Optional[str]:
+    return _consistent_present_value(
+        (result, protocol),
+        "generation_policy_fingerprint",
+        _sha256_fingerprint,
+        compare=lambda value: value.lower(),
+    )
+
+
+def _consistent_present_value(
+    payloads: Any,
+    key: str,
+    validator: Any,
+    compare: Any = None,
+) -> Optional[str]:
+    values = []
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        value = payload.get(key)
+        if value is None:
+            continue
+        validated = validator(value)
+        if validated is None:
+            return None
+        values.append(validated)
+    if not values:
+        return None
+    compare = compare or (lambda value: value)
+    if len({compare(value) for value in values}) != 1:
+        return None
+    return values[0]
+
+
 def _bounded_count(value: Any, total: Optional[int]) -> Optional[int]:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         return None
-    if total is not None and value > total:
+    if total is None or value > total:
         return None
     return value
 
