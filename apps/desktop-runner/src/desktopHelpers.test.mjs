@@ -502,6 +502,32 @@ test("observed upload presentation separates a completed check from an uploaded 
   }).message.includes("0% exact"), false);
 });
 
+test("observed completion distinguishes executed checks from correct answers", () => {
+  for (const correct of [0, 1, 4, 5]) {
+    const view = observedRuntimeUploadPresentation({
+      suite_status: "completed",
+      metrics: {
+        completed_case_count: 5,
+        expected_case_count: 5,
+        correct_count: correct,
+        exact_signed_integer_accuracy: correct / 5,
+      },
+    });
+    assert.match(view.message, new RegExp(`${correct}/5 answers correct · 5/5 completed`));
+    assert.equal(view.tone, correct === 0 ? "warning" : "good");
+    assert.equal(view.message.includes("does not establish the model's broader ability"), correct === 0);
+    assert.doesNotMatch(view.message, /did not complete successfully/);
+    assert.equal(shouldPreserveObservedRuntimeStatus("obs_complete", view.status), false);
+  }
+  const legacy = observedRuntimeUploadPresentation({
+    suite_status: "completed",
+    metrics: { completed_case_count: 5, expected_case_count: 5, exact_signed_integer_accuracy: 0 },
+  });
+  assert.equal(legacy.tone, "warning");
+  assert.match(legacy.message, /5\/5 completed · 0% exact/);
+  assert.equal(legacy.hubLabel, "Review observed result");
+});
+
 test("observed failure recovery uses bounded hints without echoing server details", () => {
   for (const [hint, expected] of [
     ["load_model", "Load a model"],

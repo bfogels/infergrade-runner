@@ -244,11 +244,19 @@ export function observedRuntimeUploadPresentation(summary = {}) {
   const count = expected ? `${completed}/${expected} completed` : `${completed} completed`;
   const completedSuccessfully = summary.suite_status === "completed" && expected > 0 && completed === expected;
   if (completedSuccessfully) {
+    const correct = metrics.correct_count;
+    const answers = Number.isInteger(correct) && correct >= 0 && correct <= completed
+      ? `${correct}/${completed} answers correct · ${count}`
+      : `${count}${score}`;
+    const noCorrectAnswers = correct === 0 || accuracy === 0;
+    const answerGuidance = noCorrectAnswers
+      ? " None of these answers passed the check. This small diagnostic does not establish the model's broader ability."
+      : "";
     return {
-      message: `Local check uploaded · ${count}${score}. Return to Hub to review the result and available next steps. This does not yet verify the exact model artifact or runtime.`,
-      status: "Local check uploaded",
-      tone: "good",
-      hubLabel: "Open observed result",
+      message: `Local check uploaded · ${answers}.${answerGuidance} Return to Hub to review the result and available next steps. This does not yet verify the exact model artifact or runtime.`,
+      status: noCorrectAnswers ? "Local check completed — review answers" : "Local check uploaded",
+      tone: noCorrectAnswers ? "warning" : "good",
+      hubLabel: noCorrectAnswers ? "Review observed result" : "Open observed result",
     };
   }
   const recoveryMessages = {
