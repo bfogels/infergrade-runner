@@ -1064,7 +1064,14 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         manifest["status"]["validation_status"] = "valid" if final_validation.valid else "invalid"
         manifest["files"]["report"] = "report.md"
         write_json(os.path.join(output_dir, "manifest.json"), manifest)
-        report_path = write_bundle_report(output_dir, manifest, summary, final_validation.to_dict(), result_records)
+        report_path = write_bundle_report(
+            output_dir,
+            manifest,
+            summary,
+            final_validation.to_dict(),
+            result_records,
+            capability_execution=capability_execution,
+        )
         mark_stage_completed(output_dir, progress, current_stage, metadata={"result_count": len(result_records)})
         mark_completed(output_dir, progress, len(result_records))
         remove_capability_case_checkpoints(output_dir)

@@ -45,6 +45,10 @@ class RunnerTests(unittest.TestCase):
             "reasoning_constraint_stress_v2_qualification_v1",
             record["capability"]["benchmark_selection"]["benchmark_check_ids"],
         )
+        with open(os.path.join(result["output_dir"], "report.md"), "r", encoding="utf-8") as handle:
+            report = handle.read()
+        self.assertIn("## Qualification Diagnostics", report)
+        self.assertIn("Evidence role: diagnostic only", report)
 
     def test_native_runtime_provenance_bounds_verified_tier(self):
         request = RunRequest(
