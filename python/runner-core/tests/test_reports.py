@@ -180,7 +180,8 @@ class ReportTests(unittest.TestCase):
             output_dir=self.tempdir,
         )
 
-        self.assertIn("Strict result (diagnostic only): 0/0 correct", report)
+        self.assertIn("Strict result (diagnostic only): n/a", report)
+        self.assertNotIn("0/0", report)
         self.assertIn("Cases completed: 0/5", report)
 
         empty_report = render_bundle_report(
@@ -204,8 +205,9 @@ class ReportTests(unittest.TestCase):
             ),
             output_dir=self.tempdir,
         )
-        self.assertIn("Strict result (diagnostic only): 0/0 correct", empty_report)
-        self.assertIn("Cases completed: 0/0", empty_report)
+        self.assertIn("Strict result (diagnostic only): n/a", empty_report)
+        self.assertIn("Cases completed: n/a", empty_report)
+        self.assertNotIn("0/0", empty_report)
 
     def test_contradictory_present_denominators_fail_closed(self):
         report = render_bundle_report(

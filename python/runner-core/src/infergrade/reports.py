@@ -421,7 +421,7 @@ def _report_count(value: Optional[int]) -> str:
 
 
 def _report_fraction(numerator: Optional[int], denominator: Optional[int]) -> str:
-    if numerator is None or denominator is None:
+    if numerator is None or denominator is None or denominator <= 0:
         return "n/a"
     return "%s/%s" % (numerator, denominator)
 
