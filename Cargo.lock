@@ -1954,7 +1954,7 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "sha2 0.10.9",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3093,7 +3093,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
