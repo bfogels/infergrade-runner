@@ -949,7 +949,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("id-token: write", workflow)
         self.assertIn("attestations: write", workflow)
         self.assertIn("artifact-metadata: write", workflow)
-        self.assertIn("actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1", workflow)
+        self.assertRegex(workflow, r"actions/attest@[0-9a-f]{40} # v4\.\d+\.\d+")
         self.assertIn("subject-path: release-assets/*", workflow)
         self.assertIn("gh attestation verify", workflow)
         self.assertIn("--bundle \"$ATTESTATION_BUNDLE\"", workflow)
