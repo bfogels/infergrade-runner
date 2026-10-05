@@ -245,3 +245,38 @@ because a full-display screenshot may contain unrelated private UI.
 - no auto-update keys in the repo
 - no claim that hosted package smoke proves real Windows/NVIDIA or Linux GPU execution
 - no claim that managed runtime downloads are independently signed until a signature verification lane is implemented
+
+## Azure-signed Windows release lane
+
+The protected Desktop Runner Release workflow uses GitHub OIDC to log in to
+Azure Artifact Signing. Its Windows job uses environment `release`, restricted
+to main, and receives `id-token: write` only at that job. The federated subject
+uses immutable repository IDs:
+`repo:bfogels@68251468/infergrade-runner@1197298114:environment:release`.
+
+Configure these environment variables (identifiers, not client secrets):
+`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
+`AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE`, and
+`AZURE_SIGNING_PUBLISHER`. The Entra application needs Artifact Signing
+Certificate Profile Signer on the certificate profile or its signing account.
+Our Public Trust profile uses the verified individual publisher Brian Fogelson.
+No client secret or exportable signing key is used.
+
+A small generated executable proves OIDC, profile access, trusted signature,
+timestamp, and publisher before the Rust build. The unsigned and wrong-publisher
+negative checks must reject their probes. The sidecar is signed before bundling;
+Tauri's custom sign command signs the desktop executable, NSIS uninstaller, and
+MSI/NSIS installers. Install smoke requires valid, timestamped signatures from
+the expected publisher on both installers and their installed app and sidecar.
+Signing failures stop publication. SHA256SUMS is generated after signing.
+
+Dispatch with `validate_windows_only=true` to build/test signed Windows workflow
+artifacts without running macOS/Linux or publishing/editing any release. This
+mode remains main-only and version-matched, but skips the immutable tag equality
+check so CI-only changes can be validated against an already released version.
+Normal publication still requires the exact immutable tag, all platform checks,
+checksums and provenance, and publishes `InferGrade.Runner.Windows-x64.exe` and
+`InferGrade.Runner.Windows-x64.msi` automatically. Unsigned candidate PR smoke
+remains separate; public releases do not fall back to unsigned installers.
+Windows updater feeds remain unchanged in this slice. Public Trust signing does
+not guarantee SmartScreen reputation or establish physical NVIDIA execution.
