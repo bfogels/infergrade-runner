@@ -11,8 +11,8 @@ on:
         description: "Short release notes shown in the updater"
         default: "InferGrade Runner desktop update."
         required: false
-      publish_unsigned_windows_preview:
-        description: "Publish clearly labeled unsigned Windows technical-preview installers"
+      validate_windows_only:
+        description: "Validate Windows signing and packages without publishing a release"
         type: boolean
         default: false
         required: false
@@ -73,6 +73,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Verify immutable release tag
+        if: ${{ !inputs.validate_windows_only }}
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.metadata.outputs.release-tag }}
@@ -97,6 +98,7 @@ jobs:
 
   macos-preview:
     name: Build signed macOS desktop package
+    if: ${{ !inputs.validate_windows_only }}
     needs: release-metadata
     runs-on: macos-latest
     timeout-minutes: 120
@@ -333,11 +335,19 @@ jobs:
 
   windows-package-smoke:
     name: Build and smoke Windows desktop packages
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
     needs: release-metadata
     runs-on: windows-latest
     timeout-minutes: 90
     env:
       DESKTOP_VERSION: ${{ needs.release-metadata.outputs.desktop-version }}
+      AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+      AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+      AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+      AZURE_SIGNING_PUBLISHER: ${{ vars.AZURE_SIGNING_PUBLISHER }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -357,12 +367,75 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build unsigned Windows packages
-        shell: bash
+      - name: Validate Azure signing configuration
+        shell: pwsh
         run: |
-          cd apps/desktop-runner
+          foreach ($name in @('AZURE_SIGNING_ENDPOINT', 'AZURE_SIGNING_ACCOUNT', 'AZURE_SIGNING_PROFILE', 'AZURE_SIGNING_PUBLISHER')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Missing release variable: $name" }
+          }
+
+      - name: Azure login with release-environment OIDC
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create unsigned signing probe
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:RUNNER_TEMP 'infergrade-signing-probe.cs'
+          'class SigningProbe { static void Main() {} }' | Set-Content $source
+          $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+          & $compiler /nologo "/out:$env:RUNNER_TEMP/infergrade-signing-probe.exe" $source
+          if ($LASTEXITCODE -ne 0) { throw 'Signing probe compilation failed.' }
+          try {
+            ./scripts/verify_desktop_windows_signature.ps1 -Path "$env:RUNNER_TEMP/infergrade-signing-probe.exe"
+            throw 'Unsigned probe was accepted.'
+          } catch {
+            if ($_.Exception.Message -notlike 'Authenticode verification failed:*') { throw }
+          }
+
+      - name: Sign probe and install pinned Azure signing dependencies
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files: ${{ runner.temp }}/infergrade-signing-probe.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+
+      - name: Verify signing probe and publisher rejection
+        shell: pwsh
+        run: |
+          ./scripts/verify_desktop_windows_signature.ps1 -Path "$env:RUNNER_TEMP/infergrade-signing-probe.exe"
+          try {
+            ./scripts/verify_desktop_windows_signature.ps1 -Path "$env:RUNNER_TEMP/infergrade-signing-probe.exe" -ExpectedPublisher 'Not the release publisher'
+            throw 'Wrong publisher was accepted.'
+          } catch {
+            if ($_.Exception.Message -notlike 'Authenticode publisher mismatch:*') { throw }
+          }
+
+      - name: Build and sign Windows packages
+        shell: pwsh
+        run: |
+          Set-Location apps/desktop-runner
           npm ci
-          npm run build:windows
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+          node scripts/prepare-sidecar.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Sidecar preparation failed.' }
+          & ../../scripts/sign_desktop_windows.ps1 -Path src-tauri/binaries/infergrade-sidecar-x86_64-pc-windows-msvc.exe
+          # Resolve the sign hook absolutely so NSIS can invoke it from its temporary directory.
+          $config = Get-Content src-tauri/tauri.azure-signing.conf.json -Raw | ConvertFrom-Json
+          $config.bundle.windows.signCommand.args[4] = (Resolve-Path ../../scripts/sign_desktop_windows.ps1).Path
+          $configPath = Join-Path $env:RUNNER_TEMP 'tauri-azure-signing.json'
+          $config | ConvertTo-Json -Depth 10 | Set-Content $configPath
+          # Use the CLI directly: npm's prebuild hook would overwrite the signed sidecar.
+          & ./node_modules/.bin/tauri build --bundles nsis,msi --config $configPath
+          if ($LASTEXITCODE -ne 0) { throw 'Signed Windows package build failed.' }
 
       - name: Install and launch Windows packages
         shell: pwsh
@@ -373,19 +446,20 @@ jobs:
           ./scripts/smoke_desktop_windows_packages.ps1 `
             -MsiPath $msi.FullName `
             -NsisPath $nsis.FullName `
-            -ExpectedVersion $env:DESKTOP_VERSION
+            -ExpectedVersion $env:DESKTOP_VERSION `
+            -RequireSigned
 
-      - name: Prepare stable Windows preview assets
+      - name: Prepare stable signed Windows assets
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force target/release/public-windows | Out-Null
           Copy-Item (Get-ChildItem target/release/bundle/msi/*.msi -File).FullName `
-            target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi
+            target/release/public-windows/InferGrade.Runner.Windows-x64.msi
           Copy-Item (Get-ChildItem target/release/bundle/nsis/*.exe -File).FullName `
-            target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe
+            target/release/public-windows/InferGrade.Runner.Windows-x64.exe
           $checksumInputs = @(
-            (Resolve-Path target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi).Path
-            (Resolve-Path target/release/public-windows/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe).Path
+            (Resolve-Path target/release/public-windows/InferGrade.Runner.Windows-x64.msi).Path
+            (Resolve-Path target/release/public-windows/InferGrade.Runner.Windows-x64.exe).Path
           )
           python ./scripts/write_desktop_release_checksums.py `
             --output target/release/public-windows/SHA256SUMS.windows `
@@ -402,6 +476,7 @@ jobs:
 
   linux-package-smoke:
     name: Build and smoke Linux desktop packages
+    if: ${{ !inputs.validate_windows_only }}
     needs: release-metadata
     runs-on: ubuntu-22.04
     timeout-minutes: 90
@@ -541,6 +616,7 @@ jobs:
 
   publish-release:
     name: Publish verified cross-platform release
+    if: ${{ !inputs.validate_windows_only }}
     needs: [release-metadata, macos-preview, windows-package-smoke, linux-package-smoke]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
@@ -554,7 +630,6 @@ jobs:
       DESKTOP_VERSION: ${{ needs.release-metadata.outputs.desktop-version }}
       RELEASE_TAG: ${{ needs.release-metadata.outputs.release-tag }}
       RELEASE_NOTES: ${{ needs.release-metadata.outputs.release-notes }}
-      PUBLISH_WINDOWS_PREVIEW: ${{ inputs.publish_unsigned_windows_preview }}
       PUBLIC_DMG_NAME: InferGrade.Runner.macOS-arm64.dmg
       PUBLIC_LINUX_DEB: InferGrade.Runner.Linux-x86_64.deb
       PUBLIC_LINUX_APPIMAGE: InferGrade.Runner.Linux-x86_64.AppImage
@@ -573,13 +648,9 @@ jobs:
 
       - name: Assemble exact public asset set
         run: |
-          checksum_parts=(release-assets/SHA256SUMS.macos release-assets/SHA256SUMS.linux)
-          if [ "$PUBLISH_WINDOWS_PREVIEW" = "true" ]; then
-            checksum_parts+=(release-assets/SHA256SUMS.windows)
-          else
-            rm -f release-assets/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe
-            rm -f release-assets/InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi
-          fi
+          checksum_parts=(release-assets/SHA256SUMS.macos release-assets/SHA256SUMS.linux release-assets/SHA256SUMS.windows)
+          test -f release-assets/InferGrade.Runner.Windows-x64.exe
+          test -f release-assets/InferGrade.Runner.Windows-x64.msi
           cat "${checksum_parts[@]}" | sort -k2 > release-assets/SHA256SUMS
           rm -f release-assets/SHA256SUMS.macos release-assets/SHA256SUMS.linux release-assets/SHA256SUMS.windows
           test -f "release-assets/$PUBLIC_DMG_NAME"
@@ -620,15 +691,9 @@ jobs:
           - Linux x86_64: checksummed technical-beta packages; install and launch smoke passed in GitHub Actions.
           - Release assets: Sigstore-backed GitHub build provenance is available at $ATTESTATION_URL.
           EOF
-          if [ "$PUBLISH_WINDOWS_PREVIEW" = "true" ]; then
-            cat >> "$notes_file" <<'EOF'
-          - Windows x64: UNSIGNED technical-preview installers; install and launch smoke passed, but Windows will show publisher/SmartScreen warnings. CUDA execution is not proven by hosted CI.
+          cat >> "$notes_file" <<'EOF'
+          - Windows x64: Public Trust Authenticode signed and timestamped app, sidecar, and installers; install and launch smoke passed. CUDA execution is not proven by hosted CI. SmartScreen reputation is separate from signature validity.
           EOF
-          else
-            cat >> "$notes_file" <<'EOF'
-          - Windows x64: package install and launch smoke passed in CI; installers remain workflow artifacts until Authenticode signing is configured or unsigned preview publication is explicitly approved.
-          EOF
-          fi
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')"
             if [ "$is_draft" != "true" ]; then
@@ -675,9 +740,7 @@ jobs:
             --require-linux
             --reject-unexpected
           )
-          if [ "$PUBLISH_WINDOWS_PREVIEW" = "true" ]; then
-            verify_args+=(--require-windows-preview)
-          fi
+          verify_args+=(--require-windows)
           python3 ./scripts/verify_desktop_release_artifacts.py "${verify_args[@]}"
 
       - name: Publish immutable versioned desktop release
@@ -712,13 +775,8 @@ jobs:
             --reject-unexpected
           )
           latest_assets=("$PUBLIC_DMG_NAME" "$PUBLIC_LINUX_DEB" "$PUBLIC_LINUX_APPIMAGE")
-          if [ "$PUBLISH_WINDOWS_PREVIEW" = "true" ]; then
-            verify_args+=(--require-windows-preview)
-            latest_assets+=(
-              InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe
-              InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi
-            )
-          fi
+          verify_args+=(--require-windows)
+          latest_assets+=(InferGrade.Runner.Windows-x64.exe InferGrade.Runner.Windows-x64.msi)
           python3 ./scripts/verify_desktop_release_artifacts.py "${verify_args[@]}"
           verify_public_attestation() {
             local artifact="$1"
