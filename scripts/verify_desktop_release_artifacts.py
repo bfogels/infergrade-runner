@@ -44,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Require the clearly labeled unsigned x64 Windows preview MSI and NSIS assets.",
     )
+    parser.add_argument("--require-windows", action="store_true", help="Require the signed x64 Windows MSI and NSIS assets (signature verification runs on Windows).")
     parser.add_argument(
         "--reject-unexpected",
         action="store_true",
@@ -199,6 +200,12 @@ def main() -> int:
         missing_linux = sorted(required_linux - verified_names)
         if missing_linux:
             raise SystemExit(f"Required Linux release asset(s) were not verified: {', '.join(missing_linux)}")
+    if args.require_windows:
+        missing_windows = sorted({"InferGrade.Runner.Windows-x64.msi", "InferGrade.Runner.Windows-x64.exe"} - verified_names)
+        if missing_windows:
+            raise SystemExit("Required signed Windows release asset(s) were not verified: " + ", ".join(missing_windows))
+        if any("UNSIGNED-PREVIEW" in name for name in verified_names):
+            raise SystemExit("Signed Windows release must not contain unsigned preview assets.")
     if args.require_windows_preview:
         required_windows = {
             "InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi",

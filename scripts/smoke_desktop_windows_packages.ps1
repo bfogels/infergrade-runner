@@ -1,12 +1,17 @@
 param(
     [Parameter(Mandatory = $true)][string]$MsiPath,
     [Parameter(Mandatory = $true)][string]$NsisPath,
-    [Parameter(Mandatory = $true)][string]$ExpectedVersion
+    [Parameter(Mandatory = $true)][string]$ExpectedVersion,
+    [switch]$RequireSigned
 )
 
 $ErrorActionPreference = "Stop"
 $MsiPath = (Resolve-Path $MsiPath).Path
 $NsisPath = (Resolve-Path $NsisPath).Path
+if ($RequireSigned) {
+    & "$PSScriptRoot/verify_desktop_windows_signature.ps1" -Path $MsiPath
+    & "$PSScriptRoot/verify_desktop_windows_signature.ps1" -Path $NsisPath
+}
 $WorkDir = Join-Path $env:RUNNER_TEMP "infergrade-windows-package-smoke"
 $MsiInstallDir = Join-Path $WorkDir "msi-install"
 $NsisInstallDir = Join-Path $WorkDir "nsis-install"
@@ -25,6 +30,7 @@ function Get-MsiProperty([string]$Path, [string]$Property) {
 }
 
 function Assert-DesktopLaunch([string]$Executable, [string]$Label) {
+    if ($RequireSigned) { & "$PSScriptRoot/verify_desktop_windows_signature.ps1" -Path $Executable }
     $process = Start-Process -FilePath $Executable -PassThru
     Start-Sleep -Seconds 8
     if ($process.HasExited) {
@@ -41,6 +47,7 @@ function Assert-PackagedSidecar([string]$Root, [string]$Label) {
     ) | Select-Object -First 1
     if ($null -eq $sidecar) { throw "$Label is missing the packaged sidecar." }
 
+    if ($RequireSigned) { & "$PSScriptRoot/verify_desktop_windows_signature.ps1" -Path $sidecar.FullName }
     $diagnosticStem = $Label.ToLowerInvariant().Replace(" ", "-")
     $stdoutPath = Join-Path $WorkDir "$diagnosticStem-sidecar-self-test.stdout"
     $stderrPath = Join-Path $WorkDir "$diagnosticStem-sidecar-self-test.stderr"
@@ -122,7 +129,9 @@ Use-PythonFreePath {
 }
 
 $uninstaller = Get-ChildItem -Path $NsisInstallDir -File -Filter "uninstall*.exe" | Select-Object -First 1
+if ($RequireSigned -and $null -eq $uninstaller) { throw "Signed NSIS install is missing its uninstaller." }
 if ($null -ne $uninstaller) {
+    if ($RequireSigned) { & "$PSScriptRoot/verify_desktop_windows_signature.ps1" -Path $uninstaller.FullName }
     $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList "/S" -Wait -PassThru
     if ($uninstall.ExitCode -ne 0) { throw "NSIS uninstall failed with code $($uninstall.ExitCode)." }
 }

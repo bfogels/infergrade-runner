@@ -856,6 +856,27 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertLess(workflow.index("Install and launch Windows packages"), workflow.index("Publish immutable versioned desktop release"))
         self.assertLess(workflow.index("Install and launch Linux packages"), workflow.index("Publish immutable versioned desktop release"))
 
+    def test_signed_windows_release_cannot_accept_missing_or_preview_assets(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            msi = root / "InferGrade.Runner.Windows-x64.msi"
+            exe = root / "InferGrade.Runner.Windows-x64.exe"
+            checksums = root / "SHA256SUMS"
+            def check(assets):
+                for artifact in assets:
+                    artifact.write_bytes(b"fixture-not-an-authenticode-proof")
+                with patch.object(sys, "argv", ["checksums", "--output", str(checksums), *map(str, assets)]):
+                    write_desktop_release_checksums()
+                with patch.object(sys, "argv", ["verify", "--directory", str(root), "--require-windows", "--reject-unexpected"]):
+                    return verify_desktop_release_artifacts()
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(SystemExit, "Required signed Windows"):
+                    check([msi])
+                self.assertEqual(check([msi, exe]), 0)
+                preview = root / "InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe"
+                with self.assertRaisesRegex(SystemExit, "must not contain unsigned preview"):
+                    check([msi, exe, preview])
+
     def test_desktop_release_dmg_gets_stable_url_safe_public_name(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -891,7 +912,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-22.04", workflow)
         self.assertIn("windows-package-smoke:\n    name: Build and smoke Windows desktop packages", workflow)
         self.assertIn("linux-package-smoke:\n    name: Build and smoke Linux desktop packages", workflow)
-        self.assertIn("npm run build:windows", workflow)
+        self.assertIn("tauri build --bundles nsis,msi --config $configPath", workflow)
         self.assertIn("npm run build:linux", workflow)
         self.assertIn("libwebkit2gtk-4.1-dev", workflow)
         self.assertIn("libayatana-appindicator3-dev", workflow)
@@ -901,8 +922,8 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("infergrade-runner-desktop-linux-${{ github.sha }}", workflow)
         self.assertIn("smoke_desktop_windows_packages.ps1", workflow)
         self.assertIn("smoke_desktop_linux_packages.sh", workflow)
-        self.assertIn("InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.exe", workflow)
-        self.assertIn("InferGrade.Runner.Windows-x64-UNSIGNED-PREVIEW.msi", workflow)
+        self.assertIn("InferGrade.Runner.Windows-x64.exe", workflow)
+        self.assertIn("InferGrade.Runner.Windows-x64.msi", workflow)
         self.assertIn("InferGrade.Runner.Linux-x86_64.deb", workflow)
         self.assertIn("InferGrade.Runner.Linux-x86_64.AppImage", workflow)
         self.assertIn("target/release/bundle/deb/*.deb", workflow)
