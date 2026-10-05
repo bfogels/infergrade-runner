@@ -7,6 +7,14 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.61 (contract 0.3.38)
+
+- Updates desktop npm and Rust dependencies together, including Tauri alignment
+  and the rustls security advisory fix.
+- Moves the desktop build to Vite 8 while preserving the existing webview
+  browser targets, and refreshes pinned CI/release action versions.
+- Keeps execution schemas, benchmark protocols, and hardware support unchanged.
+
 ## 0.3.60 (contract 0.3.38)
 
 - Makes qualification-only reasoning diagnostics readable in the local bundle
