@@ -105,6 +105,48 @@ class DesktopPythonRuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE._safe_member(external_hard_link)
 
+    def test_windows_headless_policy_removes_gui_payload_and_preserves_runner_dependencies(self):
+        manifest, manifest_sha = MODULE._load_manifest(ROOT / "runtime/desktop_python_runtime.json")
+        target = manifest["targets"]["x86_64-pc-windows-msvc"]
+        pruned_paths = target["prune_paths"]
+        self.assertEqual(set(pruned_paths), {
+            "DLLs/tcl86t.dll", "DLLs/tk86t.dll", "DLLs/_tkinter.pyd", "Lib/tkinter",
+            "Lib/idlelib", "Lib/turtledemo", "Lib/turtle.py", "libs/_tkinter.lib", "tcl",
+        })
+        required_paths = [
+            target["executable"], "python312.dll", "DLLs/_ssl.pyd", "DLLs/_sqlite3.pyd",
+            "DLLs/libssl-3-x64.dll", "DLLs/sqlite3.dll", target["ca_bundle"], target["license"],
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary)
+            for name in pruned_paths + required_paths:
+                path = runtime / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if name in {"Lib/tkinter", "Lib/idlelib", "Lib/turtledemo", "tcl"}:
+                    path.mkdir()
+                    (path / "payload.dll").write_bytes(b"unused GUI payload")
+                else:
+                    path.write_bytes(b"runtime payload")
+            self.assertEqual(MODULE._prune_runtime(runtime, pruned_paths), pruned_paths)
+            self.assertTrue(all(not (runtime / name).exists() for name in pruned_paths))
+            self.assertTrue(all((runtime / name).is_file() for name in required_paths))
+            receipt = {
+                "schema_version": "infergrade.desktop_python_runtime_receipt.v1",
+                "target": "x86_64-pc-windows-msvc", "archive_sha256": target["sha256"],
+                "manifest_sha256": manifest_sha, "pruned_paths": pruned_paths,
+                "executable": target["executable"], "ca_bundle": target["ca_bundle"],
+                "license_path": target["license"],
+                "executable_sha256": MODULE._sha256(runtime / target["executable"]),
+                "ca_bundle_sha256": MODULE._sha256(runtime / target["ca_bundle"]),
+                "license_sha256": MODULE._sha256(runtime / target["license"]),
+            }
+            (runtime / MODULE.RECEIPT_NAME).write_text(json.dumps(receipt))
+            args = [runtime, receipt["target"], target["sha256"], manifest_sha, target["executable"]]
+            self.assertTrue(MODULE._runtime_is_current(*args, pruned_paths))
+            self.assertFalse(MODULE._runtime_is_current(*args, []))
+            args[3] = "0" * 64
+            self.assertFalse(MODULE._runtime_is_current(*args, pruned_paths))
+
     def test_current_runtime_requires_all_integrity_fields(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
