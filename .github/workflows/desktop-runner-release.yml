@@ -486,8 +486,8 @@ jobs:
           overwrite: true
 
   linux-package-smoke:
-    environment: release
     name: Build and smoke Linux desktop packages
+    environment: release
     if: ${{ !inputs.validate_windows_only }}
     needs: release-metadata
     runs-on: ubuntu-22.04
