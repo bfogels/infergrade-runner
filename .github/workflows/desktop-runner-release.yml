@@ -430,6 +430,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
           node scripts/prepare-sidecar.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Sidecar preparation failed.' }
+          # Sign and verify the interpreter before sealing its final receipt and packaging resources.
+          & ../../scripts/sign_desktop_windows.ps1 -Path src-tauri/desktop-python/python.exe
+          python ../../scripts/prepare_desktop_python_runtime.py --output src-tauri/desktop-python --refresh-receipt windows_authenticode
+          if ($LASTEXITCODE -ne 0) { throw 'Signed Python receipt resealing failed.' }
           & ../../scripts/sign_desktop_windows.ps1 -Path src-tauri/binaries/infergrade-sidecar-x86_64-pc-windows-msvc.exe
           # Resolve the sign hook absolutely so NSIS can invoke it from its temporary directory.
           $config = Get-Content src-tauri/tauri.azure-signing.conf.json -Raw | ConvertFrom-Json

@@ -147,6 +147,28 @@ class DesktopPythonRuntimeTests(unittest.TestCase):
             args[3] = "0" * 64
             self.assertFalse(MODULE._runtime_is_current(*args, pruned_paths))
 
+            executable = runtime / target["executable"]
+            unsigned_sha = MODULE._sha256(executable)
+            executable.write_bytes(b"runtime payload with Authenticode signature")
+            refreshed = MODULE.refresh_runtime_receipt(runtime, "windows_authenticode")
+            self.assertEqual(refreshed["source_executable_sha256"], unsigned_sha)
+            self.assertEqual(refreshed["executable_sha256"], MODULE._sha256(executable))
+            self.assertEqual(refreshed["pruned_paths"], pruned_paths)
+            self.assertIn("windows_authenticode", refreshed["packaging_transforms"])
+            args[3] = manifest_sha
+            self.assertTrue(MODULE._runtime_is_current(*args, pruned_paths))
+
+    def test_windows_release_signs_interpreter_and_reseals_before_packaging(self):
+        workflow = (ROOT / ".github/workflows/desktop-runner-release.yml").read_text()
+        prepare = workflow.index("node scripts/prepare-sidecar.mjs")
+        sign = workflow.index("sign_desktop_windows.ps1 -Path src-tauri/desktop-python/python.exe")
+        reseal = workflow.index("--output src-tauri/desktop-python --refresh-receipt windows_authenticode")
+        package = workflow.index("tauri build --bundles 'nsis,msi'")
+        self.assertLess(prepare, sign)
+        self.assertLess(sign, reseal)
+        self.assertLess(reseal, package)
+        self.assertIn("Signed Python receipt resealing failed.", workflow)
+
     def test_current_runtime_requires_all_integrity_fields(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

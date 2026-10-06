@@ -82,6 +82,8 @@ The package jobs use Python while building, but the installed application does n
 
 Windows and Linux carry a headless Python runtime: the reviewed manifest removes unused Tcl/Tk, tkinter, IDLE, and GUI demos before packaging. Windows also removes the Tcl extension DLL tree and tkinter import library. This avoids the upstream Windows Tcl DLL that SignTool rejects with `0x800700C1`; signature checks remain mandatory for the delivered app and installers. Python core, SSL/SQLite support, certificates, and the top-level license notice remain. The receipt records every pruned path, and the manifest digest invalidates previously prepared payloads.
 
+The protected Windows build signs and verifies the bundled `python.exe` before packaging, then reseals its receipt with the `windows_authenticode` transform and preserved source executable digest. Tauri skips the already-valid interpreter signature; installed integrity checks compare the final signed executable bytes with the receipt.
+
 This proves the packaged Runner core is self-contained on the hosted Windows and Ubuntu images. It does not prove CUDA execution, all Linux distributions, Windows SmartScreen acceptance, or the complete Hub contribution loop.
 
 The sidecar contract should remain the same: call the existing `infergrade` CLI when available, otherwise resolve the bundled or repo-local Runner core.
