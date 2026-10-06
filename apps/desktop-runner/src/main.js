@@ -35,6 +35,13 @@ const FIRST_RUN_HANDOFF_RUN_ID_STORAGE_KEY = "infergrade.runner.firstRun.runId";
 const FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY = "infergrade.runner.firstRun.workerId";
 const THEME_STORAGE_KEY = "infergrade.runner.theme";
 const APP_VERSION_FALLBACK = packageInfo.version;
+const UPDATE_EXPECTED_VERSION_KEY = "infergrade.runner.update.expectedVersion";
+let updateDownloadBytes = 0;
+let updateDownloadLength = 0;
+let appUpdateBusy = false;
+let appUpdateInstalled = false;
+let nativeFirstRunBusy = false;
+
 const UPDATE_STATUS = "Open the signed desktop app to check for verified updates.";
 
 const form = document.querySelector("[data-runner-form]");
@@ -45,6 +52,8 @@ const resetPairingButtons = [...document.querySelectorAll("[data-reset-pairing]"
 const clearLogsButton = document.querySelector("[data-clear-logs]");
 const themeChoiceButtons = [...document.querySelectorAll("[data-theme-choice]")];
 const runtimePlanButton = document.querySelector("[data-runtime-plan]");
+const setupRuntimeButton = document.querySelector("[data-setup-runtime]");
+const setupRuntimeStatus = document.querySelector("[data-setup-runtime-status]");
 const runtimeInstallManagedButton = document.querySelector("[data-runtime-install-managed]");
 const runtimeReinstallManagedButton = document.querySelector("[data-runtime-reinstall-managed]");
 const runtimeRemoveSelectedButton = document.querySelector("[data-runtime-remove-selected]");
@@ -161,7 +170,7 @@ let lastNormalizedApiUrl = "https://api.infergrade.com/";
 let llamaRuntimeReadiness = "Inspect the plan before running local llama.cpp jobs.";
 let nativeSuiteReadiness = "Run a readiness check to verify local execution for Hub-assigned work.";
 let containerRuntimeReadiness = "Docker and Podman only unlock advanced sandboxed benchmarks.";
-let modelPathReadiness = "Hub assigns model artifacts when work is queued.";
+let modelPathReadiness = "Download the public starter model above, or paste a local GGUF path.";
 let modelPreflightReadiness = "Waiting for a Hub assignment. Exact artifact and model-load checks run before scoring.";
 let llamaRuntimeAvailable = false;
 let runtimeCatalogPayload = null;
@@ -336,7 +345,7 @@ function renderPrimaryReadiness() {
   document.documentElement.dataset.pairingRepair = pairingAuthFailure?.invalid ? "true" : "false";
   renderHubDisplay();
   setReadinessFact("hub", presentation.hubFact, presentation.hubFactState);
-  setReadinessFact("runtime", llamaRuntimeAvailable ? "Metal ready" : "Runtime check needed", llamaRuntimeAvailable ? "ready" : "warning");
+  setReadinessFact("runtime", llamaRuntimeAvailable ? "Runtime ready" : "Runtime check needed", llamaRuntimeAvailable ? "ready" : "warning");
   setReadinessFact(
     "token",
     pairingAuthFailure?.invalid ? "Pair again" : savedTokenAvailable ? "Token secure" : "Token missing",
@@ -758,7 +767,7 @@ function applyPreviewStateFromUrl() {
     setRunnerButtonsDisabled("stop", false);
     llamaRuntimeAvailable = true;
     hubConnectionVerified = true;
-    llamaRuntimeReadiness = "Managed Metal runtime verified.";
+    llamaRuntimeReadiness = "Managed llama.cpp runtime verified.";
     nativeSuiteReadiness = "Backend readiness check passed for local native execution.";
     containerRuntimeReadiness = "Docker not found. Native runtime checks can continue; optional sandboxed support is disabled.";
     setStatus("Listening", "good");
@@ -838,7 +847,15 @@ async function renderReleaseStatus() {
     updateChannel.textContent = "Update status unknown";
   }
   if (updateStatus) {
-    updateStatus.textContent = isTauriRuntime() ? "Ready to check for verified updates." : UPDATE_STATUS;
+    const expectedVersion = localStorage.getItem(UPDATE_EXPECTED_VERSION_KEY);
+    if (expectedVersion === version) {
+      updateStatus.textContent = `Update complete. Running v${version}.`;
+      localStorage.removeItem(UPDATE_EXPECTED_VERSION_KEY);
+    } else if (expectedVersion) {
+      updateStatus.textContent = `Running v${version}; expected v${expectedVersion}. Restart Runner, then check again.`;
+    } else {
+      updateStatus.textContent = isTauriRuntime() ? "Ready to check for verified updates." : UPDATE_STATUS;
+    }
   }
 }
 
@@ -862,12 +879,17 @@ function setUpdateStatus(message) {
 
 function updateDownloadProgress(event) {
   if (event.event === "Started") {
+    updateDownloadBytes = 0;
+    updateDownloadLength = event.data?.contentLength || 0;
     const size = event.data?.contentLength ? `${Math.round(event.data.contentLength / 1024 / 1024)} MB` : "unknown size";
     setUpdateStatus(`Downloading update (${size})...`);
     return;
   }
   if (event.event === "Progress") {
-    setUpdateStatus("Downloading update...");
+    updateDownloadBytes += event.data?.chunkLength || 0;
+    const downloaded = (updateDownloadBytes / 1024 / 1024).toFixed(1);
+    const percent = updateDownloadLength ? ` (${Math.min(100, Math.round(updateDownloadBytes / updateDownloadLength * 100))}%)` : "";
+    setUpdateStatus(`Downloading update: ${downloaded} MB${percent}...`);
     return;
   }
   if (event.event === "Finished") {
@@ -876,15 +898,25 @@ function updateDownloadProgress(event) {
 }
 
 async function checkForAppUpdate() {
+  if (appUpdateBusy || appUpdateInstalled) return;
   if (!isTauriRuntime()) {
     setUpdateStatus("Open the desktop app to check signed updates.");
     appendLog("Open the desktop app to check signed updates.");
     return;
   }
+  appUpdateBusy = true;
   checkUpdateButton.disabled = true;
   setUpdateStatus("Checking for signed updates...");
   renderUpdateActions(false);
   try {
+    if (pendingUpdate) await pendingUpdate.close();
+    pendingUpdate = null;
+    const invoke = await loadTauriInvoke();
+    const installation = await invoke("desktop_update_installation");
+    if (installation.platform === "linux" && !installation.appimage) {
+      setUpdateStatus("This Linux installation uses system packages. Download the latest .deb from Hub and install it with your package manager, then reopen Runner. In-app installation is available for AppImage.");
+      return;
+    }
     const { check } = await import("@tauri-apps/plugin-updater");
     const update = await check();
     pendingUpdate = update;
@@ -916,21 +948,28 @@ async function checkForAppUpdate() {
     setUpdateStatus(userSafeUpdateFailure(error.message || error));
     appendLog(`Update check failed: ${error.message || error}`);
   } finally {
+    appUpdateBusy = false;
     checkUpdateButton.disabled = false;
   }
 }
 
 async function installPendingUpdate() {
+  if (appUpdateBusy || appUpdateInstalled) return;
   if (!pendingUpdate) {
     await checkForAppUpdate();
   }
   if (!pendingUpdate) {
     return;
   }
+  appUpdateBusy = true;
+  checkUpdateButton.disabled = true;
   installUpdateButton.disabled = true;
+  // Windows exits during installation; persist the expected version before invoking it.
+  localStorage.setItem(UPDATE_EXPECTED_VERSION_KEY, pendingUpdate.version);
   setUpdateStatus(`Installing update ${pendingUpdate.version}...`);
   try {
     await pendingUpdate.downloadAndInstall(updateDownloadProgress);
+    appUpdateInstalled = true;
     setUpdateStatus("Update installed. Relaunch to finish.");
     appendLog(`Installed desktop Runner update ${pendingUpdate.version}.`);
     if (relaunchUpdateButton) {
@@ -938,8 +977,12 @@ async function installPendingUpdate() {
     }
   } catch (error) {
     installUpdateButton.disabled = false;
-    setUpdateStatus("Update install failed.");
+    localStorage.removeItem(UPDATE_EXPECTED_VERSION_KEY);
+    setUpdateStatus(userSafeUpdateFailure(error.message || error));
     appendLog(`Update install failed: ${error.message || error}`);
+  } finally {
+    appUpdateBusy = false;
+    checkUpdateButton.disabled = appUpdateInstalled;
   }
 }
 
@@ -963,6 +1006,7 @@ function renderRunnerCliVersion(label) {
 }
 
 function renderLocalReadinessChecklist() {
+  if (setupRuntimeStatus) setupRuntimeStatus.textContent = llamaRuntimeReadiness;
   if (nativeSuiteStatus) {
     nativeSuiteStatus.textContent = nativeSuiteReadiness;
   }
@@ -1115,6 +1159,8 @@ function renderFirstRunChecklist() {
   const uploadFailed = Boolean(lastFirstRunPayload?.upload?.error);
   const uploadReady = localRunComplete && Boolean(currentFirstRunUploadRunId()) && !uploadSucceeded;
   const firstRunReady = paired && llamaRuntimeAvailable && modelSelected;
+
+  if (firstRunStartButton) firstRunStartButton.disabled = nativeFirstRunBusy || !firstRunReady;
 
   setFirstRunStep(
     "paired",
@@ -2083,8 +2129,9 @@ function populateManagedRuntimeOptions(plan = {}) {
   const current = runtimeIdInput.value;
   const runtimes = plan?.managed_runtime_manifest?.runtimes || [];
   runtimeIdInput.replaceChildren(new Option("Runner-pinned default", ""));
-  runtimes.forEach((runtime) => {
-    const channel = runtime.channel === "infergrade_stable" ? "Stable fallback" : "Reviewed candidate";
+  const host = plan.recommended_runtime?.platform;
+  runtimes.filter((runtime) => !host?.system || (runtime.platform?.system === host.system && runtime.platform?.arch === host.arch)).forEach((runtime) => {
+    const channel = runtime.channel === "infergrade_stable" ? "Stable fallback" : runtime.channel === "upstream_release" ? "Pinned upstream" : "Reviewed candidate";
     runtimeIdInput.add(new Option(`${channel} · ${runtime.version_label || runtime.runtime_id}`, runtime.runtime_id));
   });
   if ([...runtimeIdInput.options].some((option) => option.value === current)) runtimeIdInput.value = current;
@@ -2185,6 +2232,7 @@ function runtimeRemovalSummary(result = {}) {
 }
 
 function setRuntimeActionDisabled(disabled) {
+  if (setupRuntimeButton) setupRuntimeButton.disabled = disabled;
   if (runtimeInstallManagedButton) {
     runtimeInstallManagedButton.disabled = disabled;
   }
@@ -2852,7 +2900,7 @@ function clearFirstRunLocalState({ clearModel = false } = {}) {
   }
   modelPathReadiness = currentFirstRunModelPath()
     ? `First-run model selected: ${currentFirstRunModelPath()}`
-    : "Select a local GGUF model only when recovering a Hub handoff.";
+    : "Download the public starter model above, or paste a local GGUF path.";
   nativeSuiteReadiness = "Run a readiness check to verify local execution for Hub-assigned work.";
   if (firstRunStatus) {
     firstRunStatus.textContent = clearModel
@@ -3095,6 +3143,7 @@ async function runDesktopSelfTest() {
 }
 
 async function runNativeFirstRun() {
+  if (nativeFirstRunBusy) return;
   const modelPath = readFirstRunModelPath();
   const runtimePath = readFirstRunRuntimePath();
   const uploadRunId = readFirstRunUploadRunId();
@@ -3107,6 +3156,7 @@ async function runNativeFirstRun() {
   }
 
   await ensureFirstRunEvents();
+  nativeFirstRunBusy = true;
   firstRunStartButton.disabled = true;
   setStatus("First benchmark running", "warning");
   firstRunStatus.textContent = "Starting assigned local work...";
@@ -3182,7 +3232,8 @@ async function runNativeFirstRun() {
     });
     appendLog(`Native first-run failed: ${message}`);
   } finally {
-    firstRunStartButton.disabled = false;
+    nativeFirstRunBusy = false;
+    renderFirstRunChecklist();
     updateFirstRunSupportActions();
   }
 }
@@ -3377,7 +3428,7 @@ runtimeRemoveSelectedButton?.addEventListener("click", () => {
 runtimeSelectExistingButton?.addEventListener("click", () => {
   const runtimePath = readFirstRunRuntimePath();
   if (!runtimePath) {
-    llamaRuntimeReadiness = "Choose or paste the path to llama-cli before selecting a custom runtime.";
+    llamaRuntimeReadiness = "Choose llama-cli or llama-cli.exe from the full llama.cpp release archive. A standalone llama.exe launcher is not the benchmark runtime.";
     renderLocalReadinessChecklist();
     firstRunRuntimePathInput?.focus();
     return;
@@ -3447,12 +3498,13 @@ downloadStarterGgufButton?.addEventListener("click", () => {
     .then(() => {
       setStatus("Starter model ready", "good");
       if (firstRunStatus) {
-        firstRunStatus.textContent = "Starter model downloaded. Run assigned local smoke when the runtime is ready.";
+        firstRunStatus.textContent = "Starter model verified. Run the local check when the runtime is ready.";
       }
     })
     .catch((error) => {
       const message = error.message || String(error);
-      modelPathReadiness = "Starter model download failed. You can still paste a local GGUF path.";
+      modelPathReadiness = `Starter model download failed: ${String(message).replace(/\.$/, "")}. Retry, or paste a local GGUF path.`;
+      if (firstRunStatus) firstRunStatus.textContent = modelPathReadiness;
       renderLocalReadinessChecklist();
       setStatus("Model download failed", "error");
       appendLog(`Could not download starter GGUF: ${message}`);
@@ -3460,7 +3512,7 @@ downloadStarterGgufButton?.addEventListener("click", () => {
     .finally(() => {
       if (downloadStarterGgufButton) {
         downloadStarterGgufButton.disabled = false;
-        downloadStarterGgufButton.textContent = "Download starter model";
+        downloadStarterGgufButton.textContent = "Download public starter model (~638 MB)";
       }
       updateFirstRunSupportActions();
     });
@@ -3472,7 +3524,7 @@ firstRunModelPathInput?.addEventListener("input", () => {
     ? modelPath.toLowerCase().endsWith(".gguf")
       ? `First-run model selected: ${modelPath}`
       : "Use a local GGUF model file for native first-run."
-    : "Select a local GGUF model only when recovering a Hub handoff.";
+    : "Download the public starter model above, or paste a local GGUF path.";
   updateFirstRunSupportActions();
   renderLocalReadinessChecklist();
 });
@@ -3587,3 +3639,6 @@ if (!currentObservedRunId) {
 }
 renderLocalReadinessChecklist();
 window.setTimeout(applyPreviewStateFromUrl, 50);
+
+// First-run setup shares the managed installer with Runtime options.
+setupRuntimeButton?.addEventListener("click", () => runtimeInstallManagedButton?.click());

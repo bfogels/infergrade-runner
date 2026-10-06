@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from infergrade import __version__
 from infergrade.adapters import get_adapter
+from infergrade.adapters.llama_cpp import native_cuda_required
 from infergrade.artifacts import resolve_quant_artifact
 from infergrade.benchmark_catalog import (
     capability_benchmark_ids_for_request,
@@ -435,7 +436,9 @@ def _request_selects_cuda_runtime(request: RunRequest) -> bool:
     selector = request.runtime_selector or {}
     accelerator = selector.get("accelerator") if isinstance(selector, dict) else {}
     delivery = selector.get("delivery") if isinstance(selector, dict) else {}
-    return (
+    if isinstance(accelerator, dict) and accelerator.get("api") == "cpu":
+        return False
+    return native_cuda_required(request) or (
         isinstance(accelerator, dict)
         and accelerator.get("api") == "cuda"
         and accelerator.get("vendor") in (None, "nvidia", "unknown")
@@ -452,6 +455,10 @@ def _enforce_runtime_selector_before_execution(request: RunRequest) -> None:
     selector = request.runtime_selector or {}
     driver = selector.get("driver") if isinstance(selector, dict) else {}
     delivery = selector.get("delivery") if isinstance(selector, dict) else {}
+    # Only the legacy user-selected Windows candidate retains its admission gate.
+    # New managed Windows/Linux packages prove real model offload in adapter preflight.
+    if not str((delivery or {}).get("binary_set") or "").startswith("llama_cpp_windows_cuda"):
+        return
     preflight = windows_cuda_preflight(
         runtime_binary_path=request.llama_cpp_cli_path,
         cuda_major=str((driver or {}).get("cuda_major") or "12"),
@@ -607,7 +614,11 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
     _enforce_runtime_selector_before_execution(request)
     adapter = get_adapter(request.backend)
     if not request.backend_flags:
-        request.backend_flags = adapter.default_backend_flags()
+        accelerator = (request.runtime_selector or {}).get("accelerator") or {}
+        if request.execution_mode == "local_native" and request.backend == "llama.cpp" and accelerator.get("api") == "cpu":
+            request.backend_flags = ["--n-gpu-layers=0"]
+        else:
+            request.backend_flags = adapter.default_backend_flags()
     validate_request(request)
 
     if request.resume and not request.output_dir:

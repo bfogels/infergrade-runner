@@ -44,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Require the clearly labeled unsigned x64 Windows preview MSI and NSIS assets.",
     )
+    parser.add_argument("--required-updater-platform", action="append", default=[], help="Require this platform key in the signed updater manifest; repeat for each shipped platform.")
     parser.add_argument("--require-windows", action="store_true", help="Require the signed x64 Windows MSI and NSIS assets (signature verification runs on Windows).")
     parser.add_argument(
         "--reject-unexpected",
@@ -110,8 +111,8 @@ def verify_checksums(directory: Path, checksum_path: Path) -> list[Path]:
 def artifact_name_from_url(url: str) -> str:
     parsed = urlparse(url)
     name = unquote(Path(parsed.path).name)
-    if not name:
-        raise SystemExit(f"Updater manifest URL is missing an artifact filename: {url}")
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise SystemExit(f"Updater manifest URL must identify a plain artifact filename: {url}")
     return name
 
 
@@ -134,9 +135,10 @@ def verify_update_manifest(
     manifest_path: Path,
     require_updater: bool,
     verified_names: set[str],
+    required_platforms: list[str] | None = None,
 ) -> None:
     if not manifest_path.exists():
-        if require_updater:
+        if require_updater or required_platforms:
             raise SystemExit(f"Updater manifest does not exist: {manifest_path}")
         return
     require_checksum_coverage(verified_names, manifest_path)
@@ -147,6 +149,9 @@ def verify_update_manifest(
         raise SystemExit("Updater manifest is missing version.")
     if not isinstance(platforms, dict) or not platforms:
         raise SystemExit("Updater manifest must include one or more platforms.")
+    missing = sorted(set(required_platforms or []) - set(platforms))
+    if missing:
+        raise SystemExit("Updater manifest is missing required platform(s): " + ", ".join(missing))
     for platform, payload in platforms.items():
         if not isinstance(payload, dict):
             raise SystemExit(f"Updater platform {platform!r} must be an object.")
@@ -218,7 +223,7 @@ def main() -> int:
             )
     if args.reject_unexpected:
         verify_exact_release_set(directory, checksum_path, verified)
-    verify_update_manifest(directory, update_manifest_path, args.require_updater, verified_names)
+    verify_update_manifest(directory, update_manifest_path, args.require_updater, verified_names, args.required_updater_platform)
 
     print(f"desktop_release_artifact_dir={directory}")
     print(f"desktop_release_checksums={checksum_path}")
