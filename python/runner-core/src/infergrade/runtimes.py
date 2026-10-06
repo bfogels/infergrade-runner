@@ -236,6 +236,8 @@ def known_llama_cpp_runtimes() -> List[Dict[str, Any]]:
 
 
 def runtime_manifest() -> Dict[str, Any]:
+    if shutil.which("infergrade-runner"):
+        return _native_runtime_command(["list"])
     return {
         "manifest_version": RUNTIME_MANIFEST_VERSION,
         "runtime_family": "llama.cpp",
@@ -323,6 +325,11 @@ def select_llama_cpp_runtime(
     else:
         runtime = find_known_runtime(runtime_id)
     names = runtime.get("binary_names") or {}
+    if cli_path and Path(cli_path).name.lower() == "llama.exe":
+        sibling = Path(cli_path).with_name("llama-cli.exe")
+        if not sibling.is_file():
+            raise RuntimeError("llama.exe is the standalone launcher. Use Desktop managed setup or select llama-cli.exe from the full official archive.")
+        cli_path = str(sibling)
     selected_cli = shutil.which(cli_path or names.get("cli") or "llama-cli")
     infer_siblings = bool(cli_path and selected_cli)
     sibling_server = _sibling_binary_path(selected_cli, names.get("server")) if infer_siblings else None
@@ -396,7 +403,42 @@ def select_llama_cpp_runtime(
     return payload
 
 
+def _native_runtime_command(arguments: List[str]) -> Dict[str, Any]:
+    executable = shutil.which("infergrade-runner")
+    if not executable:
+        raise RuntimeError(
+            "Install the native InferGrade Runner CLI or use Desktop → Make runtime ready. "
+            "The compatibility Python CLI needs infergrade-runner on PATH for managed installation. "
+            "Docker and WSL are optional."
+        )
+    completed = subprocess.run([executable, "runtime", *arguments], capture_output=True, text=True)
+    if completed.returncode:
+        raise RuntimeError((completed.stderr or "Managed native runtime operation failed.").strip())
+    try:
+        return json.loads(completed.stdout)
+    except ValueError as exc:
+        raise RuntimeError("Native Runner returned an invalid runtime receipt.") from exc
+
+
 def install_llama_cpp_runtime(runtime_id: Optional[str] = None, execute: bool = False) -> Dict[str, Any]:
+    # The Rust engine owns downloads, archive safety and immutable build receipts.
+    # Explicit legacy Homebrew/manual IDs retain their original compatibility path.
+    if runtime_id is None or runtime_id not in (LLAMA_CPP_RUNTIME_ID, WINDOWS_CUDA_RUNTIME_ID):
+        if execute:
+            args = ["install"] + (["--runtime-id", runtime_id] if runtime_id else [])
+            result = _native_runtime_command(args)
+            return {"action": "installed", "selected": result.get("selection"), "receipt": result}
+        if not shutil.which("infergrade-runner"):
+            return {"action": "plan", "selected": None, "supported_on_this_platform": False,
+                    "runtime": {"runtime_id": runtime_id, "backend": "llama.cpp",
+                                "version_label": "native managed runtime", "source": "native_runner",
+                                "install_command": ["infergrade-runner", "runtime", "install"]},
+                    "message": "Use Desktop → Make runtime ready, or install the native infergrade-runner CLI on PATH. Docker and WSL are optional."}
+        result = _native_runtime_command(["plan"])
+        runtime = result.get("recommended_runtime") or {}
+        return {"action": "plan", "runtime": runtime, "selected": None,
+                "supported_on_this_platform": runtime.get("supported_on_this_platform", bool(runtime.get("archive"))),
+                "message": "No runtime was downloaded. Re-run with --execute to install the pinned native runtime."}
     runtime = find_known_runtime(runtime_id)
     payload = {
         "runtime": runtime,

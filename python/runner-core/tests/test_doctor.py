@@ -43,17 +43,16 @@ class DoctorTests(unittest.TestCase):
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.subprocess.run")
     @mock.patch("infergrade.doctor.shutil.which")
-    def test_zero_config_doctor_checks_container_runtime_elsewhere(self, which_mock, run_mock, capture_environment_mock):
+    def test_zero_config_doctor_requires_native_runtime_with_docker_optional(self, which_mock, run_mock, capture_environment_mock):
         capture_environment_mock.return_value = {"hardware_class": "nvidia_gpu", "accelerator_api": "cuda"}
-        which_mock.side_effect = lambda name: "/usr/bin/%s" % name if name == "docker" else None
-        run_mock.return_value = mock.Mock(returncode=0, stdout="Server Version: 26.0.0", stderr="")
-
+        which_mock.side_effect = lambda name: "/usr/bin/docker" if name == "docker" else None
         report = run_doctor()
-
         checks = {item["id"]: item for item in report["checks"]}
-        self.assertTrue(report["ok"])
-        self.assertEqual(checks["docker_cli"]["status"], "ok")
-        self.assertEqual(checks["docker_daemon"]["status"], "ok")
+        self.assertFalse(report["ok"])
+        self.assertEqual(checks["llama_cli_native"]["status"], "error")
+        self.assertEqual(checks["optional_container_runtime"]["status"], "info")
+        self.assertNotIn("docker_daemon", checks)
+        run_mock.assert_not_called()
 
     @mock.patch("infergrade.doctor.capture_environment")
     @mock.patch("infergrade.doctor.urllib_request.urlopen")

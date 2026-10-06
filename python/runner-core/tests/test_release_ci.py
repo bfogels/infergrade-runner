@@ -1610,6 +1610,43 @@ class ReleaseCiTests(unittest.TestCase):
                 manifest["platforms"]["windows-x86_64"]["url"],
             )
 
+    def test_updater_publication_requires_all_shipped_platforms(self):
+        from scripts.verify_desktop_release_artifacts import verify_update_manifest
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = root / "latest.json"
+            manifest.write_text(json.dumps({"version": "0.3.62", "platforms": {
+                "darwin-aarch64": {"url": "https://example.test/mac.tar.gz", "signature": "sig"}
+            }}))
+            with self.assertRaisesRegex(SystemExit, "missing required platform.*linux-x86_64.*windows-x86_64"):
+                verify_update_manifest(root, manifest, True, {manifest.name}, ["linux-x86_64", "windows-x86_64"])
+
+    def test_updater_release_signs_final_linux_bytes_and_preserves_windows_installer_type(self):
+        workflow = (ROOT / ".github/workflows/desktop-runner-release.yml").read_text()
+        self.assertLess(workflow.index("npm run build:linux"), workflow.index('tauri signer sign "${appimage[0]}"'))
+        self.assertIn("windows-x86_64-msi=release-assets/InferGrade.Runner.Windows-x64.msi", workflow)
+        self.assertIn("windows-x86_64-nsis=release-assets/InferGrade.Runner.Windows-x64.exe", workflow)
+        self.assertIn("linux-x86_64=release-assets/InferGrade.Runner.Linux-x86_64.AppImage", workflow)
+        self.assertIn("createUpdaterArtifacts -NotePropertyValue $true", workflow)
+
+    def test_windows_release_rewrites_script_argument_without_losing_path_parameter(self):
+        import re
+
+        config = json.loads((ROOT / "apps/desktop-runner/src-tauri/tauri.azure-signing.conf.json").read_text())
+        arguments = config["bundle"]["windows"]["signCommand"]["args"]
+        workflow = (ROOT / ".github/workflows/desktop-runner-release.yml").read_text()
+        hook_assignment = re.search(
+            r"\$config\.bundle\.windows\.signCommand\.args\[(\d+)\] = "
+            r"\(Resolve-Path ../../scripts/sign_desktop_windows\.ps1\)\.Path",
+            workflow,
+        )
+        self.assertIsNotNone(hook_assignment)
+        script_index = int(hook_assignment.group(1))
+        self.assertEqual(script_index, arguments.index("-File") + 1)
+        arguments[script_index] = "C:/checkout/scripts/sign_desktop_windows.ps1"
+        self.assertEqual(arguments[arguments.index("-File") + 1], "C:/checkout/scripts/sign_desktop_windows.ps1")
+        self.assertEqual(arguments[arguments.index("-Path") + 1], "%1")
+
     def test_desktop_update_manifest_requires_exactly_one_archive(self):
         with TemporaryDirectory() as tmp:
             bundle_dir = Path(tmp) / "bundle"

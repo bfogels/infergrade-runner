@@ -203,6 +203,7 @@ def _resolve_role_paths(request: Any) -> Tuple[Dict[str, Path], Dict[str, Any]]:
         )
     return paths, {
         "origin": source,
+        "accelerator": selected.get("accelerator") if source not in ("operator_paths", "environment_paths", "system_path") else None,
         "runtime_id": selected.get("runtime_id") if source not in ("operator_paths", "environment_paths", "system_path") else None,
         "channel": selected.get("channel"),
         "provenance": selected.get("provenance"),
@@ -762,6 +763,7 @@ def resolve_runtime_lock(
             "runtime_interface": "llama_cpp_cli_server_v1",
             "content_scope": content_scope,
             "origin": origin,
+            "accelerator": selection_metadata.get("accelerator"),
             "maturity": selection_metadata.get("channel"),
             "provenance_strength": (
                 "independently_signed"
@@ -798,6 +800,12 @@ def resolve_runtime_lock(
         lock["status"] = "active"
         lock["updated_at"] = utcnow_iso()
         _atomic_write_json(_lock_path(lock["runtime_lock_id"]), lock)
+    # Preserve package accelerator intent after role paths bind and when a later
+    # selection changes. This local lock metadata is not a public receipt field.
+    locked_accelerator = lock.get("accelerator")
+    if not locked_accelerator and lock.get("origin") == "managed_download" and str(lock.get("runtime_id") or "").endswith("-cuda"):
+        locked_accelerator = "cuda"
+    request._locked_native_accelerator = locked_accelerator
     for role, field in _ROLE_REQUEST_FIELDS.items():
         setattr(request, field, lock.get("resolved_paths", {}).get(role))
     return lock, _public_lock_summary(lock)

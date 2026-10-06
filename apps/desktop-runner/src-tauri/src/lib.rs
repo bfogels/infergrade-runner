@@ -22,6 +22,7 @@ use infergrade_runner_engine::{
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
 use std::io::Write;
@@ -49,7 +50,10 @@ const OBSERVED_RUNTIME_TERMINATION_GRACE_SECONDS: u64 = 5;
 const OBSERVED_RUNTIME_CONTRACT_VERSION: &str = "observed_quick_suite_v1";
 const OBSERVED_EVIDENCE_CLAIM_BOUNDARY: &str = "Local observed diagnostic only. The endpoint, runtime build, model artifact, publisher, and quantization are not independently verified. Scores are not comparable, promotion-eligible, recommendation evidence, or headline capability evidence.";
 static PAIRING_STATE_LOCK: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
-const STARTER_GGUF_URL: &str = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
+const STARTER_GGUF_URL: &str = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/52e7645ba7c309695bec7ac98f4f005b139cf465/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
+const STARTER_GGUF_BYTES: u64 = 668788096;
+const STARTER_GGUF_SHA256: &str =
+    "9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0";
 const STARTER_GGUF_FILENAME: &str = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
 const PARTIAL_ARTIFACT_PREFIX: &str = "infergrade-artifact-";
 const PARTIAL_ARTIFACT_SUFFIX: &str = ".tmp";
@@ -1819,6 +1823,11 @@ fn remove_selected_llama_cpp_runtime(remove_managed_files: Option<bool>) -> Resu
 }
 
 #[tauri::command]
+fn desktop_update_installation() -> Value {
+    json!({"platform": env::consts::OS, "appimage": cfg!(target_os = "linux") && env::var_os("APPIMAGE").is_some()})
+}
+
+#[tauri::command]
 fn desktop_model_cache_status() -> Result<Value, String> {
     desktop_model_cache_status_payload()
 }
@@ -1858,10 +1867,36 @@ fn clear_desktop_model_cache() -> Result<Value, String> {
     }))
 }
 
+fn verify_starter_gguf(path: &Path) -> Result<(), String> {
+    use std::io::Read;
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    if file.metadata().map_err(|error| error.to_string())?.len() != STARTER_GGUF_BYTES {
+        return Err(
+            "Starter model length mismatch. Clear the model cache and retry the download.".into(),
+        );
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    if format!("{:x}", digest.finalize()) != STARTER_GGUF_SHA256 {
+        return Err(
+            "Starter model checksum mismatch. Clear the model cache and retry the download.".into(),
+        );
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn download_starter_gguf() -> Result<Value, String> {
     let path = desktop_artifact_cache_dir()?.join(STARTER_GGUF_FILENAME);
     if path.is_file() {
+        verify_starter_gguf(&path)?;
         return Ok(json!({
             "status": "already_present",
             "path": path.display().to_string(),
@@ -1894,9 +1929,13 @@ async fn download_starter_gguf() -> Result<Value, String> {
         file.write_all(&chunk)
             .map_err(|error| format!("could not write starter GGUF: {error}"))?;
         size_bytes += chunk.len() as u64;
+        if size_bytes > STARTER_GGUF_BYTES {
+            return Err("Starter model download exceeded its pinned length.".into());
+        }
     }
     file.flush()
         .map_err(|error| format!("could not flush starter GGUF: {error}"))?;
+    verify_starter_gguf(&partial_path)?;
     fs::rename(&partial_path, &path).map_err(|error| {
         format!(
             "could not finalize starter GGUF at {}: {error}",
@@ -2422,6 +2461,7 @@ pub fn run() {
             refresh_desktop_runtime_catalog,
             remove_selected_llama_cpp_runtime,
             select_existing_llama_cpp_runtime,
+            desktop_update_installation,
             desktop_model_cache_status,
             clear_desktop_model_cache,
             download_starter_gguf,
@@ -2441,8 +2481,7 @@ mod tests {
         claim_run_job_payload, runner_heartbeat_payload, runner_register_payload,
         sanitized_runner_profile, ui_pairing_response, verify_runtime_download_manifest,
         worker_request_preview, NativeFirstRunRuntime, NativeRuntimeOutput,
-        MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID, WINDOWS_CUDA_BINARY_SET,
-        WINDOWS_CUDA_PREVIEW_RUNTIME_ID,
+        WINDOWS_CUDA_BINARY_SET, WINDOWS_CUDA_PREVIEW_RUNTIME_ID,
     };
     use std::sync::{Mutex as TestMutex, OnceLock};
 
@@ -2959,7 +2998,7 @@ mod tests {
         if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
             assert_eq!(
                 plan["recommended_runtime"]["runtime_id"],
-                MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID
+                "llama-cpp-b11429-macos-aarch64-metal"
             );
             assert_eq!(plan["recommended_runtime"]["accelerator"], "metal");
         }

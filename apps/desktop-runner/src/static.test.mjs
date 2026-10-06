@@ -200,7 +200,7 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.equal(html.includes("data-recovery-details"), false);
   assert.equal(html.includes("Advanced local artifact and upload recovery"), false);
   assert.equal(html.includes("Download starter model"), false);
-  assert.equal(html.includes("data-download-starter-gguf"), false);
+  assert.ok(html.includes("data-download-starter-gguf"));
   assert.equal(html.includes("data-first-run-step="), false);
   assert.equal(html.includes("data-first-run-again"), false);
   assert.equal(html.includes("Run again"), false);
@@ -209,7 +209,7 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.equal(html.includes("data-copy-artifact-path"), false);
   assert.equal(html.includes("data-retry-first-run-upload"), false);
   assert.equal(html.includes("Model path"), false);
-  assert.equal(html.includes("GGUF"), false);
+  assert.ok(html.includes("GGUF"));
   assert.equal(html.includes("Run assigned local smoke"), false);
   assert.equal(html.includes("Native first-run"), false);
   assert.ok(html.includes("data-hub-connection-status"));
@@ -260,7 +260,7 @@ test("desktop details drawer keeps runtime, logs, and support progressive", () =
   assert.ok(js.includes('invoke("select_existing_llama_cpp_runtime"'));
   assert.ok(js.includes("runtimePath,"));
   assert.ok(js.includes("runtimeId: null"));
-  assert.ok(js.includes("Choose or paste the path to llama-cli"));
+  assert.ok(js.includes("Choose llama-cli or llama-cli.exe"));
   assert.ok(js.includes("SHA-256 verified"));
   assert.ok(js.includes("no independent signature"));
   assert.ok(js.includes("Retry install, remove the selected runtime, or select an existing llama.cpp binary."));
@@ -311,8 +311,8 @@ test("desktop runtime panel keeps readiness truthful and Docker optional", () =>
   assert.ok(html.includes("data-runtime-llama-status"));
   assert.ok(html.includes("data-backend-runtime-status"));
   assert.ok(html.includes("data-container-runtime-status"));
-  assert.equal(html.includes("data-first-run-start"), false);
-  assert.equal(html.includes("data-first-run-status"), false);
+  assert.ok(html.includes("data-first-run-start"));
+  assert.ok(html.includes("data-first-run-status"));
   assert.ok(js.includes("desktop-readiness"));
   assert.ok(js.includes("renderDesktopReadiness"));
   assert.ok(js.includes("parseDesktopReadinessOutput"));
@@ -347,7 +347,7 @@ test("desktop readiness copy does not overclaim when native runtime is missing",
   assert.equal(js.includes("Docker not found. Native benchmarks are available; advanced sandboxed benchmarks are disabled.\";"), false);
 });
 
-test("desktop legacy local smoke support is not exposed in the product UI", () => {
+test("desktop public local check keeps upload recovery fields out of the product UI", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const js = readFileSync(new URL("./main.js", import.meta.url), "utf8");
   const helpers = readFileSync(new URL("./desktopHelpers.js", import.meta.url), "utf8");
@@ -357,7 +357,7 @@ test("desktop legacy local smoke support is not exposed in the product UI", () =
   const packageJson = readFileSync(new URL("../package.json", import.meta.url), "utf8");
 
   assert.equal(html.includes("Hub handoff recovery"), false);
-  assert.equal(html.includes("name=\"firstRunModelPath\""), false);
+  assert.ok(html.includes("name=\"firstRunModelPath\""));
   assert.ok(html.includes("name=\"firstRunRuntimePath\""));
   assert.equal(html.includes("name=\"firstRunUploadRunId\""), false);
   assert.equal(html.includes("name=\"firstRunUploadWorkerId\""), false);

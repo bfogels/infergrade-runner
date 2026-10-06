@@ -1,0 +1,59 @@
+name: Managed Native Runtime Smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - ".github/workflows/managed-native-runtime-smoke.yml"
+      - "apps/runner-cli/**"
+      - "crates/runner-engine/**"
+      - "runtime/llama_cpp_native_releases.json"
+      - "scripts/smoke_managed_native_runtime.py"
+      - "scripts/verify_llama_cpp_model_canary.py"
+      - "Cargo.lock"
+      - "Cargo.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-cpu:
+    name: ${{ matrix.os }} managed CPU install and generation
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Build shared Rust installer and native adapter
+        run: cargo build --locked -p infergrade-runner-cli
+      - name: Run real managed installation and native CPU execution without Docker
+        shell: bash
+        run: |
+          cli=target/debug/infergrade-runner
+          if [ "$RUNNER_OS" = Windows ]; then cli="${cli}.exe"; fi
+          python scripts/smoke_managed_native_runtime.py --cli "$cli" --output output/managed-native-smoke
+      - name: Upload exact-candidate receipts and diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: managed-native-cpu-${{ matrix.os }}-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            output/managed-native-smoke/*.json
+            output/managed-native-smoke/*.txt
+            output/managed-native-smoke/first-run/*.json

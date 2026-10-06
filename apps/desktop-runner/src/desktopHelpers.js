@@ -293,7 +293,12 @@ export function isPairingIntentDeepLink(value) {
   }
 }
 
-export function userSafeUpdateFailure(_message = "") {
+export function userSafeUpdateFailure(message = "") {
+  const detail = String(message).toLowerCase();
+  if (/signature|pubkey|public key/.test(detail)) return "Update signature verification failed. Retry Check for updates; if it persists, download a verified installer from Hub.";
+  if (/permission|access denied|read.only/.test(detail)) return "Runner could not replace this installation. Move the AppImage to a writable folder, or install the latest package with your system installer.";
+  if (/network|timeout|fetch|connection/.test(detail)) return "Update download could not connect. Check your connection, then retry Check for updates.";
+  if (/platform|target/.test(detail)) return "No update package is published for this platform yet. Check the available downloads in Hub.";
   return "Update status is unavailable. You can still pair and start the Runner.";
 }
 

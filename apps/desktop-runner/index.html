@@ -89,7 +89,7 @@
                     <path d="M13 2 5 13h6l-1 9 9-13h-6l1-7Z"></path>
                   </svg>
                 </span>
-                <strong>Managed Metal runtime</strong>
+                <strong>Managed llama.cpp runtime</strong>
                 <span class="row-state" data-backend-runtime-status>checking</span>
               </div>
               <div data-backend-row="token">
@@ -100,7 +100,7 @@
                     <path d="M12 8h.01"></path>
                   </svg>
                 </span>
-                <strong>Keychain token</strong>
+                <strong>Secure token storage</strong>
                 <span class="row-state" data-backend-token-status>checking</span>
               </div>
               <div data-backend-row="reconnect">
@@ -134,7 +134,7 @@
           <div class="pairing-copy">
             <p class="eyebrow">Pairing</p>
             <h2>Connect this machine</h2>
-            <p>Paste the one-time code from Hub. Pairing token is stored in Keychain.</p>
+            <p>Paste the one-time code from Hub. Pairing token is stored in your OS credential store.</p>
             <div class="button-row pairing-actions">
               <button type="button" data-open-hub data-hub-target="setup">Open Hub pairing</button>
               <button type="button" class="button-secondary" data-pair-runner>Pair with Hub</button>
@@ -176,6 +176,21 @@
             <button type="button" class="button-secondary" data-stop-runner disabled>Stop listening</button>
             <button type="button" class="button-secondary" data-reset-pairing>Unpair</button>
           </div>
+        </section>
+
+        <section class="drawer-panel" aria-labelledby="setup-title">
+          <h3 id="setup-title">First local check</h3>
+          <p class="hint">1. Pair with Hub above. 2. Make the runtime ready. 3. Download the public starter model and run a check.</p>
+          <div class="button-row">
+            <button type="button" data-setup-runtime>Make runtime ready</button>
+            <button type="button" class="button-secondary" data-download-starter-gguf>Download public starter model (~638 MB)</button>
+          </div>
+          <p class="hint" data-setup-runtime-status aria-live="polite">Install the recommended native runtime for this machine.</p>
+          <p class="hint">No Docker, WSL, or Hugging Face token is needed for this check. Hugging Face credentials are only needed for restricted models you choose in Hub.</p>
+          <label><span>Local GGUF model</span><input name="firstRunModelPath" type="text" autocomplete="off" placeholder="Download the starter above, or paste a .gguf path" /></label>
+          <p class="hint" data-model-path-status>Download the public starter model to continue.</p>
+          <div class="button-row"><button type="button" data-first-run-start disabled>Run local check</button></div>
+          <p class="hint" data-first-run-status aria-live="polite">Pair and make the runtime ready to begin.</p>
         </section>
 
         <section class="assignment-panel" data-assignment-panel data-state="idle" aria-live="polite">
@@ -385,8 +400,8 @@
               </div>
               <div class="status-list">
                 <div>
-                  <strong>Updates</strong>
-                  <span data-update-status>Ready when signed release artifacts are published.</span>
+                  <strong>Desktop app updates</strong>
+                  <span data-update-status>Updates the desktop app. Managed llama.cpp builds are selected separately in Runtime options.</span>
                 </div>
                 <div data-update-actions hidden>
                   <strong data-update-available>Update available</strong>
@@ -406,7 +421,7 @@
                 </div>
                 <div>
                   <strong>Windows/Linux</strong>
-                  <span>Unsigned package smoke artifacts are built in CI; signed installers are not public yet.</span>
+                  <span>Windows installers and Linux AppImage can use signed in-app updates when an update is published. Linux .deb installations use the system package installer.</span>
                 </div>
               </div>
               <div class="button-row compact-actions">

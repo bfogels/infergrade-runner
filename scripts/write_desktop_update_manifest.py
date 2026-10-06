@@ -67,13 +67,18 @@ def main() -> int:
         platform_artifacts.append(platform_artifact_from_arg(artifact_arg))
 
     base_url = args.base_url.rstrip("/")
+    if not base_url.startswith("https://"):
+        raise SystemExit("Updater artifact base URL must use HTTPS.")
     platforms = {}
     for platform, archive in platform_artifacts:
         if platform in platforms:
             raise SystemExit("Duplicate updater platform: %s" % platform)
         signature_path = signature_for_artifact(archive)
+        signature = signature_path.read_text(encoding="utf-8").strip()
+        if not signature:
+            raise SystemExit("Updater signature file is empty: %s" % signature_path)
         platforms[platform] = {
-            "signature": signature_path.read_text(encoding="utf-8").strip(),
+            "signature": signature,
             "url": "%s/%s" % (base_url, quote(archive.name)),
         }
 

@@ -4,7 +4,7 @@ InferGrade Desktop Runner is the local companion app for people who want to pair
 
 The Hub remains the model selection, benchmark planning, recommendation, and results surface. This app should stay focused on pairing, readiness, Runner lifecycle, local runtime controls, logs, updates, and support export.
 
-The desktop happy path is now native-first for macOS Apple Silicon: Docker will not be required for the first local benchmark, and the app can run a local GGUF through a Runner-pinned managed fallback, an exact build from the signed runtime catalog, or a selected existing `llama-cli` binary. Downloads are explicit and checksum-verified; signed catalog metadata authenticates InferGrade's build assertion, not an upstream artifact signature. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
+The desktop happy path defaults to native execution on macOS, Windows, and Linux: Docker will not be required for the first local benchmark, and the app can run a local GGUF through a Runner-pinned managed fallback, an exact build from the signed runtime catalog, or a selected existing `llama-cli` binary. Downloads are explicit and checksum-verified; signed catalog metadata authenticates InferGrade's build assertion, not an upstream artifact signature. Docker remains supported for advanced sandboxed benchmarks and container-friendly operator workflows.
 
 ## macOS Installation Location
 
@@ -20,7 +20,7 @@ Install the signed release as `/Applications/InferGrade Runner.app`. This is the
 - System, light, and dark UI modes
 - Explicit `llama.cpp` runtime inspection and selection controls
 - Native first-run model selection, progress events, local artifacts, and Hub upload handoff
-- Signed Tauri updater wiring for the macOS release lane
+- Signed Tauri updater wiring for macOS, Windows MSI/NSIS, and Linux AppImage release lanes
 - Source-built sidecar wrapper that can emit Tauri platform-specific binaries for macOS, Windows, and Linux build hosts
 
 ## Local Development
