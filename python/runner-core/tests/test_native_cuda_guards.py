@@ -1,7 +1,7 @@
 import unittest
 import json
 from pathlib import Path
-import jsonschema
+from infergrade.json_schema_subset import validate_json_schema
 from unittest import mock
 
 from infergrade.adapters.llama_cpp import (
@@ -72,8 +72,9 @@ class NativeCudaGuardsTests(unittest.TestCase):
         selector["accelerator"]["vendor"] = "unknown"
         selector["delivery"].update({"mode": "managed_download", "source": "infergrade_runtime_manifest", "selected_by": "managed_recommendation"})
         _require_native_cuda_offload(request, "using device CUDA0\noffloaded 3/5 layers to GPU")
-        schema = json.loads(Path("schemas/json/runtime_selector.schema.json").read_text(encoding="utf-8"))
-        jsonschema.validate(selector, schema)
+        schema_path = Path(__file__).resolve().parents[3] / "schemas/json/runtime_selector.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        self.assertEqual(validate_json_schema(selector, schema, schema_path), [])
 
     def test_direct_cli_does_not_gain_a_partial_runtime_selector(self):
         request = self.request()
