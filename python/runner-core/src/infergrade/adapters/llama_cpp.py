@@ -151,13 +151,13 @@ def native_cuda_required(request: RunRequest) -> bool:
 
 
 def _native_backend_flags(request: RunRequest) -> List[str]:
-    if request.backend_flags:
-        return request.backend_flags
     api = ((request.runtime_selector or {}).get("accelerator") or {}).get("api")
     if request.execution_mode == "local_native" and api == "cpu":
-        return ["--n-gpu-layers=0"]
+        return [*request.backend_flags, "--n-gpu-layers=0"] if request.backend_flags else ["--n-gpu-layers=0"]
     if native_cuda_required(request):
-        return ["--n-gpu-layers=999"]
+        # b11429 hides device/offload INFO markers unless verbosity is requested.
+        flags = request.backend_flags or ["--n-gpu-layers=999"]
+        return [*flags, "--log-verbosity", "4"]
     return request.backend_flags
 
 

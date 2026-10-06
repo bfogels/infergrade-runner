@@ -440,6 +440,10 @@ impl NativeFirstRunRuntime for LlamaCppRuntime {
         if cuda_required || should_request_llama_cpp_metal_offload() {
             command.arg("-ngl").arg("999");
         }
+        if cuda_required {
+            // Current upstream completion suppresses device/offload logs by default.
+            command.arg("--log-verbosity").arg("4");
+        }
         let prompt_redactions = [input.prompt.clone()];
         let output = run_process_with_timeout(command, self.timeout, &prompt_redactions).map_err(
             |error| {

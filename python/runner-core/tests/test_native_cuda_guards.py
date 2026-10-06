@@ -21,10 +21,12 @@ class NativeCudaGuardsTests(unittest.TestCase):
     def test_generic_host_selector_binds_managed_cuda_and_preserves_explicit_cpu(self, selected):
         request = self.request()
         self.assertTrue(native_cuda_required(request))
-        self.assertEqual(_native_backend_flags(request), ["--n-gpu-layers=999"])
+        self.assertEqual(_native_backend_flags(request), ["--n-gpu-layers=999", "--log-verbosity", "4"])
         cpu = self.request("cpu")
         self.assertFalse(native_cuda_required(cpu))
         self.assertEqual(_native_backend_flags(cpu), ["--n-gpu-layers=0"])
+        cpu.backend_flags = ["--n-gpu-layers=99"]
+        self.assertEqual(_native_backend_flags(cpu)[-1], "--n-gpu-layers=0")
         custom = self.request()
         custom.llama_cpp_cli_path = "/custom/llama-cli"
         self.assertFalse(native_cuda_required(custom))
@@ -34,6 +36,13 @@ class NativeCudaGuardsTests(unittest.TestCase):
         for system in ("linux", "windows"):
             _enforce_runtime_selector_before_execution(self.request("cuda", system))
         preflight.assert_not_called()
+
+    def test_linux_cuda_delivery_name_requires_cuda_even_with_unknown_accelerator(self):
+        request = self.request()
+        request.runtime_selector["delivery"]["binary_set"] = "llama_cpp_linux_cuda_x86_64"
+        self.assertTrue(native_cuda_required(request))
+        with self.assertRaisesRegex(RuntimeError, "CPU fallback"):
+            _require_native_cuda_offload(request, "using device CPU\noffloaded 0/5 layers to GPU")
 
     def test_explicit_cuda_accepts_nonzero_device_offload_and_records_observed_probe(self):
         for marker in ("load: using device CUDA0 (NVIDIA test)", "load_tensors: CUDA0 model buffer size = 4 MiB"):
