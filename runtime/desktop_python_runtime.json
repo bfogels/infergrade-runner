@@ -26,7 +26,18 @@
       "sha256": "242b94b37682ac55f9bf9eb624348dc8d17c64f74f56028104545ea3ffe35e26",
       "executable": "python.exe",
       "ca_bundle": "Lib/site-packages/pip/_vendor/certifi/cacert.pem",
-      "license": "LICENSE.txt"
+      "license": "LICENSE.txt",
+      "prune_paths": [
+        "DLLs/tcl86t.dll",
+        "DLLs/tk86t.dll",
+        "DLLs/_tkinter.pyd",
+        "Lib/tkinter",
+        "Lib/idlelib",
+        "Lib/turtledemo",
+        "Lib/turtle.py",
+        "libs/_tkinter.lib",
+        "tcl"
+      ]
     },
     "x86_64-unknown-linux-gnu": {
       "archive": "cpython-3.12.13+20260728-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
