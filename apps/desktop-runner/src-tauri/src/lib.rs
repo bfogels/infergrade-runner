@@ -549,6 +549,29 @@ fn emit_first_run_event(app: &AppHandle, event: RunnerEvent) {
     }
 }
 
+fn listener_start_arguments(plan: &Value, api_url: &str) -> Result<Vec<String>, String> {
+    let mut args = vec![
+        "start".to_string(),
+        "--api-url".to_string(),
+        api_url.to_string(),
+    ];
+    if plan["credential_source"] == "saved_pairing" {
+        for (flag, field) in [
+            ("--worker-id", "runner_id"),
+            ("--execution-mode", "execution_mode"),
+        ] {
+            let value = plan[field]
+                .as_str()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| {
+                    format!("Saved pairing is missing {field}. Pair this Runner again.")
+                })?;
+            args.extend([flag.to_string(), value.to_string()]);
+        }
+    }
+    Ok(args)
+}
+
 #[tauri::command]
 fn start_runner_listener(
     app: AppHandle,
@@ -597,7 +620,10 @@ fn start_runner_listener(
         .shell()
         .sidecar(SIDECAR_BINARY_NAME)
         .map_err(|error| format!("could not prepare Runner sidecar: {error}"))?
-        .args(["start", "--api-url", &normalized_api_url])
+        .args(listener_start_arguments(&plan, &normalized_api_url)?)
+        // Python must read the same pairing profile as this supervisor, including
+        // Windows APPDATA rather than Python's default ~/.config directory.
+        .env("INFERGRADE_CONFIG_DIR", runner_config_dir()?)
         .env("INFERGRADE_DESKTOP_EVENTS", "1");
     if let Some(token) = token_for_child {
         command = command.env("INFERGRADE_HUB_TOKEN", token);
@@ -2537,6 +2563,35 @@ mod tests {
         } else {
             ""
         }
+    }
+
+    #[test]
+    fn listener_arguments_bind_saved_pairing_without_exposing_token() {
+        let plan = json!({"credential_source": "saved_pairing", "runner_id": "runner_paired",
+                          "execution_mode": "local_native", "access_token": "secret-not-an-argument"});
+        assert_eq!(
+            listener_start_arguments(&plan, "https://api.infergrade.com").unwrap(),
+            [
+                "start",
+                "--api-url",
+                "https://api.infergrade.com",
+                "--worker-id",
+                "runner_paired",
+                "--execution-mode",
+                "local_native"
+            ]
+        );
+        let typed = json!({"credential_source": "typed_input", "runner_id": "stale_profile",
+                           "execution_mode": "local_container"});
+        assert_eq!(
+            listener_start_arguments(&typed, "https://api.infergrade.com").unwrap(),
+            ["start", "--api-url", "https://api.infergrade.com"]
+        );
+        assert!(listener_start_arguments(
+            &json!({"credential_source": "saved_pairing"}),
+            "https://api.infergrade.com"
+        )
+        .is_err());
     }
 
     #[test]
