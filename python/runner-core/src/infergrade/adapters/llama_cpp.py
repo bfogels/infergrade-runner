@@ -150,15 +150,27 @@ def native_cuda_required(request: RunRequest) -> bool:
     return (selected_llama_cpp_runtime() or {}).get("accelerator") == "cuda"
 
 
+def _llama_cpp_backend_flags(flags: List[str]) -> List[str]:
+    """Translate legacy GPU flags to llama.cpp argv without changing intent."""
+    arguments = []
+    for flag in flags:
+        if flag.startswith("--n-gpu-layers="):
+            arguments.extend(flag.split("=", 1))
+        else:
+            arguments.append(flag)
+    return arguments
+
+
 def _native_backend_flags(request: RunRequest) -> List[str]:
+    flags = _llama_cpp_backend_flags(request.backend_flags)
     api = ((request.runtime_selector or {}).get("accelerator") or {}).get("api")
     if request.execution_mode == "local_native" and api == "cpu":
-        return [*request.backend_flags, "--n-gpu-layers=0"] if request.backend_flags else ["--n-gpu-layers=0"]
+        return [*flags, "--n-gpu-layers", "0"]
     if native_cuda_required(request):
         # b11429 hides device/offload INFO markers unless verbosity is requested.
-        flags = request.backend_flags or ["--n-gpu-layers=999"]
+        flags = flags or ["--n-gpu-layers", "999"]
         return [*flags, "--log-verbosity", "4"]
-    return request.backend_flags
+    return flags
 
 
 def _require_native_cuda_offload(request: RunRequest, logs: str) -> None:
@@ -200,7 +212,7 @@ class LlamaCppAdapter(BaseAdapter):
         self._capability_server_session = None
 
     def default_backend_flags(self):
-        return ["--n-gpu-layers=99"] if shutil.which("nvidia-smi") is not None else []
+        return ["--n-gpu-layers", "99"] if shutil.which("nvidia-smi") is not None else []
 
     def runtime_metadata(self, request: RunRequest) -> Dict[str, object]:
         if request and request.execution_mode == "local_native":

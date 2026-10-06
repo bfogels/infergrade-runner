@@ -10,6 +10,8 @@ on:
       - "crates/runner-engine/**"
       - "runtime/llama_cpp_native_releases.json"
       - "scripts/smoke_managed_native_runtime.py"
+      - "python/runner-core/src/infergrade/adapters/llama_cpp.py"
+      - "python/runner-core/src/infergrade/runner.py"
       - "scripts/verify_llama_cpp_model_canary.py"
       - "Cargo.lock"
       - "Cargo.toml"
