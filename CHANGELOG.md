@@ -7,6 +7,15 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.64 (contract 0.3.38)
+
+- Fixes native NVIDIA model preflight rejecting GPU-layer arguments by passing
+  llama.cpp options and values separately, including saved or queued plans.
+- Applies the correction to completion, server and perplexity commands while
+  preserving requested GPU layers, explicit CPU selection and CUDA verification.
+- Adds the Python worker model-load preflight to real Windows/Linux native smoke
+  coverage alongside managed installation and Rust first-run generation.
+
 ## 0.3.63 (contract 0.3.38)
 
 - Fixes Windows Desktop listeners stopping immediately with a token-bound
