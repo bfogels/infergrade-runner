@@ -30,6 +30,23 @@ def command_json(cli, args, env, output, name, timeout=300):
     return value
 
 
+def python_adapter_preflight(selection, model):
+    # Exercise the Python worker's actual command builder, not just Rust first-run.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python/runner-core/src"))
+    from infergrade.adapters.llama_cpp import LlamaCppAdapter
+    from infergrade.models import RunRequest
+    request = RunRequest(
+        model="public/tiny-canary", backend="llama.cpp", tier="canary",
+        execution_mode="local_native", simulate=False,
+        quant_artifact_resolved_path=str(model),
+        llama_cpp_server_path=selection["binaries"]["server"],
+        runtime_selector={"accelerator": {"api": "cpu"}},
+        backend_flags=["--n-gpu-layers=99"],
+    )
+    LlamaCppAdapter().preflight_model(request)
+    return "passed"
+
+
 def smoke(cli, output):
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -72,6 +89,7 @@ def smoke(cli, output):
     model = output / spec["filename"]
     digest = download_model(model, spec)
     binary = Path(selection["binaries"]["cli"]).with_name("llama-completion.exe" if system == "windows" else "llama-completion")
+    python_preflight = python_adapter_preflight(selection, model)
     generation = run_canary(binary, model)
     first_run = command_json(cli, ["first-run", "--model", str(model), "--runtime", "auto",
                                   "--no-upload", "--prompt", "Once upon a time", "--max-tokens", "8",
@@ -93,7 +111,8 @@ def smoke(cli, output):
                "runtime_build_id": build_id, "upstream": selection["upstream"],
                "model": {"repository": spec["repository"], "revision": spec["revision"],
                          "sha256": digest, "size_bytes": model.stat().st_size},
-               "generation": generation, "runner_first_run": "passed",
+               "generation": generation, "python_adapter_preflight": python_preflight,
+               "runner_first_run": "passed",
                "exact_build_reselection": "passed", "docker_required": False,
                "claim_boundary": "Exact host installer, binary load, tiny legacy GGUF generation and Rust native first-run only. CPU CI does not qualify NVIDIA hardware. No broad model support, desktop package, signing or updater qualification."}
     write_json(output / "receipt.json", receipt)

@@ -616,7 +616,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
     if not request.backend_flags:
         accelerator = (request.runtime_selector or {}).get("accelerator") or {}
         if request.execution_mode == "local_native" and request.backend == "llama.cpp" and accelerator.get("api") == "cpu":
-            request.backend_flags = ["--n-gpu-layers=0"]
+            request.backend_flags = ["--n-gpu-layers", "0"]
         else:
             request.backend_flags = adapter.default_backend_flags()
     validate_request(request)

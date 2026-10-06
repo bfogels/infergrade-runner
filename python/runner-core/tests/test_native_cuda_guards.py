@@ -24,15 +24,40 @@ class NativeCudaGuardsTests(unittest.TestCase):
     def test_generic_host_selector_binds_managed_cuda_and_preserves_explicit_cpu(self, selected):
         request = self.request()
         self.assertTrue(native_cuda_required(request))
-        self.assertEqual(_native_backend_flags(request), ["--n-gpu-layers=999", "--log-verbosity", "4"])
+        self.assertEqual(_native_backend_flags(request), ["--n-gpu-layers", "999", "--log-verbosity", "4"])
         cpu = self.request("cpu")
         self.assertFalse(native_cuda_required(cpu))
-        self.assertEqual(_native_backend_flags(cpu), ["--n-gpu-layers=0"])
+        self.assertEqual(_native_backend_flags(cpu), ["--n-gpu-layers", "0"])
         cpu.backend_flags = ["--n-gpu-layers=99"]
-        self.assertEqual(_native_backend_flags(cpu)[-1], "--n-gpu-layers=0")
+        self.assertEqual(_native_backend_flags(cpu)[-2:], ["--n-gpu-layers", "0"])
         custom = self.request()
         custom.llama_cpp_cli_path = "/custom/llama-cli"
         self.assertFalse(native_cuda_required(custom))
+
+    @mock.patch("infergrade.adapters.llama_cpp.shutil.which", return_value="nvidia-smi")
+    def test_nvidia_default_and_saved_flags_use_separate_argv(self, which):
+        adapter = LlamaCppAdapter()
+        self.assertEqual(adapter.default_backend_flags(), ["--n-gpu-layers", "99"])
+        for mode in ("local_native", "local_container"):
+            request = self.request("unknown")
+            request.execution_mode = mode
+            request.llama_cpp_cli_path = "/custom/llama-cli"
+            request.backend_flags = ["--n-gpu-layers=99", "--other=value"]
+            original = list(request.backend_flags)
+            commands = [
+                adapter._build_llama_cli_command("model.gguf", "hello", 8, 512, request),
+                adapter._build_llama_server_command("model.gguf", 512, request),
+                adapter._build_llama_perplexity_command("model.gguf", "corpus.txt", request),
+            ]
+            for command in commands:
+                with self.subTest(mode=mode, command=command):
+                    index = command.index("--n-gpu-layers")
+                    self.assertEqual(command[index + 1], "99")
+                    self.assertNotIn("--n-gpu-layers=99", command)
+                    self.assertIn("--other=value", command)
+            self.assertEqual(request.backend_flags, original)
+        request.backend_flags = ["--n-gpu-layers", "42", "-ngl", "1"]
+        self.assertEqual(_native_backend_flags(request), request.backend_flags)
 
     @mock.patch("infergrade.runner.windows_cuda_preflight")
     def test_new_linux_and_windows_cuda_packages_do_not_enter_legacy_windows_gate(self, preflight):
@@ -106,7 +131,8 @@ class NativeCudaGuardsTests(unittest.TestCase):
             adapter.preflight_model(request)
         ready.assert_called_once()
         stop.assert_called_once_with(popen.return_value)
-        self.assertIn("--n-gpu-layers=999", popen.call_args[0][0])
+        self.assertIn("999", popen.call_args[0][0])
+        self.assertNotIn("--n-gpu-layers=999", popen.call_args[0][0])
         self.assertNotIn("compatibility", request.runtime_selector)
 
     @mock.patch("infergrade.adapters.llama_cpp._stop_process")
