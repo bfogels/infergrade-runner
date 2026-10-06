@@ -912,7 +912,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-22.04", workflow)
         self.assertIn("windows-package-smoke:\n    name: Build and smoke Windows desktop packages", workflow)
         self.assertIn("linux-package-smoke:\n    name: Build and smoke Linux desktop packages", workflow)
-        self.assertIn("tauri build --bundles nsis,msi --config $configPath", workflow)
+        self.assertIn("tauri build --bundles 'nsis,msi' --config $configPath", workflow)
         self.assertIn("npm run build:linux", workflow)
         self.assertIn("libwebkit2gtk-4.1-dev", workflow)
         self.assertIn("libayatana-appindicator3-dev", workflow)
@@ -1646,6 +1646,15 @@ class ReleaseCiTests(unittest.TestCase):
         arguments[script_index] = "C:/checkout/scripts/sign_desktop_windows.ps1"
         self.assertEqual(arguments[arguments.index("-File") + 1], "C:/checkout/scripts/sign_desktop_windows.ps1")
         self.assertEqual(arguments[arguments.index("-Path") + 1], "%1")
+
+    def test_windows_release_passes_bundle_list_as_one_literal_powershell_argument(self):
+        import re
+
+        workflow = (ROOT / ".github/workflows/desktop-runner-release.yml").read_text()
+        command = next(line for line in workflow.splitlines() if "tauri build --bundles" in line)
+        bundle_argument = re.search(r"--bundles\s+(['\"])([^'\"]+)\1\s+--config", command)
+        self.assertIsNotNone(bundle_argument, "PowerShell comma-separated bundle lists must be quoted")
+        self.assertEqual(bundle_argument.group(2).split(","), ["nsis", "msi"])
 
     def test_desktop_update_manifest_requires_exactly_one_archive(self):
         with TemporaryDirectory() as tmp:

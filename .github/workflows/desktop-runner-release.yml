@@ -439,7 +439,8 @@ jobs:
           $configPath = Join-Path $env:RUNNER_TEMP 'tauri-azure-signing.json'
           $config | ConvertTo-Json -Depth 10 | Set-Content $configPath
           # Use the CLI directly: npm's prebuild hook would overwrite the signed sidecar.
-          & ./node_modules/.bin/tauri build --bundles nsis,msi --config $configPath
+          # PowerShell treats an unquoted comma as an array separator.
+          & ./node_modules/.bin/tauri build --bundles 'nsis,msi' --config $configPath
           if ($LASTEXITCODE -ne 0) { throw 'Signed Windows package build failed.' }
 
       - name: Install and launch Windows packages
