@@ -435,7 +435,7 @@ jobs:
           $config = Get-Content src-tauri/tauri.azure-signing.conf.json -Raw | ConvertFrom-Json
           if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw "Missing updater signing key." }
           $config.bundle | Add-Member -NotePropertyName createUpdaterArtifacts -NotePropertyValue $true -Force
-          $config.bundle.windows.signCommand.args[4] = (Resolve-Path ../../scripts/sign_desktop_windows.ps1).Path
+          $config.bundle.windows.signCommand.args[3] = (Resolve-Path ../../scripts/sign_desktop_windows.ps1).Path
           $configPath = Join-Path $env:RUNNER_TEMP 'tauri-azure-signing.json'
           $config | ConvertTo-Json -Depth 10 | Set-Content $configPath
           # Use the CLI directly: npm's prebuild hook would overwrite the signed sidecar.

@@ -1629,6 +1629,24 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("linux-x86_64=release-assets/InferGrade.Runner.Linux-x86_64.AppImage", workflow)
         self.assertIn("createUpdaterArtifacts -NotePropertyValue $true", workflow)
 
+    def test_windows_release_rewrites_script_argument_without_losing_path_parameter(self):
+        import re
+
+        config = json.loads((ROOT / "apps/desktop-runner/src-tauri/tauri.azure-signing.conf.json").read_text())
+        arguments = config["bundle"]["windows"]["signCommand"]["args"]
+        workflow = (ROOT / ".github/workflows/desktop-runner-release.yml").read_text()
+        hook_assignment = re.search(
+            r"\$config\.bundle\.windows\.signCommand\.args\[(\d+)\] = "
+            r"\(Resolve-Path ../../scripts/sign_desktop_windows\.ps1\)\.Path",
+            workflow,
+        )
+        self.assertIsNotNone(hook_assignment)
+        script_index = int(hook_assignment.group(1))
+        self.assertEqual(script_index, arguments.index("-File") + 1)
+        arguments[script_index] = "C:/checkout/scripts/sign_desktop_windows.ps1"
+        self.assertEqual(arguments[arguments.index("-File") + 1], "C:/checkout/scripts/sign_desktop_windows.ps1")
+        self.assertEqual(arguments[arguments.index("-Path") + 1], "%1")
+
     def test_desktop_update_manifest_requires_exactly_one_archive(self):
         with TemporaryDirectory() as tmp:
             bundle_dir = Path(tmp) / "bundle"
