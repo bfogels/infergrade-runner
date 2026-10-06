@@ -7,6 +7,15 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.63 (contract 0.3.38)
+
+- Fixes Windows Desktop listeners stopping immediately with a token-bound
+  runner identity error by using Desktop's saved pairing directory and ID.
+- Preserves paired identity and native execution mode when starting the
+  listener; normal updates do not require pairing again to locate the profile.
+- Normalizes Windows checksum line endings before release reconciliation,
+  keeping signed Windows installers in the published asset set.
+
 ## 0.3.62 (contract 0.3.38)
 
 - Publishes signed and timestamped Windows x64 EXE/MSI installers alongside
