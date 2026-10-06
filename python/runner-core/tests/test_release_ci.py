@@ -1655,6 +1655,7 @@ class ReleaseCiTests(unittest.TestCase):
         bundle_argument = re.search(r"--bundles\s+(['\"])([^'\"]+)\1\s+--config", command)
         self.assertIsNotNone(bundle_argument, "PowerShell comma-separated bundle lists must be quoted")
         self.assertEqual(bundle_argument.group(2).split(","), ["nsis", "msi"])
+        self.assertIn("--verbose", command, "Tauri must expose custom signing child stderr on failure")
 
     def test_desktop_update_manifest_requires_exactly_one_archive(self):
         with TemporaryDirectory() as tmp:
