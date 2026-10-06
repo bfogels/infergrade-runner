@@ -739,7 +739,7 @@ pub fn recommended_llama_cpp_runtime() -> Value {
 fn recommended_runtime_for_platform(system: &str, arch: &str, accelerator: &str) -> Value {
     managed_llama_cpp_runtime_manifest()["runtimes"].as_array().unwrap().iter()
         .find(|entry| entry["platform"]["system"] == system && entry["platform"]["arch"] == arch && entry["accelerator"] == accelerator && entry["upstream"]["tag"] == "b11429")
-        .cloned().unwrap_or_else(|| json!({"runtime_id": "llama-cpp-native-manual", "platform": format!("{system} {arch}"), "supported_on_this_platform": false, "message": "Select an existing native llama.cpp runtime for this platform. Docker is optional."}))
+        .cloned().unwrap_or_else(|| json!({"runtime_id": "llama-cpp-native-manual", "platform": {"system": system, "arch": arch}, "supported_on_this_platform": false, "message": "Select an existing native llama.cpp runtime for this platform. Docker is optional."}))
 }
 
 fn safe_runtime_id(value: Option<&str>) -> Result<String, String> {

@@ -171,18 +171,19 @@ def _require_native_cuda_offload(request: RunRequest, logs: str) -> None:
             "Requested CUDA runtime did not prove CUDA device use and nonzero GPU layer offload. "
             "CPU fallback is not accepted; check the NVIDIA driver, GPU memory and managed CUDA dependencies."
         )
+    observed = "CUDA offloaded %s/%s layers" % (offload.group(1), offload.group(2))
+    request._native_cuda_offload_evidence = observed
     selector = request.runtime_selector
-    if not isinstance(selector, dict):
-        selector = {}
-        request.runtime_selector = selector
+    # Direct CLI requests may have no selector. Do not invent a partial contract;
+    # their package lock and execution logs remain the evidence owners.
+    if not isinstance(selector, dict) or selector.get("runtime_selector_version") != "0.3":
+        return
     accelerator = selector.setdefault("accelerator", {})
     accelerator.update({"vendor": "nvidia", "api": "cuda"})
     compatibility = selector.setdefault("compatibility", {})
     probes = compatibility.setdefault("probes", [])
     probes[:] = [probe for probe in probes if probe.get("id") != "native_cuda_offload"]
-    probes.append({"id": "native_cuda_offload", "status": "passed",
-                   "observed": {"offloaded_layers": int(offload.group(1)),
-                                "total_layers": int(offload.group(2))}})
+    probes.append({"id": "native_cuda_offload", "status": "passed", "observed": observed})
     # Offload is one observed probe; it cannot clear independent admission gates.
     if compatibility.get("status") in (None, "unknown") and not compatibility.get("reason_codes"):
         compatibility["status"] = "ready"

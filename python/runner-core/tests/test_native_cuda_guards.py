@@ -1,4 +1,7 @@
 import unittest
+import json
+from pathlib import Path
+import jsonschema
 from unittest import mock
 
 from infergrade.adapters.llama_cpp import (
@@ -12,7 +15,7 @@ class NativeCudaGuardsTests(unittest.TestCase):
     def request(self, api="unknown", system="linux"):
         return RunRequest(model="test/model", backend="llama.cpp", tier="canary",
                           execution_mode="local_native", simulate=False,
-                          runtime_selector={"platform": {"system": system},
+                          runtime_selector={"runtime_selector_version": "0.3", "platform": {"system": system},
                                             "accelerator": {"api": api},
                                             "delivery": {"binary_set": "llama_cpp_native_host_selected"}})
 
@@ -49,7 +52,7 @@ class NativeCudaGuardsTests(unittest.TestCase):
             request = self.request("cuda")
             _require_native_cuda_offload(request, marker + "\nload_tensors: offloaded 3/5 layers to GPU")
             self.assertEqual(request.runtime_selector["accelerator"]["vendor"], "nvidia")
-            self.assertEqual(request.runtime_selector["compatibility"]["probes"][0]["observed"]["offloaded_layers"], 3)
+            self.assertEqual(request.runtime_selector["compatibility"]["probes"][0]["observed"], "CUDA offloaded 3/5 layers")
 
     def test_explicit_cuda_rejects_cpu_zero_offload_and_missing_device(self):
         for logs in ("CPU model buffer\noffloaded 0/5 layers to GPU",
@@ -57,6 +60,28 @@ class NativeCudaGuardsTests(unittest.TestCase):
                      "CPU model buffer\noffloaded 3/5 layers to GPU", ""):
             with self.subTest(logs=logs), self.assertRaisesRegex(RuntimeError, "CPU fallback is not accepted"):
                 _require_native_cuda_offload(self.request("cuda"), logs)
+
+    def test_observed_cuda_probe_preserves_the_runtime_selector_contract(self):
+        request = self.request("cuda")
+        selector = request.runtime_selector
+        selector.update({"runtime_family": "llama.cpp",
+                         "support": {"tier": "best_effort", "claim_boundary": "Exact native candidate only"},
+                         "fallback": {"allowed": False, "mode": None, "reason": "No CPU fallback"},
+                         "compatibility": {"status": "unknown", "reason_codes": [], "probes": []}})
+        selector["platform"]["arch"] = "x86_64"
+        selector["accelerator"]["vendor"] = "unknown"
+        selector["delivery"].update({"mode": "managed_download", "source": "infergrade_runtime_manifest", "selected_by": "managed_recommendation"})
+        _require_native_cuda_offload(request, "using device CUDA0\noffloaded 3/5 layers to GPU")
+        schema = json.loads(Path("schemas/json/runtime_selector.schema.json").read_text(encoding="utf-8"))
+        jsonschema.validate(selector, schema)
+
+    def test_direct_cli_does_not_gain_a_partial_runtime_selector(self):
+        request = self.request()
+        request.runtime_selector = {}
+        request._locked_native_accelerator = "cuda"
+        _require_native_cuda_offload(request, "using device CUDA0\noffloaded 3/5 layers to GPU")
+        self.assertEqual(request.runtime_selector, {})
+        self.assertEqual(request._native_cuda_offload_evidence, "CUDA offloaded 3/5 layers")
 
     def test_cuda_probe_cannot_clear_an_unrelated_compatibility_gate(self):
         request = self.request("cuda")
