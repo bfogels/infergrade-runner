@@ -124,6 +124,7 @@ impl NativeCommandRuntime {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LlamaCppRuntime {
+    accelerator: Option<String>,
     command_path: PathBuf,
     runtime_id: String,
     timeout: Duration,
@@ -160,6 +161,7 @@ impl LlamaCppRuntime {
         Self {
             command_path: command_path.into(),
             runtime_id: runtime_id.into(),
+            accelerator: None,
             timeout: DEFAULT_NATIVE_RUNTIME_TIMEOUT,
         }
     }
@@ -170,16 +172,19 @@ impl LlamaCppRuntime {
     }
 
     pub fn resolve(command_path: Option<PathBuf>) -> Result<Self, String> {
-        let (command_path, runtime_id) = match command_path {
+        let (command_path, runtime_id, accelerator) = match command_path {
             Some(path) => (
                 validate_llama_cpp_command_path(path)?,
                 LLAMA_CPP_AUTO_RUNTIME_ID.to_string(),
+                None,
             ),
             None => selected_llama_cpp_runtime_binding()?.ok_or_else(|| {
                 "No selected llama.cpp runtime was found. Pass --runtime-path or select an app-managed llama.cpp runtime before using --runtime auto.".to_string()
             })?,
         };
-        Ok(Self::new(command_path, runtime_id))
+        let mut runtime = Self::new(command_path, runtime_id);
+        runtime.accelerator = accelerator;
+        Ok(runtime)
     }
 }
 
@@ -431,7 +436,8 @@ impl NativeFirstRunRuntime for LlamaCppRuntime {
             .arg("--single-turn")
             .arg("--simple-io")
             .arg("--perf");
-        if should_request_llama_cpp_metal_offload() {
+        let cuda_required = self.accelerator.as_deref() == Some("cuda");
+        if cuda_required || should_request_llama_cpp_metal_offload() {
             command.arg("-ngl").arg("999");
         }
         let prompt_redactions = [input.prompt.clone()];
@@ -457,6 +463,9 @@ impl NativeFirstRunRuntime for LlamaCppRuntime {
             });
         }
         let combined_log = format!("{}\n{}", output.stdout, output.stderr);
+        if cuda_required && !cuda_offload_proven(&combined_log) {
+            return Err("Requested CUDA runtime did not prove CUDA device use and nonzero GPU layer offload. CPU fallback is not accepted; check the NVIDIA driver and managed CUDA dependencies.".into());
+        }
         let timings = parse_llama_timings(&combined_log);
         let generated_tokens = match timings.eval_tokens {
             Some(value) => timing_u32(Some(value), "eval tokens")?,
@@ -478,6 +487,19 @@ impl NativeFirstRunRuntime for LlamaCppRuntime {
             peak_memory_bytes: None,
         })
     }
+}
+
+fn cuda_offload_proven(log: &str) -> bool {
+    let cuda_device = log
+        .lines()
+        .any(|line| line.contains("using device CUDA") || line.contains("CUDA0 model buffer"));
+    let offloaded = log.lines().any(|line| {
+        line.split_once("offloaded ")
+            .and_then(|(_, tail)| tail.split('/').next())
+            .and_then(|count| count.trim().parse::<u32>().ok())
+            .is_some_and(|count| count > 0)
+    });
+    cuda_device && offloaded
 }
 
 fn should_request_llama_cpp_metal_offload() -> bool {
@@ -511,7 +533,8 @@ fn validate_llama_cpp_command_path(path: PathBuf) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn selected_llama_cpp_runtime_binding() -> Result<Option<(PathBuf, String)>, String> {
+fn selected_llama_cpp_runtime_binding() -> Result<Option<(PathBuf, String, Option<String>)>, String>
+{
     let path = crate::selected_llama_cpp_runtime_path()?;
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
@@ -547,7 +570,12 @@ fn selected_llama_cpp_runtime_binding() -> Result<Option<(PathBuf, String)>, Str
         .filter(|value| !value.is_empty())
         .unwrap_or(LLAMA_CPP_AUTO_RUNTIME_ID)
         .to_string();
-    validate_llama_cpp_command_path(PathBuf::from(raw)).map(|path| Some((path, runtime_id)))
+    let accelerator = value
+        .get("accelerator")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    validate_llama_cpp_command_path(PathBuf::from(raw))
+        .map(|path| Some((path, runtime_id, accelerator)))
 }
 
 fn parse_llama_timings(raw_log: &str) -> LlamaTimings {

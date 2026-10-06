@@ -193,6 +193,33 @@ class RuntimeLockTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def test_managed_cuda_intent_survives_bound_paths_and_selection_change_on_resume(self):
+        from infergrade.adapters.llama_cpp import native_cuda_required, _require_native_cuda_offload
+        self._write_managed_selection(self.runtime_a)
+        selection_path = selected_llama_cpp_runtime_path()
+        selection = json.loads(selection_path.read_text(encoding="utf-8"))
+        selection["accelerator"] = "cuda"
+        selection_path.write_text(json.dumps(selection), encoding="utf-8")
+        request = self._request()
+        for field in ("llama_cpp_cli_path", "llama_cpp_server_path", "llama_cpp_perplexity_path"):
+            setattr(request, field, None)
+        request.runtime_selector = {"accelerator": {"api": "unknown"}}
+        lock, summary = resolve_runtime_lock(request, "bundle-cuda-resume")
+        self.assertEqual(lock["accelerator"], "cuda")
+        self.assertTrue(native_cuda_required(request))
+        self.assertIsNotNone(request.llama_cpp_cli_path)
+        selection["accelerator"] = "cpu"
+        selection_path.write_text(json.dumps(selection), encoding="utf-8")
+        resumed = self._request()
+        resumed.runtime_selector = {"accelerator": {"api": "unknown"}}
+        resumed_lock, _ = resolve_runtime_lock(resumed, "bundle-cuda-resume", summary)
+        self.assertEqual(resumed_lock["runtime_build_id"], lock["runtime_build_id"])
+        self.assertTrue(native_cuda_required(resumed))
+        with self.assertRaisesRegex(RuntimeError, "CPU fallback"):
+            _require_native_cuda_offload(resumed, "using device CPU\noffloaded 0/5 layers to GPU")
+        resumed.runtime_selector["accelerator"]["api"] = "cpu"
+        self.assertFalse(native_cuda_required(resumed))
+
     def test_managed_package_lock_fingerprints_full_package_without_public_paths(self):
         managed_root = self._write_managed_selection(self.runtime_a)
         request = self._request()

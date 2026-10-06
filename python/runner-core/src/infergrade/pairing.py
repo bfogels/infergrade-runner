@@ -92,10 +92,7 @@ def runner_api_credential_source(api_token: Optional[str] = None) -> str:
 
 def preferred_local_execution_mode() -> str:
     """Return the clearest default local execution mode for this machine."""
-    environment = capture_environment("local_native")
-    if (environment or {}).get("hardware_class") == "apple_silicon":
-        return "local_native"
-    return "local_container"
+    return "local_native"
 
 
 def resolve_runner_execution_mode(execution_mode: Optional[str] = None) -> str:

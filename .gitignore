@@ -22,3 +22,6 @@ apps/desktop-runner/src-tauri/binaries/infergrade-sidecar-*
 apps/desktop-runner/src-tauri/desktop-python/*
 !apps/desktop-runner/src-tauri/desktop-python/.gitkeep
 apps/desktop-runner/sidecar/target/
+
+# Local runtime qualification receipts, archives and downloaded models.
+/output/

@@ -124,7 +124,7 @@ def _add_run_request_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--quant-artifact-revision")
     parser.add_argument("--use-case")
     parser.add_argument("--deployment-profile", dest="deployment_profiles", action="append")
-    parser.add_argument("--execution-mode", default="local_container")
+    parser.add_argument("--execution-mode", choices=("local_native", "local_container", "cloud_container", "manual_external"))
     parser.add_argument("--output")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--upload", action="store_true")
@@ -592,13 +592,15 @@ def _runtime_summary(payload: Dict) -> str:
         lines[0] = "✓ Installed and selected %s" % (runtime.get("version_label") or "llama.cpp")
     elif payload.get("supported_on_this_platform"):
         lines.append("Ready to install · run again with `--execute`.")
-    else:
+    elif not payload.get("message"):
         lines.append("This managed runtime does not match the current platform.")
     if current_cli:
         if os.path.exists(current_cli):
             lines.append("Current selection: %s" % (current.get("version_label") or current.get("runtime_id") or "local binary"))
         else:
             lines.append("Current selection needs repair: its binary no longer exists.")
+    if payload.get("message"):
+        lines.append(payload["message"])
     lines.append("Use `infergrade install-runtime --json` for provenance and binary details.")
     return "\n".join(lines)
 

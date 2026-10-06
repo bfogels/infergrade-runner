@@ -65,7 +65,7 @@ class RuntimeManagementTests(unittest.TestCase):
         self.assertIn("managed download remains disabled", " ".join(preview["notes"]))
 
     def test_install_runtime_without_execute_returns_plan_only(self):
-        plan = install_llama_cpp_runtime(execute=False)
+        plan = install_llama_cpp_runtime(runtime_id=LLAMA_CPP_RUNTIME_ID, execute=False)
         self.assertEqual(plan["action"], "plan")
         self.assertIn("install_command", plan["runtime"])
         self.assertIsNone(selected_llama_cpp_runtime())
@@ -198,3 +198,17 @@ class RuntimeManagementTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NativeManagedBridgeTests(unittest.TestCase):
+    @mock.patch("infergrade.runtimes._native_runtime_command")
+    def test_default_install_delegates_to_native_authority(self, command):
+        command.return_value = {"selection": {"runtime_build": {"runtime_build_id": "exact"}}}
+        result = install_llama_cpp_runtime(execute=True)
+        command.assert_called_once_with(["install"])
+        self.assertEqual(result["selected"]["runtime_build"]["runtime_build_id"], "exact")
+
+    @mock.patch("infergrade.runtimes.shutil.which", return_value=None)
+    def test_missing_native_cli_explains_desktop_recovery(self, command):
+        with self.assertRaisesRegex(RuntimeError, "Make runtime ready"):
+            install_llama_cpp_runtime(execute=True)

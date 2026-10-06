@@ -1,0 +1,399 @@
+{
+  "release": "v0.6.0",
+  "binary_release": "b11429",
+  "runtimes": [
+    {
+      "runtime_id": "llama-cpp-b11429-macos-aarch64-metal",
+      "channel": "upstream_release",
+      "backend": "llama.cpp",
+      "accelerator": "metal",
+      "version_label": "llama.cpp v0.6.0 \u00b7 macos aarch64 \u00b7 METAL",
+      "upstream": {
+        "project": "ggml-org/llama.cpp",
+        "tag": "b11429",
+        "semantic_version": "v0.6.0",
+        "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0"
+      },
+      "platform": {
+        "system": "macos",
+        "arch": "aarch64",
+        "human": "macos aarch64 / METAL"
+      },
+      "archive": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-macos-arm64.tar.gz",
+        "sha256": "740288ec6887be94280a5dfa25b5e23a78285cab104519e6c7e218904ee82459",
+        "size_bytes": 11971406,
+        "format": "tar.gz",
+        "checksum_source": "github_release_asset_digest"
+      },
+      "dependencies": [],
+      "verification": {
+        "sha256": true,
+        "expected_binaries": true,
+        "version_smoke": true,
+        "independent_signature": false
+      },
+      "download": {
+        "enabled": true,
+        "requires_explicit_user_action": true
+      },
+      "expected_binaries": [
+        "llama-cli",
+        "llama-server",
+        "llama-perplexity",
+        "llama-completion"
+      ],
+      "binary_names": {
+        "cli": "llama-cli",
+        "server": "llama-server",
+        "perplexity": "llama-perplexity"
+      },
+      "rollback_runtime_id": "llama-cpp-b9050-macos-arm64-metal",
+      "compatibility_notes": [
+        "Pinned upstream release; compatibility qualification is separate from installation.",
+        "Native execution; Docker is optional for advanced sandboxed checks."
+      ],
+      "provenance": "Official upstream release assets with pinned GitHub SHA-256; no independent signature."
+    },
+    {
+      "runtime_id": "llama-cpp-b11429-macos-x86_64-cpu",
+      "channel": "upstream_release",
+      "backend": "llama.cpp",
+      "accelerator": "cpu",
+      "version_label": "llama.cpp v0.6.0 \u00b7 macos x86_64 \u00b7 CPU",
+      "upstream": {
+        "project": "ggml-org/llama.cpp",
+        "tag": "b11429",
+        "semantic_version": "v0.6.0",
+        "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0"
+      },
+      "platform": {
+        "system": "macos",
+        "arch": "x86_64",
+        "human": "macos x86_64 / CPU"
+      },
+      "archive": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-macos-x64.tar.gz",
+        "sha256": "29ac3ea02be6bd143e824973f2cc5fa74bc4094393a9eaab0ff6814f19dd8522",
+        "size_bytes": 11487431,
+        "format": "tar.gz",
+        "checksum_source": "github_release_asset_digest"
+      },
+      "dependencies": [],
+      "verification": {
+        "sha256": true,
+        "expected_binaries": true,
+        "version_smoke": true,
+        "independent_signature": false
+      },
+      "download": {
+        "enabled": true,
+        "requires_explicit_user_action": true
+      },
+      "expected_binaries": [
+        "llama-cli",
+        "llama-server",
+        "llama-perplexity",
+        "llama-completion"
+      ],
+      "binary_names": {
+        "cli": "llama-cli",
+        "server": "llama-server",
+        "perplexity": "llama-perplexity"
+      },
+      "rollback_runtime_id": "llama-cpp-b11429-macos-x86_64-cpu",
+      "compatibility_notes": [
+        "Pinned upstream release; compatibility qualification is separate from installation.",
+        "Native execution; Docker is optional for advanced sandboxed checks.",
+        "Previous selected builds remain available for rollback; a fresh install has no older build."
+      ],
+      "provenance": "Official upstream release assets with pinned GitHub SHA-256; no independent signature."
+    },
+    {
+      "runtime_id": "llama-cpp-b11429-windows-x86_64-cpu",
+      "channel": "upstream_release",
+      "backend": "llama.cpp",
+      "accelerator": "cpu",
+      "version_label": "llama.cpp v0.6.0 \u00b7 windows x86_64 \u00b7 CPU",
+      "upstream": {
+        "project": "ggml-org/llama.cpp",
+        "tag": "b11429",
+        "semantic_version": "v0.6.0",
+        "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0"
+      },
+      "platform": {
+        "system": "windows",
+        "arch": "x86_64",
+        "human": "windows x86_64 / CPU"
+      },
+      "archive": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-win-cpu-x64.zip",
+        "sha256": "1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe",
+        "size_bytes": 19398918,
+        "format": "zip",
+        "checksum_source": "github_release_asset_digest"
+      },
+      "dependencies": [],
+      "verification": {
+        "sha256": true,
+        "expected_binaries": true,
+        "version_smoke": true,
+        "independent_signature": false
+      },
+      "download": {
+        "enabled": true,
+        "requires_explicit_user_action": true
+      },
+      "expected_binaries": [
+        "llama-cli.exe",
+        "llama-server.exe",
+        "llama-perplexity.exe",
+        "llama-completion.exe"
+      ],
+      "binary_names": {
+        "cli": "llama-cli.exe",
+        "server": "llama-server.exe",
+        "perplexity": "llama-perplexity.exe"
+      },
+      "rollback_runtime_id": "llama-cpp-b11429-windows-x86_64-cpu",
+      "compatibility_notes": [
+        "Pinned upstream release; compatibility qualification is separate from installation.",
+        "Native execution; Docker is optional for advanced sandboxed checks.",
+        "Previous selected builds remain available for rollback; a fresh install has no older build."
+      ],
+      "provenance": "Official upstream release assets with pinned GitHub SHA-256; no independent signature."
+    },
+    {
+      "runtime_id": "llama-cpp-b11429-windows-x86_64-cuda",
+      "channel": "upstream_release",
+      "backend": "llama.cpp",
+      "accelerator": "cuda",
+      "version_label": "llama.cpp v0.6.0 \u00b7 windows x86_64 \u00b7 CUDA",
+      "upstream": {
+        "project": "ggml-org/llama.cpp",
+        "tag": "b11429",
+        "semantic_version": "v0.6.0",
+        "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0"
+      },
+      "platform": {
+        "system": "windows",
+        "arch": "x86_64",
+        "human": "windows x86_64 / CUDA"
+      },
+      "archive": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-win-cuda-12.4-x64.zip",
+        "sha256": "dd6df685c1024e6aa55ca55ad35038692d5e284d4dc895e7a646c3245d3d14ff",
+        "size_bytes": 264478423,
+        "format": "zip",
+        "checksum_source": "github_release_asset_digest"
+      },
+      "dependencies": [
+        {
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/cudart-llama-bin-win-cuda-12.4-x64.zip",
+          "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+          "size_bytes": 391443627,
+          "format": "zip",
+          "checksum_source": "github_release_asset_digest"
+        }
+      ],
+      "verification": {
+        "sha256": true,
+        "expected_binaries": true,
+        "version_smoke": true,
+        "independent_signature": false
+      },
+      "download": {
+        "enabled": true,
+        "requires_explicit_user_action": true
+      },
+      "expected_binaries": [
+        "llama-cli.exe",
+        "llama-server.exe",
+        "llama-perplexity.exe",
+        "llama-completion.exe"
+      ],
+      "binary_names": {
+        "cli": "llama-cli.exe",
+        "server": "llama-server.exe",
+        "perplexity": "llama-perplexity.exe"
+      },
+      "rollback_runtime_id": "llama-cpp-b11429-windows-x86_64-cuda",
+      "compatibility_notes": [
+        "Pinned upstream release; compatibility qualification is separate from installation.",
+        "CUDA requires a compatible NVIDIA driver; no CPU fallback is claimed as CUDA.",
+        "Previous selected builds remain available for rollback; a fresh install has no older build."
+      ],
+      "provenance": "Official upstream release assets with pinned GitHub SHA-256; no independent signature."
+    },
+    {
+      "runtime_id": "llama-cpp-b11429-linux-x86_64-cpu",
+      "channel": "upstream_release",
+      "backend": "llama.cpp",
+      "accelerator": "cpu",
+      "version_label": "llama.cpp v0.6.0 \u00b7 linux x86_64 \u00b7 CPU",
+      "upstream": {
+        "project": "ggml-org/llama.cpp",
+        "tag": "b11429",
+        "semantic_version": "v0.6.0",
+        "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0"
+      },
+      "platform": {
+        "system": "linux",
+        "arch": "x86_64",
+        "human": "linux x86_64 / CPU"
+      },
+      "archive": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-ubuntu-x64.tar.gz",
+        "sha256": "f6d25dde8f51133143d1453da4fd5f73b145127177612a283bf7995957af3392",
+        "size_bytes": 17693462,
+        "format": "tar.gz",
+        "checksum_source": "github_release_asset_digest"
+      },
+      "dependencies": [],
+      "verification": {
+        "sha256": true,
+        "expected_binaries": true,
+        "version_smoke": true,
+        "independent_signature": false
+      },
+      "download": {
+        "enabled": true,
+        "requires_explicit_user_action": true
+      },
+      "expected_binaries": [
+        "llama-cli",
+        "llama-server",
+        "llama-perplexity",
+        "llama-completion"
+      ],
+      "binary_names": {
+        "cli": "llama-cli",
+        "server": "llama-server",
+        "perplexity": "llama-perplexity"
+      },
+      "rollback_runtime_id": "llama-cpp-b11429-linux-x86_64-cpu",
+      "compatibility_notes": [
+        "Pinned upstream release; compatibility qualification is separate from installation.",
+        "Native execution; Docker is optional for advanced sandboxed checks.",
+        "Previous selected builds remain available for rollback; a fresh install has no older build."
+      ],
+      "provenance": "Official upstream release assets with pinned GitHub SHA-256; no independent signature."
+    },
+    {
+      "runtime_id": "llama-cpp-b11429-linux-x86_64-cuda",
+      "channel": "upstream_release",
+      "backend": "llama.cpp",
+      "accelerator": "cuda",
+      "version_label": "llama.cpp v0.6.0 \u00b7 linux x86_64 \u00b7 CUDA",
+      "upstream": {
+        "project": "ggml-org/llama.cpp",
+        "tag": "b11429",
+        "semantic_version": "v0.6.0",
+        "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0"
+      },
+      "platform": {
+        "system": "linux",
+        "arch": "x86_64",
+        "human": "linux x86_64 / CUDA"
+      },
+      "archive": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-ubuntu-cuda-12.8-x64.tar.gz",
+        "sha256": "b13c64b9224d3c89d9993945d70cc21177ad00178c21b8d34237e3bc139834f1",
+        "size_bytes": 171651873,
+        "format": "tar.gz",
+        "checksum_source": "github_release_asset_digest"
+      },
+      "dependencies": [
+        {
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/cudart-llama-b11429-bin-ubuntu-cuda-12.8-x64.tar.gz",
+          "sha256": "f4ab593e31507320b121f2cb21791f4c72420a2483d3df8bf2ca1a97d04e6845",
+          "size_bytes": 594377569,
+          "format": "tar.gz",
+          "checksum_source": "github_release_asset_digest"
+        }
+      ],
+      "verification": {
+        "sha256": true,
+        "expected_binaries": true,
+        "version_smoke": true,
+        "independent_signature": false
+      },
+      "download": {
+        "enabled": true,
+        "requires_explicit_user_action": true
+      },
+      "expected_binaries": [
+        "llama-cli",
+        "llama-server",
+        "llama-perplexity",
+        "llama-completion"
+      ],
+      "binary_names": {
+        "cli": "llama-cli",
+        "server": "llama-server",
+        "perplexity": "llama-perplexity"
+      },
+      "rollback_runtime_id": "llama-cpp-b11429-linux-x86_64-cuda",
+      "compatibility_notes": [
+        "Pinned upstream release; compatibility qualification is separate from installation.",
+        "CUDA requires a compatible NVIDIA driver; no CPU fallback is claimed as CUDA.",
+        "Previous selected builds remain available for rollback; a fresh install has no older build."
+      ],
+      "provenance": "Official upstream release assets with pinned GitHub SHA-256; no independent signature."
+    },
+    {
+      "runtime_id": "llama-cpp-b11429-linux-aarch64-cpu",
+      "channel": "upstream_release",
+      "backend": "llama.cpp",
+      "accelerator": "cpu",
+      "version_label": "llama.cpp v0.6.0 \u00b7 linux aarch64 \u00b7 CPU",
+      "upstream": {
+        "project": "ggml-org/llama.cpp",
+        "tag": "b11429",
+        "semantic_version": "v0.6.0",
+        "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0"
+      },
+      "platform": {
+        "system": "linux",
+        "arch": "aarch64",
+        "human": "linux aarch64 / CPU"
+      },
+      "archive": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-ubuntu-arm64.tar.gz",
+        "sha256": "ed44c0f79c3d02424f62bdc87e106318b0b89f49050e2e80c5f352723d14e00b",
+        "size_bytes": 13682895,
+        "format": "tar.gz",
+        "checksum_source": "github_release_asset_digest"
+      },
+      "dependencies": [],
+      "verification": {
+        "sha256": true,
+        "expected_binaries": true,
+        "version_smoke": true,
+        "independent_signature": false
+      },
+      "download": {
+        "enabled": true,
+        "requires_explicit_user_action": true
+      },
+      "expected_binaries": [
+        "llama-cli",
+        "llama-server",
+        "llama-perplexity",
+        "llama-completion"
+      ],
+      "binary_names": {
+        "cli": "llama-cli",
+        "server": "llama-server",
+        "perplexity": "llama-perplexity"
+      },
+      "rollback_runtime_id": "llama-cpp-b11429-linux-aarch64-cpu",
+      "compatibility_notes": [
+        "Pinned upstream release; compatibility qualification is separate from installation.",
+        "Native execution; Docker is optional for advanced sandboxed checks.",
+        "Previous selected builds remain available for rollback; a fresh install has no older build."
+      ],
+      "provenance": "Official upstream release assets with pinned GitHub SHA-256; no independent signature."
+    }
+  ]
+}

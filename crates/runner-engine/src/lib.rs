@@ -165,11 +165,7 @@ pub fn normalize_api_url(raw: &str) -> Result<String, String> {
 }
 
 pub fn preferred_execution_mode() -> &'static str {
-    if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-        "local_native"
-    } else {
-        "local_container"
-    }
+    "local_native"
 }
 
 pub fn hostname() -> Option<String> {
@@ -228,7 +224,7 @@ pub fn load_selected_llama_cpp_runtime() -> Value {
 }
 
 pub fn managed_llama_cpp_runtime_manifest() -> Value {
-    json!({
+    let mut manifest = json!({
         "manifest_version": RUNTIME_MANIFEST_VERSION,
         "runtime_family": "llama.cpp",
         "channels": managed_llama_cpp_runtime_channels(),
@@ -339,7 +335,16 @@ pub fn managed_llama_cpp_runtime_manifest() -> Value {
                 "provenance": "Stable upstream ggml-org/llama.cpp release asset with pinned SHA-256 digest; no independent signature verified.",
             }
         ],
-    })
+    });
+    let native: Value = serde_json::from_str(include_str!(
+        "../../../runtime/llama_cpp_native_releases.json"
+    ))
+    .expect("bundled native runtime manifest must be valid JSON");
+    manifest["runtimes"]
+        .as_array_mut()
+        .unwrap()
+        .extend(native["runtimes"].as_array().unwrap().iter().cloned());
+    manifest
 }
 
 pub fn managed_llama_cpp_runtime_channels() -> Value {
@@ -350,8 +355,8 @@ pub fn managed_llama_cpp_runtime_channels() -> Value {
             {
                 "channel": "infergrade_stable",
                 "label": "InferGrade Stable",
-                "audience": "default",
-                "default": true,
+                "audience": "recovery",
+                "default": false,
                 "managed_by_infergrade": true,
                 "install_policy": "explicit_only",
                 "update_policy": "manual_only",
@@ -382,13 +387,13 @@ pub fn managed_llama_cpp_runtime_channels() -> Value {
             },
             {
                 "channel": "upstream_release",
-                "label": "Upstream Release",
-                "audience": "advanced",
-                "default": false,
-                "managed_by_infergrade": false,
+                "label": "Pinned Upstream Release",
+                "audience": "default",
+                "default": true,
+                "managed_by_infergrade": true,
                 "install_policy": "explicit_only",
                 "update_policy": "manual_only",
-                "provenance_expectation": "Upstream release metadata must be reviewed before selection.",
+                "provenance_expectation": "Bundled official release assets pinned by SHA-256; cross-platform qualification is tracked separately.",
                 "evidence_note": "Directional evidence only unless promoted into InferGrade Stable.",
             },
             {
@@ -720,34 +725,21 @@ pub fn verified_runtime_download_policy() -> Value {
 }
 
 pub fn recommended_llama_cpp_runtime() -> Value {
-    if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-        managed_llama_cpp_runtime_manifest()["runtimes"]
-            .as_array()
-            .and_then(|runtimes| {
-                runtimes
-                    .iter()
-                    .find(|entry| entry["channel"] == "infergrade_stable")
-            })
-            .cloned()
-            .unwrap_or(Value::Null)
+    let has_nvidia = command_version("nvidia-smi")["status"] == "found";
+    let accelerator = if has_nvidia {
+        "cuda"
+    } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        "metal"
     } else {
-        json!({
-            "runtime_id": "llama-cpp-native-manual",
-            "backend": "llama.cpp",
-            "accelerator": preferred_execution_mode(),
-            "platform": format!("{} {}", env::consts::OS, env::consts::ARCH),
-            "source": "manual",
-            "provenance": "Use an explicit llama.cpp build for this platform until InferGrade ships a verified runtime lane.",
-            "install_command": Value::Null,
-            "download_required": false,
-            "download_policy": verified_runtime_download_policy(),
-            "supported_on_this_platform": false,
-            "notes": [
-                "Verified GPU-specific runtime downloads are not implemented yet.",
-                "No install command was run. Installation remains explicit."
-            ],
-        })
-    }
+        "cpu"
+    };
+    recommended_runtime_for_platform(env::consts::OS, env::consts::ARCH, accelerator)
+}
+
+fn recommended_runtime_for_platform(system: &str, arch: &str, accelerator: &str) -> Value {
+    managed_llama_cpp_runtime_manifest()["runtimes"].as_array().unwrap().iter()
+        .find(|entry| entry["platform"]["system"] == system && entry["platform"]["arch"] == arch && entry["accelerator"] == accelerator && entry["upstream"]["tag"] == "b11429")
+        .cloned().unwrap_or_else(|| json!({"runtime_id": "llama-cpp-native-manual", "platform": format!("{system} {arch}"), "supported_on_this_platform": false, "message": "Select an existing native llama.cpp runtime for this platform. Docker is optional."}))
 }
 
 fn safe_runtime_id(value: Option<&str>) -> Result<String, String> {
@@ -967,20 +959,35 @@ pub fn select_existing_llama_cpp_runtime(
         .as_deref()
         .map(is_windows_cuda_preview_runtime)
         .unwrap_or(false);
-    let cli_program = if windows_cuda_preview {
+    let cli_program = if cfg!(windows) || windows_cuda_preview {
         "llama-cli.exe"
     } else {
         "llama-cli"
     };
-    let server_program = if windows_cuda_preview {
+    let server_program = if cfg!(windows) || windows_cuda_preview {
         "llama-server.exe"
     } else {
         "llama-server"
     };
-    let perplexity_program = if windows_cuda_preview {
+    let perplexity_program = if cfg!(windows) || windows_cuda_preview {
         "llama-perplexity.exe"
     } else {
         "llama-perplexity"
+    };
+    let cli_path = match cli_path {
+        Some(path)
+            if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("llama.exe")) =>
+        {
+            let sibling = path.with_file_name("llama-cli.exe");
+            if !sibling.is_file() {
+                return Err("llama.exe is the standalone launcher. Install the managed runtime, or extract the full official llama.cpp archive and select llama-cli.exe.".into());
+            }
+            Some(sibling)
+        }
+        other => other,
     };
     let cli_was_explicit = cli_path.is_some();
     let cli = resolve_existing_runtime_binary(cli_path, cli_program, "llama-cli", true)?
@@ -1620,7 +1627,10 @@ fn managed_llama_cpp_runtime_entry(runtime_id: Option<&str>) -> Result<Value, St
     let runtimes = manifest["runtimes"]
         .as_array()
         .ok_or_else(|| "managed runtime manifest is missing runtimes".to_string())?;
-    let runtime_id = runtime_id.unwrap_or(MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID);
+    let recommended = recommended_llama_cpp_runtime();
+    let runtime_id = runtime_id
+        .or_else(|| recommended["runtime_id"].as_str())
+        .ok_or("No managed runtime for this platform")?;
     runtimes
         .iter()
         .find(|entry| entry["runtime_id"].as_str() == Some(runtime_id))
@@ -1881,10 +1891,9 @@ fn runtime_archive_sha256(entry: &Value) -> Result<&str, String> {
 }
 
 /// Maximum size we accept when downloading a managed runtime archive.
-/// Sized for current macOS Metal builds (~9 MB) plus generous slack for
-/// future Linux/Windows lanes; refuses pathologically large URLs that would
-/// OOM the host.
-pub const MAX_MANAGED_RUNTIME_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
+/// Includes the official CUDA runtime dependency archives (up to ~594 MB).
+/// Expanded archives are separately bounded before selection.
+pub const MAX_MANAGED_RUNTIME_ARCHIVE_BYTES: u64 = 768 * 1024 * 1024;
 
 fn fetch_runtime_archive(url: &str) -> Result<Vec<u8>, String> {
     let mut response = reqwest::blocking::Client::builder()
@@ -1946,6 +1955,80 @@ fn set_executable_if_needed(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn reject_archive_symlink_parents(destination: &Path, output: &Path) -> Result<(), String> {
+    let mut ancestor = output.parent();
+    while let Some(parent) = ancestor {
+        if parent == destination {
+            break;
+        }
+        if fs::symlink_metadata(parent).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err("managed runtime archive contains a symlink parent".into());
+        }
+        ancestor = parent.parent();
+    }
+    Ok(())
+}
+
+fn safe_extract_runtime_archive(
+    bytes: &[u8],
+    destination: &Path,
+    format: &str,
+) -> Result<(), String> {
+    if format == "tar.gz" {
+        return safe_extract_targz(bytes, destination);
+    }
+    if format != "zip" {
+        return Err("Unsupported managed archive format".into());
+    }
+    fs::create_dir_all(destination).map_err(|e| e.to_string())?;
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
+    if archive.len() > 4096 {
+        return Err("Too many managed archive members".into());
+    }
+    let mut total = 0_u64;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        let name = entry.name();
+        if name.contains('\\') || name.contains(':') || name.split('/').any(|part| part == "..") {
+            return Err("Unsafe managed ZIP path".into());
+        }
+        let relative = entry.enclosed_name().ok_or("Unsafe managed ZIP path")?;
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
+            return Err("Managed ZIP symlinks are not allowed".into());
+        }
+        total = total
+            .checked_add(entry.size())
+            .ok_or("Archive size overflow")?;
+        if total > 4 * 1024 * 1024 * 1024 {
+            return Err("Expanded managed archive exceeds limit".into());
+        }
+        let path = destination.join(relative);
+        reject_archive_symlink_parents(destination, &path)?;
+        if entry.is_dir() {
+            fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+        } else {
+            fs::create_dir_all(path.parent().ok_or("Missing archive parent")?)
+                .map_err(|e| e.to_string())?;
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .map_err(|e| e.to_string())?;
+            let declared_size = entry.size();
+            let copied = std::io::copy(&mut (&mut entry).take(declared_size + 1), &mut file)
+                .map_err(|e| e.to_string())?;
+            if copied != declared_size {
+                return Err("Managed ZIP member length mismatch".into());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn safe_extract_targz(bytes: &[u8], destination: &Path) -> Result<(), String> {
     fs::create_dir_all(destination).map_err(|error| {
         format!(
@@ -1955,6 +2038,8 @@ fn safe_extract_targz(bytes: &[u8], destination: &Path) -> Result<(), String> {
     })?;
     let decoder = GzDecoder::new(bytes);
     let mut archive = Archive::new(decoder);
+    let mut member_count = 0_u64;
+    let mut expanded_bytes = 0_u64;
     for entry in archive
         .entries()
         .map_err(|error| format!("could not read managed runtime archive: {error}"))?
@@ -1965,6 +2050,13 @@ fn safe_extract_targz(bytes: &[u8], destination: &Path) -> Result<(), String> {
             .path()
             .map_err(|error| format!("could not read managed runtime archive path: {error}"))?;
         let entry_type = entry.header().entry_type();
+        member_count += 1;
+        expanded_bytes = expanded_bytes
+            .checked_add(entry.size())
+            .ok_or("Archive size overflow")?;
+        if member_count > 4096 || expanded_bytes > 4 * 1024 * 1024 * 1024 {
+            return Err("Expanded managed archive exceeds limit".into());
+        }
         if entry_path.components().any(|component| {
             matches!(
                 component,
@@ -1997,6 +2089,7 @@ fn safe_extract_targz(bytes: &[u8], destination: &Path) -> Result<(), String> {
                 "managed runtime archive contains a link or special file entry".to_string(),
             );
         }
+        reject_archive_symlink_parents(destination, &output)?;
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent).map_err(|error| {
                 format!(
@@ -2004,6 +2097,14 @@ fn safe_extract_targz(bytes: &[u8], destination: &Path) -> Result<(), String> {
                     parent.display()
                 )
             })?;
+        }
+        // No member may overwrite a previous file or follow a symlink directory.
+        // Dependencies may share real directories, but never replace package files.
+        if fs::symlink_metadata(&output).is_ok() {
+            if entry_type.is_dir() && output.is_dir() {
+                continue;
+            }
+            return Err("managed runtime archive contains duplicate paths".into());
         }
         entry
             .unpack(&output)
@@ -2150,6 +2251,13 @@ pub fn install_managed_llama_cpp_runtime(
     options: ManagedRuntimeInstallOptions,
 ) -> Result<Value, String> {
     let entry = managed_llama_cpp_runtime_entry(options.runtime_id.as_deref())?;
+    if entry["platform"]["system"] != env::consts::OS
+        || entry["platform"]["arch"] != env::consts::ARCH
+    {
+        return Err(
+            "Selected runtime does not match this operating system and architecture".into(),
+        );
+    }
     install_managed_llama_cpp_runtime_from_manifest_entry(entry, options)
 }
 
@@ -2466,7 +2574,28 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         std::process::id()
     ));
     cleanup_stale_runtime_dir(&staging_root, "staging")?;
-    safe_extract_targz(&bytes, &staging_root)?;
+    safe_extract_runtime_archive(
+        &bytes,
+        &staging_root,
+        entry["archive"]["format"].as_str().unwrap_or("tar.gz"),
+    )?;
+    for dependency in entry["dependencies"].as_array().into_iter().flatten() {
+        let url = dependency["url"].as_str().ok_or("dependency URL missing")?;
+        if !url.starts_with("https://github.com/ggml-org/llama.cpp/releases/download/") {
+            return Err("dependency must be an official HTTPS release asset".into());
+        }
+        let data = fetch_runtime_archive(url)?;
+        if dependency["size_bytes"].as_u64() != Some(data.len() as u64)
+            || dependency["sha256"].as_str() != Some(sha256_hex(&data).as_str())
+        {
+            return Err("managed runtime dependency checksum or length mismatch".into());
+        }
+        safe_extract_runtime_archive(
+            &data,
+            &staging_root,
+            dependency["format"].as_str().unwrap_or(""),
+        )?;
+    }
     assert_symlinks_stay_under(&staging_root)?;
 
     let cli_name = entry
@@ -2486,6 +2615,28 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         .ok_or_else(|| "managed runtime manifest is missing expected_binaries".to_string())?;
     let cli = find_runtime_binary(&staging_root, cli_name)?
         .ok_or_else(|| "managed runtime archive did not contain llama-cli".to_string())?;
+    // Official Linux CUDA companions use a separate top-level directory.
+    // Keep the pinned archive tree in the receipt, and colocate loader libraries
+    // with upstream executables so their $ORIGIN search path works after relocation.
+    if entry["platform"]["system"] == "linux" && entry["accelerator"] == "cuda" {
+        let binary_dir = cli
+            .parent()
+            .ok_or("managed runtime binary directory missing")?;
+        for name in ["libcublas.so.12", "libcublasLt.so.12", "libcudart.so.12"] {
+            let library = find_runtime_binary(&staging_root, name)?
+                .ok_or_else(|| format!("managed CUDA companion is missing {name}"))?;
+            let target = binary_dir.join(name);
+            if library != target {
+                let mut source = fs::File::open(&library).map_err(|e| e.to_string())?;
+                let mut destination = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&target)
+                    .map_err(|e| format!("could not colocate CUDA library: {e}"))?;
+                std::io::copy(&mut source, &mut destination).map_err(|e| e.to_string())?;
+            }
+        }
+    }
     let server = find_runtime_binary(&staging_root, server_name)?;
     let perplexity = find_runtime_binary(&staging_root, perplexity_name)?;
     for expected in expected_binaries {
@@ -2606,6 +2757,9 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
             "checksum_verified": true,
             "independent_signature_verified": false,
         },
+        "accelerator": entry["accelerator"].clone(),
+        "dependencies": entry.get("dependencies").cloned().unwrap_or_else(|| json!([])),
+        "upstream": entry["upstream"].clone(),
         "catalog_assertion": entry.get("catalog_assertion").cloned().unwrap_or(Value::Null),
     });
     let build_manifest_bytes = serde_json::to_vec_pretty(&build_manifest)
@@ -2668,6 +2822,8 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         "runtime_id": runtime_id,
         "backend": "llama.cpp",
         "version_label": entry["version_label"].clone(),
+        "accelerator": entry["accelerator"].clone(),
+        "dependencies": entry["dependencies"].clone(),
         "source": "managed_download",
         "channel": entry["channel"].clone(),
         "provenance": entry["provenance"].clone(),
@@ -2752,6 +2908,101 @@ mod tests {
     use std::io::Write;
     use std::sync::{Mutex, OnceLock};
     use tar::{Builder, Header};
+
+    #[test]
+    fn native_default_and_pins_cover_supported_desktop_platforms() {
+        assert_eq!(preferred_execution_mode(), "local_native");
+        for (system, arch, accelerator) in [
+            ("windows", "x86_64", "cpu"),
+            ("windows", "x86_64", "cuda"),
+            ("linux", "x86_64", "cpu"),
+            ("linux", "x86_64", "cuda"),
+            ("linux", "aarch64", "cpu"),
+            ("macos", "aarch64", "metal"),
+        ] {
+            let entry = recommended_runtime_for_platform(system, arch, accelerator);
+            assert_eq!(entry["upstream"]["semantic_version"], "v0.6.0");
+            assert!(verify_runtime_download_manifest(&entry).is_ok());
+            assert!(entry["expected_binaries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|name| name.as_str().unwrap().starts_with("llama-completion")));
+        }
+        assert_eq!(
+            recommended_runtime_for_platform("windows", "aarch64", "cpu")
+                ["supported_on_this_platform"],
+            false
+        );
+    }
+
+    #[test]
+    fn managed_zip_extracts_files_and_rejects_traversal_and_collisions() {
+        let root = env::temp_dir().join(format!("infergrade-zip-safety-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let make_zip = |name: &str| {
+            let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            writer
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(b"runtime").unwrap();
+            writer.finish().unwrap().into_inner()
+        };
+        safe_extract_runtime_archive(&make_zip("bin/llama-cli.exe"), &root, "zip").unwrap();
+        assert_eq!(
+            fs::read(root.join("bin/llama-cli.exe")).unwrap(),
+            b"runtime"
+        );
+        assert!(
+            safe_extract_runtime_archive(&make_zip("bin/llama-cli.exe"), &root, "zip").is_err()
+        );
+        for name in ["../escape.exe", "C:/escape.exe", "bin\\escape.exe"] {
+            assert!(safe_extract_runtime_archive(&make_zip(name), &root, "zip").is_err());
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn managed_tar_rejects_duplicate_files_and_expanded_size_limit() {
+        let root = env::temp_dir().join(format!("infergrade-tar-safety-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = Builder::new(encoder);
+        append_tar_file(&mut builder, "bin/cli", b"first", 0o755);
+        append_tar_file(&mut builder, "bin/cli", b"overwrite", 0o755);
+        let bytes = builder.into_inner().unwrap().finish().unwrap();
+        assert!(safe_extract_targz(&bytes, &root)
+            .unwrap_err()
+            .contains("duplicate"));
+        assert_eq!(fs::read(root.join("bin/cli")).unwrap(), b"first");
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = Builder::new(encoder);
+        let mut header = Header::new_gnu();
+        header.set_size(4 * 1024 * 1024 * 1024 + 1);
+        header.set_mode(0o755);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "huge", std::io::empty())
+            .unwrap();
+        let bytes = builder.into_inner().unwrap().finish().unwrap();
+        assert!(safe_extract_targz(&bytes, &root)
+            .unwrap_err()
+            .contains("limit"));
+        assert!(!root.join("huge").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn standalone_windows_launcher_has_actionable_recovery() {
+        let root = env::temp_dir().join(format!("infergrade-launcher-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let error =
+            select_existing_llama_cpp_runtime(None, Some(root.join("llama.exe")), None, None)
+                .unwrap_err();
+        assert!(error.contains("managed runtime"));
+        assert!(error.contains("llama-cli.exe"));
+        let _ = fs::remove_dir_all(root);
+    }
 
     fn env_test_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -3393,7 +3644,7 @@ mod tests {
         if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
             assert_eq!(
                 recommended_llama_cpp_runtime()["runtime_id"],
-                "llama-cpp-b9050-macos-arm64-metal"
+                "llama-cpp-b11429-macos-aarch64-metal"
             );
         }
     }
@@ -3407,7 +3658,7 @@ mod tests {
             .iter()
             .find(|entry| entry["channel"] == "infergrade_stable")
             .expect("stable channel");
-        assert_eq!(stable["default"], true);
+        assert_eq!(stable["default"], false);
         assert_eq!(stable["managed_by_infergrade"], true);
         assert_eq!(stable["install_policy"], "explicit_only");
         assert_eq!(stable["update_policy"], "manual_only");
@@ -4090,7 +4341,7 @@ mod tests {
         if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
             assert_eq!(
                 plan["recommended_runtime"]["runtime_id"],
-                MANAGED_LLAMA_CPP_MACOS_METAL_RUNTIME_ID
+                "llama-cpp-b11429-macos-aarch64-metal"
             );
             assert_eq!(plan["recommended_runtime"]["accelerator"], "metal");
         }

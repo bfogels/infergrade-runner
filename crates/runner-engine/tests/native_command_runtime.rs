@@ -537,3 +537,62 @@ fn native_command_runtime_rejects_metric_values_that_do_not_fit_contract() {
     let _ = std::fs::remove_file(runtime_path);
     let _ = std::fs::remove_file(model_path);
 }
+
+#[test]
+fn selected_cuda_runtime_requests_gpu_and_requires_nonzero_cuda_offload() {
+    let extension = if cfg!(windows) { "cmd" } else { "sh" };
+    let root = temp_path("selected-cuda-offload", "dir");
+    std::fs::create_dir_all(root.join("llama.cpp")).expect("cache directory");
+    let runtime_path = root.join(format!("llama-cli.{extension}"));
+    let args_path = root.join("args.txt");
+    let model_path = root.join("model.gguf");
+    std::fs::write(&model_path, b"fake model").expect("model");
+    std::fs::write(
+        root.join("llama.cpp/selected_runtime.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "runtime_id": "cuda-selected-test", "accelerator": "cuda",
+            "binaries": {"cli": runtime_path}
+        }))
+        .unwrap(),
+    )
+    .expect("selection");
+    let previous = std::env::var_os("INFERGRADE_RUNTIME_CACHE_DIR");
+    std::env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &root);
+    for (index, log, accepted) in [
+        (0, "load: using device CUDA0 (NVIDIA test)\nload_tensors: offloaded 3/3 layers to GPU", true),
+        (1, "load_tensors: CUDA0 model buffer size = 32 MiB\nload_tensors: offloaded 2/3 layers to GPU", true),
+        (2, "load: using device CPU\nload_tensors: offloaded 0/3 layers to GPU", false),
+        (3, "load: using device CUDA0 (NVIDIA test)\nload_tensors: offloaded 0/3 layers to GPU", false),
+        (4, "load_tensors: CPU model buffer size = 32 MiB\nload_tensors: offloaded 3/3 layers to GPU", false),
+    ] {
+        let timings = "llama_print_timings: load time = 100.00 ms\nllama_print_timings: eval time = 200.00 ms / 4 runs (50.00 ms per token, 20.00 tokens per second)";
+        let body = if cfg!(windows) {
+            let echoes = format!("{log}\n{timings}").lines().map(|line| format!("echo {line} 1>&2\r\n")).collect::<String>();
+            format!("@echo off\r\necho %* > \"{}\"\r\necho generated token\r\n{echoes}", args_path.display())
+        } else {
+            format!("#!/bin/sh\nprintf '%s\\n' \"$*\" > '{}'\necho 'generated token'\nprintf '%s\\n' '{log}\n{timings}' >&2\n", args_path.display())
+        };
+        write_executable(&runtime_path, &body);
+        let result = run_native_first_run(
+            NativeFirstRunInput {
+                model_path: model_path.clone(), runtime_hint: Some("auto".into()),
+                prompt: "hello".into(), max_tokens: 4, upload: false,
+            },
+            &LlamaCppRuntime::resolve(None).expect("selected CUDA runtime")
+                .with_timeout(Duration::from_secs(5)),
+        );
+        let args = std::fs::read_to_string(&args_path).expect("recorded args");
+        assert!(args.contains("-ngl 999"), "CUDA selection did not request GPU: {args}");
+        if accepted {
+            assert!(result.is_ok(), "case {index} should accept observed CUDA offload: {result:?}");
+        } else {
+            let error = result.expect_err("CPU or zero-layer fallback must fail").to_string();
+            assert!(error.contains("CUDA"), "case {index}: {error}");
+        }
+    }
+    match previous {
+        Some(value) => std::env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", value),
+        None => std::env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR"),
+    }
+    let _ = std::fs::remove_dir_all(root);
+}

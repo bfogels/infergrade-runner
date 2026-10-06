@@ -130,6 +130,64 @@ def _llama_cpp_version_label(output: str) -> Optional[str]:
     return first
 
 
+def native_cuda_required(request: RunRequest) -> bool:
+    """Bind native accelerator intent to explicit selectors or the selected package."""
+    if request.execution_mode != "local_native" or request.backend != "llama.cpp":
+        return False
+    selector = request.runtime_selector or {}
+    api = (selector.get("accelerator") or {}).get("api")
+    if api == "cpu":
+        return False
+    if api == "cuda":
+        return True
+    binary_set = str((selector.get("delivery") or {}).get("binary_set") or "")
+    if "cuda" in binary_set.lower():
+        return True
+    if hasattr(request, "_locked_native_accelerator"):
+        return request._locked_native_accelerator == "cuda"
+    if _native_runtime_source(request) != "managed_runtime":
+        return False
+    return (selected_llama_cpp_runtime() or {}).get("accelerator") == "cuda"
+
+
+def _native_backend_flags(request: RunRequest) -> List[str]:
+    if request.backend_flags:
+        return request.backend_flags
+    api = ((request.runtime_selector or {}).get("accelerator") or {}).get("api")
+    if request.execution_mode == "local_native" and api == "cpu":
+        return ["--n-gpu-layers=0"]
+    if native_cuda_required(request):
+        return ["--n-gpu-layers=999"]
+    return request.backend_flags
+
+
+def _require_native_cuda_offload(request: RunRequest, logs: str) -> None:
+    if request.simulate or not native_cuda_required(request):
+        return
+    device = re.search(r"using device CUDA\d*\b|CUDA\d+ model buffer", logs)
+    offload = re.search(r"offloaded\s+([0-9]+)/([0-9]+)\s+layers", logs)
+    if not device or not offload or int(offload.group(1)) <= 0:
+        raise RuntimeError(
+            "Requested CUDA runtime did not prove CUDA device use and nonzero GPU layer offload. "
+            "CPU fallback is not accepted; check the NVIDIA driver, GPU memory and managed CUDA dependencies."
+        )
+    selector = request.runtime_selector
+    if not isinstance(selector, dict):
+        selector = {}
+        request.runtime_selector = selector
+    accelerator = selector.setdefault("accelerator", {})
+    accelerator.update({"vendor": "nvidia", "api": "cuda"})
+    compatibility = selector.setdefault("compatibility", {})
+    probes = compatibility.setdefault("probes", [])
+    probes[:] = [probe for probe in probes if probe.get("id") != "native_cuda_offload"]
+    probes.append({"id": "native_cuda_offload", "status": "passed",
+                   "observed": {"offloaded_layers": int(offload.group(1)),
+                                "total_layers": int(offload.group(2))}})
+    # Offload is one observed probe; it cannot clear independent admission gates.
+    if compatibility.get("status") in (None, "unknown") and not compatibility.get("reason_codes"):
+        compatibility["status"] = "ready"
+
+
 class LlamaCppAdapter(BaseAdapter):
     backend_name = "llama.cpp"
 
@@ -239,10 +297,11 @@ class LlamaCppAdapter(BaseAdapter):
             with open(log_path, "wb") as log_file:
                 process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
             _wait_for_native_server_ready(process, published_port, started, log_path)
+            _require_native_cuda_offload(request, _read_log_file(log_path))
         except Exception as exc:
             logs = _read_log_file(log_path)
             tail = "\n".join(logs.splitlines()[-40:]).strip()
-            detail = tail or str(exc) or "unknown model-load failure"
+            detail = "%s%s" % (str(exc) or "unknown model-load failure", "\n" + tail if tail else "")
             raise RuntimeError(
                 "Native llama.cpp model compatibility preflight failed before capability execution. %s"
                 % detail
@@ -543,6 +602,7 @@ class LlamaCppAdapter(BaseAdapter):
         raw_log = "%s\n%s" % (stdout, stderr)
         if completed.returncode != 0:
             raise RuntimeError((raw_log or "llama.cpp generation failed").strip())
+        _require_native_cuda_offload(request, raw_log)
         parsed = _parse_llama_timings(raw_log)
         output = stdout.strip()
         output_tokens = _whole_token_count(parsed.get("eval_tokens"))
@@ -638,6 +698,7 @@ class LlamaCppAdapter(BaseAdapter):
             with open(log_path, "wb") as log_file:
                 process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
             base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
+            _require_native_cuda_offload(request, _read_log_file(log_path))
             return self._complete_native_server_text(
                 session={
                     "base_url": base_url,
@@ -717,6 +778,7 @@ class LlamaCppAdapter(BaseAdapter):
                 started,
                 log_path,
             )
+            _require_native_cuda_offload(request, _read_log_file(log_path))
         except Exception:
             _stop_process(process)
             try:
@@ -1207,6 +1269,7 @@ class LlamaCppAdapter(BaseAdapter):
                 )
             memory_monitor = _start_process_rss_monitor(process.pid)
             base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
+            _require_native_cuda_offload(request, _read_log_file(log_path))
             completion = (
                 _stream_server_chat_completion(
                     base_url=base_url,
@@ -1301,7 +1364,7 @@ class LlamaCppAdapter(BaseAdapter):
             "--perf",
             "--no-warmup",
         ]
-        command.extend(request.backend_flags)
+        command.extend(_native_backend_flags(request))
         return command
 
     def _native_completion_path(self, request: RunRequest) -> str:
@@ -1349,7 +1412,7 @@ class LlamaCppAdapter(BaseAdapter):
             "-np",
             "1",
         ]
-        command.extend(request.backend_flags)
+        command.extend(_native_backend_flags(request))
         return command
 
     def _profile_spec(self, profile_id: str, use_case: Optional[str]) -> Dict[str, object]:
@@ -1506,6 +1569,7 @@ class LlamaCppAdapter(BaseAdapter):
             raw_log = "%s\n%s" % (stdout, stderr)
             if completed.returncode != 0:
                 raise RuntimeError((raw_log or "llama.cpp perplexity failed").strip())
+            _require_native_cuda_offload(request, raw_log)
             parsed = _parse_perplexity_output(raw_log)
             if parsed.get("perplexity") is None:
                 raise RuntimeError("llama.cpp perplexity output did not include a final estimate.")
@@ -1546,7 +1610,7 @@ class LlamaCppAdapter(BaseAdapter):
             "4",
             "--no-warmup",
         ]
-        command.extend(request.backend_flags)
+        command.extend(_native_backend_flags(request))
         return command
 
 

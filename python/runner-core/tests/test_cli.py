@@ -916,3 +916,14 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NativeRequestDefaultTests(unittest.TestCase):
+    def test_backend_defaults_preserve_explicit_container_modes(self):
+        from infergrade.cli import build_parser
+        from infergrade.request import request_from_cli
+        for backend, expected in [("llama.cpp", "local_native"), ("vllm", "local_container"), ("tgi", "local_container")]:
+            args = build_parser().parse_args(["run", "--model", "example/model", "--backend", backend, "--tier", "canary"])
+            self.assertEqual(request_from_cli(args).execution_mode, expected)
+            args.execution_mode = "local_container"
+            self.assertEqual(request_from_cli(args).execution_mode, "local_container")

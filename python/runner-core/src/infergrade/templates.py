@@ -20,6 +20,7 @@ def build_run_request_template(
             "model": model,
             "backend": backend,
             "tier": tier,
+            "execution_mode": "local_native" if backend == "llama.cpp" else "local_container",
         },
     }
     if use_case:

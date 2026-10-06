@@ -9,7 +9,7 @@ The current release lane is intentionally staged by platform:
 3. build, install, self-test, and launch-smoke Windows x64 MSI and NSIS packages
 4. publish the macOS and Linux packages only after every platform build gate passes
 5. retain unsigned Windows packages as short-lived workflow artifacts unless an operator explicitly publishes a clearly named unsigned technical preview
-6. use Tauri updater signing for macOS app-update integrity
+6. use Tauri updater signing for macOS, Windows, and Linux AppImage app-update integrity
 
 The canonical end-user macOS install path is `/Applications/InferGrade Runner.app`. Use `~/Applications` only as an explicit non-admin fallback, and never leave both copies installed: deep links, Finder, and manual launches can otherwise select different versions while sharing the same Keychain pairing and local state.
 
@@ -96,7 +96,7 @@ Before a public beta:
 - verify Gatekeeper behavior on a clean macOS machine
 - document how signing credentials are injected in CI without exposing them to forks
 
-Windows needs a separate Authenticode signing path and SmartScreen reputation plan. Linux needs a packaging decision before update behavior is promised.
+Windows Authenticode and Tauri updater signatures are separate checks. Linux in-app updates apply to AppImage; .deb installations use the system package installer.
 
 ### macOS "Damaged App" Triage
 
@@ -106,7 +106,7 @@ Do not ask users to bypass Gatekeeper. Build a new artifact from the protected d
 
 ## Update Channel
 
-The macOS app reads the latest updater manifest from:
+The desktop app reads the latest updater manifest from:
 
 ```text
 https://github.com/bfogels/infergrade-runner/releases/latest/download/infergrade-runner-desktop-latest.json
@@ -124,10 +124,9 @@ the exact `vX.Y.Z` tag, attaches and verifies the complete asset set, and only
 then publishes the release. Published releases and their assets are immutable;
 GitHub's `releases/latest` redirect selects the current version without requiring
 an overwriteable release asset. The workflow publishes the DMG, updater
-artifacts, and verified Linux packages only after Developer ID signing,
-notarization, Gatekeeper verification, stapled-ticket checks, and both hosted
-package gates pass. Windows installers are excluded from the public asset set
-unless the dispatch explicitly enables the clearly labeled unsigned preview.
+artifacts, signed Windows installers, and verified Linux packages only after
+Developer ID signing, notarization, Gatekeeper verification, stapled-ticket
+checks, Authenticode verification, and hosted package gates pass.
 
 Before creating the draft, the publisher also records Sigstore-backed GitHub
 build provenance for the exact final asset set. It verifies that provenance
@@ -145,6 +144,11 @@ scripts/verify_desktop_release_artifacts.py \
   --require-dmg \
   --required-dmg-name InferGrade.Runner.macOS-arm64.dmg \
   --require-updater \
+  --required-updater-platform darwin-aarch64 \
+  --required-updater-platform windows-x86_64-msi \
+  --required-updater-platform windows-x86_64-nsis \
+  --required-updater-platform linux-x86_64 \
+  --require-windows \
   --require-linux \
   --reject-unexpected
 ```
@@ -158,12 +162,18 @@ python3 ./scripts/write_desktop_update_manifest.py \
   --version "$(cat VERSION)" \
   --base-url "https://github.com/bfogels/infergrade-runner/releases/download/vX.Y.Z" \
   --artifact darwin-aarch64=/path/to/InferGrade.Runner.app.tar.gz \
-  --artifact windows-x86_64=/path/to/InferGrade.Runner.setup.zip \
-  --artifact linux-x86_64=/path/to/infergrade-runner.AppImage.tar.gz \
+  --artifact windows-x86_64=/path/to/InferGrade.Runner.Windows-x64.exe \
+  --artifact windows-x86_64-nsis=/path/to/InferGrade.Runner.Windows-x64.exe \
+  --artifact windows-x86_64-msi=/path/to/InferGrade.Runner.Windows-x64.msi \
+  --artifact linux-x86_64=/path/to/InferGrade.Runner.Linux-x86_64.AppImage \
   --output /path/to/infergrade-runner-desktop-latest.json
 ```
 
-Each archive must have a sibling `.sig` file produced by Tauri updater signing. Adding Windows or Linux entries to the public manifest still requires a successful package attempt, platform-specific signing decision, and launch smoke on that platform.
+Each updater artifact must have a sibling `.sig` file produced by Tauri updater signing. Linux signing runs after AppImage receipt resealing, so its signature covers the final bytes. The merged manifest preserves MSI versus NSIS installer type; the generic Windows entry is the NSIS fallback. The artifact verifier checks checksums, platform coverage, and manifest/signature-file agreement; cryptographic updater signature verification is performed by the Tauri plugin before installation.
+
+On macOS and Windows, use Check for updates, Install update, then Relaunch when offered. Windows may close Runner and launch its installer during installation. After restart, Runner compares the running version with the version selected for installation. On Linux, run the AppImage from a writable location for in-app updates. For .deb or other system-package installs, download the latest .deb and install it using the system package installer, then reopen Runner; the AppImage updater does not replace a .deb installation.
+
+Desktop updates and llama.cpp updates are independent: desktop updates replace the app and bundled Runner core; Runtime options installs or selects the pinned managed llama.cpp build explicitly. Neither this code nor generated platform entries prove an actual older-to-newer update; record native host update evidence separately from package/install smoke.
 
 ## Release Candidate Checklist
 
@@ -278,5 +288,7 @@ Normal publication still requires the exact immutable tag, all platform checks,
 checksums and provenance, and publishes `InferGrade.Runner.Windows-x64.exe` and
 `InferGrade.Runner.Windows-x64.msi` automatically. Unsigned candidate PR smoke
 remains separate; public releases do not fall back to unsigned installers.
-Windows updater feeds remain unchanged in this slice. Public Trust signing does
-not guarantee SmartScreen reputation or establish physical NVIDIA execution.
+The cross-platform updater workflow now creates Tauri signatures and platform
+entries for Windows and Linux AppImage. This remains implementation evidence
+until the workflow and native older-to-newer update are exercised. Public Trust
+signing does not guarantee SmartScreen reputation or establish physical NVIDIA execution.

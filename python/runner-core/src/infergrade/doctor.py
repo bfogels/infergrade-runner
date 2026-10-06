@@ -174,7 +174,7 @@ def _request_context(request: Optional[RunRequest], api_url: Optional[str]) -> D
 
 
 def _generic_environment_checks() -> List[Dict[str, Any]]:
-    environment = capture_environment("local_container")
+    environment = capture_environment("local_native")
     checks = [
         _check(
             "hardware_snapshot",
@@ -183,25 +183,11 @@ def _generic_environment_checks() -> List[Dict[str, Any]]:
             environment,
         )
     ]
+    checks.append(_llama_native_binary_check("llama_cli_native", None, "INFERGRADE_LLAMA_CPP_CLI", "llama-cli", "Native llama-cli"))
+    checks.append(_llama_native_binary_check("llama_server_native", None, "INFERGRADE_LLAMA_CPP_SERVER", "llama-server", "Native llama-server"))
     if environment.get("hardware_class") == "apple_silicon":
-        checks.append(_llama_native_binary_check("llama_cli_native", None, "INFERGRADE_LLAMA_CPP_CLI", "llama-cli", "Native llama-cli"))
-        checks.append(_llama_native_binary_check("llama_server_native", None, "INFERGRADE_LLAMA_CPP_SERVER", "llama-server", "Native llama-server"))
-        checks.append(
-            _check(
-                "apple_silicon_native_runtime",
-                "ok",
-                "Apple Silicon native execution can use Metal acceleration when the installed llama.cpp binaries include Metal support.",
-                {
-                    "hardware_class": environment.get("hardware_class"),
-                    "accelerator_api": environment.get("accelerator_api"),
-                },
-            )
-        )
-        return checks
-    docker_cli = _binary_check("docker", "docker_cli", "Docker CLI is available.")
-    checks.append(docker_cli)
-    if docker_cli["status"] == "ok":
-        checks.append(_docker_daemon_check())
+        checks.append(_check("apple_silicon_native_runtime", "ok", "Native llama.cpp can use Metal acceleration.", environment))
+    checks.append(_check("optional_container_runtime", "info", "Docker/Podman is optional for advanced sandboxed benchmarks, not native setup.", {}))
     return checks
 
 
@@ -330,7 +316,7 @@ def _llama_native_binary_check(check_id: str, explicit_path: Optional[str], env_
     else:
         requested = default_binary
         path = shutil.which(requested)
-    install_hint = "brew install llama.cpp" if platform.system().lower() == "darwin" else None
+    install_hint = "infergrade-runner runtime install (or Desktop: Make runtime ready)"
     source = "custom_path" if explicit_path else ("environment_path" if environment_path else ("managed_runtime" if managed_selection is not None else "system_path"))
     managed_details = {"managed_runtime": managed_selection} if source == "managed_runtime" else {}
     if not path:
@@ -892,9 +878,7 @@ def _uses_remote_artifact(request: RunRequest) -> bool:
 
 def _preferred_local_execution_mode(environment: Dict[str, Any]) -> str:
     """Return the best default local execution mode for the detected hardware."""
-    if (environment or {}).get("hardware_class") == "apple_silicon":
-        return "local_native"
-    return "local_container"
+    return "local_native"
 
 
 def _check(check_id: str, status: str, message: str, details: Dict[str, Any]) -> Dict[str, Any]:

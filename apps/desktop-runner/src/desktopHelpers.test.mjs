@@ -664,3 +664,11 @@ test("maps auto-start failures to paired-but-recoverable UI copy", () => {
     "Pairing is saved. Runner could not start automatically; inspect Logs, then start listening again."
   );
 });
+
+
+test("update failures explain signature, transport, package and permission recovery", () => {
+  assert.match(userSafeUpdateFailure("signature verification failed"), /signature verification failed/);
+  assert.match(userSafeUpdateFailure("connection timeout"), /Check your connection/);
+  assert.match(userSafeUpdateFailure("platform not found"), /No update package/);
+  assert.match(userSafeUpdateFailure("Permission denied"), /writable folder/);
+});
