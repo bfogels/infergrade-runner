@@ -7,6 +7,19 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+## 0.3.62 (contract 0.3.38)
+
+- Publishes signed and timestamped Windows x64 EXE/MSI installers alongside
+  notarized macOS and verified Linux packages on the official release channel.
+- Enables signed app updates for Windows EXE/MSI and Linux AppImage installs,
+  with progress, busy-state protection, and version confirmation after restart.
+- Defaults llama.cpp jobs to managed native runtimes across platforms, pins
+  runtime downloads and companion libraries, and preserves explicit containers.
+- Adds a guided local first-run check using a public starter model and clearer
+  runtime, pairing, and recovery states.
+- Windows remains a technical beta. Hosted install/launch checks do not prove
+  NVIDIA/CUDA inference, a full paired Hub loop, or SmartScreen reputation.
+
 ## 0.3.61 (contract 0.3.38)
 
 - Updates desktop npm and Rust dependencies together, including Tauri alignment
