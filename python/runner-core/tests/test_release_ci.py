@@ -1657,6 +1657,23 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertEqual(bundle_argument.group(2).split(","), ["nsis", "msi"])
         self.assertIn("--verbose", command, "Tauri must expose custom signing child stderr on failure")
 
+    @unittest.skipIf(sys.platform == "win32", "Release asset assembly runs on Linux")
+    def test_release_checksum_assembly_normalizes_windows_names_before_reconciliation(self):
+        workflow = (ROOT / ".github/workflows/desktop-runner-release.yml").read_text()
+        assembly = next(line for line in workflow.splitlines() if 'cat "${checksum_parts[@]}"' in line)
+        pipeline = assembly.split("|", 1)[1].rsplit(">", 1)[0].strip()
+        digest = "a" * 64
+        windows_names = ["InferGrade.Runner.Windows-x64.exe", "InferGrade.Runner.Windows-x64.exe.sig",
+                         "InferGrade.Runner.Windows-x64.msi", "InferGrade.Runner.Windows-x64.msi.sig"]
+        source = digest + "  InferGrade.Runner.app.tar.gz\n"
+        source += "".join(digest + "  " + name + "\r\n" for name in windows_names)
+        source += digest + "  infergrade-runner-desktop-latest.json\r\n"
+        result = subprocess.run(["bash", "-o", "pipefail", "-c", pipeline], input=source,
+                                text=True, capture_output=True, check=True)
+        self.assertNotIn("\r", result.stdout)
+        expected_names = {line.split("  ", 1)[1] for line in result.stdout.splitlines()}
+        self.assertEqual(expected_names, set(windows_names + ["InferGrade.Runner.app.tar.gz"]))
+
     def test_desktop_update_manifest_requires_exactly_one_archive(self):
         with TemporaryDirectory() as tmp:
             bundle_dir = Path(tmp) / "bundle"

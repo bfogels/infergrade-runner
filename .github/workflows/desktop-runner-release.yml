@@ -692,7 +692,8 @@ jobs:
             --notes "$RELEASE_NOTES" \
             --output release-assets/infergrade-runner-desktop-latest.json
           # The macOS job checksummed its partial manifest; replace that entry after merging.
-          cat "${checksum_parts[@]}" | awk '$2 != "infergrade-runner-desktop-latest.json"' | sort -k2 > release-assets/SHA256SUMS
+          # Normalize Windows CRLF before filenames drive exact-asset reconciliation.
+          cat "${checksum_parts[@]}" | tr -d '\r' | awk '$2 != "infergrade-runner-desktop-latest.json"' | sort -k2 > release-assets/SHA256SUMS
           sha256sum release-assets/infergrade-runner-desktop-latest.json | sed 's|release-assets/||' >> release-assets/SHA256SUMS
           rm -f release-assets/SHA256SUMS.macos release-assets/SHA256SUMS.linux release-assets/SHA256SUMS.windows
           test -f "release-assets/$PUBLIC_DMG_NAME"
