@@ -4,7 +4,6 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-from infergrade.environment import capture_environment
 from infergrade.utils import ensure_dir, env_value
 
 
