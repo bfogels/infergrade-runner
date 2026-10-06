@@ -1876,7 +1876,7 @@ fn verify_starter_gguf(path: &Path) -> Result<(), String> {
         );
     }
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
         if count == 0 {

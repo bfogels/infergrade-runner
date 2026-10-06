@@ -1648,7 +1648,7 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = fs::File::open(path)
         .map_err(|error| format!("could not open runtime file `{}`: {error}", path.display()))?;
     let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let count = file.read(&mut buffer).map_err(|error| {
             format!("could not hash runtime file `{}`: {error}", path.display())
@@ -2908,6 +2908,27 @@ mod tests {
     use std::io::Write;
     use std::sync::{Mutex, OnceLock};
     use tar::{Builder, Header};
+
+    #[test]
+    fn runtime_file_hashing_fits_windows_sized_thread_stacks() {
+        let path = env::temp_dir().join(format!(
+            "infergrade-small-stack-hash-{}",
+            std::process::id()
+        ));
+        let bytes = vec![42_u8; 8192];
+        fs::write(&path, &bytes).unwrap();
+        let expected = sha256_hex(&bytes);
+        let thread_path = path.clone();
+        let digest = std::thread::Builder::new()
+            .stack_size(128 * 1024)
+            .spawn(move || sha256_file(&thread_path))
+            .unwrap()
+            .join()
+            .unwrap()
+            .unwrap();
+        assert_eq!(digest, expected);
+        fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn native_default_and_pins_cover_supported_desktop_platforms() {
