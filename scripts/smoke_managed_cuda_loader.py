@@ -26,6 +26,10 @@ def smoke(cli, output):
     if selection["archive"]["sha256"] != entry["archive"]["sha256"] or not selection["archive"]["checksum_verified"]:
         raise ValueError("CUDA package archive identity did not match its pin")
     directory = Path(selection["binaries"]["cli"]).parent
+    if any(directory.rglob("libcuda.so*")):
+        raise ValueError("CUDA package must use the host NVIDIA driver, not a bundled driver or stub")
+    if not (directory / "libggml-cuda.so").is_file():
+        raise ValueError("CUDA package did not contain its dynamic backend")
     versions = {}
     for name in ("llama-cli", "llama-server", "llama-perplexity", "llama-completion"):
         result = subprocess.run([str(directory / name), "--version"], env=env,
@@ -66,6 +70,7 @@ def smoke(cli, output):
         "cpu_generation_from_cuda_package": "passed", "model_sha256": digest,
         "cuda_request_without_gpu": "rejected", "gpu_execution_verified": False,
         "listener_without_cuda_device": "blocked_before_registration",
+        "driver_library_bundled": False,
         "claim_boundary": "Ubuntu 22 CUDA archive installation, binary loading and CPU-only generation. CUDA request correctly rejects absent GPU proof. Physical NVIDIA execution unverified.",
     })
 
