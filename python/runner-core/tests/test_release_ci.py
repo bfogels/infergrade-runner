@@ -643,6 +643,12 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("Close superseded sync PRs", workflow)
         self.assertIn('if [ "$head" != "$SYNC_BRANCH" ]; then', workflow)
         self.assertIn("automation/sync-main-to-develop-*)", workflow)
+        self.assertIn("select(.isCrossRepository | not)", workflow)
+        self.assertIn('|| echo "::warning::Could not close superseded sync PR #$number"', workflow)
+        # Cleanup must not gate the new sync PR's protected checks or auto-merge.
+        close_at = workflow.index("Close superseded sync PRs")
+        self.assertGreater(close_at, workflow.index("gh workflow run secret-scan.yml"))
+        self.assertGreater(close_at, workflow.index('gh pr merge "$pr_url" --auto --merge --delete-branch'))
 
     def test_desktop_app_uses_package_metadata_for_browser_version_fallback(self):
         js = (ROOT / "apps" / "desktop-runner" / "src" / "main.js").read_text(encoding="utf-8")
