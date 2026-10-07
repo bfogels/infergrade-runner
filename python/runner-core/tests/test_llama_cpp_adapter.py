@@ -90,6 +90,11 @@ llama_perf_context_print:       total time =   28989.04 ms /  2049 tokens
 
 class LlamaCppAdapterTests(unittest.TestCase):
     def setUp(self):
+        # Process tests mock Popen; fitting's separate help probe is covered by
+        # test_native_cuda_guards and must not launch a host-installed runtime.
+        fit_probe = mock.patch("infergrade.adapters.llama_cpp._supports_automatic_fit", return_value=False)
+        fit_probe.start()
+        self.addCleanup(fit_probe.stop)
         self.tempdir = tempfile.TemporaryDirectory(prefix="infergrade-llama-adapter-")
         self.env_patch = mock.patch.dict(os.environ, {"INFERGRADE_RUNTIME_CACHE_DIR": self.tempdir.name})
         self.env_patch.start()
