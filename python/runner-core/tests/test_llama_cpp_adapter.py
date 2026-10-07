@@ -1401,6 +1401,8 @@ class LlamaCppAdapterTests(unittest.TestCase):
 
         self.assertEqual(first["load_time_ms"], 321.0)
         self.assertIsNone(second["load_time_ms"])
+        self.assertEqual(first["runtime_placement"]["invocation_id"], second["runtime_placement"]["invocation_id"])
+        self.assertEqual(first["runtime_placement"]["layer_placement"], "unknown")
         self.assertEqual(stream_mock.call_count, 3)
         popen_mock.assert_called_once()
         wait_mock.assert_called_once()
@@ -1433,6 +1435,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
             "load_time_ms": 321.0,
             "load_time_reported": False,
             "process": process,
+            "runtime_placement": {"invocation_id": "raw-completion-invocation"},
         }
         request = RunRequest(
             model="Qwen/Qwen3-8B",
@@ -1465,6 +1468,8 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(first["input_tokens"], 8)
         self.assertEqual(first["output_tokens"], 1)
         self.assertEqual(first["measurement_source"], "llama_cpp_server_completion_timings")
+        self.assertEqual(first["runtime_placement"], session["runtime_placement"])
+        self.assertEqual(second["runtime_placement"], session["runtime_placement"])
         self.assertEqual(
             [call.kwargs["prompt"] for call in stream_mock.call_args_list],
             ["Answer only A.\n/no_think", "Answer only A again.\n/no_think"],
@@ -1555,6 +1560,9 @@ class LlamaCppAdapterTests(unittest.TestCase):
         self.assertEqual(first["ctx_size"], 8192)
         self.assertIsNot(first, grown)
         self.assertEqual(grown["ctx_size"], 16384)
+        self.assertNotEqual(first["runtime_placement"]["invocation_id"], grown["runtime_placement"]["invocation_id"])
+        self.assertEqual(first["runtime_placement"]["requested_context_tokens"], 8192)
+        self.assertEqual(grown["runtime_placement"]["requested_context_tokens"], 16384)
         self.assertIsNot(grown, recovered)
         self.assertEqual(popen_mock.call_count, 3)
         self.assertEqual(wait_mock.call_count, 3)
