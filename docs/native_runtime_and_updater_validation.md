@@ -31,8 +31,10 @@ Native Python benchmarks probe each resolved completion/server/perplexity binary
 `--help` for the exact `--fit` option. With no explicit backend flags, supported
 binaries use `--fit on` instead of forcing a GPU-layer count. Help probes have a
 10-second timeout and are cached by executable path, size and modification time.
-Unsupported or failed probes retain legacy defaults. The older pinned container
-image keeps its existing arguments; no new flag is assumed for that image.
+Unsupported or failed probes retain legacy defaults. The pinned container ref
+`9f102a1407ed5d73b8c954f32edab50f8dfa3f58` also implements `--fit` and uses
+`--fit on` by default. Custom images retain legacy defaults unless the user
+supplies fitting flags explicitly.
 
 Benchmark context sizes stay explicit. Desktop first-run uses a fixed 4096-token
 context and probes its actual completion binary before choosing fitting or legacy

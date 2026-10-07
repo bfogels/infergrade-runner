@@ -236,11 +236,16 @@ class LlamaCppAdapter(BaseAdapter):
         return ["--n-gpu-layers", "99"] if shutil.which("nvidia-smi") is not None else []
 
     def _backend_flags(self, request: RunRequest, tool: str) -> List[str]:
-        # Container defaults stay compatible with the older pinned image. User
-        # flags and explicit CPU intent retain their existing precedence.
+        # Explicit backend flags keep their existing precedence. The pinned
+        # container ref supports fitting; custom images have unknown capabilities.
         api = ((request.runtime_selector or {}).get("accelerator") or {}).get("api")
-        if (request.execution_mode != "local_native" or request.backend_flags
-                or request.simulate or api == "cpu"):
+        if request.backend_flags:
+            return _native_backend_flags(request)
+        if request.execution_mode != "local_native":
+            if self._image_name(request) == _DEFAULT_IMAGE:
+                return ["--fit", "on"]
+            return self.default_backend_flags()
+        if request.simulate or api == "cpu":
             return _native_backend_flags(request)
         try:
             binary = {

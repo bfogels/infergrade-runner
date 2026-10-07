@@ -8,7 +8,7 @@ from infergrade.json_schema_subset import validate_json_schema
 from unittest import mock
 
 from infergrade.adapters.llama_cpp import (
-    LlamaCppAdapter, native_cuda_required, _native_backend_flags, _require_native_cuda_offload,
+    _DEFAULT_IMAGE, LlamaCppAdapter, native_cuda_required, _native_backend_flags, _require_native_cuda_offload,
     _supports_automatic_fit, _probe_automatic_fit,
 )
 from infergrade.models import RunRequest
@@ -106,8 +106,22 @@ class NativeCudaGuardsTests(unittest.TestCase):
         self.assertEqual(adapter._backend_flags(cpu, "server"), ["--n-gpu-layers", "0"])
         container = self.request()
         container.execution_mode = "local_container"
-        container.backend_flags = adapter.default_backend_flags()
+        container.backend_flags = ["--fit", "off"]
         self.assertEqual(adapter._backend_flags(container, "server"), container.backend_flags)
+        supports.assert_not_called()
+
+    @mock.patch("infergrade.adapters.llama_cpp._supports_automatic_fit")
+    def test_pinned_container_fits_but_custom_image_keeps_legacy_defaults(self, supports):
+        adapter = LlamaCppAdapter()
+        request = self.request()
+        request.execution_mode = "local_container"
+        with mock.patch.object(adapter, "_image_name", return_value=_DEFAULT_IMAGE):
+            command = adapter._build_llama_server_command("model.gguf", 8192, request)
+        self.assertEqual(command[command.index("--fit") + 1], "on")
+        self.assertNotIn("--n-gpu-layers", command)
+        request.backend_image = "custom/unknown:runtime"
+        with mock.patch.object(adapter, "default_backend_flags", return_value=["--n-gpu-layers", "99"]):
+            self.assertEqual(adapter._backend_flags(request, "server"), ["--n-gpu-layers", "99"])
         supports.assert_not_called()
 
     @mock.patch("infergrade.adapters.llama_cpp._supports_automatic_fit", return_value=False)

@@ -89,17 +89,18 @@ class RunnerTests(unittest.TestCase):
         )
         self.assertEqual(_recorded_elapsed_seconds("not-a-time", "2026-07-16T20:50:01Z"), 0)
 
-    def test_native_run_does_not_inject_layers_before_automatic_fitting(self):
-        request = RunRequest(
-            model="Qwen/Qwen2.5-7B-Instruct", backend="llama.cpp", tier="canary",
-            execution_mode="local_native", simulate=True,
-            output_dir=os.path.join(self.tempdir, "native-fit-default"),
-        )
-        with mock.patch("infergrade.adapters.llama_cpp.LlamaCppAdapter.default_backend_flags",
-                        return_value=["--n-gpu-layers", "99"]) as defaults:
-            run_infergrade(request)
-        defaults.assert_not_called()
-        self.assertEqual(request.backend_flags, [])
+    def test_llama_run_does_not_inject_layers_before_automatic_fitting(self):
+        for mode in ("local_native", "local_container"):
+            request = RunRequest(
+                model="Qwen/Qwen2.5-7B-Instruct", backend="llama.cpp", tier="canary",
+                execution_mode=mode, simulate=True,
+                output_dir=os.path.join(self.tempdir, "fit-default-" + mode),
+            )
+            with mock.patch("infergrade.adapters.llama_cpp.LlamaCppAdapter.default_backend_flags",
+                            return_value=["--n-gpu-layers", "99"]) as defaults:
+                run_infergrade(request)
+            defaults.assert_not_called()
+            self.assertEqual(request.backend_flags, [])
 
     def test_simulated_deployment_preserves_explicit_iteration_counts(self):
         output_dir = os.path.join(self.tempdir, "explicit-counts")
