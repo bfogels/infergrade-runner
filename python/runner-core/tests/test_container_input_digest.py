@@ -1,4 +1,6 @@
 import importlib.util
+import os
+import subprocess
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -109,6 +111,28 @@ class ContainerInputDigestTests(unittest.TestCase):
             dockerfile.write_text("FROM python:3.11-slim\nCOPY lib/pkg/*.missing /app/\n", encoding="utf-8")
             with self.assertRaises(FileNotFoundError):
                 self._digest(root)
+
+    def test_workflow_fails_closed_when_base_manifest_lookup_fails(self):
+        workflow = (ROOT / ".github/workflows/publish-containers.yml").read_text(encoding="utf-8")
+        step = workflow.split("      - name: Fingerprint image inputs\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("shell: bash", step)
+        script = "\n".join(line[10:] for line in step.split("        run: |\n", 1)[1].splitlines())
+        with TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            (root / "scripts").mkdir()
+            (root / "scripts/container_input_digest.py").write_text(
+                (ROOT / "scripts/container_input_digest.py").read_text(encoding="utf-8"), encoding="utf-8")
+            docker = root / "docker"
+            docker.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            docker.chmod(0o755)
+            output = root / "output"
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"],
+                       DOCKERFILE="containers/demo/Dockerfile", PLATFORMS="linux/amd64",
+                       GITHUB_OUTPUT=str(output))
+            result = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", script],
+                                    cwd=str(root), env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(output.exists(), "Failed base lookup must not publish a reuse key")
 
     def test_every_repository_dockerfile_is_fingerprintable(self):
         for dockerfile in sorted((ROOT / "containers").glob("*/Dockerfile")):

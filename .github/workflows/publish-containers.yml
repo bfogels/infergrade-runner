@@ -108,6 +108,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Fingerprint image inputs
+        shell: bash
         id: inputs
         env:
           DOCKERFILE: ${{ matrix.dockerfile }}
