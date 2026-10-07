@@ -14,6 +14,17 @@ incremental changes only — see the git history.
 - Reports GPU count, per-card VRAM and total installed VRAM separately from the
   largest-card capacity used by existing model-fit checks.
 
+## 0.3.65 (contract 0.3.38)
+
+- Uses llama.cpp automatic memory fitting by default for native binaries that
+  advertise support and for the supported pinned container runtime, instead of
+  forcing a GPU-layer count that prevents automatic allocation.
+- Preserves explicit backend flags, CPU-only selection and benchmark context
+  sizes; requested CUDA still requires proof of positive GPU layer offload.
+- Keeps legacy defaults for older native binaries and unknown custom container
+  images. Fitting improves memory placement; Windows/NVIDIA speed gains require
+  measurement on the user's hardware.
+
 ## 0.3.64 (contract 0.3.38)
 
 - Fixes native NVIDIA model preflight rejecting GPU-layer arguments by passing
