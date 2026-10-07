@@ -14,7 +14,17 @@ incremental changes only — see the git history.
 - Reports GPU count, per-card VRAM and total installed VRAM separately from the
   largest-card capacity used by existing model-fit checks.
 
-## 0.3.65 (contract 0.3.38)
+## 0.3.66 (contract 0.3.39)
+
+- Packages the reviewed automatic memory fitting change and the current main
+  integration with additive device-authorization contracts.
+- Preserves existing Desktop pairing and explicit code-based CLI pairing;
+  bare CLI pairing uses device authorization when the Hub supports it and
+  offers hidden legacy input when those endpoints are unavailable.
+- Requires a Hub that accepts contract 0.3.39 before hosted Runner jobs are
+  considered ready. Windows/NVIDIA speed gains remain hardware-test dependent.
+
+## 0.3.65 (contract 0.3.38; source/image candidate only)
 
 - Uses llama.cpp automatic memory fitting by default for native binaries that
   advertise support and for the supported pinned container runtime, instead of

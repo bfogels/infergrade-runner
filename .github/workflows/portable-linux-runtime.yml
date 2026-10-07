@@ -52,7 +52,7 @@ jobs:
           persist-credentials: false
 
       - name: Restore compiler cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /github/home/.ccache
           key: portable-${{ matrix.accelerator }}-${{ hashFiles('scripts/build_linux_cuda_runtime.sh') }}
@@ -69,7 +69,17 @@ jobs:
           cat output/glibc228-runtime/SHA256SUMS
           ccache --show-stats || true
 
+      # Keep compiled objects and any recovery archive even when packaging
+      # fails, so a retry never recompiles CUDA from scratch.
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /github/home/.ccache
+          key: portable-${{ matrix.accelerator }}-${{ hashFiles('scripts/build_linux_cuda_runtime.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
         with:
           name: portable-glibc228-${{ matrix.accelerator }}-${{ github.sha }}
           path: output/glibc228-runtime/

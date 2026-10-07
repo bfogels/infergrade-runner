@@ -38,7 +38,7 @@ def smoke(bundle, output):
                     "shutil.copyfile(pathlib.Path(" + repr(str(mirror)) + ") / name,args[args.index('-o')+1])\n")
     curl.chmod(0o755)
     env = {key: value for key, value in os.environ.items() if key not in {
-        "INFERGRADE_HUB_TOKEN", "INFERGRADE_API_TOKEN", "INFERGRADE_LLAMA_CPP_CLI",
+        "INFERGRADE_HUB_TOKEN", "INFERGRADE_API_TOKEN", "INFERGRADE_PAIR_CODE", "INFERGRADE_LLAMA_CPP_CLI",
         "INFERGRADE_LLAMA_CPP_SERVER", "LD_LIBRARY_PATH", "PYTHONPATH",
     }}
     env.update(PATH=str(shim) + ":/usr/bin:/bin", INFERGRADE_VERSION=version,
@@ -64,7 +64,11 @@ def smoke(bundle, output):
             payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             observed.append(self.path)
             status = 200
-            if self.path == "/v1/runner-pairings/redeem":
+            if self.path == "/api/runner/device-codes":
+                response = {"device_code": "local_contract_fixture_secret_123456789",
+                            "user_code": "ABCD-EFGH", "verification_uri": api_url + "/connect",
+                            "expires_in": 60, "interval": 1}
+            elif self.path in {"/v1/runner-pairings/redeem", "/api/runner/device-codes/token"}:
                 response = {"runner_profile": {
                     "api_url": api_url, "runner_id": "installer-smoke",
                     "access_token": "qbhr_local_contract_fixture", "label": "Installer smoke",
@@ -93,30 +97,38 @@ def smoke(bundle, output):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     command = output / "commands/infergrade"
-    log = output / "pair-start.txt"
-    with log.open("w") as handle:
-        process = subprocess.Popen([str(command), "pair", "--start", "--api-url", api_url,
-                                    "--pair-code-stdin"], env=env, stdin=subprocess.PIPE,
-                                   stdout=handle, stderr=handle, text=True)
-        try:
-            process.stdin.write("igrp_local_contract_fixture\n")
-            process.stdin.close()
-            deadline = time.monotonic() + 60
-            while not listener_ready.wait(0.2):
-                if process.poll() is not None or time.monotonic() > deadline:
-                    raise ValueError("Installed pair --start did not listen: " + log.read_text()[-2000:])
-        finally:
-            if process.poll() is None:
-                process.terminate()
-            process.wait(timeout=15)
-            server.shutdown()
-            server.server_close()
-    registration = json.loads((output / "registration.json").read_text())
-    if registration.get("diagnostics", {}).get("blocking_count") != 0:
-        raise ValueError("Installed listener reported native readiness blockers")
+    try:
+        for flow, flags in (("pasted-code", ["--pair-code-stdin"]), ("device-code", [])):
+            listener_ready.clear()
+            log = output / (flow + "-pair-start.txt")
+            with log.open("w") as handle:
+                process = subprocess.Popen([str(command), "pair", "--start", "--api-url", api_url] + flags,
+                                           env=env, stdin=subprocess.PIPE, stdout=handle, stderr=handle, text=True)
+                try:
+                    if flags:
+                        process.stdin.write("igrp_local_contract_fixture\n")
+                    process.stdin.close()
+                    deadline = time.monotonic() + 60
+                    while not listener_ready.wait(0.2):
+                        if process.poll() is not None or time.monotonic() > deadline:
+                            raise ValueError(flow + " installed pair --start did not listen: " + log.read_text()[-2000:])
+                finally:
+                    if process.poll() is None:
+                        process.terminate()
+                    process.wait(timeout=15)
+            registration = json.loads((output / "registration.json").read_text())
+            if registration.get("diagnostics", {}).get("blocking_count") != 0:
+                raise ValueError(flow + " installed listener reported native readiness blockers")
+        if not {"/api/runner/device-codes", "/api/runner/device-codes/token", "/v1/runner-pairings/redeem"}.issubset(observed):
+            raise ValueError("Packaged pairing did not exercise both device approval and pasted-code redemption")
+    finally:
+        server.shutdown()
+        server.server_close()
     receipt = {"status": "passed", "runner_version": version, "application_archive": archive.name,
                "installed_command": shlex.quote(str(command)), "repeat_install": "passed",
-               "pair_and_start": "passed", "observed_paths": observed,
+               "pair_and_start": "passed", "device_pair_and_start": "passed",
+               "pasted_code_pair_and_start": "passed", "device_approval": "local_fixture_only",
+               "observed_paths": observed,
                "native_readiness_blockers": 0,
                "claim_boundary": "Actual Linux package, system prerequisites, public managed runtime and paired-profile listener against a local HTTP contract fixture. Hosted Hub and NVIDIA execution unverified."}
     (output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")

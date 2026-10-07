@@ -11,6 +11,8 @@ source_commit=d81235049384534c167caea52b85a694f6103d14
 source_sha256=6b58785f0a82898f4c3442417ff962e2d4b231b1bee5d033902ad90b27901e14
 cccl_commit=5fb1013e3c6f72877a2ebd30f54fe5158d64eec4
 cccl_sha256=a87760bed120043b2cb58ee0482e13bb246cf77ec14b49542fb8688842bd91b5
+eula_url=https://docs.nvidia.com/cuda/archive/12.8.1/eula/index.html
+eula_sha256=6722d4c310a2ec9ad869ede3371a648fe2cfc2baaf8e1ece2c35e1dccc05752c
 output_dir="${1:?Pass an output directory}"
 abi="${INFERGRADE_RUNTIME_ABI:-ubuntu22}"
 case "$abi" in
@@ -27,7 +29,25 @@ if [ "$accelerator" = cuda ]; then cuda_enabled=ON; backend_loading=ON; fi
 mkdir -p "$output_dir"
 output_dir="$(cd "$output_dir" && pwd)"
 build_dir="$(mktemp -d)"
-trap 'rm -rf "$build_dir"' EXIT
+cleanup() {
+  status=$?
+  if [ "$status" -ne 0 ] && [ -d "$build_dir/build/bin" ]; then
+    tar -czf "$output_dir/unverified-build-recovery.tar.gz" -C "$build_dir/build" bin || true
+    echo 'Unverified build outputs retained for diagnosis; failed builds are not release candidates.' >&2
+  fi
+  rm -rf "$build_dir"
+}
+trap cleanup EXIT
+# Fail fast on everything packaging needs, before hours of compilation.
+for tool in readelf ldd sha256sum tar gzip python3 curl; do
+  command -v "$tool" >/dev/null || { echo "Packaging prerequisite missing: $tool" >&2; exit 1; }
+done
+libgomp=""
+if [ "$abi" = glibc228 ]; then
+  libgomp="$(gcc -print-file-name=libgomp.so.1)"
+  case "$libgomp" in /*) ;; *) libgomp=/usr/lib64/libgomp.so.1 ;; esac
+  test -f "$libgomp" || { echo "libgomp.so.1 not found for the portable package" >&2; exit 1; }
+fi
 curl --fail --location --retry 3 --output "$build_dir/source.tar.gz" \
   "https://github.com/ggml-org/llama.cpp/archive/$source_commit.tar.gz"
 printf '%s  %s\n' "$source_sha256" "$build_dir/source.tar.gz" | sha256sum --check
@@ -41,6 +61,14 @@ if [ "$accelerator" = cuda ]; then
   printf '%s  %s\n' "$cccl_sha256" "$build_dir/cccl.tar.gz" | sha256sum --check
   mkdir "$build_dir/cccl"
   tar -xzf "$build_dir/cccl.tar.gz" --strip-components=1 -C "$build_dir/cccl"
+  # Check and stage packaging prerequisites before the expensive compilation.
+  mkdir "$build_dir/redistributables"
+  for library in libcublas.so.12 libcublasLt.so.12 libcudart.so.12; do
+    cp -L "/usr/local/cuda/lib64/$library" "$build_dir/redistributables/$library"
+  done
+  curl --fail --location --retry 3 --output "$build_dir/redistributables/EULA.cuda.html" "$eula_url"
+  printf '%s  %s\n' "$eula_sha256" "$build_dir/redistributables/EULA.cuda.html" | sha256sum --check
+  cp "$build_dir/cccl/LICENSE" "$build_dir/redistributables/LICENSE.cccl"
   cmake_extra=(-DGGML_CUDA_CCCL_VERSION=v3.4.3 "-DFETCHCONTENT_SOURCE_DIR_CCCL=$build_dir/cccl")
 fi
 cmake -S "$build_dir/source" -B "$build_dir/build" -G Ninja \
@@ -54,21 +82,16 @@ archive_name="llama-b11429-bin-$abi-$accelerator-x64.tar.gz"
 mkdir "$package"
 cp -a "$build_dir/build/bin/." "$package/"
 if [ "$accelerator" = cuda ]; then
-for library in libcublas.so.12 libcublasLt.so.12 libcudart.so.12; do
-  cp -L "/usr/local/cuda/lib64/$library" "$package/$library"
-done
-cp /usr/local/cuda/EULA.txt "$package/EULA.cuda.txt"
-cp "$build_dir/cccl/LICENSE" "$package/LICENSE.cccl"
+  cp -a "$build_dir/redistributables/." "$package/"
 fi
 cp "$build_dir/source/LICENSE" "$package/LICENSE.llama.cpp"
 if [ "$abi" = glibc228 ]; then
   # Minimal servers and containers often lack libgomp; ship the build host's
   # (glibc 2.28 compatible) copy beside the binaries, found via $ORIGIN.
-  libgomp="$(gcc -print-file-name=libgomp.so.1)"
-  case "$libgomp" in /*) cp -L "$libgomp" "$package/libgomp.so.1" ;; *) cp -L /usr/lib64/libgomp.so.1 "$package/libgomp.so.1" ;; esac
+  cp -L "$libgomp" "$package/libgomp.so.1"
 fi
 # Embed origin and scope, without claiming a GPU canary on hosted CPU CI.
-python3 - "$package/build-origin.json" "$source_commit" "$source_sha256" "$accelerator" "$output_dir/cmake-configure.txt" "$cccl_commit" "$cccl_sha256" "$abi_platform" "$max_glibc" <<'PY'
+python3 - "$package/build-origin.json" "$source_commit" "$source_sha256" "$accelerator" "$output_dir/cmake-configure.txt" "$cccl_commit" "$cccl_sha256" "$abi_platform" "$max_glibc" "$eula_url" "$eula_sha256" <<'PY'
 import json, sys, subprocess, re
 configure = open(sys.argv[5]).read()
 match = re.search(r"Using CMAKE_CUDA_ARCHITECTURES=([^ ]+) CMAKE_CUDA_ARCHITECTURES_NATIVE=", configure)
@@ -85,6 +108,8 @@ json.dump({"upstream_commit": sys.argv[2], "source_archive_sha256": sys.argv[3],
            "cccl_version": "v3.4.3" if sys.argv[4] == "cuda" else None,
            "cccl_commit": sys.argv[6] if sys.argv[4] == "cuda" else None,
            "cccl_source_sha256": sys.argv[7] if sys.argv[4] == "cuda" else None,
+           "cuda_eula_url": sys.argv[10] if sys.argv[4] == "cuda" else None,
+           "cuda_eula_sha256": sys.argv[11] if sys.argv[4] == "cuda" else None,
            "gpu_execution_verified": False}, open(sys.argv[1], "w"), indent=2)
 PY
 for binary in llama-cli llama-completion llama-server llama-perplexity; do

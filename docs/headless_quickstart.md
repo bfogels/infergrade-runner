@@ -22,8 +22,9 @@ curl -fsSL https://github.com/bfogels/infergrade-runner/releases/latest/download
 ```
 
 The second command follows Runner's pairing flow and keeps the listener running.
-Open the device approval link when offered, or enter a Hub pairing code when prompted.
-Hub's generated command explicitly uses hidden/stdin code entry. The absolute per-user path works in the same shell without a PATH change
+Open the device approval link and approve this device. Hub's Linux guide uses
+this device flow first. Pasted-code pairing remains available as a fallback
+through `--pair-code-stdin`; older Hubs offer a hidden pairing-code prompt. The absolute per-user path works in the same shell without a PATH change
 or login. The installer prints the exact path when a custom install location is
 used. Headless installation initially supports Ubuntu 22.04+ and Debian 12+ Linux x86_64; Desktop
 remains the install route on other platforms.
