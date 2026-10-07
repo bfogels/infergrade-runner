@@ -22,8 +22,10 @@ Sixteen captures in output/playwright inspected; mobile grid spacing and cache
 heading adjusted. Assignment mirror updates while Home is hidden; repeated
 paired=true state notifications preserve the current Settings page. Paired Home
 focus skips the hidden welcome heading. These are UI regressions, not actual
-benchmark execution or native app acceptance. Final captures and full Runner
-suite follow before promotion.
+benchmark execution or native app acceptance. Final sixteen captures were inspected after these fixes. Full Runner suite
+passed: 1,170 tests and tier audit, /tmp/infergrade-redesign-runner-desktop-full.log.
+Desktop npm check passed 54 tests and production build; independent review
+approved the repaired slice.
 
 The worktree starts at maine2ab6ad and preserves develop248e338, including
 CI efficiency PR649 and best-effort cleanup PR651. No release tag or version
