@@ -599,7 +599,17 @@ def _surface_task_performance_summary(artifacts: List[Dict[str, Any]]) -> Dict[s
     total_elapsed = [float(item["total_elapsed_seconds"]) for item in summaries if isinstance(item.get("total_elapsed_seconds"), (int, float))]
     total_input = [int(item["total_input_tokens"]) for item in summaries if isinstance(item.get("total_input_tokens"), int)]
     total_output = [int(item["total_output_tokens"]) for item in summaries if isinstance(item.get("total_output_tokens"), int)]
+    observations = [row for item in summaries for row in item.get("item_observations", [])]
+    observations_complete = all(
+        item.get("item_observations_version") == "task_timing_observations_v1"
+        and item.get("item_observations_complete") is True
+        and len(item.get("item_observations", [])) == int(item.get("attempted_task_count") or 0)
+        for item in summaries
+    ) and len(observations) <= 10000
     return {
+        "item_observations_version": "task_timing_observations_v1",
+        "item_observations_complete": observations_complete,
+        "item_observations": observations[:10000],
         "attempted_task_count": attempted,
         "completed_task_count": sum(int(item.get("completed_task_count") or 0) for item in summaries),
         "timed_task_count": timed,

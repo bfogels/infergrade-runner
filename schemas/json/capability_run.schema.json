@@ -354,6 +354,9 @@
     "task_performance_summary": {
       "type": "object",
       "properties": {
+        "item_observations_version": { "const": "task_timing_observations_v1" },
+        "item_observations_complete": { "type": "boolean" },
+        "item_observations": { "type": "array", "maxItems": 10000, "items": { "$ref": "task_timing_sample.schema.json" } },
         "attempted_task_count": { "type": "integer", "minimum": 0 },
         "completed_task_count": { "type": "integer", "minimum": 0 },
         "timed_task_count": { "type": "integer", "minimum": 0 },
