@@ -25,6 +25,9 @@ concurrency:
 
 jobs:
   native-cpu:
+    # Automated main-to-develop sync PRs only merge commits that already passed
+    # this smoke on their way to main; required CI still runs on the merge.
+    if: ${{ !startsWith(github.head_ref, 'automation/sync-main-to-develop-') }}
     name: ${{ matrix.os }} managed CPU install and generation
     strategy:
       fail-fast: false
