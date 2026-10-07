@@ -101,7 +101,7 @@ INFERGRADE_RUNNER_ROOT="$release_root/runner" \
 PYTHONPATH="$release_root/runner/python/runner-core/src" \
 PATH="$release_root/bin:$PATH" \
 "$release_root/venv/bin/python" -c \
-  'from infergrade.runtimes import prepare_native_listener_runtime; prepare_native_listener_runtime(emit_progress=print)'
+  'from infergrade.runtimes import prepare_native_listener_runtime; prepare_native_listener_runtime(emit_progress=print, prefer_managed=True)'
 python3 - "$release_root" "$command_root" <<'PY'
 import os, pathlib, sys, tempfile
 root, commands = map(pathlib.Path, sys.argv[1:])

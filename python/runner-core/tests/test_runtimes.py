@@ -257,3 +257,25 @@ class ListenerRuntimeSetupTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'configured llama-cli'):
             self.prepare()
         install.assert_not_called()
+
+    @mock.patch('infergrade.runtimes.subprocess.run')
+    @mock.patch('infergrade.runtimes.install_llama_cpp_runtime')
+    @mock.patch('infergrade.runtimes.selected_llama_cpp_runtime', return_value=None)
+    @mock.patch('infergrade.runtimes.managed_llama_cpp_binary_path', side_effect=['/managed/cli', '/managed/server'])
+    @mock.patch('infergrade.runtimes.shutil.which', return_value='/system/llama')
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_installer_prefers_managed_default_to_unselected_system_binaries(self, which, managed, selected, install, run):
+        run.return_value = mock.Mock(returncode=0)
+        self.prepare(prefer_managed=True)
+        install.assert_called_once_with(execute=True)
+        self.assertEqual([call.args[0][0] for call in run.call_args_list], ['/managed/cli', '/managed/server'])
+
+    @mock.patch('infergrade.runtimes.install_llama_cpp_runtime')
+    @mock.patch('infergrade.runtimes.selected_llama_cpp_runtime', return_value={'runtime_id': 'selected-build'})
+    @mock.patch('infergrade.runtimes.managed_llama_cpp_binary_path', return_value=None)
+    @mock.patch('infergrade.runtimes.shutil.which', return_value='/system/llama')
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_missing_selection_is_not_masked_by_system_binaries(self, which, managed, selected, install):
+        with self.assertRaisesRegex(RuntimeError, 'selected llama.cpp runtime is incomplete'):
+            self.prepare(prefer_managed=True)
+        install.assert_not_called()

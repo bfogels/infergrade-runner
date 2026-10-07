@@ -420,22 +420,31 @@ def _native_runtime_command(arguments: List[str]) -> Dict[str, Any]:
         raise RuntimeError("Native Runner returned an invalid runtime receipt.") from exc
 
 
-def prepare_native_listener_runtime(emit_progress=None) -> None:
+def prepare_native_listener_runtime(emit_progress=None, prefer_managed=False) -> None:
     """Make first-start setup part of starting the paired native listener.
 
     Preserve an existing or explicit selection. Never repair a broken custom
     runtime by silently switching its build or accelerator.
     """
+    selection = selected_llama_cpp_runtime()
+    install_default = prefer_managed and not selection and not any(
+        os.environ.get("INFERGRADE_LLAMA_CPP_" + kind) for kind in ("CLI", "SERVER")
+    )
     paths = {}
     for kind, name in (("cli", "llama-cli"), ("server", "llama-server")):
         explicit = os.environ.get("INFERGRADE_LLAMA_CPP_" + kind.upper())
-        paths[kind] = shutil.which(explicit) if explicit else (
-            managed_llama_cpp_binary_path(kind) or shutil.which(name)
-        )
+        if explicit:
+            paths[kind] = shutil.which(explicit)
+        elif install_default:
+            paths[kind] = None
+        else:
+            paths[kind] = managed_llama_cpp_binary_path(kind)
+            if not paths[kind] and not selection:
+                paths[kind] = shutil.which(name)
         if explicit and not paths[kind]:
             raise RuntimeError("The configured %s runtime binary is unavailable: %s" % (name, explicit))
     if not all(paths.values()):
-        if selected_llama_cpp_runtime() or any(paths.values()):
+        if selection or any(paths.values()):
             raise RuntimeError("The selected llama.cpp runtime is incomplete. Its llama-cli and llama-server must both be available.")
         if emit_progress:
             emit_progress("Preparing llama.cpp for this machine. First-start setup may download the runtime.")
