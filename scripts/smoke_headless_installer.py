@@ -117,6 +117,8 @@ def smoke(bundle, output):
                         process.terminate()
                     process.wait(timeout=15)
             registration = json.loads((output / "registration.json").read_text())
+            if registration.get("runner_id") != "installer-smoke" or registration.get("execution_modes") != ["local_native"]:
+                raise ValueError(flow + " installed listener lost its paired native identity")
             if registration.get("diagnostics", {}).get("blocking_count") != 0:
                 raise ValueError(flow + " installed listener reported native readiness blockers")
         if not {"/api/runner/device-codes", "/api/runner/device-codes/token", "/v1/runner-pairings/redeem"}.issubset(observed):
