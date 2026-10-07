@@ -7,7 +7,8 @@ output_dir="${1:?Pass an output directory}"
 accelerator="${2:-cuda}"
 if [ "$accelerator" != cuda ] && [ "$accelerator" != cpu ]; then echo 'Expected cuda or cpu.' >&2; exit 1; fi
 cuda_enabled=OFF
-if [ "$accelerator" = cuda ]; then cuda_enabled=ON; fi
+backend_loading=OFF
+if [ "$accelerator" = cuda ]; then cuda_enabled=ON; backend_loading=ON; fi
 mkdir -p "$output_dir"
 output_dir="$(cd "$output_dir" && pwd)"
 build_dir="$(mktemp -d)"
@@ -18,10 +19,10 @@ printf '%s  %s\n' "$source_sha256" "$build_dir/source.tar.gz" | sha256sum --chec
 mkdir "$build_dir/source"
 tar -xzf "$build_dir/source.tar.gz" --strip-components=1 -C "$build_dir/source"
 cmake -S "$build_dir/source" -B "$build_dir/build" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA="$cuda_enabled" -DGGML_NATIVE=OFF \
+  -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA="$cuda_enabled" -DGGML_NATIVE=OFF -DGGML_BACKEND_DL="$backend_loading" \
   -DLLAMA_BUILD_NUMBER=11429 -DLLAMA_BUILD_COMMIT="$source_commit" \
   -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH='$ORIGIN' \
-  -DCMAKE_CUDA_ARCHITECTURES='75;80;86;89;90' -DLLAMA_BUILD_TESTS=OFF
+  -DCMAKE_CUDA_ARCHITECTURES='75-virtual;80-virtual;86-real;89-real;90-virtual' -DLLAMA_BUILD_TESTS=OFF
 cmake --build "$build_dir/build" --parallel 2 --target llama-cli llama-completion llama-server llama-perplexity
 package="$build_dir/llama-b11429-ubuntu22-$accelerator"
 archive_name="llama-b11429-bin-ubuntu22-$accelerator-x64.tar.gz"
@@ -41,6 +42,8 @@ json.dump({"upstream_commit": sys.argv[2], "source_archive_sha256": sys.argv[3],
            "platform": "ubuntu22.04-x86_64", "cuda": "12.8.1" if sys.argv[4] == "cuda" else None,
            "compiler": subprocess.check_output(["gcc", "--version"], text=True),
            "minimum_glibc": "2.35", "cuda_architectures": [75,80,86,89,90] if sys.argv[4] == "cuda" else [],
+           "backend_loading": "dynamic" if sys.argv[4] == "cuda" else "linked",
+           "cuda_architecture_targets": ["75-virtual", "80-virtual", "86-real", "89-real", "90-virtual"] if sys.argv[4] == "cuda" else [],
            "gpu_execution_verified": False}, open(sys.argv[1], "w"), indent=2)
 PY
 for binary in llama-cli llama-completion llama-server llama-perplexity; do
@@ -61,3 +64,14 @@ for binary in llama-cli llama-completion llama-server llama-perplexity; do
   env -u LD_LIBRARY_PATH ldd "$relocated/llama-b11429-ubuntu22-$accelerator/$binary" > "$output_dir/$binary-relocated-ldd.txt"
   if grep -q 'not found' "$output_dir/$binary-relocated-ldd.txt"; then exit 1; fi
 done
+
+if [ "$accelerator" = cuda ]; then
+  # The NVIDIA driver remains host-owned. CPU CI has no libcuda.so.1, while
+  # dynamic backend loading keeps the executable usable for version/CPU checks.
+  backend="$relocated/llama-b11429-ubuntu22-cuda/libggml-cuda.so"
+  test -f "$backend"
+  env -u LD_LIBRARY_PATH ldd "$backend" > "$output_dir/cuda-backend-relocated-ldd.txt"
+  if grep 'not found' "$output_dir/cuda-backend-relocated-ldd.txt" | grep -v 'libcuda.so.1'; then exit 1; fi
+  env -u LD_LIBRARY_PATH readelf -d "$backend" > "$output_dir/cuda-backend-dynamic.txt"
+  grep -F '$ORIGIN' "$output_dir/cuda-backend-dynamic.txt"
+fi
