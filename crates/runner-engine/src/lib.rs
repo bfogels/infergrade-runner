@@ -2697,6 +2697,7 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
     }
     let server = find_runtime_binary(&staging_root, server_name)?;
     let perplexity = find_runtime_binary(&staging_root, perplexity_name)?;
+    let mut required_paths = Vec::new();
     for expected in expected_binaries {
         let Some(name) = expected.as_str() else {
             return Err("expected_binaries must contain only binary names".to_string());
@@ -2710,11 +2711,10 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         } else {
             find_runtime_binary(&staging_root, name)?
         };
-        if found.is_none() {
-            return Err(format!(
-                "managed runtime archive did not contain expected binary `{name}`"
-            ));
-        }
+        let path = found.ok_or_else(|| {
+            format!("managed runtime archive did not contain expected binary `{name}`")
+        })?;
+        required_paths.push(path);
     }
     set_executable_if_needed(&cli)?;
     if let Some(path) = server.as_ref() {
@@ -2722,6 +2722,11 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
     }
     if let Some(path) = perplexity.as_ref() {
         set_executable_if_needed(path)?;
+    }
+    // Validate the complete protocol before changing the selected build.
+    for path in &required_paths {
+        set_executable_if_needed(path)?;
+        smoke_runtime_binary(path).map_err(|error| format!("{}: {error}", path.display()))?;
     }
     let version_output = smoke_runtime_binary(&cli)?;
     let server =
@@ -3431,6 +3436,53 @@ mod tests {
         let error = smoke_runtime_binary(&path).expect_err("failed version smoke");
         assert!(error.contains("GLIBC_2.38 not found"));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn failed_server_smoke_preserves_selected_runtime() {
+        let _guard = env_test_lock().lock().unwrap();
+        let cache = env::temp_dir().join(format!(
+            "infergrade-server-smoke-failure-{}",
+            std::process::id()
+        ));
+        let previous = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &cache);
+        fs::create_dir_all(cache.join("llama.cpp")).unwrap();
+        let selection_path = selected_llama_cpp_runtime_path().unwrap();
+        fs::write(
+            &selection_path,
+            "{\"runtime_id\":\"previous-working-build\"}",
+        )
+        .unwrap();
+        let mut builder = Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+        for name in ["llama-cli", "llama-server", "llama-perplexity"] {
+            let body = if name == "llama-server" {
+                b"#!/bin/sh\necho 'server library missing' >&2\nexit 1\n".to_vec()
+            } else {
+                test_runtime_binary_body(name, "working")
+            };
+            append_tar_file(&mut builder, &format!("bin/{name}"), &body, 0o755);
+        }
+        let archive = builder.into_inner().unwrap().finish().unwrap();
+        let error = install_managed_llama_cpp_runtime_from_manifest_entry(
+            test_runtime_manifest_entry(&archive),
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive),
+            },
+        )
+        .expect_err("bad server");
+        assert!(error.contains("server library missing"));
+        assert_eq!(
+            fs::read_to_string(&selection_path).unwrap(),
+            "{\"runtime_id\":\"previous-working-build\"}"
+        );
+        match previous {
+            Some(value) => env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", value),
+            None => env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR"),
+        }
+        let _ = fs::remove_dir_all(cache);
     }
 
     fn append_tar_file(

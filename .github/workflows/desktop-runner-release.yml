@@ -642,10 +642,32 @@ jobs:
           retention-days: 7
           overwrite: true
 
+  headless-package:
+    name: Build Linux headless Runner
+    if: ${{ !inputs.validate_windows_only }}
+    needs: release-metadata
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - name: Build native CLI and packaged Python bridge
+        run: |
+          cargo build --locked --release -p infergrade-runner-cli
+          python3 scripts/package_headless_runner.py --cli target/release/infergrade-runner --output output/headless
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infergrade-runner-desktop-headless-${{ github.sha }}
+          path: output/headless/
+          if-no-files-found: error
+          retention-days: 7
+
   publish-release:
     name: Publish verified cross-platform release
     if: ${{ !inputs.validate_windows_only }}
-    needs: [release-metadata, macos-preview, windows-package-smoke, linux-package-smoke]
+    needs: [release-metadata, macos-preview, windows-package-smoke, linux-package-smoke, headless-package]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:
@@ -676,7 +698,7 @@ jobs:
 
       - name: Assemble exact public asset set
         run: |
-          checksum_parts=(release-assets/SHA256SUMS.macos release-assets/SHA256SUMS.linux release-assets/SHA256SUMS.windows)
+          checksum_parts=(release-assets/SHA256SUMS.macos release-assets/SHA256SUMS.linux release-assets/SHA256SUMS.windows release-assets/SHA256SUMS.headless)
           test -f release-assets/InferGrade.Runner.Windows-x64.exe
           test -f release-assets/InferGrade.Runner.Windows-x64.msi
           mac_updater=(release-assets/*.app.tar.gz)

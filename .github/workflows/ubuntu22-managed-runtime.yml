@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 90
     container: nvidia/cuda:12.8.1-devel-ubuntu22.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install build dependencies
@@ -26,9 +26,27 @@ jobs:
       - name: Build pinned upstream source and smoke Ubuntu 22 loader
         shell: bash
         run: bash scripts/build_linux_cuda_runtime.sh output/ubuntu22-runtime
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ubuntu22-managed-cuda-${{ github.sha }}
+          path: output/ubuntu22-runtime/
+          if-no-files-found: error
+          retention-days: 14
+  managed-cpu:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build pinned upstream CPU runtime for Ubuntu 22
+        run: |
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build build-essential libssl-dev
+          bash scripts/build_linux_cuda_runtime.sh output/ubuntu22-runtime cpu
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ubuntu22-managed-cpu-${{ github.sha }}
           path: output/ubuntu22-runtime/
           if-no-files-found: error
           retention-days: 14
@@ -36,13 +54,13 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
       - run: cargo build --locked --release -p infergrade-runner-cli
       - run: python3 scripts/package_headless_runner.py --cli target/release/infergrade-runner --output output/headless
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ubuntu22-headless-${{ github.sha }}
           path: output/headless/
