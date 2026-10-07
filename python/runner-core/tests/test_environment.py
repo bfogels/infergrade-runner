@@ -177,6 +177,40 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(gpu["accelerator_model"], "AMD Radeon RX 7800 XT")
         self.assertEqual(gpu["accelerator_api"], "vulkan")
 
+    def test_vulkan_gpu_is_reported_only_when_native_runs_can_use_it(self):
+        radeon = {"accelerator_type": "gpu", "accelerator_vendor": "amd", "accelerator_model": "AMD Radeon RX 7900 XTX",
+                  "accelerator_vram_gb": 24.0, "accelerator_count": 1, "hardware_class": "amd_gpu",
+                  "memory_architecture": "discrete_vram", "accelerator_api": "vulkan"}
+        cases = [
+            ("local_native", {}, {"accelerator": "vulkan"}, "amd_gpu"),
+            ("local_native", {}, None, "amd_gpu"),
+            ("local_native", {}, {"accelerator": "cpu"}, "cpu_only"),
+            ("local_native", {"INFERGRADE_ACCELERATOR": "cpu"}, None, "cpu_only"),
+            ("local_container", {}, None, "cpu_only"),
+        ]
+        for mode, env, selection, expected in cases:
+            with self.subTest(mode=mode, env=env, selection=selection), \
+                    mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch("infergrade.environment._detect_nvidia_gpu", return_value=None), \
+                    mock.patch("infergrade.environment._detect_amd_gpu", return_value=None), \
+                    mock.patch("infergrade.environment._detect_apple_silicon_gpu", return_value=None), \
+                    mock.patch("infergrade.environment._detect_vulkan_gpu", return_value=dict(radeon)), \
+                    mock.patch("infergrade.runtimes.selected_llama_cpp_runtime", return_value=selection):
+                payload = capture_environment(mode)
+            self.assertEqual(payload["hardware_class"], expected)
+            if expected == "cpu_only":
+                self.assertNotEqual(payload["accelerator_api"], "vulkan")
+
+    @mock.patch("infergrade.environment.platform.system", return_value="Linux")
+    def test_detect_vulkan_gpu_counts_cards_without_product_names(self, _system):
+        with tempfile.TemporaryDirectory() as root:
+            self._fake_drm(root, {
+                "card0": {"vendor": "0x1002\n", "device": "0x73bf\n", "class": "0x030000\n"},
+                "card1": {"vendor": "0x1002\n", "device": "0x73bf\n", "class": "0x030000\n"},
+            })
+            gpu = _detect_vulkan_gpu(root)
+        self.assertEqual((gpu["accelerator_count"], gpu["accelerator_model"]), (2, "AMD GPU"))
+
     def test_capture_environment_prefers_detected_accelerator(self):
         with mock.patch(
             "infergrade.environment._detect_nvidia_gpu",

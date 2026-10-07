@@ -206,14 +206,14 @@ def _read_sysfs_hex(path: str) -> Optional[int]:
         return None
 
 
-def _vulkan_gpu_payload(vendor: str, models, vrams) -> Dict[str, Any]:
+def _vulkan_gpu_payload(vendor: str, models, vrams, count: Optional[int] = None) -> Dict[str, Any]:
     label = "AMD GPU" if vendor == "amd" else "Intel Arc GPU"
     return {
         "accelerator_type": "gpu",
         "accelerator_vendor": vendor,
         "accelerator_model": models[0] if models else label,
         "accelerator_vram_gb": max(vrams) if vrams else None,
-        "accelerator_count": max(1, len(models)),
+        "accelerator_count": max(1, count or len(models)),
         "hardware_class": "amd_gpu" if vendor == "amd" else "intel_gpu",
         "memory_architecture": "discrete_vram",
         "accelerator_api": "vulkan",
@@ -243,7 +243,8 @@ def _detect_vulkan_gpu(drm_root: str = "/sys/class/drm") -> Optional[Dict[str, A
             vendor = _classify_pci_gpu(vendor_id, device_id, pci_class)
             if not vendor:
                 continue
-            bucket = found.setdefault(vendor, {"models": [], "vrams": []})
+            bucket = found.setdefault(vendor, {"models": [], "vrams": [], "count": 0})
+            bucket["count"] += 1
             try:
                 with open(os.path.join(device_dir, "product_name"), "r", encoding="utf-8") as handle:
                     name = handle.read().strip()
@@ -256,7 +257,7 @@ def _detect_vulkan_gpu(drm_root: str = "/sys/class/drm") -> Optional[Dict[str, A
                 bucket["vrams"].append(round(vram_bytes / (1024.0 ** 3), 2))
         for vendor in ("amd", "intel"):
             if vendor in found:
-                return _vulkan_gpu_payload(vendor, found[vendor]["models"], found[vendor]["vrams"])
+                return _vulkan_gpu_payload(vendor, found[vendor]["models"], found[vendor]["vrams"], found[vendor]["count"])
         return None
     if system == "windows":
         output = _run_command(["powershell", "-NoProfile", "-NonInteractive", "-Command",
@@ -450,10 +451,32 @@ def _detect_process_translation() -> Optional[str]:
     return None
 
 
+def _vulkan_execution_expected(execution_mode: str) -> bool:
+    """Only report a Vulkan GPU when native runs can actually execute on it.
+
+    Containers never use the managed Vulkan build, and an explicit CPU (or other)
+    accelerator choice or an installed non-Vulkan runtime means the run executes
+    elsewhere; labelling it amd_gpu/intel_gpu would present CPU work as GPU evidence.
+    """
+    if execution_mode != "local_native":
+        return False
+    override = os.environ.get("INFERGRADE_ACCELERATOR", "").strip().lower()
+    if override in ("cuda", "metal", "cpu"):
+        return False
+    from infergrade.runtimes import selected_llama_cpp_runtime
+
+    selected_accelerator = (selected_llama_cpp_runtime() or {}).get("accelerator")
+    return selected_accelerator in (None, "vulkan")
+
+
 def capture_environment(execution_mode: str) -> Dict[str, Any]:
     """Capture hardware and OS facts for a InferGrade run."""
     gpu = _normalize_accelerator_payload(
-        _detect_nvidia_gpu() or _detect_amd_gpu() or _detect_apple_silicon_gpu() or _detect_vulkan_gpu() or _default_accelerator_payload()
+        _detect_nvidia_gpu()
+        or _detect_amd_gpu()
+        or _detect_apple_silicon_gpu()
+        or (_detect_vulkan_gpu() if _vulkan_execution_expected(execution_mode) else None)
+        or _default_accelerator_payload()
     )
     environment_class = {
         "local_container": "local_workstation",
