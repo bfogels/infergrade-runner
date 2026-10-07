@@ -106,6 +106,34 @@ fn roots(home: &Path, folders: &[String]) -> Vec<(PathBuf, &'static str)> {
     result.extend(folders.iter().map(|f| (PathBuf::from(f), "Your folder")));
     result
 }
+fn open_regular_file(path: &Path) -> Result<fs::File, String> {
+    if !fs::metadata(path)
+        .map_err(|_| "The local file is no longer readable.".to_string())?
+        .is_file()
+    {
+        return Err("Choose a regular local GGUF file.".into());
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    // A replacement FIFO must not block between metadata and open. The handle
+    // metadata is checked again, so a raced replacement is rejected.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(path)
+        .map_err(|_| "The local file is no longer readable.".to_string())?;
+    if !file
+        .metadata()
+        .map_err(|_| "Could not inspect local file.".to_string())?
+        .is_file()
+    {
+        return Err("Choose a regular local GGUF file.".into());
+    }
+    Ok(file)
+}
 fn scan(roots: &[(PathBuf, &str)]) -> Value {
     let mut rows = vec![];
     let mut seen_files = HashSet::new();
@@ -171,7 +199,7 @@ fn scan(roots: &[(PathBuf, &str)]) -> Value {
                     continue;
                 }
                 let mut header = [0u8; 4];
-                let Ok(mut file) = fs::File::open(&canonical) else {
+                let Ok(mut file) = open_regular_file(&canonical) else {
                     inaccessible += 1;
                     continue;
                 };
@@ -189,15 +217,7 @@ fn scan(roots: &[(PathBuf, &str)]) -> Value {
     json!({"files":rows,"scan_complete":!incomplete && inaccessible==0,"scan_limit_reached":incomplete,"unreadable_locations":inaccessible,"visited_entries":visited.min(MAX_ENTRIES),"identity_notice":"GGUF header detected. Publisher, quantization, compatibility and exact artifact identity are unverified."})
 }
 pub fn validate_local_gguf(path: &str) -> Result<(), String> {
-    let mut file = fs::File::open(path)
-        .map_err(|_| "The selected local model is no longer readable.".to_string())?;
-    if !file
-        .metadata()
-        .map_err(|_| "Could not inspect the selected model.".to_string())?
-        .is_file()
-    {
-        return Err("Choose a local GGUF file.".into());
-    }
+    let mut file = open_regular_file(Path::new(path))?;
     let mut header = [0u8; 4];
     if file.read_exact(&mut header).is_err() || &header != b"GGUF" {
         return Err("The selected file does not have a GGUF header. Refresh local files and select a model again.".into());
@@ -290,6 +310,23 @@ mod tests {
         assert_eq!(rows["files"].as_array().unwrap().len(), 1);
         fs::remove_dir_all(dir).unwrap();
         fs::remove_dir_all(outside).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn fifo_is_rejected_without_opening_or_waiting_for_a_writer() {
+        let dir = root();
+        let fifo = dir.join("fifo.gguf");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert!(validate_local_gguf(fifo.to_str().unwrap()).is_err());
+        assert!(scan(&[(dir.clone(), "Folder")])["files"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn custom_folders_persist_remove_without_touching_models() {
