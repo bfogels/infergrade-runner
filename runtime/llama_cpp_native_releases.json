@@ -294,7 +294,8 @@
       "platform": {
         "system": "linux",
         "arch": "x86_64",
-        "human": "linux x86_64 / CUDA"
+        "human": "linux x86_64 / CUDA",
+        "minimum_glibc": "2.38"
       },
       "archive": {
         "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-ubuntu-cuda-12.8-x64.tar.gz",
@@ -337,7 +338,8 @@
       "compatibility_notes": [
         "Pinned upstream release; compatibility qualification is separate from installation.",
         "CUDA requires a compatible NVIDIA driver; no CPU fallback is claimed as CUDA.",
-        "Previous selected builds remain available for rollback; a fresh install has no older build."
+        "Previous selected builds remain available for rollback; a fresh install has no older build.",
+        "The upstream archive requires glibc 2.38 and is incompatible with standard Ubuntu 22.04 (glibc 2.35)."
       ],
       "provenance": "Official upstream release assets with pinned GitHub SHA-256; no independent signature."
     },

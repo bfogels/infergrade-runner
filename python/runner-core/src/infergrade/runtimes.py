@@ -420,6 +420,41 @@ def _native_runtime_command(arguments: List[str]) -> Dict[str, Any]:
         raise RuntimeError("Native Runner returned an invalid runtime receipt.") from exc
 
 
+def prepare_native_listener_runtime(emit_progress=None) -> None:
+    """Make first-start setup part of starting the paired native listener.
+
+    Preserve an existing or explicit selection. Never repair a broken custom
+    runtime by silently switching its build or accelerator.
+    """
+    paths = {}
+    for kind, name in (("cli", "llama-cli"), ("server", "llama-server")):
+        explicit = os.environ.get("INFERGRADE_LLAMA_CPP_" + kind.upper())
+        paths[kind] = shutil.which(explicit) if explicit else (
+            managed_llama_cpp_binary_path(kind) or shutil.which(name)
+        )
+        if explicit and not paths[kind]:
+            raise RuntimeError("The configured %s runtime binary is unavailable: %s" % (name, explicit))
+    if not all(paths.values()):
+        if selected_llama_cpp_runtime() or any(paths.values()):
+            raise RuntimeError("The selected llama.cpp runtime is incomplete. Its llama-cli and llama-server must both be available.")
+        if emit_progress:
+            emit_progress("Preparing llama.cpp for this machine. First-start setup may download the runtime.")
+        install_llama_cpp_runtime(execute=True)
+        paths = {kind: managed_llama_cpp_binary_path(kind) for kind in paths}
+        if not all(paths.values()):
+            raise RuntimeError("Runtime installation did not provide both llama-cli and llama-server.")
+    for kind, path in paths.items():
+        try:
+            result = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("llama.cpp %s could not start: %s" % (kind, exc)) from exc
+        if result.returncode:
+            detail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()[:4096]
+            raise RuntimeError("llama.cpp %s could not start (exit %s): %s" % (kind, result.returncode, detail or "no diagnostic output"))
+    if emit_progress:
+        emit_progress("Native runtime ready. Connecting the paired runner.")
+
+
 def install_llama_cpp_runtime(runtime_id: Optional[str] = None, execute: bool = False) -> Dict[str, Any]:
     # The Rust engine owns downloads, archive safety and immutable build receipts.
     # Explicit legacy Homebrew/manual IDs retain their original compatibility path.

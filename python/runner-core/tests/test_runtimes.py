@@ -212,3 +212,48 @@ class NativeManagedBridgeTests(unittest.TestCase):
     def test_missing_native_cli_explains_desktop_recovery(self, command):
         with self.assertRaisesRegex(RuntimeError, "Make runtime ready"):
             install_llama_cpp_runtime(execute=True)
+
+
+class ListenerRuntimeSetupTests(unittest.TestCase):
+    def setUp(self):
+        from infergrade.runtimes import prepare_native_listener_runtime
+        self.prepare = prepare_native_listener_runtime
+
+    @mock.patch('infergrade.runtimes.subprocess.run')
+    @mock.patch('infergrade.runtimes.install_llama_cpp_runtime')
+    @mock.patch('infergrade.runtimes.selected_llama_cpp_runtime', return_value=None)
+    @mock.patch('infergrade.runtimes.managed_llama_cpp_binary_path')
+    @mock.patch('infergrade.runtimes.shutil.which', return_value=None)
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_first_start_installs_and_verifies_both_binaries(self, which, managed, selected, install, run):
+        managed.side_effect = [None, None, '/managed/llama-cli', '/managed/llama-server']
+        run.return_value = mock.Mock(returncode=0)
+        self.prepare()
+        install.assert_called_once_with(execute=True)
+        self.assertEqual([call.args[0] for call in run.call_args_list],
+                         [['/managed/llama-cli', '--version'], ['/managed/llama-server', '--version']])
+
+    @mock.patch('infergrade.runtimes.subprocess.run')
+    @mock.patch('infergrade.runtimes.install_llama_cpp_runtime')
+    @mock.patch('infergrade.runtimes.managed_llama_cpp_binary_path', side_effect=['/managed/cli', '/managed/server'])
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_existing_build_is_verified_without_upgrade(self, managed, install, run):
+        run.return_value = mock.Mock(returncode=0)
+        self.prepare()
+        install.assert_not_called()
+
+    @mock.patch('infergrade.runtimes.subprocess.run')
+    @mock.patch('infergrade.runtimes.managed_llama_cpp_binary_path', side_effect=['/managed/cli', '/managed/server'])
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_loader_error_survives_setup_failure(self, managed, run):
+        run.return_value = mock.Mock(returncode=1, stderr='GLIBC_2.38 not found', stdout='')
+        with self.assertRaisesRegex(RuntimeError, 'GLIBC_2.38 not found'):
+            self.prepare()
+
+    @mock.patch('infergrade.runtimes.install_llama_cpp_runtime')
+    @mock.patch('infergrade.runtimes.shutil.which', return_value=None)
+    @mock.patch.dict(os.environ, {'INFERGRADE_LLAMA_CPP_CLI': '/missing/cli'}, clear=True)
+    def test_broken_explicit_runtime_is_not_replaced(self, which, install):
+        with self.assertRaisesRegex(RuntimeError, 'configured llama-cli'):
+            self.prepare()
+        install.assert_not_called()

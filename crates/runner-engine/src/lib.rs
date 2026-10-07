@@ -2236,8 +2236,17 @@ fn smoke_runtime_binary(path: &Path) -> Result<String, String> {
         .map_err(|error| format!("could not run managed llama.cpp version smoke: {error}"))?;
     if !output.status.success() {
         return Err(format!(
-            "managed llama.cpp version smoke failed with exit code {:?}",
-            output.status.code()
+            "managed llama.cpp version smoke failed with exit code {:?}: {}",
+            output.status.code(),
+            format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stderr),
+                String::from_utf8_lossy(&output.stdout)
+            )
+            .trim()
+            .chars()
+            .take(4096)
+            .collect::<String>()
         ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -2245,6 +2254,54 @@ fn smoke_runtime_binary(path: &Path) -> Result<String, String> {
         return Ok(stdout);
     }
     Ok(String::from_utf8_lossy(&output.stderr).trim().to_string())
+}
+
+fn check_glibc_version(required: &str, observed: &str) -> Result<(), String> {
+    fn version(value: &str) -> Option<Vec<u32>> {
+        value
+            .split('.')
+            .map(str::parse::<u32>)
+            .collect::<Result<Vec<_>, _>>()
+            .ok()
+    }
+    let minimum = version(required).ok_or("invalid managed runtime glibc requirement")?;
+    let installed = version(observed).ok_or("could not determine the host glibc version")?;
+    if installed < minimum {
+        return Err(format!(
+            "This llama.cpp package requires glibc {required}, but this machine has glibc {observed}. \
+             The package is incompatible with this operating system; no runtime was downloaded. \
+             An InferGrade runtime built for this system is required."
+        ));
+    }
+    Ok(())
+}
+
+fn check_managed_runtime_host(entry: &Value) -> Result<(), String> {
+    if cfg!(target_os = "linux") {
+        if let Some(required) = entry
+            .pointer("/platform/minimum_glibc")
+            .and_then(Value::as_str)
+        {
+            let output = StdCommand::new("getconf")
+                .arg("GNU_LIBC_VERSION")
+                .output()
+                .map_err(|error| {
+                    format!("could not check runtime operating-system compatibility: {error}")
+                })?;
+            if !output.status.success() {
+                return Err(
+                    "could not determine the host glibc version before runtime installation".into(),
+                );
+            }
+            let text = String::from_utf8_lossy(&output.stdout);
+            let observed = text
+                .split_whitespace()
+                .last()
+                .ok_or("missing host glibc version")?;
+            check_glibc_version(required, observed)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn install_managed_llama_cpp_runtime(
@@ -2540,6 +2597,7 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
     options: ManagedRuntimeInstallOptions,
 ) -> Result<Value, String> {
     verify_runtime_download_manifest(&entry)?;
+    check_managed_runtime_host(&entry)?;
     let runtime_id = entry["runtime_id"]
         .as_str()
         .ok_or_else(|| "managed runtime id missing".to_string())?;
@@ -3349,6 +3407,30 @@ mod tests {
             .expect_err("symlinked cache must fail");
         assert!(error.contains("must not be a symlink"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn managed_runtime_glibc_floor_rejects_ubuntu22_upstream_archive() {
+        let error = check_glibc_version("2.38", "2.35").expect_err("Ubuntu22 is incompatible");
+        assert!(error.contains("no runtime was downloaded"));
+        assert!(check_glibc_version("2.35", "2.35").is_ok());
+        assert!(check_glibc_version("2.38", "2.39").is_ok());
+        assert!(check_glibc_version("2.38", "unknown").is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn managed_smoke_failure_preserves_loader_diagnostics() {
+        let path = env::temp_dir().join(format!("infergrade-smoke-error-{}", std::process::id()));
+        fs::write(
+            &path,
+            "#!/bin/sh\necho 'GLIBC_2.38 not found' >&2\nexit 1\n",
+        )
+        .unwrap();
+        set_executable_if_needed(&path).unwrap();
+        let error = smoke_runtime_binary(&path).expect_err("failed version smoke");
+        assert!(error.contains("GLIBC_2.38 not found"));
+        let _ = fs::remove_file(path);
     }
 
     fn append_tar_file(

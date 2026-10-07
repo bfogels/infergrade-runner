@@ -1,6 +1,7 @@
 """Command-line entrypoints for running and inspecting InferGrade bundles."""
 
 import argparse
+import getpass
 import json
 import os
 import socket
@@ -38,7 +39,7 @@ from infergrade.profiles import DEPLOYMENT_PROFILES
 from infergrade.request import request_from_cli, request_from_file
 from infergrade.run_configs import request_from_run_config_document
 from infergrade.runner import run_infergrade
-from infergrade.runtimes import install_llama_cpp_runtime, runtime_manifest, select_llama_cpp_runtime, selected_llama_cpp_runtime
+from infergrade.runtimes import install_llama_cpp_runtime, prepare_native_listener_runtime, runtime_manifest, select_llama_cpp_runtime, selected_llama_cpp_runtime
 from infergrade.support import build_support_export, write_support_export
 from infergrade.templates import render_run_config_template, render_run_request_template
 from infergrade.transport import (
@@ -251,12 +252,13 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     runtime_parser.add_argument("--json", action="store_true", help="Print the complete machine-readable result.")
 
     pair_parser = subparsers.add_parser("pair", help="Pair this local machine with InferGrade Hub and save a reusable runner profile.")
-    pair_parser.add_argument("--api-url", required=True)
+    pair_parser.add_argument("--api-url", default="https://api.infergrade.com")
     pair_parser.add_argument("--pair-code")
     pair_parser.add_argument("--pair-code-stdin", action="store_true", help="Read the one-time pair code from stdin.")
     pair_parser.add_argument("--label", "--runner-label", dest="label", help="Optional machine label; defaults to this hostname.")
     pair_parser.add_argument("--hostname")
     pair_parser.add_argument("--json", action="store_true", help="Print the complete machine-readable result.")
+    pair_parser.add_argument("--start", action="store_true", help="Start listening immediately after pairing.")
 
     unpair_parser = subparsers.add_parser("unpair", help="Remove the saved local runner pairing profile.")
     unpair_parser.add_argument("--print-path", action="store_true")
@@ -505,7 +507,7 @@ def _resolve_pair_code(args) -> str:
     if env_pair_code:
         return env_pair_code
     if getattr(args, "pair_code_stdin", False):
-        pair_code = sys.stdin.read().strip()
+        pair_code = (getpass.getpass("Pairing code from InferGrade: ") if sys.stdin.isatty() else sys.stdin.read()).strip()
         if pair_code:
             return pair_code
         raise SystemExit("--pair-code-stdin was set but stdin did not contain a pair code.")
@@ -515,6 +517,10 @@ def _resolve_pair_code(args) -> str:
             file=sys.stderr,
         )
         return str(args.pair_code).strip()
+    if sys.stdin.isatty():
+        pair_code = getpass.getpass("Pairing code from InferGrade: ").strip()
+        if pair_code:
+            return pair_code
     raise SystemExit("No pair code provided. Set INFERGRADE_PAIR_CODE or pass --pair-code-stdin.")
 
 
@@ -884,7 +890,9 @@ def main(argv: Optional[list] = None) -> int:
             print(json.dumps(result, indent=2, sort_keys=True))
         else:
             label = public_profile.get("label") or public_profile.get("runner_label") or "this machine"
-            print("✓ Paired %s\nRun `infergrade start` to listen for benchmarks." % label)
+            print("✓ Paired %s%s" % (label, "" if args.start else "\nRun `infergrade start` to listen for benchmarks."))
+        if args.start:
+            return main(["start", "--api-url", api_url, "--execution-mode", execution_mode])
         return 0
 
     if args.command == "unpair":
@@ -1049,6 +1057,16 @@ def main(argv: Optional[list] = None) -> int:
         api_url = _require_runner_api_url(args.api_url)
         execution_mode = _resolve_local_execution_mode(args.execution_mode)
         worker_id = _resolve_runner_worker_id(args.worker_id, execution_mode)
+        # Starting a real native listener includes first-start runtime setup.
+        # Do this before registration so "listening" cannot mask a missing runtime.
+        api_token = resolve_runner_api_token(args.api_token)
+        if execution_mode == "local_native" and not args.simulate:
+            try:
+                prepare_native_listener_runtime(
+                    emit_progress=lambda message: print(message, file=sys.stderr, flush=True)
+                )
+            except RuntimeError as exc:
+                raise SystemExit("Runner setup failed: %s" % exc) from exc
         if args.autopilot:
             if args.once:
                 raise SystemExit("--autopilot already stops at the bounded grant; do not combine it with --once.")
@@ -1059,7 +1077,7 @@ def main(argv: Optional[list] = None) -> int:
                     api_url=api_url,
                     worker_id=worker_id,
                     hostname=args.hostname,
-                    api_token=resolve_runner_api_token(args.api_token),
+                    api_token=api_token,
                     simulate=bool(args.simulate),
                     max_jobs=args.max_jobs,
                     emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
@@ -1073,7 +1091,7 @@ def main(argv: Optional[list] = None) -> int:
                     execution_mode=execution_mode,
                     worker_id=worker_id,
                     hostname=args.hostname,
-                    api_token=resolve_runner_api_token(args.api_token),
+                    api_token=api_token,
                     run_token=None,
                     simulate=bool(args.simulate),
                     emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
@@ -1087,7 +1105,7 @@ def main(argv: Optional[list] = None) -> int:
                     execution_mode=execution_mode,
                     worker_id=worker_id,
                     hostname=args.hostname,
-                    api_token=resolve_runner_api_token(args.api_token),
+                    api_token=api_token,
                     run_token=None,
                     simulate=bool(args.simulate),
                     poll_interval_seconds=args.poll_interval_seconds,
