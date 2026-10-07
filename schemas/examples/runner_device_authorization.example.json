@@ -1,0 +1,7 @@
+{
+  "device_code": "test-device-secret-not-a-real-token-0123456789",
+  "user_code": "K7QM-4F2X",
+  "verification_uri": "https://infergrade.com/connect",
+  "expires_in": 600,
+  "interval": 5
+}
