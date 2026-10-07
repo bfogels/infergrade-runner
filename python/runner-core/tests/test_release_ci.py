@@ -980,7 +980,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("verify_public_attestation", workflow)
         self.assertIn("gh release download \"$RELEASE_TAG\" --dir \"$published_dir\"", workflow)
         self.assertIn("Sigstore-backed GitHub build provenance", workflow)
-        self.assertEqual(workflow.count("overwrite: true"), 3)
+        self.assertEqual(workflow.count("overwrite: true"), 5)
         self.assertLess(workflow.index("Assemble exact public asset set"), workflow.index("Attest exact public release assets"))
         self.assertLess(workflow.index("Attest exact public release assets"), workflow.index("Create or resume versioned draft release"))
 
