@@ -22,6 +22,9 @@ or benchmark was run. The Mac remains locked for native UI acceptance.
 
 Five renderer tests cover success, late issue/approval cancellation, expiry,
 denial and terminal approval before delayed startup. Desktop check59/build,
-Rust43 tests plus one opt-in protocol test and clippy validation are recorded
-with the final candidate. Full Runner suite and responsive checks are separate
-required receipts before landing. This remains one slice of the desktop redesign.
+Rust43 tests plus one opt-in protocol test and clippy validation passed.
+`./scripts/test_all.sh` passed1174 Python tests plus tier/product audits.
+Home Connect Enter opens Settings and the honest development-view message.
+Eight Home/Settings1060px/375px light/dark captures report no overflow; four
+Settings captures were visually inspected. Native OS-keyring/app acceptance
+remains pending. This remains one slice of the desktop redesign.
