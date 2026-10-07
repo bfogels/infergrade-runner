@@ -1386,6 +1386,13 @@ def execute_capability_suite(
             phase_started = time.perf_counter()
             predictions = _generate_predictions(adapter, request, spec, cases, progress_callback=progress_callback)
             phase_timings["generation_seconds"] = round(time.perf_counter() - phase_started, 6)
+            # Bind timing cohorts to exact fixture content without transporting it.
+            case_revisions = {
+                str(case.get("case_id") or case.get("task_id") or stable_hash(case, length=12)): stable_hash(case, length=64)
+                for case in cases
+            }
+            for prediction in predictions:
+                prediction["task_revision"] = case_revisions.get(str(prediction.get("case_id") or ""))
             task_performance_rows.extend(predictions)
             _write_jsonl(os.path.join(benchmark_dir, "predictions.jsonl"), predictions)
             phase_started = time.perf_counter()
@@ -4288,6 +4295,10 @@ def _generate_predictions(
             record["generation_failure_kind"] = generation_failure_kind
         if generated.get("prompt_transform"):
             record["generation_prompt_transform"] = generated["prompt_transform"]
+        if generated.get("runtime_placement"):
+            # Local predictions preserve invocation evidence. Uploaded timing
+            # samples still need a separately versioned placement reference.
+            record["runtime_placement"] = generated["runtime_placement"]
         if generated.get("generation_constraint_receipt"):
             record["generation_constraint_id"] = generated.get("generation_constraint_id")
             record["generation_constraint_receipt"] = generated["generation_constraint_receipt"]
@@ -4697,6 +4708,8 @@ def _task_performance_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
         stop_type = None
     return {
         "latency_ms": _non_negative_number(payload.get("latency_ms")),
+        "latency_measurement_source": (payload.get("latency_measurement_source")
+            if payload.get("latency_measurement_source") in {"request_elapsed", "compute_timing", "parsed_timing"} else None),
         "time_to_first_token_ms": _non_negative_number(payload.get("time_to_first_token_ms")),
         "tokens_per_second": _non_negative_number(payload.get("tokens_per_second")),
         "input_tokens": _non_negative_integer(payload.get("input_tokens")),
@@ -4757,7 +4770,29 @@ def _summarize_task_performance_rows(rows: List[Dict[str, Any]]) -> Dict[str, An
     natural_stop_rate = _known_boolean_rate(rows, "natural_stop")
     token_budget_exhaustion_rate = _known_boolean_rate(rows, "token_budget_exhausted")
     sources = sorted({str(item.get("measurement_source")) for item in completed_rows if item.get("measurement_source")})
+    observations = []
+    for item in rows[:10000]:
+        benchmark_id = str(item.get("benchmark_id") or "")
+        case_id = str(item.get("case_id") or item.get("task_id") or "")
+        observations.append({
+            "task_key": stable_hash([benchmark_id, case_id], length=64) if benchmark_id and case_id else None,
+            "benchmark_id": benchmark_id or None,
+            "task_revision": item.get("task_revision") if isinstance(item.get("task_revision"), str)
+                and re.fullmatch(r"[a-f0-9]{64}", item["task_revision"]) else None,
+            "generation_status": "completed" if item.get("generation_status") == "completed" else "failed",
+            "latency_ms": _non_negative_number(item.get("latency_ms")),
+            "latency_measurement_source": item.get("latency_measurement_source")
+                if item.get("latency_measurement_source") in {"request_elapsed", "compute_timing", "parsed_timing"} else None,
+            "output_tokens": _non_negative_integer(item.get("output_tokens")),
+            "natural_stop": item.get("natural_stop") if isinstance(item.get("natural_stop"), bool) else None,
+            "token_budget_exhausted": item.get("token_budget_exhausted")
+                if isinstance(item.get("token_budget_exhausted"), bool) else None,
+            "protocol_recovery": bool(item.get("direct_answer_protocol_recovery")),
+        })
     return {
+        "item_observations_version": "task_timing_observations_v1",
+        "item_observations_complete": len(rows) <= 10000,
+        "item_observations": observations,
         "attempted_task_count": attempted_count,
         "completed_task_count": len(completed_rows),
         "timed_task_count": len(latencies_ms),
