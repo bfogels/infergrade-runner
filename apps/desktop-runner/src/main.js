@@ -1,4 +1,6 @@
 import "./styles.css";
+import {initDesktopNavigation,showDesktopPage} from "./desktopNavigation.js";
+initDesktopNavigation();
 import packageInfo from "../package.json";
 import {
   assignmentClockTransition,
@@ -753,6 +755,7 @@ function applyPreviewStateFromUrl() {
   const mockAssignment = params.get("mock_assignment");
   const openDetails = params.get("open_details") === "1";
   if (openDetails && supportDetails) {
+    showDesktopPage("settings", {focus:false});
     supportDetails.open = true;
   }
   if (!mockState && !mockAssignment) {
@@ -1469,6 +1472,7 @@ async function openHub(target = "home") {
 }
 
 function showLogs() {
+  showDesktopPage("activity");
   if (supportDetails) {
     supportDetails.open = true;
     supportDetails.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -2710,6 +2714,7 @@ async function runObservedRuntimeCheck() {
 
 function applyPairingIntentFromDeepLinks(urls) {
   if (!(Array.isArray(urls) ? urls : []).some(isPairingIntentDeepLink)) return false;
+  showDesktopPage("settings");
   form.scrollIntoView({ behavior: "smooth", block: "center" });
   form.elements.pairCode?.focus();
   pairState.textContent = "Pairing code copied in Hub. Paste it here, then choose Pair with Hub.";
@@ -3292,6 +3297,7 @@ startButtons.forEach((button) => button.addEventListener("click", () => {
 }));
 
 repairPairingButton?.addEventListener("click", () => {
+  showDesktopPage("settings");
   resetPairing()
     .then(() => openHub("setup"))
     .catch((error) => {
@@ -3611,6 +3617,7 @@ relaunchUpdateButton?.addEventListener("click", () => {
 readinessCheckButton?.addEventListener("click", () => {
   runReadinessCheck().catch(() => {
     if (supportDetails) {
+      showDesktopPage("settings");
       supportDetails.open = true;
     }
   });
