@@ -4295,6 +4295,10 @@ def _generate_predictions(
             record["generation_failure_kind"] = generation_failure_kind
         if generated.get("prompt_transform"):
             record["generation_prompt_transform"] = generated["prompt_transform"]
+        if generated.get("runtime_placement"):
+            # Local predictions preserve invocation evidence. Uploaded timing
+            # samples still need a separately versioned placement reference.
+            record["runtime_placement"] = generated["runtime_placement"]
         if generated.get("generation_constraint_receipt"):
             record["generation_constraint_id"] = generated.get("generation_constraint_id")
             record["generation_constraint_receipt"] = generated["generation_constraint_receipt"]
