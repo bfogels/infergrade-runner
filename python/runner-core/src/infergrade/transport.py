@@ -105,6 +105,7 @@ def _json_request(
     api_token: str = None,
     run_token: str = None,
     idempotency_key: str = None,
+    timeout: Optional[float] = None,
 ) -> Tuple[int, Dict[str, Any]]:
     """Send a JSON request to the InferGrade API and return status plus body."""
     url = require_secure_api_url(api_url).rstrip("/") + path
@@ -120,7 +121,10 @@ def _json_request(
         body = json.dumps(payload).encode("utf-8")
     req = urllib_request.Request(url, data=body, headers=headers, method=method.upper())
     try:
-        with urllib_request.urlopen(req, context=verified_https_context(url)) as response:
+        request_options = {"context": verified_https_context(url)}
+        if timeout is not None:
+            request_options["timeout"] = timeout
+        with urllib_request.urlopen(req, **request_options) as response:
             status = response.getcode()
             text = response.read().decode("utf-8")
     except urllib_error.HTTPError as exc:
@@ -528,6 +532,76 @@ def claim_run_job(
         run_token=run_token,
     )
     return payload
+
+
+class DeviceAuthorizationUnavailable(RuntimeError):
+    """The Hub has not implemented device authorization; legacy pairing is usable."""
+
+
+def authorize_runner_device(api_url: str, details: Dict[str, Any], on_issued=None) -> Dict[str, Any]:
+    """Authorize a headless machine without displaying or accepting a device secret.
+
+    Only a missing endpoint permits fallback. Denial, expiry, and network errors
+    never silently switch authorization flows. Polling follows the Hub interval.
+    """
+    status, issued = _json_request(api_url, "/api/runner/device-codes", method="POST", timeout=30, payload={
+        "label": details.get("label"), "hostname": details.get("hostname"),
+        "preferred_execution_mode": details.get("execution_mode"),
+        "environment": details.get("environment") or {},
+    })
+    if status in (404, 501):
+        raise DeviceAuthorizationUnavailable("Hub device authorization is unavailable.")
+    if status >= 400:
+        raise RuntimeError("Unable to start device authorization (HTTP %d)." % status)
+    try:
+        if not isinstance(issued, dict):
+            raise ValueError("Invalid response object.")
+        device_code = issued["device_code"]
+        user_code = issued["user_code"]
+        verification_uri = issued["verification_uri"]
+        expires_in = issued["expires_in"]
+        interval = issued["interval"]
+        if (not isinstance(device_code, str) or len(device_code) < 32
+                or not isinstance(user_code, str) or not re.fullmatch(r"[A-Z2-9]{4}-[A-Z2-9]{4}", user_code)
+                or isinstance(expires_in, bool) or not isinstance(expires_in, int) or not 1 <= expires_in <= 600
+                or isinstance(interval, bool) or not isinstance(interval, int) or not 1 <= interval <= 60):
+            raise ValueError("Invalid device authorization response.")
+        require_secure_api_url(verification_uri)
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeError("Hub returned an invalid device authorization response.") from None
+    deadline = time.monotonic() + expires_in
+    if on_issued:
+        on_issued({"user_code": user_code, "verification_uri": verification_uri,
+                   "expires_in": expires_in, "interval": interval})
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= interval:
+            raise RuntimeError("Device code expired. Run `infergrade pair` again.")
+        time.sleep(interval)
+        status, response = _json_request(api_url, "/api/runner/device-codes/token", method="POST",
+                                         payload={"device_code": device_code}, timeout=min(30, max(1, deadline - time.monotonic())))
+        if status < 400:
+            profile = response.get("runner_profile") if isinstance(response, dict) else None
+            if (not isinstance(profile, dict) or any(
+                    not isinstance(profile.get(key), str) or not profile[key].strip()
+                    for key in ("api_url", "runner_id", "access_token"))):
+                raise RuntimeError("Hub device authorization returned an invalid runner profile.")
+            try:
+                require_secure_api_url(profile["api_url"])
+            except (InsecureApiUrlError, ValueError):
+                raise RuntimeError("Hub device authorization returned an insecure runner profile.") from None
+            return response
+        code = _api_error_code(response)
+        if status == 429 or code == "slow_down":
+            interval = min(60, interval + 5)
+        elif code == "authorization_pending":
+            continue
+        elif code == "access_denied":
+            raise RuntimeError("Device connection denied. Run `infergrade pair` to try again.")
+        elif code in ("expired_token", "invalid_grant"):
+            raise RuntimeError("Device code expired or already used. Run `infergrade pair` again.")
+        else:
+            raise RuntimeError("Device authorization failed (HTTP %d)." % status)
 
 
 def redeem_runner_pairing(
