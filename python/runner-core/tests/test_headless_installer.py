@@ -31,6 +31,7 @@ class HeadlessInstallerTests(unittest.TestCase):
         for key in ('INFERGRADE_LLAMA_CPP_CLI', 'INFERGRADE_LLAMA_CPP_SERVER'):
             self.env.pop(key, None)
         self.write_executable(self.commands / 'uname', '#!/bin/sh\nif [ "$1" = -s ]; then echo Linux; else echo x86_64; fi\n')
+        self.write_executable(self.commands / 'getconf', '#!/bin/sh\necho "glibc 2.35"\n')
         self.write_executable(self.commands / 'apt-get', '#!/bin/sh\nexit 99\n')
         self.write_executable(self.commands / 'dpkg-query', '#!/bin/sh\nprintf "install ok installed"\n')
         self.write_executable(self.commands / 'curl', '#!/usr/bin/env python3\n'
@@ -128,3 +129,11 @@ print(json.dumps({'selection':selection}))
         self.assertEqual(len(calls), 2)
         self.assertTrue(calls[0].endswith('update'))
         self.assertTrue(calls[1].endswith('install -y --no-install-recommends libgomp1'))
+
+    def test_old_glibc_rejected_before_application_or_runtime_download(self):
+        self.write_executable(self.commands / 'getconf', '#!/bin/sh\necho "glibc 2.31"\n')
+        self.archive.unlink()
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('requires glibc 2.35', result.stderr)
+        self.assertFalse((self.root / 'runtime-cache').exists())

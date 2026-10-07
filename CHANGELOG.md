@@ -7,6 +7,13 @@ incremental changes only — see the git history.
 
 ## Unreleased
 
+- Adds a per-user Linux server installer that supplies dependencies, the native
+  Runner and managed llama.cpp; `pair --start` pairs and listens in one command.
+- Prepares native llama.cpp before listening, verifies every required executable,
+  and reports loader failures while preserving the previous runtime selection.
+- Reports GPU count, per-card VRAM and total installed VRAM separately from the
+  largest-card capacity used by existing model-fit checks.
+
 ## 0.3.64 (contract 0.3.38)
 
 - Fixes native NVIDIA model preflight rejecting GPU-layer arguments by passing

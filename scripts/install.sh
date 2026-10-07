@@ -31,8 +31,17 @@ fi
 install_root="${INFERGRADE_INSTALL_DIR:-$HOME/.local/share/infergrade}"
 command_root="${INFERGRADE_BIN_DIR:-$HOME/.local/bin}"
 mkdir -p "$install_root/releases" "$command_root"
-python3 - "$command_root" <<'PY'
+python3 - "$command_root" "$(getconf GNU_LIBC_VERSION 2>/dev/null || true)" <<'PY'
 import pathlib, sys
+if sys.version_info < (3, 8):
+    raise SystemExit('Headless Runner requires Python 3.8 or newer.')
+parts = sys.argv[2].split()
+try:
+    compatible = parts[0] == 'glibc' and tuple(map(int, parts[1].split('.'))) >= (2, 35)
+except (IndexError, ValueError):
+    compatible = False
+if not compatible:
+    raise SystemExit('Headless Runner requires glibc 2.35 or newer (Ubuntu 22.04+ or Debian 12+).')
 commands = pathlib.Path(sys.argv[1])
 for name in ('infergrade', 'infergrade-runner'):
     target = commands / name

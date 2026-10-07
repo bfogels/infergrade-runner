@@ -24,7 +24,7 @@ curl -fsSL https://github.com/bfogels/infergrade-runner/releases/latest/download
 The second command prompts for the one-time code from Hub and keeps the listener
 running. The absolute per-user path works in the same shell without a PATH change
 or login. The installer prints the exact path when a custom install location is
-used. Headless installation initially supports Debian/Ubuntu Linux x86_64; Desktop
+used. Headless installation initially supports Ubuntu 22.04+ and Debian 12+ Linux x86_64; Desktop
 remains the install route on other platforms.
 
 The installer may ask for administrator access to install missing distribution
@@ -47,6 +47,15 @@ Runtime activation must follow successful version checks for every required
 binary. Failed setup preserves the previous selected runtime and command links.
 Version-smoke errors retain the loader's error text. A listener must not register
 as listening until native setup succeeds.
+
+The Ubuntu 22 CPU candidate passed real managed installation, tiny GGUF
+generation, Python adapter preflight, Rust first-run and exact-build reselection
+in [managed runtime CI](https://github.com/bfogels/infergrade-runner/actions/runs/37670990948).
+That same run also installed the actual headless package twice and exercised
+`pair --start` against a local HTTP contract fixture, reaching listening with
+zero blocking diagnostics. This fixture check is separate from hosted Hub
+acceptance. Runtime archives live in the
+[candidate distribution](https://github.com/bfogels/infergrade-runner/releases/tag/managed-llama-cpp-b11429-ubuntu22-20261007).
 
 The hardware inventory keeps largest-card memory for existing fit consumers and
 reports observed per-card capacities and total installed VRAM separately. Total
