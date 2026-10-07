@@ -1376,6 +1376,25 @@ class ReleaseCiTests(unittest.TestCase):
             finally:
                 sys.argv = old_argv
 
+    def test_release_verifier_requires_installer_and_exact_headless_version(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            assets = [root / 'install.sh', root / 'infergrade-runner-0.3.65-linux-x86_64.tar.gz']
+            for artifact in assets:
+                artifact.write_bytes(b'checksummed release fixture')
+            with patch.object(sys, 'argv', ['checksums', '--output', str(root / 'SHA256SUMS'), *(str(item) for item in assets)]):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    write_desktop_release_checksums()
+            for version, succeeds in [('0.3.65', True), ('0.3.64', False)]:
+                args = ['verify', '--directory', str(root), '--required-headless-version', version, '--reject-unexpected']
+                with patch.object(sys, 'argv', args):
+                    if succeeds:
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            self.assertEqual(verify_desktop_release_artifacts(), 0)
+                    else:
+                        with self.assertRaisesRegex(SystemExit, 'Required headless release asset'):
+                            verify_desktop_release_artifacts()
+
     def test_desktop_release_artifact_verifier_rejects_bad_checksums_and_missing_signatures(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

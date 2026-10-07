@@ -11,7 +11,7 @@ if ! command -v apt-get >/dev/null 2>&1; then
   exit 1
 fi
 # Dependencies are distribution packages; leave NVIDIA drivers under OS ownership.
-packages=(python3 python3-venv ca-certificates curl libgomp1 libstdc++6)
+packages=(python3 python3-venv ca-certificates curl openssl libgomp1 libstdc++6)
 missing=()
 for package in "${packages[@]}"; do
   if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q '^install ok installed$'; then

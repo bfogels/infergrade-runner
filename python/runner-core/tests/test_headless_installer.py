@@ -113,3 +113,18 @@ print(json.dumps({'selection':selection}))
         self.assertIn('command directory', result.stderr)
         self.assertIn('old-working-runner', command.read_text())
         self.assertFalse((self.root / 'runtime-cache').exists())
+
+    def test_install_supplies_missing_distribution_dependency(self):
+        self.write_executable(self.commands / 'dpkg-query', '#!/bin/sh\n'
+            'if [ "$3" = libgomp1 ]; then exit 1; fi\nprintf "install ok installed"\n')
+        self.write_executable(self.commands / 'sudo', '#!/bin/sh\nexec "$@"\n')
+        log = self.root / 'apt-arguments.txt'
+        self.write_executable(self.commands / 'apt-get', '#!/usr/bin/env python3\n'
+            'import pathlib,sys\n'
+            f'with pathlib.Path({str(log)!r}).open("a") as handle: handle.write(" ".join(sys.argv[1:])+"\\n")\n')
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = log.read_text().splitlines()
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[0].endswith('update'))
+        self.assertTrue(calls[1].endswith('install -y --no-install-recommends libgomp1'))

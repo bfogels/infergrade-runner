@@ -717,7 +717,7 @@ jobs:
           # Normalize Windows CRLF before filenames drive exact-asset reconciliation.
           cat "${checksum_parts[@]}" | tr -d '\r' | awk '$2 != "infergrade-runner-desktop-latest.json"' | sort -k2 > release-assets/SHA256SUMS
           sha256sum release-assets/infergrade-runner-desktop-latest.json | sed 's|release-assets/||' >> release-assets/SHA256SUMS
-          rm -f release-assets/SHA256SUMS.macos release-assets/SHA256SUMS.linux release-assets/SHA256SUMS.windows
+          rm -f release-assets/SHA256SUMS.macos release-assets/SHA256SUMS.linux release-assets/SHA256SUMS.windows release-assets/SHA256SUMS.headless
           test -f "release-assets/$PUBLIC_DMG_NAME"
           test -f "release-assets/$PUBLIC_LINUX_DEB"
           test -f "release-assets/$PUBLIC_LINUX_APPIMAGE"
@@ -808,6 +808,7 @@ jobs:
             --required-updater-platform windows-x86_64-msi
             --required-updater-platform linux-x86_64
             --require-linux
+            --required-headless-version "$DESKTOP_VERSION"
             --reject-unexpected
           )
           verify_args+=(--require-windows)
@@ -847,9 +848,10 @@ jobs:
             --required-updater-platform windows-x86_64-msi
             --required-updater-platform linux-x86_64
             --require-linux
+            --required-headless-version "$DESKTOP_VERSION"
             --reject-unexpected
           )
-          latest_assets=("$PUBLIC_DMG_NAME" "$PUBLIC_LINUX_DEB" "$PUBLIC_LINUX_APPIMAGE")
+          latest_assets=("$PUBLIC_DMG_NAME" "$PUBLIC_LINUX_DEB" "$PUBLIC_LINUX_APPIMAGE" install.sh "infergrade-runner-$DESKTOP_VERSION-linux-x86_64.tar.gz")
           verify_args+=(--require-windows)
           latest_assets+=(InferGrade.Runner.Windows-x64.exe InferGrade.Runner.Windows-x64.msi)
           python3 ./scripts/verify_desktop_release_artifacts.py "${verify_args[@]}"
