@@ -38,6 +38,7 @@ from infergrade.generation_policies import (
 from infergrade.models import DeploymentExecution, FidelityExecution, RunRequest
 from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
 from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cpp_runtime
+from infergrade.runtime_placement import record_runtime_placement
 from infergrade.utils import env_value, stable_hash, utcnow_iso
 
 
@@ -358,6 +359,7 @@ class LlamaCppAdapter(BaseAdapter):
             with open(log_path, "wb") as log_file:
                 process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
             _wait_for_native_server_ready(process, published_port, started, log_path)
+            record_runtime_placement(request, command, _read_log_file(log_path), "preflight")
             _require_native_cuda_offload(request, _read_log_file(log_path))
         except Exception as exc:
             logs = _read_log_file(log_path)
@@ -661,6 +663,7 @@ class LlamaCppAdapter(BaseAdapter):
         stdout = _decode_utf8_lossy(completed.stdout)
         stderr = _decode_utf8_lossy(completed.stderr)
         raw_log = "%s\n%s" % (stdout, stderr)
+        placement = record_runtime_placement(request, command, stderr, "capability_completion")
         if completed.returncode != 0:
             raise RuntimeError((raw_log or "llama.cpp generation failed").strip())
         _require_native_cuda_offload(request, raw_log)
@@ -697,6 +700,7 @@ class LlamaCppAdapter(BaseAdapter):
             "measurement_source": "llama_cpp_timings",
             "load_time_ms": parsed.get("load_time_ms"),
             "prompt_transform": prompt_transform,
+            "runtime_placement": placement,
         }
 
     def _generate_native_server_text(
@@ -759,6 +763,7 @@ class LlamaCppAdapter(BaseAdapter):
             with open(log_path, "wb") as log_file:
                 process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
             base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
+            placement = record_runtime_placement(request, command, _read_log_file(log_path), "capability_server")
             _require_native_cuda_offload(request, _read_log_file(log_path))
             return self._complete_native_server_text(
                 session={
@@ -766,6 +771,7 @@ class LlamaCppAdapter(BaseAdapter):
                     "load_time_ms": load_time_ms,
                     "load_time_reported": False,
                     "log_path": log_path,
+                    "runtime_placement": placement,
                 },
                 messages=messages,
                 prompt_transform=prompt_transform,
@@ -839,6 +845,7 @@ class LlamaCppAdapter(BaseAdapter):
                 started,
                 log_path,
             )
+            placement = record_runtime_placement(request, command, _read_log_file(log_path), "capability_server")
             _require_native_cuda_offload(request, _read_log_file(log_path))
         except Exception:
             _stop_process(process)
@@ -855,6 +862,7 @@ class LlamaCppAdapter(BaseAdapter):
             "log_path": log_path,
             "process": process,
             "request_key": request_key,
+            "runtime_placement": placement,
         }
         self._capability_server_session = session
         return session
@@ -900,6 +908,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "status": "completed",
                 "error": None,
                 "latency_ms": metrics.get("latency_ms"),
+                "latency_measurement_source": metrics.get("latency_measurement_source"),
                 "time_to_first_token_ms": metrics.get("ttft_ms"),
                 "tokens_per_second": metrics.get("decode_tokens_per_second"),
                 "input_tokens": _whole_token_count(
@@ -911,6 +920,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "token_budget_exhausted": metrics.get("token_budget_exhausted"),
                 "output_token_budget": max_tokens,
                 "measurement_source": "llama_cpp_server_completion_timings",
+                "runtime_placement": session.get("runtime_placement"),
                 "load_time_ms": metrics.get("load_time_ms"),
                 "prompt_transform": prompt_transform,
             }
@@ -960,6 +970,7 @@ class LlamaCppAdapter(BaseAdapter):
             "status": "completed",
             "error": None,
             "latency_ms": metrics.get("latency_ms"),
+            "latency_measurement_source": metrics.get("latency_measurement_source"),
             "time_to_first_token_ms": metrics.get("ttft_ms"),
             "tokens_per_second": metrics.get("decode_tokens_per_second"),
             "input_tokens": _whole_token_count(
@@ -971,6 +982,7 @@ class LlamaCppAdapter(BaseAdapter):
             "token_budget_exhausted": metrics.get("token_budget_exhausted"),
             "output_token_budget": max_tokens,
             "measurement_source": "llama_cpp_server_chat_timings",
+            "runtime_placement": session.get("runtime_placement"),
             "load_time_ms": metrics.get("load_time_ms"),
             "prompt_transform": prompt_transform,
             **(
@@ -1271,6 +1283,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "parsed_timings": parsed,
                 "completion_summary": completion["final_payload"],
                 "prompt_transform": prompt_transform,
+                "runtime_placement": record_runtime_placement(request, command, logs_text, "deployment_server"),
                 "log_tail": logs_text.splitlines()[-40:],
             }
         except Exception as exc:
@@ -1284,6 +1297,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "peak_vram_mb": _stop_gpu_monitor(monitor),
                 "error": str(exc),
                 "prompt_transform": prompt_transform,
+                "runtime_placement": record_runtime_placement(request, command, logs_text, "deployment_server"),
                 "log_tail": logs_text.splitlines()[-40:],
             }
         finally:
@@ -1373,6 +1387,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "parsed_timings": parsed,
                 "completion_summary": completion["final_payload"],
                 "prompt_transform": prompt_transform,
+                "runtime_placement": record_runtime_placement(request, command, logs_text, "deployment_server"),
                 "log_tail": logs_text.splitlines()[-40:],
             }
         except Exception as exc:
@@ -1387,6 +1402,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "peak_memory_mb": _stop_process_rss_monitor(memory_monitor),
                 "error": str(exc),
                 "prompt_transform": prompt_transform,
+                "runtime_placement": record_runtime_placement(request, command, logs_text, "deployment_server"),
                 "log_tail": logs_text.splitlines()[-40:],
             }
         finally:
@@ -1628,6 +1644,7 @@ class LlamaCppAdapter(BaseAdapter):
             stdout = _decode_utf8_lossy(completed.stdout)
             stderr = _decode_utf8_lossy(completed.stderr)
             raw_log = "%s\n%s" % (stdout, stderr)
+            placement = record_runtime_placement(request, command, stderr, "perplexity")
             if completed.returncode != 0:
                 raise RuntimeError((raw_log or "llama.cpp perplexity failed").strip())
             _require_native_cuda_offload(request, raw_log)
@@ -1642,6 +1659,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "corpus_byte_count": len(_PERPLEXITY_CORPUS_TEXT.encode("utf-8")),
                 "duration_seconds": parsed.get("duration_seconds") or round(time.perf_counter() - started, 4),
                 "evaluation_backend": "llama-perplexity",
+                "runtime_placement": placement,
                 "log_tail": raw_log.splitlines()[-40:],
             }
         finally:
@@ -2430,9 +2448,16 @@ def _metrics_from_server_completion(
     compute_total_ms = None
     if prompt_ms is not None and predicted_ms is not None:
         compute_total_ms = round(prompt_ms + predicted_ms, 2)
-    latency_ms = completion.get("elapsed_ms") or compute_total_ms
-    if latency_ms is None:
+    elapsed_ms = _coerce_float(completion.get("elapsed_ms"))
+    if elapsed_ms is not None and math.isfinite(elapsed_ms) and elapsed_ms >= 0:
+        latency_ms = elapsed_ms
+        latency_measurement_source = "request_elapsed"
+    elif compute_total_ms is not None:
+        latency_ms = compute_total_ms
+        latency_measurement_source = "compute_timing"
+    else:
         latency_ms = parsed_timings.get("total_time_ms")
+        latency_measurement_source = "parsed_timing" if latency_ms is not None else None
     stop_type = str(final_payload.get("stop_type") or "").lower() or None
     token_budget_exhausted = (
         None
@@ -2442,6 +2467,7 @@ def _metrics_from_server_completion(
     return {
         "ttft_ms": round(ttft_ms, 2) if ttft_ms is not None else None,
         "latency_ms": round(latency_ms, 2) if latency_ms is not None else None,
+        "latency_measurement_source": latency_measurement_source,
         "prompt_tokens_per_second": round(prompt_tps, 4) if prompt_tps is not None else None,
         "decode_tokens_per_second": round(decode_tps, 4) if decode_tps is not None else _safe_tokens_per_second(parsed_timings),
         "load_time_ms": round(load_time_ms, 2) if load_time_ms is not None else parsed_timings.get("load_time_ms"),
