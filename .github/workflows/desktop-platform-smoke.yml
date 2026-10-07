@@ -32,6 +32,9 @@ concurrency:
 
 jobs:
   windows-package:
+    # Automated main-to-develop sync PRs only merge commits that already passed
+    # this smoke on their way to main; required CI still runs on the merge.
+    if: ${{ !startsWith(github.head_ref, 'automation/sync-main-to-develop-') }}
     name: Windows install and launch smoke
     runs-on: windows-latest
     timeout-minutes: 90
@@ -117,6 +120,9 @@ jobs:
           retention-days: 3
 
   linux-package:
+    # Automated main-to-develop sync PRs only merge commits that already passed
+    # this smoke on their way to main; required CI still runs on the merge.
+    if: ${{ !startsWith(github.head_ref, 'automation/sync-main-to-develop-') }}
     name: Linux install and launch smoke
     runs-on: ubuntu-22.04
     timeout-minutes: 90

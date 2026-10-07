@@ -7,6 +7,11 @@ on:
         description: Container tag to publish
         required: false
         default: ""
+      force_rebuild:
+        description: Rebuild every image even when an identical one was already published
+        required: false
+        default: false
+        type: boolean
   push:
     tags:
       - "v*"
@@ -102,12 +107,64 @@ jobs:
             type=raw,value=${{ steps.meta.outputs.image_tag }}
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Fingerprint image inputs
+        id: inputs
+        env:
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          PLATFORMS: ${{ matrix.platforms }}
+        run: |
+          # Base images are unpinned tags; fold their current manifest into the
+          # fingerprint so upstream security refreshes still trigger a rebuild.
+          base_state=""
+          while read -r base; do
+            [ -z "$base" ] && continue
+            manifest_sha=$(docker buildx imagetools inspect --raw "$base" | sha256sum | cut -d' ' -f1)
+            base_state="${base_state}${base}=${manifest_sha};"
+          done < <(python3 scripts/container_input_digest.py --dockerfile "$DOCKERFILE" --platforms "$PLATFORMS" --print-base-images)
+          fingerprint=$(python3 scripts/container_input_digest.py --dockerfile "$DOCKERFILE" --platforms "$PLATFORMS" --base-digest "$base_state" --short)
+          echo "tag=inputs-${fingerprint}" >> "$GITHUB_OUTPUT"
+
+      - name: Look for an identical published image
+        id: reuse
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          INPUT_TAG: ${{ steps.inputs.outputs.tag }}
+          FORCE_REBUILD: ${{ github.event.inputs.force_rebuild }}
+        run: |
+          if [ "$FORCE_REBUILD" != "true" ] && docker buildx imagetools inspect "$IMAGE:$INPUT_TAG" >/dev/null 2>&1; then
+            echo "reuse=true" >> "$GITHUB_OUTPUT"
+            echo "Reusing $IMAGE:$INPUT_TAG (inputs unchanged)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "reuse=false" >> "$GITHUB_OUTPUT"
+            echo "Building $IMAGE (inputs changed, first publish, or forced)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Re-tag unchanged image
+        if: steps.reuse.outputs.reuse == 'true'
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          INPUT_TAG: ${{ steps.inputs.outputs.tag }}
+          TAGS: ${{ steps.docker_meta.outputs.tags }}
+        run: |
+          # imagetools create copies the manifest list, so every platform keeps
+          # the exact digest that was already published and verified.
+          args=()
+          while read -r tag; do
+            [ -n "$tag" ] && args+=(--tag "$tag")
+          done <<< "$TAGS"
+          docker buildx imagetools create "${args[@]}" "$IMAGE:$INPUT_TAG"
+
       - name: Build and push
+        if: steps.reuse.outputs.reuse != 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platforms }}
           push: true
-          tags: ${{ steps.docker_meta.outputs.tags }}
+          tags: |
+            ${{ steps.docker_meta.outputs.tags }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ steps.inputs.outputs.tag }}
           labels: ${{ steps.docker_meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
