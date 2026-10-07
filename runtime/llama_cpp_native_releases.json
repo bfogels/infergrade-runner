@@ -357,7 +357,8 @@
       "platform": {
         "system": "linux",
         "arch": "x86_64",
-        "human": "linux x86_64 / CPU"
+        "human": "linux x86_64 / CPU",
+        "minimum_glibc": "2.34"
       },
       "archive": {
         "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-ubuntu-x64.tar.gz",
@@ -392,7 +393,8 @@
       "compatibility_notes": [
         "Pinned upstream release; compatibility qualification is separate from installation.",
         "Native execution; Docker is optional for advanced sandboxed checks.",
-        "Previous selected builds remain available for rollback; a fresh install has no older build."
+        "Previous selected builds remain available for rollback; a fresh install has no older build.",
+        "Built by upstream on Ubuntu 22.04, so it links GLIBC_2.34 symbols and cannot load on older glibc."
       ],
       "provenance": "Official upstream release assets with pinned GitHub SHA-256; no independent signature."
     },

@@ -795,10 +795,15 @@ fn recommended_runtime_for_host(
             })),
         }
     }
+    let cpu_opt_in = if accelerator == "cpu" {
+        ""
+    } else {
+        ", or set INFERGRADE_ACCELERATOR=cpu to benchmark on the CPU"
+    };
     let message = if rejected.is_empty() {
         format!(
             "No managed {accelerator} llama.cpp build is published for {system} {arch}. \
-             Select an existing native llama.cpp runtime, or set INFERGRADE_ACCELERATOR=cpu to benchmark on the CPU."
+             Select an existing native llama.cpp runtime{cpu_opt_in}."
         )
     } else {
         let reasons = rejected
@@ -808,7 +813,7 @@ fn recommended_runtime_for_host(
             .join("; ");
         format!(
             "No managed {accelerator} llama.cpp build can run on this machine: {reasons}. \
-             Nothing was downloaded. Fix the requirement above, or set INFERGRADE_ACCELERATOR=cpu to benchmark on the CPU."
+             Nothing was downloaded. Fix the requirement above, select an existing native llama.cpp runtime{cpu_opt_in}."
         )
     };
     json!({
@@ -3145,6 +3150,16 @@ mod tests {
         };
         let cpu = recommended_runtime_for_host("linux", "x86_64", "cpu", &rhel8);
         assert_ne!(cpu["runtime_id"], "llama-cpp-b11429-ubuntu22-x86_64-cpu");
+        // The upstream CPU build is linked on Ubuntu 22.04 too, so nothing fits
+        // glibc 2.28 until the portable build is pinned: refuse before download.
+        if cpu.get("archive").is_none() {
+            assert_eq!(cpu["supported_on_this_platform"], false);
+            let message = cpu["message"].as_str().unwrap();
+            assert!(message.contains("glibc 2.34"), "{message}");
+            assert!(!message.contains("INFERGRADE_ACCELERATOR=cpu"), "{message}");
+        } else {
+            assert!(host_compat::entry_host_incompatibility(&cpu, &rhel8).is_none());
+        }
     }
 
     #[test]
