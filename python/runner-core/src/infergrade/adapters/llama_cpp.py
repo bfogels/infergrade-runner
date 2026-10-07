@@ -900,6 +900,7 @@ class LlamaCppAdapter(BaseAdapter):
                 "status": "completed",
                 "error": None,
                 "latency_ms": metrics.get("latency_ms"),
+                "latency_measurement_source": metrics.get("latency_measurement_source"),
                 "time_to_first_token_ms": metrics.get("ttft_ms"),
                 "tokens_per_second": metrics.get("decode_tokens_per_second"),
                 "input_tokens": _whole_token_count(
@@ -960,6 +961,7 @@ class LlamaCppAdapter(BaseAdapter):
             "status": "completed",
             "error": None,
             "latency_ms": metrics.get("latency_ms"),
+            "latency_measurement_source": metrics.get("latency_measurement_source"),
             "time_to_first_token_ms": metrics.get("ttft_ms"),
             "tokens_per_second": metrics.get("decode_tokens_per_second"),
             "input_tokens": _whole_token_count(
@@ -2430,9 +2432,16 @@ def _metrics_from_server_completion(
     compute_total_ms = None
     if prompt_ms is not None and predicted_ms is not None:
         compute_total_ms = round(prompt_ms + predicted_ms, 2)
-    latency_ms = completion.get("elapsed_ms") or compute_total_ms
-    if latency_ms is None:
+    elapsed_ms = _coerce_float(completion.get("elapsed_ms"))
+    if elapsed_ms is not None and math.isfinite(elapsed_ms) and elapsed_ms >= 0:
+        latency_ms = elapsed_ms
+        latency_measurement_source = "request_elapsed"
+    elif compute_total_ms is not None:
+        latency_ms = compute_total_ms
+        latency_measurement_source = "compute_timing"
+    else:
         latency_ms = parsed_timings.get("total_time_ms")
+        latency_measurement_source = "parsed_timing" if latency_ms is not None else None
     stop_type = str(final_payload.get("stop_type") or "").lower() or None
     token_budget_exhausted = (
         None
@@ -2442,6 +2451,7 @@ def _metrics_from_server_completion(
     return {
         "ttft_ms": round(ttft_ms, 2) if ttft_ms is not None else None,
         "latency_ms": round(latency_ms, 2) if latency_ms is not None else None,
+        "latency_measurement_source": latency_measurement_source,
         "prompt_tokens_per_second": round(prompt_tps, 4) if prompt_tps is not None else None,
         "decode_tokens_per_second": round(decode_tps, 4) if decode_tps is not None else _safe_tokens_per_second(parsed_timings),
         "load_time_ms": round(load_time_ms, 2) if load_time_ms is not None else parsed_timings.get("load_time_ms"),
