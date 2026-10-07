@@ -69,7 +69,12 @@ if [ "$accelerator" = cuda ]; then
   curl --fail --location --retry 3 --output "$build_dir/redistributables/EULA.cuda.html" "$eula_url"
   printf '%s  %s\n' "$eula_sha256" "$build_dir/redistributables/EULA.cuda.html" | sha256sum --check
   cp "$build_dir/cccl/LICENSE" "$build_dir/redistributables/LICENSE.cccl"
-  cmake_extra=(-DGGML_CUDA_CCCL_VERSION=v3.4.3 "-DFETCHCONTENT_SOURCE_DIR_CCCL=$build_dir/cccl")
+  # NCCL ships in NVIDIA's devel images but not on user machines; ggml enables
+  # it by default whenever found. Upstream release builds link without it.
+  cmake_extra=(-DGGML_CUDA_CCCL_VERSION=v3.4.3 "-DFETCHCONTENT_SOURCE_DIR_CCCL=$build_dir/cccl" -DGGML_CUDA_NCCL=OFF)
+  if command -v ccache >/dev/null; then
+    cmake_extra+=(-DCMAKE_CUDA_COMPILER_LAUNCHER=ccache)
+  fi
 fi
 cmake -S "$build_dir/source" -B "$build_dir/build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA="$cuda_enabled" -DGGML_NATIVE=OFF -DGGML_BACKEND_DL="$backend_loading" \
