@@ -134,10 +134,12 @@
           <div class="pairing-copy">
             <p class="eyebrow">Pairing</p>
             <h2>Connect this machine</h2>
-            <p>Paste the one-time code from Hub. Pairing token is stored in your OS credential store.</p>
+            <p>Sign in and approve this machine in your browser. Your Runner token stays in the OS credential store.</p>
+            <div data-device-pairing hidden><p>Your connection code</p><strong class="device-pair-code" data-device-user-code></strong><p class="hint" data-device-expiry></p><div class="button-row"><button type="button" data-device-open-browser>Open connection page</button><button type="button" class="button-secondary" data-device-cancel>Stop waiting</button></div></div>
             <div class="button-row pairing-actions">
-              <button type="button" data-open-hub data-hub-target="setup">Open Hub pairing</button>
-              <button type="button" class="button-secondary" data-pair-runner>Pair with Hub</button>
+              <button type="button" data-browser-pair-runner>Connect in browser</button>
+              <button type="button" class="button-secondary" data-pair-runner>Use pasted code</button>
+              <button type="button" class="button-secondary" data-open-hub data-hub-target="setup">Get a one-time Hub code</button>
             </div>
           </div>
           <div class="pairing-fields">
@@ -156,7 +158,7 @@
               </label>
             </div>
             <div class="pairing-notes">
-              <p class="hint" data-pair-state>Click Pair Local Runner in the Hub, then paste the one-time code here.</p>
+              <p class="hint" data-pair-state>Connect in your browser, or paste an existing one-time Hub code.</p>
               <p class="hint" data-token-state>Pairing stores the runner token in the OS credential store. Tokens are not shown in this browser UI.</p>
             </div>
           </div>

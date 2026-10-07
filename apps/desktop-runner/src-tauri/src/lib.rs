@@ -1,3 +1,7 @@
+mod device_pairing;
+use device_pairing::{
+    begin_runner_device_pairing, cancel_runner_device_pairing, poll_runner_device_pairing,
+};
 use infergrade_runner_engine::{
     build_hub_json_request, build_listener_start_plan, build_pairing_redeem_request,
     build_run_bundle_upload_request, build_run_claim_request, build_run_completion_request,
@@ -372,6 +376,7 @@ fn save_runner_token_value(token: &str) -> Result<(), String> {
 #[tauri::command]
 async fn save_runner_token(token: String) -> Result<(), String> {
     let _pairing_guard = PAIRING_STATE_LOCK.write().await;
+    device_pairing::invalidate();
     save_runner_token_value(&token)
 }
 
@@ -394,6 +399,7 @@ fn load_runner_token_value() -> Result<Option<String>, String> {
 #[tauri::command]
 async fn clear_runner_token() -> Result<(), String> {
     let _pairing_guard = PAIRING_STATE_LOCK.write().await;
+    device_pairing::invalidate();
     clear_runner_token_value()
 }
 
@@ -1698,6 +1704,7 @@ async fn run_observed_runtime(
 #[tauri::command]
 async fn reset_runner_pairing() -> Result<Value, String> {
     let _pairing_guard = PAIRING_STATE_LOCK.write().await;
+    device_pairing::invalidate();
     let profile_path = runner_profile_path()?;
     reset_pairing_state(
         &DesktopProfileStore,
@@ -2396,6 +2403,10 @@ async fn redeem_runner_pairing(
     pair_code: String,
     label: Option<String>,
 ) -> Result<Value, String> {
+    let pairing_generation = {
+        let _guard = PAIRING_STATE_LOCK.write().await;
+        device_pairing::invalidate()
+    };
     let api_url = normalize_api_url(&api_url)?;
     let payload = build_pairing_redeem_request(
         PairingInput { pair_code, label },
@@ -2442,6 +2453,9 @@ async fn redeem_runner_pairing(
     }
     let body = parsed.ok_or_else(|| "Hub pairing response was not valid JSON.".to_string())?;
     let _pairing_guard = PAIRING_STATE_LOCK.write().await;
+    if !device_pairing::is_current(pairing_generation) {
+        return Err("Pairing changed while this code was being redeemed. Start again.".into());
+    }
     let profile_path = runner_profile_path()?;
     complete_pairing_response(
         body,
@@ -2494,7 +2508,10 @@ pub fn run() {
             run_desktop_native_first_run,
             retry_desktop_native_first_run_upload,
             desktop_support_summary,
-            redeem_runner_pairing
+            redeem_runner_pairing,
+            begin_runner_device_pairing,
+            poll_runner_device_pairing,
+            cancel_runner_device_pairing
         ])
         .run(tauri::generate_context!())
         .expect("error while running InferGrade desktop runner");
