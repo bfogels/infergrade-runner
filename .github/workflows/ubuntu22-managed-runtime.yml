@@ -22,6 +22,7 @@ jobs:
         shell: bash
         run: bash scripts/build_linux_cuda_runtime.sh output/ubuntu22-runtime
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
         with:
           name: ubuntu22-managed-cuda-${{ github.sha }}
           path: output/ubuntu22-runtime/
