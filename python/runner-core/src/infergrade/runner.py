@@ -617,8 +617,10 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         accelerator = (request.runtime_selector or {}).get("accelerator") or {}
         if request.execution_mode == "local_native" and request.backend == "llama.cpp" and accelerator.get("api") == "cpu":
             request.backend_flags = ["--n-gpu-layers", "0"]
-        else:
+        elif request.backend != "llama.cpp":
             request.backend_flags = adapter.default_backend_flags()
+        # llama.cpp chooses fitting per executable/pinned image when building
+        # argv; injecting a layer count here would disable the upstream fitter.
     validate_request(request)
 
     if request.resume and not request.output_dir:

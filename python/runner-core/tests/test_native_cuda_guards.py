@@ -1,11 +1,15 @@
 import unittest
 import json
+import os
+import subprocess
+import tempfile
 from pathlib import Path
 from infergrade.json_schema_subset import validate_json_schema
 from unittest import mock
 
 from infergrade.adapters.llama_cpp import (
-    LlamaCppAdapter, native_cuda_required, _native_backend_flags, _require_native_cuda_offload,
+    _DEFAULT_IMAGE, LlamaCppAdapter, native_cuda_required, _native_backend_flags, _require_native_cuda_offload,
+    _supports_automatic_fit, _probe_automatic_fit,
 )
 from infergrade.models import RunRequest
 from infergrade.runner import _enforce_runtime_selector_before_execution
@@ -64,6 +68,93 @@ class NativeCudaGuardsTests(unittest.TestCase):
         for system in ("linux", "windows"):
             _enforce_runtime_selector_before_execution(self.request("cuda", system))
         preflight.assert_not_called()
+
+    @mock.patch("infergrade.adapters.llama_cpp._supports_automatic_fit", return_value=True)
+    def test_supported_native_tools_fit_without_forced_layers_and_keep_context(self, supports):
+        request = self.request("cuda")
+        adapter = LlamaCppAdapter()
+        with mock.patch.object(adapter, "_native_completion_path", return_value="completion"), \
+             mock.patch.object(adapter, "_native_server_path", return_value="server"), \
+             mock.patch.object(adapter, "_native_perplexity_path", return_value="perplexity"):
+            commands = [
+                adapter._build_llama_cli_command("model.gguf", "hello", 8, 8192, request),
+                adapter._build_llama_server_command("model.gguf", 8192, request),
+                adapter._build_llama_perplexity_command("model.gguf", "corpus.txt", request),
+            ]
+        self.assertEqual([call.args[0] for call in supports.call_args_list],
+                         ["completion", "server", "perplexity"])
+        for command, context in zip(commands, (8192, 8192, 128)):
+            self.assertEqual(command[command.index("--fit") + 1], "on")
+            self.assertEqual(command[command.index("-c") + 1], str(context))
+            self.assertNotIn("--n-gpu-layers", command)
+            self.assertIn("--log-verbosity", command)
+        self.assertEqual(request.backend_flags, [])
+        # Fitting does not weaken the positive CUDA evidence requirement.
+        with self.assertRaisesRegex(RuntimeError, "CPU fallback"):
+            _require_native_cuda_offload(request, "using device CPU\noffloaded 0/5 layers")
+
+    @mock.patch("infergrade.adapters.llama_cpp._supports_automatic_fit")
+    def test_fitting_preserves_explicit_flags_cpu_and_container(self, supports):
+        adapter = LlamaCppAdapter()
+        for flags in (["--fit", "off"], ["-ngl", "12"], ["--n-gpu-layers=12"],
+                      ["--fit", "on", "--fit-target", "2048"]):
+            request = self.request("cuda")
+            request.backend_flags = list(flags)
+            self.assertEqual(adapter._backend_flags(request, "server"),
+                             _native_backend_flags(request))
+        cpu = self.request("cpu")
+        self.assertEqual(adapter._backend_flags(cpu, "server"), ["--n-gpu-layers", "0"])
+        container = self.request()
+        container.execution_mode = "local_container"
+        container.backend_flags = ["--fit", "off"]
+        self.assertEqual(adapter._backend_flags(container, "server"), container.backend_flags)
+        supports.assert_not_called()
+
+    @mock.patch("infergrade.adapters.llama_cpp._supports_automatic_fit")
+    def test_pinned_container_fits_but_custom_image_keeps_legacy_defaults(self, supports):
+        adapter = LlamaCppAdapter()
+        request = self.request()
+        request.execution_mode = "local_container"
+        with mock.patch.object(adapter, "_image_name", return_value=_DEFAULT_IMAGE):
+            command = adapter._build_llama_server_command("model.gguf", 8192, request)
+        self.assertEqual(command[command.index("--fit") + 1], "on")
+        self.assertNotIn("--n-gpu-layers", command)
+        request.backend_image = "custom/unknown:runtime"
+        with mock.patch.object(adapter, "default_backend_flags", return_value=["--n-gpu-layers", "99"]):
+            self.assertEqual(adapter._backend_flags(request, "server"), ["--n-gpu-layers", "99"])
+        supports.assert_not_called()
+
+    @mock.patch("infergrade.adapters.llama_cpp._supports_automatic_fit", return_value=False)
+    def test_unsupported_native_keeps_legacy_cuda_default(self, supports):
+        adapter = LlamaCppAdapter()
+        with mock.patch.object(adapter, "_native_server_path", return_value="old-server"):
+            self.assertEqual(adapter._backend_flags(self.request("cuda"), "server"),
+                             ["--n-gpu-layers", "999", "--log-verbosity", "4"])
+
+    def test_fit_help_probe_is_bounded_exact_and_cached_by_binary_identity(self):
+        _probe_automatic_fit.cache_clear()
+        with tempfile.NamedTemporaryFile() as binary:
+            with mock.patch("infergrade.adapters.llama_cpp.subprocess.run") as run:
+                run.return_value = mock.Mock(returncode=0, stdout=b"--fit [on|off]", stderr=b"")
+                self.assertTrue(_supports_automatic_fit(binary.name))
+                self.assertTrue(_supports_automatic_fit(binary.name))
+                run.assert_called_once_with([os.path.realpath(binary.name), "--help"],
+                                            capture_output=True, timeout=10)
+                binary.write(b"new executable identity")
+                binary.flush()
+                run.return_value = mock.Mock(returncode=0, stdout=b"--fit-target MiB", stderr=b"")
+                self.assertFalse(_supports_automatic_fit(binary.name))
+                self.assertEqual(run.call_count, 2)
+        for result in (mock.Mock(returncode=1, stdout=b"--fit on", stderr=b""),
+                       subprocess.TimeoutExpired("help", 10), OSError("missing")):
+            _probe_automatic_fit.cache_clear()
+            with mock.patch("infergrade.adapters.llama_cpp.subprocess.run") as run:
+                if isinstance(result, Exception):
+                    run.side_effect = result
+                else:
+                    run.return_value = result
+                self.assertFalse(_probe_automatic_fit("binary", 1, 1))
+        _probe_automatic_fit.cache_clear()
 
     def test_linux_cuda_delivery_name_requires_cuda_even_with_unknown_accelerator(self):
         request = self.request()
