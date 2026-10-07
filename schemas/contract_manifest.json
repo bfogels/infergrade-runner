@@ -1,5 +1,5 @@
 {
-  "contract_version": "0.3.38",
+  "contract_version": "0.3.39",
   "publisher": "infergrade-runner",
   "ontology_source": "schemas/json/model_ontology.schema.json",
   "schema_files": [
@@ -17,7 +17,8 @@
     "schemas/json/runtime_receipt.schema.json",
     "schemas/json/runtime_receipt_artifact.schema.json",
     "schemas/json/runtime_trust_catalog.schema.json",
-    "schemas/json/runtime_selector.schema.json"
+    "schemas/json/runtime_selector.schema.json",
+    "schemas/json/runner_device_authorization.schema.json"
   ],
   "example_files": [
     "schemas/examples/model_ontology.qwen2.5-7b-instruct.gguf.json",
@@ -28,7 +29,8 @@
     "schemas/examples/run_config.tinyllama_preview_demo.json",
     "schemas/examples/run_config.llama_cpp.qwen2.5-7b.json",
     "schemas/examples/run_request.canary.yaml",
-    "schemas/examples/run_request.standard.yaml"
+    "schemas/examples/run_request.standard.yaml",
+    "schemas/examples/runner_device_authorization.example.json"
   ],
   "catalog_files": [
     "schemas/capability_catalog.json",
@@ -54,6 +56,7 @@
     "docs/runtime_catalog_operations.md",
     "docs/schema_draft.md",
     "docs/windows_nvidia_cuda_beta.md",
-    "docs/coverage_expansion_v0_3_5.md"
+    "docs/coverage_expansion_v0_3_5.md",
+    "docs/runner_device_authorization.md"
   ]
 }

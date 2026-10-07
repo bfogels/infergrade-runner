@@ -6,6 +6,7 @@ import json
 import os
 import socket
 import sys
+import warnings
 from typing import Dict, Optional
 from urllib.error import URLError
 
@@ -50,6 +51,8 @@ from infergrade.transport import (
     list_run_configs,
     publish_run_config,
     redeem_runner_pairing,
+    authorize_runner_device,
+    DeviceAuthorizationUnavailable,
     require_secure_api_url,
     upload_bundle,
 )
@@ -253,6 +256,7 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
 
     pair_parser = subparsers.add_parser("pair", help="Pair this local machine with InferGrade Hub and save a reusable runner profile.")
     pair_parser.add_argument("--api-url", default="https://api.infergrade.com")
+    pair_parser.add_argument("--prompt-pair-code", action="store_true", help="Enter a Hub-issued code using hidden input instead of device authorization.")
     pair_parser.add_argument("--pair-code")
     pair_parser.add_argument("--pair-code-stdin", action="store_true", help="Read the one-time pair code from stdin.")
     pair_parser.add_argument("--label", "--runner-label", dest="label", help="Optional machine label; defaults to this hostname.")
@@ -507,7 +511,9 @@ def _resolve_pair_code(args) -> str:
     if env_pair_code:
         return env_pair_code
     if getattr(args, "pair_code_stdin", False):
-        pair_code = (getpass.getpass("Pairing code from InferGrade: ") if sys.stdin.isatty() else sys.stdin.read()).strip()
+        if sys.stdin.isatty():
+            return _resolve_pair_code(argparse.Namespace(prompt_pair_code=True))
+        pair_code = sys.stdin.read().strip()
         if pair_code:
             return pair_code
         raise SystemExit("--pair-code-stdin was set but stdin did not contain a pair code.")
@@ -517,11 +523,21 @@ def _resolve_pair_code(args) -> str:
             file=sys.stderr,
         )
         return str(args.pair_code).strip()
-    if sys.stdin.isatty():
-        pair_code = getpass.getpass("Pairing code from InferGrade: ").strip()
-        if pair_code:
-            return pair_code
-    raise SystemExit("No pair code provided. Set INFERGRADE_PAIR_CODE or pass --pair-code-stdin.")
+    if getattr(args, "prompt_pair_code", False):
+        if not sys.stdin.isatty():
+            raise SystemExit("Hidden-input pairing needs a terminal. Use INFERGRADE_PAIR_CODE or --pair-code-stdin.")
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", getpass.GetPassWarning)
+                pair_code = getpass.getpass("Hub pairing code (hidden): ").strip()
+        except getpass.GetPassWarning:
+            raise SystemExit("Unable to hide input. Use INFERGRADE_PAIR_CODE or --pair-code-stdin.")
+        except (EOFError, KeyboardInterrupt):
+            raise SystemExit("Pairing cancelled.")
+        if not pair_code:
+            raise SystemExit("No pairing code entered.")
+        return pair_code
+    return ""
 
 
 def _exit_for_invalid_runner_token(exc: RunnerTokenInvalidError) -> None:
@@ -842,14 +858,28 @@ def main(argv: Optional[list] = None) -> int:
         execution_mode = preferred_local_execution_mode()
         environment = capture_environment(execution_mode)
         try:
-            payload = redeem_runner_pairing(
-                api_url=api_url,
-                pair_code=pair_code,
-                label=args.label or (args.hostname or socket.gethostname()).split(".", 1)[0],
-                hostname=args.hostname or socket.gethostname(),
-                execution_mode=execution_mode,
-                environment=environment,
-            )
+            details = {
+                "label": args.label or (args.hostname or socket.gethostname()).split(".", 1)[0],
+                "hostname": args.hostname or socket.gethostname(),
+                "execution_mode": execution_mode,
+                "environment": environment,
+            }
+            if not pair_code:
+                def show_device_code(issued):
+                    print("To connect this machine, open %s\nand enter: %s (expires in %d minutes)\nWaiting for approval…" % (
+                        issued["verification_uri"], issued["user_code"], issued["expires_in"] // 60,
+                    ), file=sys.stderr, flush=True)
+                try:
+                    payload = authorize_runner_device(api_url, details, on_issued=show_device_code)
+                except DeviceAuthorizationUnavailable:
+                    if not sys.stdin.isatty():
+                        raise SystemExit("This Hub does not support device pairing. Use INFERGRADE_PAIR_CODE or --pair-code-stdin.")
+                    args.prompt_pair_code = True
+                    pair_code = _resolve_pair_code(args)
+            if pair_code:
+                payload = redeem_runner_pairing(api_url=api_url, pair_code=pair_code, **details)
+        except KeyboardInterrupt:
+            raise SystemExit("Pairing cancelled.")
         except (URLError, RuntimeError, InsecureApiUrlError) as exc:
             raise SystemExit("Failed to redeem runner pairing code against %s: %s" % (api_url, exc))
         profile = dict(payload.get("runner_profile") or {})

@@ -134,11 +134,15 @@ If you are benchmarking locally on Apple Silicon, use the native `llama.cpp` pat
 ```bash
 brew install llama.cpp
 python3 -m pip install -e ./python/runner-core
-python3 -c 'import getpass; print(getpass.getpass("InferGrade pairing code: "))' | infergrade pair \
-  --api-url http://127.0.0.1:8000 \
-  --pair-code-stdin
+infergrade pair
 infergrade start
 ```
+
+`infergrade pair` prints a short device code. Open the displayed Hub link,
+sign in, inspect the detected machine, and approve it. For a development Hub,
+pass `--api-url http://127.0.0.1:8000`. Existing scripts may still supply
+`INFERGRADE_PAIR_CODE`, `--pair-code-stdin`, or `--pair-code`; use
+`--prompt-pair-code` for hidden entry of a Hub-issued legacy pairing code.
 
 `infergrade doctor` fails fast if you try to run a real Apple Silicon `llama.cpp` benchmark with `execution_mode=local_container`, because that path does not use Metal.
 
