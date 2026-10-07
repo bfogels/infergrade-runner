@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runner_device_authorization.schema.json",
+  "title": "Runner device authorization v1",
+  "$ref": "#/$defs/issueResponse",
+  "$defs": {
+    "issueRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hostname": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "preferred_execution_mode": {
+          "enum": [
+            "local_native",
+            "local_container"
+          ]
+        },
+        "environment": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "hostname",
+        "preferred_execution_mode",
+        "environment"
+      ]
+    },
+    "issueResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "device_code": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 256
+        },
+        "user_code": {
+          "type": "string",
+          "pattern": "^[A-Z2-9]{4}-[A-Z2-9]{4}$"
+        },
+        "verification_uri": {
+          "type": "string",
+          "format": "uri"
+        },
+        "expires_in": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600
+        },
+        "interval": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        }
+      },
+      "required": [
+        "device_code",
+        "user_code",
+        "verification_uri",
+        "expires_in",
+        "interval"
+      ]
+    },
+    "pollRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "device_code": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "device_code"
+      ]
+    },
+    "pollError": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "enum": [
+            "authorization_pending",
+            "slow_down",
+            "access_denied",
+            "expired_token",
+            "invalid_grant"
+          ]
+        }
+      },
+      "required": [
+        "error"
+      ]
+    },
+    "approvalRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "user_code": {
+          "type": "string",
+          "pattern": "^[A-Z2-9]{4}-[A-Z2-9]{4}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "approve": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "user_code",
+        "approve"
+      ]
+    },
+    "tokenResponse": {
+      "type": "object",
+      "required": [
+        "runner_profile"
+      ],
+      "properties": {
+        "runner_profile": {
+          "type": "object",
+          "required": [
+            "api_url",
+            "runner_id",
+            "access_token"
+          ],
+          "properties": {
+            "api_url": {
+              "type": "string"
+            },
+            "runner_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "access_token": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}
