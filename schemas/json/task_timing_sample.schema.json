@@ -73,6 +73,8 @@
     "protocol_recovery": {
       "type": "boolean"
     },
+    "placement_invocation_id": {"type": ["string", "null"], "pattern": "^[a-f0-9]{32}$"},
+    "placement_fingerprint": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
     "task_revision": {
       "type": [
         "string",
