@@ -1,4 +1,5 @@
 import json
+from functools import lru_cache
 import math
 import os
 import re
@@ -161,6 +162,26 @@ def _llama_cpp_backend_flags(flags: List[str]) -> List[str]:
     return arguments
 
 
+@lru_cache(maxsize=32)
+def _probe_automatic_fit(binary: str, size: int, mtime_ns: int) -> bool:
+    """Cache help capability by executable identity, not a guessed version."""
+    del size, mtime_ns
+    try:
+        result = subprocess.run([binary, "--help"], capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    output = _decode_utf8_lossy(result.stdout) + "\n" + _decode_utf8_lossy(result.stderr)
+    return result.returncode == 0 and bool(re.search(r"(?<![\w-])--fit(?=[\s,=]|$)", output))
+
+
+def _supports_automatic_fit(binary: str) -> bool:
+    try:
+        stat = os.stat(binary)
+    except OSError:
+        return False
+    return _probe_automatic_fit(os.path.realpath(binary), stat.st_size, stat.st_mtime_ns)
+
+
 def _native_backend_flags(request: RunRequest) -> List[str]:
     flags = _llama_cpp_backend_flags(request.backend_flags)
     api = ((request.runtime_selector or {}).get("accelerator") or {}).get("api")
@@ -213,6 +234,28 @@ class LlamaCppAdapter(BaseAdapter):
 
     def default_backend_flags(self):
         return ["--n-gpu-layers", "99"] if shutil.which("nvidia-smi") is not None else []
+
+    def _backend_flags(self, request: RunRequest, tool: str) -> List[str]:
+        # Container defaults stay compatible with the older pinned image. User
+        # flags and explicit CPU intent retain their existing precedence.
+        api = ((request.runtime_selector or {}).get("accelerator") or {}).get("api")
+        if (request.execution_mode != "local_native" or request.backend_flags
+                or request.simulate or api == "cpu"):
+            return _native_backend_flags(request)
+        try:
+            binary = {
+                "completion": self._native_completion_path,
+                "server": self._native_server_path,
+                "perplexity": self._native_perplexity_path,
+            }[tool](request)
+        except RuntimeError:
+            # Actual execution still reports missing-binary errors at resolution.
+            binary = None
+        if binary and _supports_automatic_fit(binary):
+            # Keep fitter decisions and observed allocations in execution logs.
+            return ["--fit", "on", "--log-verbosity", "4"]
+        legacy = _native_backend_flags(request)
+        return legacy or self.default_backend_flags()
 
     def runtime_metadata(self, request: RunRequest) -> Dict[str, object]:
         if request and request.execution_mode == "local_native":
@@ -1377,7 +1420,7 @@ class LlamaCppAdapter(BaseAdapter):
             "--perf",
             "--no-warmup",
         ]
-        command.extend(_native_backend_flags(request))
+        command.extend(self._backend_flags(request, "completion"))
         return command
 
     def _native_completion_path(self, request: RunRequest) -> str:
@@ -1425,7 +1468,7 @@ class LlamaCppAdapter(BaseAdapter):
             "-np",
             "1",
         ]
-        command.extend(_native_backend_flags(request))
+        command.extend(self._backend_flags(request, "server"))
         return command
 
     def _profile_spec(self, profile_id: str, use_case: Optional[str]) -> Dict[str, object]:
@@ -1623,7 +1666,7 @@ class LlamaCppAdapter(BaseAdapter):
             "4",
             "--no-warmup",
         ]
-        command.extend(_native_backend_flags(request))
+        command.extend(self._backend_flags(request, "perplexity"))
         return command
 
 
