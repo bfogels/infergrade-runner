@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check CUDA package installation on a CPU host without claiming GPU execution."""
 import argparse
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -30,6 +31,15 @@ def smoke(cli, output):
         raise ValueError("CUDA package must use the host NVIDIA driver, not a bundled driver or stub")
     if not (directory / "libggml-cuda.so").is_file():
         raise ValueError("CUDA package did not contain its dynamic backend")
+    origin = json.loads((directory / "build-origin.json").read_text())
+    required_targets = {"50-virtual", "61-virtual", "70-virtual", "75-virtual", "80-virtual",
+                        "86-real", "89-real", "90-virtual", "120a-real"}
+    if not required_targets.issubset(origin.get("cuda_architecture_targets", [])):
+        raise ValueError("CUDA default package narrowed the pinned upstream GPU target policy")
+    for key in ("upstream_commit", "source_archive_sha256", "cuda_architecture_targets",
+                "cccl_commit", "cccl_source_sha256"):
+        if entry["build_origin"].get(key) != origin.get(key):
+            raise ValueError("CUDA package provenance did not match manifest: " + key)
     versions = {}
     for name in ("llama-cli", "llama-server", "llama-perplexity", "llama-completion"):
         result = subprocess.run([str(directory / name), "--version"], env=env,
