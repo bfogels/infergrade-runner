@@ -623,6 +623,9 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("if: steps.reuse.outputs.reuse != 'true'", workflow)
         self.assertIn("cache-from: type=gha,scope=${{ matrix.image }}", workflow)
         self.assertIn("force_rebuild:", workflow)
+        self.assertIn("pull: true", workflow)
+        self.assertIn("no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}", workflow)
+        self.assertNotIn("done < <(python3 scripts/container_input_digest.py", workflow)
 
     def test_optional_smokes_skip_automated_sync_prs_only(self):
         skip = "if: ${{ !startsWith(github.head_ref, 'automation/sync-main-to-develop-') }}"

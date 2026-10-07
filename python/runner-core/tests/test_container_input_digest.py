@@ -47,8 +47,6 @@ class ContainerInputDigestTests(unittest.TestCase):
             root = self._repo(tmp)
             first = self._digest(root)
             (root / "unrelated.txt").write_text("changed\n", encoding="utf-8")
-            (root / "lib" / "pkg" / "__pycache__").mkdir()
-            (root / "lib" / "pkg" / "__pycache__" / "a.cpython-311.pyc").write_bytes(b"\0")
             self.assertEqual(first, self._digest(root))
             self.assertEqual(self._digest(root, platforms="linux/arm64,linux/amd64"),
                              self._digest(root, platforms="linux/amd64, linux/arm64"))
@@ -73,6 +71,42 @@ class ContainerInputDigestTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             root = self._repo(tmp)
             (root / "containers" / "demo" / "runner.py").unlink()
+            with self.assertRaises(FileNotFoundError):
+                self._digest(root)
+
+    def test_copy_modes_symlinks_and_empty_directories_change_digest(self):
+        with TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            source = root / "lib/pkg/a.py"
+            first = self._digest(root)
+            source.chmod(0o755)
+            self.assertNotEqual(first, self._digest(root))
+            before = self._digest(root)
+            (root / "lib/pkg/empty").mkdir()
+            self.assertNotEqual(before, self._digest(root))
+            link = root / "lib/pkg/link"
+            link.symlink_to("a.py")
+            before = self._digest(root)
+            link.unlink()
+            link.symlink_to("missing.py")
+            self.assertNotEqual(before, self._digest(root))
+
+    def test_ignore_rules_and_possible_copied_cache_files_change_digest(self):
+        with TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            for name in (".dockerignore", "containers/demo/Dockerfile.dockerignore"):
+                before = self._digest(root)
+                (root / name).write_text("lib/pkg/a.py\n", encoding="utf-8")
+                self.assertNotEqual(before, self._digest(root))
+            before = self._digest(root)
+            (root / "lib/pkg/a.pyc").write_bytes(b"compiled")
+            self.assertNotEqual(before, self._digest(root))
+
+    def test_unmatched_copy_glob_fails_closed(self):
+        with TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            dockerfile = root / "containers/demo/Dockerfile"
+            dockerfile.write_text("FROM python:3.11-slim\nCOPY lib/pkg/*.missing /app/\n", encoding="utf-8")
             with self.assertRaises(FileNotFoundError):
                 self._digest(root)
 

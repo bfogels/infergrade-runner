@@ -13,12 +13,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shlex
+import stat
 import sys
 from pathlib import Path
 from typing import Iterable, List
 
-SCHEMA = "infergrade-container-inputs-v1"
+SCHEMA = "infergrade-container-inputs-v2"
 
 
 def _logical_lines(text: str) -> Iterable[str]:
@@ -81,17 +83,17 @@ def base_images(dockerfile_text: str) -> List[str]:
 
 def _files_under(root: Path, source: str) -> List[Path]:
     matches = sorted(root.glob(source)) if any(c in source for c in "*?[") else [root / source]
+    if not matches:
+        raise FileNotFoundError("COPY source does not match any path: %s" % source)
     files: List[Path] = []
     for match in matches:
-        if not match.exists():
+        if not match.exists() and not match.is_symlink():
             raise FileNotFoundError("COPY source does not exist: %s" % source)
-        if match.is_dir():
-            files.extend(
-                p for p in sorted(match.rglob("*"))
-                if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
-            )
-        else:
-            files.append(match)
+        files.append(match)
+        if match.is_dir() and not match.is_symlink():
+            # Conservatively include ignored paths too. Extra invalidation is
+            # safe; silently omitting a possible COPY input is not.
+            files.extend(sorted(match.rglob("*")))
     return files
 
 
@@ -109,6 +111,9 @@ def input_digest(root: Path, dockerfile: str, platforms: str, base_digest: str =
     feed("dockerfile", text.encode("utf-8"))
     feed("platforms", ",".join(sorted(p.strip() for p in platforms.split(",") if p.strip())).encode())
     feed("base", base_digest.strip().encode())
+    for ignore_path in (root / ".dockerignore", Path(str(dockerfile_path) + ".dockerignore")):
+        feed("ignore:" + ignore_path.relative_to(root).as_posix(),
+             ignore_path.read_bytes() if ignore_path.exists() else b"")
     seen = set()
     for source in copy_sources(text):
         for path in _files_under(root, source):
@@ -116,7 +121,16 @@ def input_digest(root: Path, dockerfile: str, platforms: str, base_digest: str =
             if rel in seen:
                 continue
             seen.add(rel)
-            feed("file:" + rel, path.read_bytes())
+            mode = path.lstat().st_mode
+            feed("mode:" + rel, str(stat.S_IMODE(mode)).encode())
+            if path.is_symlink():
+                feed("symlink:" + rel, os.readlink(path).encode())
+            elif path.is_dir():
+                feed("directory:" + rel, b"")
+            elif path.is_file():
+                feed("file:" + rel, path.read_bytes())
+            else:
+                raise ValueError("Unsupported COPY input type: %s" % rel)
     return digest.hexdigest()
 
 

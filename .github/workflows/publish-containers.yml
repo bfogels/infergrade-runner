@@ -115,12 +115,13 @@ jobs:
         run: |
           # Base images are unpinned tags; fold their current manifest into the
           # fingerprint so upstream security refreshes still trigger a rebuild.
+          bases=$(python3 scripts/container_input_digest.py --dockerfile "$DOCKERFILE" --platforms "$PLATFORMS" --print-base-images)
           base_state=""
           while read -r base; do
             [ -z "$base" ] && continue
             manifest_sha=$(docker buildx imagetools inspect --raw "$base" | sha256sum | cut -d' ' -f1)
             base_state="${base_state}${base}=${manifest_sha};"
-          done < <(python3 scripts/container_input_digest.py --dockerfile "$DOCKERFILE" --platforms "$PLATFORMS" --print-base-images)
+          done <<< "$bases"
           fingerprint=$(python3 scripts/container_input_digest.py --dockerfile "$DOCKERFILE" --platforms "$PLATFORMS" --base-digest "$base_state" --short)
           echo "tag=inputs-${fingerprint}" >> "$GITHUB_OUTPUT"
 
@@ -162,6 +163,8 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platforms }}
           push: true
+          pull: true
+          no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
           tags: |
             ${{ steps.docker_meta.outputs.tags }}
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ steps.inputs.outputs.tag }}
