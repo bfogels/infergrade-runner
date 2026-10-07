@@ -613,6 +613,43 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("platforms: ${{ matrix.platforms }}", workflow)
         self.assertNotIn("0.1.31-preview", workflow)
 
+    def test_publish_container_workflow_reuses_unchanged_images(self):
+        workflow = (ROOT / ".github" / "workflows" / "publish-containers.yml").read_text(encoding="utf-8")
+
+        self.assertIn("scripts/container_input_digest.py", workflow)
+        self.assertIn("--print-base-images", workflow)
+        self.assertIn('echo "tag=inputs-${fingerprint}"', workflow)
+        self.assertIn('docker buildx imagetools create "${args[@]}" "$IMAGE:$INPUT_TAG"', workflow)
+        self.assertIn("if: steps.reuse.outputs.reuse != 'true'", workflow)
+        self.assertIn("cache-from: type=gha,scope=${{ matrix.image }}", workflow)
+        self.assertIn("force_rebuild:", workflow)
+        self.assertIn("pull: true", workflow)
+        self.assertIn("no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}", workflow)
+        self.assertNotIn("done < <(python3 scripts/container_input_digest.py", workflow)
+
+    def test_optional_smokes_skip_automated_sync_prs_only(self):
+        skip = "if: ${{ !startsWith(github.head_ref, 'automation/sync-main-to-develop-') }}"
+        for filename, jobs in (("desktop-platform-smoke.yml", 2), ("managed-native-runtime-smoke.yml", 1)):
+            workflow = (ROOT / ".github" / "workflows" / filename).read_text(encoding="utf-8")
+            with self.subTest(filename=filename):
+                self.assertEqual(workflow.count(skip), jobs)
+        for required in ("ci.yml", "secret-scan.yml"):
+            workflow = (ROOT / ".github" / "workflows" / required).read_text(encoding="utf-8")
+            self.assertNotIn("automation/sync-main-to-develop-", workflow)
+
+    def test_sync_workflow_closes_only_superseded_sync_prs(self):
+        workflow = (ROOT / ".github" / "workflows" / "sync-main-to-develop.yml").read_text(encoding="utf-8")
+
+        self.assertIn("Close superseded sync PRs", workflow)
+        self.assertIn('if [ "$head" != "$SYNC_BRANCH" ]; then', workflow)
+        self.assertIn("automation/sync-main-to-develop-*)", workflow)
+        self.assertIn("select(.isCrossRepository | not)", workflow)
+        self.assertIn('|| echo "::warning::Could not close superseded sync PR #$number"', workflow)
+        # Cleanup must not gate the new sync PR's protected checks or auto-merge.
+        close_at = workflow.index("Close superseded sync PRs")
+        self.assertGreater(close_at, workflow.index("gh workflow run secret-scan.yml"))
+        self.assertGreater(close_at, workflow.index('gh pr merge "$pr_url" --auto --merge --delete-branch'))
+
     def test_desktop_app_uses_package_metadata_for_browser_version_fallback(self):
         js = (ROOT / "apps" / "desktop-runner" / "src" / "main.js").read_text(encoding="utf-8")
         html = (ROOT / "apps" / "desktop-runner" / "index.html").read_text(encoding="utf-8")

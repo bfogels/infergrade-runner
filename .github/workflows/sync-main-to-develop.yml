@@ -93,3 +93,23 @@ jobs:
       - name: Enable automatic merge after protected checks
         if: steps.plan.outputs.mode == 'integration_pr'
         run: gh pr merge "$pr_url" --auto --merge --delete-branch
+
+      - name: Close superseded sync PRs
+        if: steps.plan.outputs.mode == 'integration_pr'
+        run: |
+          # main only moves forward, so the newest sync branch contains every
+          # older one; keeping stale sync PRs open just re-runs their checks.
+          # Runs last and is best-effort so a cleanup failure can never block
+          # the protected checks or auto-merge of the new sync PR. Fork PRs
+          # are excluded even if their branch name matches.
+          gh pr list --state open --base develop --limit 50 --json number,headRefName,isCrossRepository \
+            --jq '.[] | select(.isCrossRepository | not) | "\(.number) \(.headRefName)"' | while read -r number head; do
+            case "$head" in
+              automation/sync-main-to-develop-*)
+                if [ "$head" != "$SYNC_BRANCH" ]; then
+                  gh pr close "$number" --delete-branch --comment "Superseded by $pr_url, which carries a newer main." \
+                    || echo "::warning::Could not close superseded sync PR #$number"
+                fi
+                ;;
+            esac
+          done
