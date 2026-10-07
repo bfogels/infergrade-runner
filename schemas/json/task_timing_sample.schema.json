@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task_timing_sample.schema.json",
+  "title": "Task timing observation v1",
+  "type": "object",
+  "required": [
+    "task_key",
+    "benchmark_id",
+    "generation_status",
+    "latency_ms",
+    "latency_measurement_source",
+    "output_tokens",
+    "natural_stop",
+    "token_budget_exhausted",
+    "protocol_recovery",
+    "task_revision"
+  ],
+  "properties": {
+    "task_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "benchmark_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 256
+    },
+    "generation_status": {
+      "enum": [
+        "completed",
+        "failed"
+      ]
+    },
+    "latency_ms": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "latency_measurement_source": {
+      "enum": [
+        "request_elapsed",
+        "compute_timing",
+        "parsed_timing",
+        null
+      ]
+    },
+    "output_tokens": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "natural_stop": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "token_budget_exhausted": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "protocol_recovery": {
+      "type": "boolean"
+    },
+    "task_revision": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "additionalProperties": false
+}
