@@ -279,3 +279,23 @@ class ListenerRuntimeSetupTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'selected llama.cpp runtime is incomplete'):
             self.prepare(prefer_managed=True)
         install.assert_not_called()
+
+    @mock.patch('infergrade.runtimes.selected_llama_cpp_runtime', return_value={'accelerator': 'cuda'})
+    @mock.patch('infergrade.runtimes.managed_llama_cpp_binary_path', side_effect=['/managed/cli', '/managed/server'])
+    @mock.patch('infergrade.runtimes.subprocess.run')
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_cuda_listener_requires_a_device_from_the_actual_managed_runtime(self, run, managed, selected):
+        run.side_effect = [mock.Mock(returncode=0), mock.Mock(returncode=0),
+                           mock.Mock(returncode=0, stdout='Available devices:\n  (none)\n', stderr='driver initialization failed')]
+        with self.assertRaisesRegex(RuntimeError, 'usable NVIDIA device.*driver initialization failed'):
+            self.prepare()
+        self.assertEqual(run.call_args_list[-1].args[0], ['/managed/cli', '--list-devices'])
+
+    @mock.patch('infergrade.runtimes.selected_llama_cpp_runtime', return_value={'accelerator': 'cuda'})
+    @mock.patch('infergrade.runtimes.managed_llama_cpp_binary_path', side_effect=['/managed/cli', '/managed/server'])
+    @mock.patch('infergrade.runtimes.subprocess.run')
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_cuda_listener_accepts_two_observed_runtime_devices(self, run, managed, selected):
+        run.side_effect = [mock.Mock(returncode=0), mock.Mock(returncode=0),
+                           mock.Mock(returncode=0, stdout='Available devices:\n  CUDA0: NVIDIA RTX 4090\n  CUDA1: NVIDIA RTX 4090\n', stderr='')]
+        self.prepare()

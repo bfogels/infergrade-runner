@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -425,6 +426,8 @@ def prepare_native_listener_runtime(emit_progress=None, prefer_managed=False) ->
 
     Preserve an existing or explicit selection. Never repair a broken custom
     runtime by silently switching its build or accelerator.
+    Installation prefers the managed default over unselected system binaries;
+    ordinary listener starts retain the existing system-runtime path.
     """
     selection = selected_llama_cpp_runtime()
     install_default = prefer_managed and not selection and not any(
@@ -449,6 +452,7 @@ def prepare_native_listener_runtime(emit_progress=None, prefer_managed=False) ->
         if emit_progress:
             emit_progress("Preparing llama.cpp for this machine. First-start setup may download the runtime.")
         install_llama_cpp_runtime(execute=True)
+        selection = selected_llama_cpp_runtime()
         paths = {kind: managed_llama_cpp_binary_path(kind) for kind in paths}
         if not all(paths.values()):
             raise RuntimeError("Runtime installation did not provide both llama-cli and llama-server.")
@@ -460,6 +464,14 @@ def prepare_native_listener_runtime(emit_progress=None, prefer_managed=False) ->
         if result.returncode:
             detail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()[:4096]
             raise RuntimeError("llama.cpp %s could not start (exit %s): %s" % (kind, result.returncode, detail or "no diagnostic output"))
+    if (selection or {}).get("accelerator") == "cuda" and not os.environ.get("INFERGRADE_LLAMA_CPP_CLI"):
+        try:
+            result = subprocess.run([paths["cli"], "--list-devices"], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("The managed CUDA runtime could not inspect NVIDIA devices: %s" % exc) from exc
+        if result.returncode or not re.search(r"^\s*CUDA\d+:", result.stdout or "", re.MULTILINE):
+            detail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()[:4096]
+            raise RuntimeError("The managed CUDA runtime could not detect a usable NVIDIA device. Check the NVIDIA driver. %s" % detail)
     if emit_progress:
         emit_progress("Native runtime ready. Connecting the paired runner.")
 
