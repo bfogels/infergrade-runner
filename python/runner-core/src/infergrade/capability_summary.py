@@ -6,6 +6,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from infergrade import __version__
+from infergrade.runtime_placement import merge_runtime_placement_receipts
 from infergrade.benchmark_catalog import (
     benchmark_evidence_exclusion_reason,
     selection_metadata_for_request,
@@ -599,6 +600,7 @@ def _surface_task_performance_summary(artifacts: List[Dict[str, Any]]) -> Dict[s
     total_elapsed = [float(item["total_elapsed_seconds"]) for item in summaries if isinstance(item.get("total_elapsed_seconds"), (int, float))]
     total_input = [int(item["total_input_tokens"]) for item in summaries if isinstance(item.get("total_input_tokens"), int)]
     total_output = [int(item["total_output_tokens"]) for item in summaries if isinstance(item.get("total_output_tokens"), int)]
+    receipts, receipts_complete = merge_runtime_placement_receipts([item.get("runtime_placement_receipts", []) for item in summaries])
     observations = [row for item in summaries for row in item.get("item_observations", [])]
     observations_complete = all(
         item.get("item_observations_version") == "task_timing_observations_v1"
@@ -607,6 +609,8 @@ def _surface_task_performance_summary(artifacts: List[Dict[str, Any]]) -> Dict[s
         for item in summaries
     ) and len(observations) <= 10000
     return {
+        "runtime_placement_receipts": receipts,
+        "runtime_placement_receipts_complete": receipts_complete and all(item.get("runtime_placement_receipts_complete") is True for item in summaries),
         "item_observations_version": "task_timing_observations_v1",
         "item_observations_complete": observations_complete,
         "item_observations": observations[:10000],
