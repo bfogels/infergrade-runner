@@ -437,7 +437,24 @@ impl NativeFirstRunRuntime for LlamaCppRuntime {
             .arg("--simple-io")
             .arg("--perf");
         let cuda_required = self.accelerator.as_deref() == Some("cuda");
-        if cuda_required || should_request_llama_cpp_metal_offload() {
+        let mut help_command = Command::new(&command_path);
+        help_command.arg("--help");
+        let supports_fit =
+            run_process_with_timeout(help_command, self.timeout.min(Duration::from_secs(10)), &[])
+                .map(|output| {
+                    output.exit_code == 0
+                        && format!("{}\n{}", output.stdout, output.stderr)
+                            .split(|c: char| c.is_whitespace() || c == ',' || c == '=')
+                            .any(|argument| argument == "--fit")
+                })
+                .unwrap_or(false);
+        // Keep the first-run context fixed while letting upstream place weights.
+        command.arg("-c").arg("4096");
+        if self.accelerator.as_deref() == Some("cpu") {
+            command.arg("-ngl").arg("0");
+        } else if supports_fit {
+            command.arg("--fit").arg("on");
+        } else if cuda_required || should_request_llama_cpp_metal_offload() {
             command.arg("-ngl").arg("999");
         }
         if cuda_required {
