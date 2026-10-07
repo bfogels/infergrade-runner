@@ -14,6 +14,7 @@ from infergrade.environment import (
     _detect_cpu_architecture,
     _detect_nvidia_gpu,
     _detect_process_translation,
+    _detect_vulkan_gpu,
     capture_environment,
 )
 
@@ -135,6 +136,47 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(translated["process_architecture"], "x86_64")
         self.assertEqual(translated["process_translation"], "rosetta_2")
 
+    def _fake_drm(self, root, cards):
+        for name, files in cards.items():
+            device = os.path.join(root, name, "device")
+            os.makedirs(device)
+            for filename, value in files.items():
+                with open(os.path.join(device, filename), "w", encoding="utf-8") as handle:
+                    handle.write(value)
+
+    @mock.patch("infergrade.environment.platform.system", return_value="Linux")
+    def test_detect_vulkan_gpu_reports_amd_without_rocm_tools(self, _system):
+        with tempfile.TemporaryDirectory() as root:
+            self._fake_drm(root, {
+                "card0": {"vendor": "0x8086\n", "device": "0x9a49\n", "class": "0x030000\n"},
+                "card1": {"vendor": "0x1002\n", "device": "0x744c\n", "class": "0x030000\n",
+                          "product_name": "AMD Radeon RX 7900 XTX\n", "mem_info_vram_total": "25753026560\n"},
+                "card1-DP-1": {},
+            })
+            gpu = _detect_vulkan_gpu(root)
+        self.assertEqual(gpu["accelerator_vendor"], "amd")
+        self.assertEqual(gpu["accelerator_api"], "vulkan")
+        self.assertEqual(gpu["accelerator_model"], "AMD Radeon RX 7900 XTX")
+        self.assertEqual(gpu["accelerator_vram_gb"], 23.98)
+        self.assertEqual(gpu["hardware_class"], "amd_gpu")
+
+    @mock.patch("infergrade.environment.platform.system", return_value="Linux")
+    def test_detect_vulkan_gpu_keeps_integrated_intel_on_cpu(self, _system):
+        with tempfile.TemporaryDirectory() as root:
+            self._fake_drm(root, {"card0": {"vendor": "0x8086\n", "device": "0x9a49\n", "class": "0x030000\n"}})
+            self.assertIsNone(_detect_vulkan_gpu(root))
+        with tempfile.TemporaryDirectory() as root:
+            self._fake_drm(root, {"card0": {"vendor": "0x8086\n", "device": "0xe20b\n", "class": "0x030000\n"}})
+            gpu = _detect_vulkan_gpu(root)
+        self.assertEqual((gpu["accelerator_vendor"], gpu["hardware_class"]), ("intel", "intel_gpu"))
+
+    @mock.patch("infergrade.environment.platform.system", return_value="Windows")
+    @mock.patch("infergrade.environment._run_command", return_value="Intel(R) UHD Graphics 770\nAMD Radeon RX 7800 XT")
+    def test_detect_vulkan_gpu_reads_windows_adapter_names(self, _run, _system):
+        gpu = _detect_vulkan_gpu()
+        self.assertEqual(gpu["accelerator_model"], "AMD Radeon RX 7800 XT")
+        self.assertEqual(gpu["accelerator_api"], "vulkan")
+
     def test_capture_environment_prefers_detected_accelerator(self):
         with mock.patch(
             "infergrade.environment._detect_nvidia_gpu",
@@ -195,7 +237,8 @@ class EnvironmentTests(unittest.TestCase):
     def test_capture_environment_defaults_to_cpu_only_when_no_accelerator_detected(self):
         with mock.patch("infergrade.environment._detect_nvidia_gpu", return_value=None):
             with mock.patch("infergrade.environment._detect_amd_gpu", return_value=None):
-                with mock.patch("infergrade.environment._detect_apple_silicon_gpu", return_value=None):
+                with mock.patch("infergrade.environment._detect_apple_silicon_gpu", return_value=None), \
+                        mock.patch("infergrade.environment._detect_vulkan_gpu", return_value=None):
                     with mock.patch("infergrade.environment._detect_cpu_model", return_value="AMD Ryzen 9 7950X"):
                         with mock.patch("infergrade.environment._detect_memory_gb", return_value=128.0):
                             payload = capture_environment("local_container")

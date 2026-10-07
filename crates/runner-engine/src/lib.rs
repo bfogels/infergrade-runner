@@ -1,6 +1,7 @@
 mod benchmark;
 mod errors;
 mod events;
+mod host_compat;
 mod hub_client;
 mod pairing;
 mod profile;
@@ -725,21 +726,99 @@ pub fn verified_runtime_download_policy() -> Value {
 }
 
 pub fn recommended_llama_cpp_runtime() -> Value {
-    let has_nvidia = command_version("nvidia-smi")["status"] == "found";
-    let accelerator = if has_nvidia {
-        "cuda"
-    } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-        "metal"
-    } else {
-        "cpu"
-    };
-    recommended_runtime_for_platform(env::consts::OS, env::consts::ARCH, accelerator)
+    recommended_runtime_for_host(
+        env::consts::OS,
+        env::consts::ARCH,
+        &preferred_accelerator(),
+        &host_compat::detect_host_facts(),
+    )
 }
 
+/// The accelerator this machine should benchmark with. `INFERGRADE_ACCELERATOR`
+/// (`cuda`, `vulkan`, `metal`, `cpu`) overrides detection, e.g. to opt an
+/// integrated GPU into Vulkan or to benchmark a GPU machine on its CPU.
+fn preferred_accelerator() -> String {
+    if let Ok(value) = env::var("INFERGRADE_ACCELERATOR") {
+        let value = value.trim().to_ascii_lowercase();
+        if matches!(value.as_str(), "cuda" | "vulkan" | "metal" | "cpu") {
+            return value;
+        }
+    }
+    if command_version("nvidia-smi")["status"] == "found" {
+        "cuda".into()
+    } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        "metal".into()
+    } else if host_compat::detect_vulkan_gpu_vendor().is_some() {
+        "vulkan".into()
+    } else {
+        "cpu".into()
+    }
+}
+
+#[cfg(test)]
 fn recommended_runtime_for_platform(system: &str, arch: &str, accelerator: &str) -> Value {
-    managed_llama_cpp_runtime_manifest()["runtimes"].as_array().unwrap().iter()
-        .find(|entry| entry["platform"]["system"] == system && entry["platform"]["arch"] == arch && entry["accelerator"] == accelerator && entry["upstream"]["tag"] == "b11429")
-        .cloned().unwrap_or_else(|| json!({"runtime_id": "llama-cpp-native-manual", "platform": {"system": system, "arch": arch}, "supported_on_this_platform": false, "message": "Select an existing native llama.cpp runtime for this platform. Docker is optional."}))
+    recommended_runtime_for_host(
+        system,
+        arch,
+        accelerator,
+        &host_compat::HostFacts::default(),
+    )
+}
+
+/// First manifest entry for this platform and accelerator that the host can
+/// actually load. A GPU request never falls back to a CPU build on its own:
+/// the caller gets the reasons and can opt into CPU explicitly.
+fn recommended_runtime_for_host(
+    system: &str,
+    arch: &str,
+    accelerator: &str,
+    facts: &host_compat::HostFacts,
+) -> Value {
+    let manifest = managed_llama_cpp_runtime_manifest();
+    let mut rejected = Vec::new();
+    for entry in manifest["runtimes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| {
+            entry["platform"]["system"] == system
+                && entry["platform"]["arch"] == arch
+                && entry["accelerator"] == accelerator
+                && entry["upstream"]["tag"] == "b11429"
+        })
+    {
+        match host_compat::entry_host_incompatibility(entry, facts) {
+            None => return entry.clone(),
+            Some(reason) => rejected.push(json!({
+                "runtime_id": entry["runtime_id"].clone(),
+                "reason": reason,
+            })),
+        }
+    }
+    let message = if rejected.is_empty() {
+        format!(
+            "No managed {accelerator} llama.cpp build is published for {system} {arch}. \
+             Select an existing native llama.cpp runtime, or set INFERGRADE_ACCELERATOR=cpu to benchmark on the CPU."
+        )
+    } else {
+        let reasons = rejected
+            .iter()
+            .filter_map(|item| item["reason"].as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        format!(
+            "No managed {accelerator} llama.cpp build can run on this machine: {reasons}. \
+             Nothing was downloaded. Fix the requirement above, or set INFERGRADE_ACCELERATOR=cpu to benchmark on the CPU."
+        )
+    };
+    json!({
+        "runtime_id": "llama-cpp-native-manual",
+        "accelerator": accelerator,
+        "platform": {"system": system, "arch": arch},
+        "supported_on_this_platform": false,
+        "incompatible_builds": rejected,
+        "message": message,
+    })
 }
 
 fn safe_runtime_id(value: Option<&str>) -> Result<String, String> {
@@ -1628,6 +1707,12 @@ fn managed_llama_cpp_runtime_entry(runtime_id: Option<&str>) -> Result<Value, St
         .as_array()
         .ok_or_else(|| "managed runtime manifest is missing runtimes".to_string())?;
     let recommended = recommended_llama_cpp_runtime();
+    if runtime_id.is_none() && recommended.get("archive").is_none() {
+        return Err(recommended["message"]
+            .as_str()
+            .unwrap_or("No managed runtime for this platform")
+            .to_string());
+    }
     let runtime_id = runtime_id
         .or_else(|| recommended["runtime_id"].as_str())
         .ok_or("No managed runtime for this platform")?;
@@ -2308,6 +2393,12 @@ fn check_managed_runtime_host(entry: &Value) -> Result<(), String> {
                 .last()
                 .ok_or("missing host glibc version")?;
             check_glibc_version(required, observed)?;
+        }
+        let facts = host_compat::detect_host_facts();
+        if let Some(reason) = host_compat::entry_host_incompatibility(entry, &facts) {
+            return Err(format!(
+                "This llama.cpp package {reason}. No runtime was downloaded."
+            ));
         }
     }
     Ok(())
@@ -3011,6 +3102,8 @@ mod tests {
             ("windows", "x86_64", "cuda"),
             ("linux", "x86_64", "cpu"),
             ("linux", "x86_64", "cuda"),
+            ("linux", "x86_64", "vulkan"),
+            ("windows", "x86_64", "vulkan"),
             ("linux", "aarch64", "cpu"),
             ("macos", "aarch64", "metal"),
         ] {
@@ -3028,6 +3121,95 @@ mod tests {
                 ["supported_on_this_platform"],
             false
         );
+    }
+
+    #[test]
+    fn recommendation_picks_the_first_build_the_host_can_load() {
+        use host_compat::HostFacts;
+        let ubuntu22 = HostFacts {
+            glibc: Some("2.35".into()),
+            glibcxx_minor: Some(30),
+            vulkan_loader: Some(true),
+        };
+        let cpu = recommended_runtime_for_host("linux", "x86_64", "cpu", &ubuntu22);
+        assert_eq!(cpu["runtime_id"], "llama-cpp-b11429-ubuntu22-x86_64-cpu");
+        let vulkan = recommended_runtime_for_host("linux", "x86_64", "vulkan", &ubuntu22);
+        assert_eq!(vulkan["runtime_id"], "llama-cpp-b11429-linux-x86_64-vulkan");
+        assert!(verify_runtime_download_manifest(&vulkan).is_ok());
+
+        // Glibc 2.28 hosts skip the Ubuntu 22 CPU build and get the next compatible one.
+        let rhel8 = HostFacts {
+            glibc: Some("2.28".into()),
+            glibcxx_minor: Some(25),
+            vulkan_loader: Some(false),
+        };
+        let cpu = recommended_runtime_for_host("linux", "x86_64", "cpu", &rhel8);
+        assert_ne!(cpu["runtime_id"], "llama-cpp-b11429-ubuntu22-x86_64-cpu");
+    }
+
+    #[test]
+    fn gpu_requests_report_reasons_instead_of_falling_back_to_cpu() {
+        use host_compat::HostFacts;
+        let ubuntu22 = HostFacts {
+            glibc: Some("2.35".into()),
+            glibcxx_minor: Some(30),
+            vulkan_loader: Some(true),
+        };
+        let cuda = recommended_runtime_for_host("linux", "x86_64", "cuda", &ubuntu22);
+        if cuda.get("archive").is_none() {
+            assert_eq!(cuda["supported_on_this_platform"], false);
+            let message = cuda["message"].as_str().unwrap();
+            assert!(message.contains("glibc 2.38"), "{message}");
+            assert!(message.contains("INFERGRADE_ACCELERATOR=cpu"), "{message}");
+            assert_eq!(cuda["accelerator"], "cuda");
+        } else {
+            // A portable CUDA build, once pinned, must be the one Ubuntu 22 receives.
+            assert!(host_compat::entry_host_incompatibility(&cuda, &ubuntu22).is_none());
+        }
+        let no_loader = HostFacts {
+            vulkan_loader: Some(false),
+            ..ubuntu22
+        };
+        let vulkan = recommended_runtime_for_host("linux", "x86_64", "vulkan", &no_loader);
+        assert_eq!(vulkan["supported_on_this_platform"], false);
+        assert!(vulkan["message"]
+            .as_str()
+            .unwrap()
+            .contains("libvulkan.so.1"));
+        assert_eq!(
+            vulkan["incompatible_builds"][0]["runtime_id"],
+            "llama-cpp-b11429-linux-x86_64-vulkan"
+        );
+        let none =
+            recommended_runtime_for_host("linux", "aarch64", "vulkan", &HostFacts::default());
+        assert!(none["message"]
+            .as_str()
+            .unwrap()
+            .contains("No managed vulkan llama.cpp build is published"));
+    }
+
+    #[test]
+    fn every_linux_gpu_entry_declares_its_host_requirements() {
+        for entry in managed_llama_cpp_runtime_manifest()["runtimes"]
+            .as_array()
+            .unwrap()
+        {
+            if entry["platform"]["system"] != "linux" || entry["accelerator"] == "cpu" {
+                continue;
+            }
+            let id = entry["runtime_id"].as_str().unwrap_or("");
+            assert!(
+                entry.pointer("/platform/minimum_glibc").is_some(),
+                "{id} must declare minimum_glibc"
+            );
+            if entry["accelerator"] == "vulkan" {
+                assert_eq!(
+                    entry.pointer("/platform/requires_vulkan_loader"),
+                    Some(&json!(true)),
+                    "{id}"
+                );
+            }
+        }
     }
 
     #[test]

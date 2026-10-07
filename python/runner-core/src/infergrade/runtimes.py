@@ -472,6 +472,17 @@ def prepare_native_listener_runtime(emit_progress=None, prefer_managed=False) ->
         if result.returncode or not re.search(r"^\s*CUDA\d+:", result.stdout or "", re.MULTILINE):
             detail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()[:4096]
             raise RuntimeError("The managed CUDA runtime could not detect a usable NVIDIA device. Check the NVIDIA driver. %s" % detail)
+    if (selection or {}).get("accelerator") == "vulkan" and not os.environ.get("INFERGRADE_LLAMA_CPP_CLI"):
+        try:
+            result = subprocess.run([paths["cli"], "--list-devices"], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("The managed Vulkan runtime could not inspect GPU devices: %s" % exc) from exc
+        if result.returncode or not re.search(r"^\s*Vulkan\d+:", result.stdout or "", re.MULTILINE):
+            detail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()[:4096]
+            raise RuntimeError(
+                "The managed Vulkan runtime found no usable AMD/Intel GPU. Install the GPU's Vulkan driver "
+                "(e.g. mesa-vulkan-drivers) or set INFERGRADE_ACCELERATOR=cpu to benchmark on the CPU. %s" % detail
+            )
     if emit_progress:
         emit_progress("Native runtime ready. Connecting the paired runner.")
 

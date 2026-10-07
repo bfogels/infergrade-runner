@@ -299,3 +299,24 @@ class ListenerRuntimeSetupTests(unittest.TestCase):
         run.side_effect = [mock.Mock(returncode=0), mock.Mock(returncode=0),
                            mock.Mock(returncode=0, stdout='Available devices:\n  CUDA0: NVIDIA RTX 4090\n  CUDA1: NVIDIA RTX 4090\n', stderr='')]
         self.prepare()
+
+
+    @mock.patch('infergrade.runtimes.selected_llama_cpp_runtime', return_value={'accelerator': 'vulkan'})
+    @mock.patch('infergrade.runtimes.managed_llama_cpp_binary_path', side_effect=['/managed/cli', '/managed/server'])
+    @mock.patch('infergrade.runtimes.subprocess.run')
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_vulkan_listener_refuses_cpu_only_execution(self, run, managed, selected):
+        run.side_effect = [mock.Mock(returncode=0), mock.Mock(returncode=0),
+                           mock.Mock(returncode=0, stdout='Available devices:\n', stderr='ggml_vulkan: No devices found.')]
+        with self.assertRaisesRegex(RuntimeError, 'no usable AMD/Intel GPU.*INFERGRADE_ACCELERATOR=cpu.*No devices found'):
+            self.prepare()
+        self.assertEqual(run.call_args_list[-1].args[0], ['/managed/cli', '--list-devices'])
+
+    @mock.patch('infergrade.runtimes.selected_llama_cpp_runtime', return_value={'accelerator': 'vulkan'})
+    @mock.patch('infergrade.runtimes.managed_llama_cpp_binary_path', side_effect=['/managed/cli', '/managed/server'])
+    @mock.patch('infergrade.runtimes.subprocess.run')
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_vulkan_listener_accepts_an_observed_radeon_device(self, run, managed, selected):
+        run.side_effect = [mock.Mock(returncode=0), mock.Mock(returncode=0),
+                           mock.Mock(returncode=0, stdout='Available devices:\n  Vulkan0: AMD Radeon RX 7900 XTX (RADV NAVI31) (24560 MiB, 24000 MiB free)\n', stderr='')]
+        self.prepare()
