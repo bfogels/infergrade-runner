@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 from smoke_managed_native_runtime import command_json, write_json
 from verify_llama_cpp_model_canary import canary_command, download_model, model_spec, LEGACY_CANARY_ID
@@ -33,6 +34,13 @@ def smoke(cli, output):
         if result.returncode or "11429" not in versions[name]:
             raise ValueError("CUDA executable version check failed: " + name)
     write_json(output / "versions.json", versions)
+    setup_env = dict(env, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "python/runner-core/src"))
+    unavailable = subprocess.run([sys.executable, "-c",
+                                  "from infergrade.runtimes import prepare_native_listener_runtime; prepare_native_listener_runtime()"],
+                                 env=setup_env, capture_output=True, text=True, timeout=90)
+    (output / "cuda-listener-not-ready.txt").write_text(unavailable.stdout + unavailable.stderr)
+    if unavailable.returncode == 0 or "could not detect a usable NVIDIA device" not in unavailable.stderr:
+        raise ValueError("CUDA setup did not reject an unavailable GPU before listening")
     spec = model_spec(LEGACY_CANARY_ID)
     model = output / spec["filename"]
     digest = download_model(model, spec)
@@ -57,6 +65,7 @@ def smoke(cli, output):
         "build_origin": entry["build_origin"], "version_loader_smokes": "passed",
         "cpu_generation_from_cuda_package": "passed", "model_sha256": digest,
         "cuda_request_without_gpu": "rejected", "gpu_execution_verified": False,
+        "listener_without_cuda_device": "blocked_before_registration",
         "claim_boundary": "Ubuntu 22 CUDA archive installation, binary loading and CPU-only generation. CUDA request correctly rejects absent GPU proof. Physical NVIDIA execution unverified.",
     })
 

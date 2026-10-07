@@ -111,9 +111,13 @@ def smoke(bundle, output):
             process.wait(timeout=15)
             server.shutdown()
             server.server_close()
+    registration = json.loads((output / "registration.json").read_text())
+    if registration.get("diagnostics", {}).get("blocking_count") != 0:
+        raise ValueError("Installed listener reported native readiness blockers")
     receipt = {"status": "passed", "runner_version": version, "application_archive": archive.name,
                "installed_command": shlex.quote(str(command)), "repeat_install": "passed",
                "pair_and_start": "passed", "observed_paths": observed,
+               "native_readiness_blockers": 0,
                "claim_boundary": "Actual Linux package, system prerequisites, public managed runtime and paired-profile listener against a local HTTP contract fixture. Hosted Hub and NVIDIA execution unverified."}
     (output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(json.dumps(receipt, indent=2))
