@@ -112,7 +112,9 @@ def input_digest(root: Path, dockerfile: str, platforms: str, base_digest: str =
     feed("platforms", ",".join(sorted(p.strip() for p in platforms.split(",") if p.strip())).encode())
     feed("base", base_digest.strip().encode())
     for ignore_path in (root / ".dockerignore", Path(str(dockerfile_path) + ".dockerignore")):
-        feed("ignore:" + ignore_path.relative_to(root).as_posix(),
+        ignore_label = ignore_path.relative_to(root).as_posix()
+        feed("ignore-exists:" + ignore_label, str(ignore_path.exists()).encode())
+        feed("ignore:" + ignore_label,
              ignore_path.read_bytes() if ignore_path.exists() else b"")
     seen = set()
     for source in copy_sources(text):

@@ -98,6 +98,9 @@ class ContainerInputDigestTests(unittest.TestCase):
             root = self._repo(tmp)
             for name in (".dockerignore", "containers/demo/Dockerfile.dockerignore"):
                 before = self._digest(root)
+                (root / name).write_text("", encoding="utf-8")
+                self.assertNotEqual(before, self._digest(root), "Empty Dockerfile-specific ignore overrides root rules")
+                before = self._digest(root)
                 (root / name).write_text("lib/pkg/a.py\n", encoding="utf-8")
                 self.assertNotEqual(before, self._digest(root))
             before = self._digest(root)
