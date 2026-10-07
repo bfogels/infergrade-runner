@@ -127,6 +127,8 @@ for elf in "$package"/*; do
   readelf -d "$elf" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | while read -r needed; do
     case "$needed" in
       libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|librt.so.*|ld-linux*|libgcc_s.so.*|libstdc++.so.*|libgomp.so.*|libcuda.so.1|libvulkan.so.1) ;;
+      # Every Ubuntu 22.04+ host ships OpenSSL 3; only the portable build must avoid it.
+      libssl.so.3|libcrypto.so.3) [ "$abi" = ubuntu22 ] || { echo "$(basename "$elf") links host library $needed, which is not portable" >&2; exit 1; } ;;
       *) [ -e "$package/$needed" ] || { echo "$(basename "$elf") links host library $needed, which is not portable" >&2; exit 1; } ;;
     esac
   done

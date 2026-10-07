@@ -43,7 +43,9 @@ jobs:
           python3 -m pip install --no-cache-dir cmake==3.31.10 ninja==1.11.1.1
           # OpenSSL/curl development headers are deliberately absent: linking
           # Rocky 8's OpenSSL 1.1 would break Ubuntu 22+ hosts.
-          ! rpm -q openssl-devel libcurl-devel
+          for package in openssl-devel libcurl-devel; do
+            if rpm -q "$package" >/dev/null; then echo "$package must not be installed" >&2; exit 1; fi
+          done
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -104,7 +106,9 @@ jobs:
           sha256sum -c SHA256SUMS
           mkdir extracted
           tar -xzf llama-b11429-bin-glibc228-*-x64.tar.gz -C extracted
-          dir=$(find extracted -mindepth 1 -maxdepth 1 -type d)
+          set -- extracted/*/
+          [ "$#" -eq 1 ] && [ -d "$1" ] || { echo "expected one extracted directory" >&2; exit 1; }
+          dir=${1%/}
           for binary in llama-cli llama-completion llama-server llama-perplexity; do
             "$dir/$binary" --version
           done
