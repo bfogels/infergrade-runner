@@ -44,11 +44,35 @@ remap ordinals. A main-GPU option does not establish single-GPU execution.
 Failed startup or case exceptions may leave no prediction-to-receipt binding;
 absence must remain unqualified rather than borrowing another invocation.
 
-This first slice changes local artifacts only and keeps exported contract
-`0.3.40`. Uploaded compact item timing samples do not yet carry placement
-references. Hub must not treat these artifacts as uploaded comparison
-qualification. A subsequent additive contract needs to bind each uploaded
-timing observation to its actual placement receipt; different observed contexts
-and device allocations must remain separate in speed comparisons. The receipt
+The initial local-artifact slice kept exported contract `0.3.40`; those uploads
+do not carry placement references and remain unbound for comparison
+qualification. The additive upload binding below associates each timing
+observation with its actual invocation. Different observed contexts and device
+allocations must remain separate in speed comparisons. The receipt
 fingerprint identifies bounded placement evidence, not the complete model,
 hardware, generation policy or comparison setup.
+
+## Contract 0.3.41 upload binding
+
+Capability task-performance payloads now carry a bounded, deduplicated table of
+these same invocation receipts (`runtime_placement_receipts`, maximum 128).
+Each item observation references its actual `placement_invocation_id` and
+`placement_fingerprint`; missing or invalid receipts leave both null. The
+receipt uses the exact local `llama_cpp_placement_artifact_v1` shape, including
+requested versus observed fields. It contains no raw argv, logs or paths.
+
+Before upload, strict schema validation and recomputation of the existing
+placement fingerprint reject unexpected fields and mutated content. Reused
+invocation IDs with conflicting receipts are removed. Receipt-table truncation
+or validation conflicts set `runtime_placement_receipts_complete=false`.
+Surface rollups preserve per-item references and deduplicate the same invocation
+across artifacts; they never substitute another invocation's context. Complete
+means the receipt table was not truncated or conflicted; it does not mean every
+item has known placement. Consumers must resolve each qualifying item reference,
+check its fingerprint and observed fields, and keep different contexts and
+placement fingerprints in separate speed cohorts.
+
+This digest establishes content binding, not independent hardware attestation.
+Existing unknown/context/conflict/layer/mapped-Metal caveats remain in force.
+Old .40 uploads remain unbound. Hub's pin and qualification remain a separate
+integration step; source export does not deliver a new desktop release.
