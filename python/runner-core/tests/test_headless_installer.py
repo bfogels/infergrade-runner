@@ -102,3 +102,14 @@ print(json.dumps({'selection':selection}))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('could not start', result.stderr)
         self.assertFalse((self.root / 'bin/infergrade').exists())
+
+    def test_command_directory_failure_preserves_previous_command(self):
+        command = self.root / 'bin/infergrade'
+        command.parent.mkdir()
+        self.write_executable(command, '#!/bin/sh\necho old-working-runner\n')
+        (command.parent / 'infergrade-runner').mkdir()
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('command directory', result.stderr)
+        self.assertIn('old-working-runner', command.read_text())
+        self.assertFalse((self.root / 'runtime-cache').exists())

@@ -3,6 +3,69 @@
   "binary_release": "b11429",
   "runtimes": [
     {
+      "runtime_id": "llama-cpp-b11429-ubuntu22-x86_64-cpu",
+      "channel": "reviewed_candidate",
+      "backend": "llama.cpp",
+      "accelerator": "cpu",
+      "version_label": "llama.cpp v0.6.0 \u00b7 Ubuntu 22 compatible x86_64 \u00b7 CPU",
+      "upstream": {
+        "project": "ggml-org/llama.cpp",
+        "tag": "b11429",
+        "semantic_version": "v0.6.0",
+        "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0"
+      },
+      "platform": {
+        "system": "linux",
+        "arch": "x86_64",
+        "human": "Linux x86_64 / CPU (Ubuntu 22 ABI)",
+        "minimum_glibc": "2.35"
+      },
+      "archive": {
+        "url": "https://github.com/bfogels/infergrade-runner/releases/download/managed-llama-cpp-b11429-ubuntu22-20261007/llama-b11429-bin-ubuntu22-cpu-x64.tar.gz",
+        "sha256": "168c68ee4e60ce3f099737de5d4e316ef36dd8df59dbf6d9ad6177ad7dcd186e",
+        "size_bytes": 10633512,
+        "format": "tar.gz",
+        "checksum_source": "infergrade_ci_archive_and_github_release_digest"
+      },
+      "dependencies": [],
+      "verification": {
+        "sha256": true,
+        "expected_binaries": true,
+        "version_smoke": true,
+        "independent_signature": false
+      },
+      "download": {
+        "enabled": true,
+        "requires_explicit_user_action": true
+      },
+      "expected_binaries": [
+        "llama-cli",
+        "llama-server",
+        "llama-perplexity",
+        "llama-completion"
+      ],
+      "binary_names": {
+        "cli": "llama-cli",
+        "server": "llama-server",
+        "perplexity": "llama-perplexity"
+      },
+      "rollback_runtime_id": "llama-cpp-b11429-linux-x86_64-cpu",
+      "compatibility_notes": [
+        "InferGrade build from pinned upstream source, compiled against Ubuntu 22.04 glibc 2.35.",
+        "All four executable version and relocated loader checks passed on Ubuntu 22.04.",
+        "Exact model generation and benchmark qualification are separate checks."
+      ],
+      "provenance": "InferGrade CI build from checksum-pinned upstream source; archive SHA-256 and size pinned. No independent signature.",
+      "build_origin": {
+        "publisher": "infergrade",
+        "upstream_commit": "d81235049384534c167caea52b85a694f6103d14",
+        "source_archive_sha256": "6b58785f0a82898f4c3442417ff962e2d4b231b1bee5d033902ad90b27901e14",
+        "build_workflow": "https://github.com/bfogels/infergrade-runner/actions/runs/37668118204",
+        "minimum_glibc": "2.35",
+        "gpu_execution_verified": false
+      }
+    },
+    {
       "runtime_id": "llama-cpp-b11429-macos-aarch64-metal",
       "channel": "upstream_release",
       "backend": "llama.cpp",

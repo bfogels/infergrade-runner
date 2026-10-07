@@ -31,6 +31,14 @@ fi
 install_root="${INFERGRADE_INSTALL_DIR:-$HOME/.local/share/infergrade}"
 command_root="${INFERGRADE_BIN_DIR:-$HOME/.local/bin}"
 mkdir -p "$install_root/releases" "$command_root"
+python3 - "$command_root" <<'PY'
+import pathlib, sys
+commands = pathlib.Path(sys.argv[1])
+for name in ('infergrade', 'infergrade-runner'):
+    target = commands / name
+    if target.is_dir() and not target.is_symlink():
+        raise SystemExit('Cannot install over a command directory: ' + str(target))
+PY
 work_dir="$(mktemp -d "$install_root/.install-XXXXXX")"
 trap 'rm -rf "$work_dir"' EXIT
 fetch() { curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 600 "$1" -o "$2"; }
@@ -86,12 +94,31 @@ PATH="$release_root/bin:$PATH" \
 "$release_root/venv/bin/python" -c \
   'from infergrade.runtimes import prepare_native_listener_runtime; prepare_native_listener_runtime(emit_progress=print)'
 python3 - "$release_root" "$command_root" <<'PY'
-import os, pathlib, sys
+import os, pathlib, sys, tempfile
 root, commands = map(pathlib.Path, sys.argv[1:])
-for name in ('infergrade', 'infergrade-runner'):
-    temporary = commands / ('.' + name + '-install')
-    temporary.unlink(missing_ok=True)
-    temporary.symlink_to(root / 'bin' / name)
-    os.replace(temporary, commands / name)
+names = ('infergrade', 'infergrade-runner')
+for name in names:
+    target = commands / name
+    if target.is_dir() and not target.is_symlink():
+        raise SystemExit('Cannot install over a command directory: ' + str(target))
+with tempfile.TemporaryDirectory(prefix='.infergrade-activate-', dir=commands) as temporary:
+    staged = pathlib.Path(temporary)
+    saved, activated = [], []
+    try:
+        for name in names:
+            target = commands / name
+            (staged / name).symlink_to(root / 'bin' / name)
+            if os.path.lexists(target):
+                os.replace(target, staged / (name + '.previous'))
+                saved.append(name)
+        for name in names:
+            os.replace(staged / name, commands / name)
+            activated.append(name)
+    except BaseException:
+        for name in activated:
+            (commands / name).unlink(missing_ok=True)
+        for name in saved:
+            os.replace(staged / (name + '.previous'), commands / name)
+        raise
 PY
 printf '\nInferGrade is installed and its native runtime is ready.\nPair and listen with:\n  %q pair --start\n' "$command_root/infergrade"

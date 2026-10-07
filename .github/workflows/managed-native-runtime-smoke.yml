@@ -29,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-24.04]
+        os: [windows-latest, ubuntu-22.04, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -59,3 +59,18 @@ jobs:
             output/managed-native-smoke/*.json
             output/managed-native-smoke/*.txt
             output/managed-native-smoke/first-run/*.json
+      - name: Exercise packaged Linux installer and pair/start
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          python scripts/package_headless_runner.py --cli target/debug/infergrade-runner --output output/headless
+          python scripts/smoke_headless_installer.py --bundle output/headless --output output/headless-smoke
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && runner.os == 'Linux'
+        with:
+          name: headless-install-pair-${{ matrix.os }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            output/headless-smoke/*.json
+            output/headless-smoke/*.txt
+          if-no-files-found: error
+          retention-days: 7

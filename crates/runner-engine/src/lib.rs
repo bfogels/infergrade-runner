@@ -2124,6 +2124,15 @@ fn cleanup_stale_runtime_dir(path: &Path, label: &str) -> Result<(), String> {
     }
 }
 
+struct RuntimeStagingDirectory(PathBuf);
+
+impl Drop for RuntimeStagingDirectory {
+    fn drop(&mut self) {
+        // This operation owns only its staging path; an activated build has moved.
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 fn normalized_join(base: &Path, relative: &Path) -> Option<PathBuf> {
     let mut output = base.to_path_buf();
     for component in relative.components() {
@@ -2632,6 +2641,7 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         std::process::id()
     ));
     cleanup_stale_runtime_dir(&staging_root, "staging")?;
+    let _staging_cleanup = RuntimeStagingDirectory(staging_root.clone());
     safe_extract_runtime_archive(
         &bytes,
         &staging_root,
@@ -3474,6 +3484,17 @@ mod tests {
         )
         .expect_err("bad server");
         assert!(error.contains("server library missing"));
+        assert!(!runtime_builds_root()
+            .unwrap()
+            .read_dir()
+            .unwrap()
+            .any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".staging-")
+            }));
         assert_eq!(
             fs::read_to_string(&selection_path).unwrap(),
             "{\"runtime_id\":\"previous-working-build\"}"
