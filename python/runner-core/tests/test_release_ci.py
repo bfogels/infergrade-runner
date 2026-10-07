@@ -459,7 +459,7 @@ class ReleaseCiTests(unittest.TestCase):
                     continue
                 self.assertRegex(
                     line,
-                    r"uses:\s+[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}\s+#\s+\S+",
+                    r"uses:\s+[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*@[0-9a-f]{40}\s+#\s+\S+",
                     msg=f"unpinned action in {path.name}: {line.strip()}",
                 )
         for filename in ("ci.yml", "secret-scan.yml"):
