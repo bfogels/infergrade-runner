@@ -2,6 +2,7 @@ mod device_pairing;
 use device_pairing::{
     begin_runner_device_pairing, cancel_runner_device_pairing, poll_runner_device_pairing,
 };
+mod model_discovery;
 use infergrade_runner_engine::{
     build_hub_json_request, build_listener_start_plan, build_pairing_redeem_request,
     build_run_bundle_upload_request, build_run_claim_request, build_run_completion_request,
@@ -2343,6 +2344,7 @@ async fn run_desktop_native_first_run(
     upload_run_id: Option<String>,
     upload_worker_id: Option<String>,
 ) -> Result<Value, String> {
+    model_discovery::validate_local_gguf(model_path.trim())?;
     let input = native_first_run_input(&model_path);
     let runtime_path = runtime_path
         .map(|value| value.trim().to_string())
@@ -2502,6 +2504,8 @@ pub fn run() {
             remove_selected_llama_cpp_runtime,
             select_existing_llama_cpp_runtime,
             desktop_update_installation,
+            model_discovery::desktop_discovered_models,
+            model_discovery::set_desktop_model_folder,
             desktop_model_cache_status,
             clear_desktop_model_cache,
             download_starter_gguf,

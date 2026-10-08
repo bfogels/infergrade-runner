@@ -1,3 +1,4 @@
+import { initModelDiscovery, selectableLocalModel } from './modelDiscovery.js';
 import "./styles.css";
 import {devicePairingController} from "./devicePairing.js";
 import {initDesktopNavigation,showDesktopPage} from "./desktopNavigation.js";
@@ -1151,8 +1152,9 @@ function currentFirstRunUploadRunId() {
   return firstRunUploadRunIdInput?.value.trim() || currentHandoffRunId || "";
 }
 
+let discoveredModelPath = null;
 function hasSelectedModelPath() {
-  return currentFirstRunModelPath().toLowerCase().endsWith(".gguf");
+  return selectableLocalModel(currentFirstRunModelPath(), discoveredModelPath);
 }
 
 function renderFirstRunChecklist() {
@@ -2484,7 +2486,7 @@ function readFirstRunModelPath() {
   if (!modelPath) {
     throw new Error("Select a local GGUF model file before running assigned local work.");
   }
-  if (!modelPath.toLowerCase().endsWith(".gguf")) {
+  if (!selectableLocalModel(modelPath, discoveredModelPath)) {
     throw new Error("Use a local GGUF model file for assigned local work.");
   }
   modelPathReadiness = `First-run model selected: ${modelPath}`;
@@ -3579,7 +3581,7 @@ downloadStarterGgufButton?.addEventListener("click", () => {
 firstRunModelPathInput?.addEventListener("input", () => {
   const modelPath = currentFirstRunModelPath();
   modelPathReadiness = modelPath
-    ? modelPath.toLowerCase().endsWith(".gguf")
+    ? selectableLocalModel(modelPath, discoveredModelPath)
       ? `First-run model selected: ${modelPath}`
       : "Use a local GGUF model file for native first-run."
     : "Download the public starter model above, or paste a local GGUF path.";
@@ -3701,3 +3703,11 @@ window.setTimeout(applyPreviewStateFromUrl, 50);
 
 // First-run setup shares the managed installer with Runtime options.
 setupRuntimeButton?.addEventListener("click", () => runtimeInstallManagedButton?.click());
+
+initModelDiscovery({invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
+  if(!await loadTauriInvoke())throw new Error('Desktop only');
+  const {open}=await import('@tauri-apps/plugin-dialog');
+  return open({directory:true,multiple:false,title:'Choose a local model folder'});
+},useFile:path=>{
+  if(firstRunModelPathInput){discoveredModelPath=path;firstRunModelPathInput.value=path;firstRunModelPathInput.dispatchEvent(new Event('input'));firstRunModelPathInput.focus();firstRunModelPathInput.scrollIntoView({block:'center'});}
+}});
