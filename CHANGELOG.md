@@ -5,7 +5,7 @@ user-visible changes; full evidence boundaries and validation details live in
 the release PRs and tags. Versions without an entry shipped internal or
 incremental changes only — see the git history.
 
-## Unreleased
+## 0.3.67 (contract 0.3.41)
 
 - Adds a per-user Linux server installer that supplies dependencies, the native
   Runner and managed llama.cpp; `pair --start` pairs and listens in one command.
@@ -13,6 +13,14 @@ incremental changes only — see the git history.
   and reports loader failures while preserving the previous runtime selection.
 - Reports GPU count, per-card VRAM and total installed VRAM separately from the
   largest-card capacity used by existing model-fit checks.
+
+- Pins the verified Ubuntu 22 CUDA build and bundles its runtime libraries; the
+  host NVIDIA driver remains under OS ownership. Physical CUDA execution is
+  still hardware-test dependent.
+- Includes the reviewed four-page Desktop shell, browser device approval, local
+  model discovery and authenticated machine Activity from current main.
+- Preserves automatic memory fitting and adds bounded placement provenance
+  binding for uploaded item timings.
 
 ## 0.3.66 (contract 0.3.39)
 
