@@ -1922,6 +1922,131 @@ async fn cache_action(app: &AppHandle, args: Vec<String>) -> Result<Value, Strin
         .map_err(|_| "Cache controls returned an invalid response.".into())
 }
 
+fn admission_helper_busy() -> &'static std::sync::atomic::AtomicBool {
+    static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    &BUSY
+}
+struct AdmissionHelperGuard {
+    _work: background::WorkGuard,
+}
+impl AdmissionHelperGuard {
+    fn begin() -> Result<Self, String> {
+        let work = background::WorkGuard::begin()?;
+        admission_helper_busy()
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .map_err(|_| {
+                "Admission confirmation is still being supervised. Wait before refreshing."
+                    .to_string()
+            })?;
+        Ok(Self { _work: work })
+    }
+}
+impl Drop for AdmissionHelperGuard {
+    fn drop(&mut self) {
+        admission_helper_busy().store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn admission_projection(value: Value) -> Result<Value, String> {
+    let object = value
+        .as_object()
+        .ok_or("Admission controls returned invalid state.")?;
+    if object.len() != 2
+        || value["schema_version"] != "infergrade.admission.v1"
+        || !value["paused"].is_boolean()
+    {
+        return Err("Admission controls returned invalid state.".into());
+    }
+    Ok(json!({"schema_version":"infergrade.admission.v1", "paused":value["paused"]}))
+}
+
+async fn hold_admission_until_terminated<G>(
+    mut events: tauri::async_runtime::Receiver<CommandEvent>,
+    guard: G,
+) {
+    while let Some(event) = events.recv().await {
+        if matches!(event, CommandEvent::Terminated(_)) {
+            drop(guard);
+            return;
+        }
+    }
+    // Channel loss does not establish process cleanup.
+    std::mem::forget(guard);
+}
+
+async fn admission_action(app: &AppHandle, action: &str) -> Result<Value, String> {
+    let guard = AdmissionHelperGuard::begin()?;
+    let (mut events, child) = app
+        .shell()
+        .sidecar(SIDECAR_BINARY_NAME)
+        .map_err(|_| "Could not prepare admission controls.")?
+        .args(["admission", action, "--json"])
+        .env("INFERGRADE_CONFIG_DIR", runner_config_dir()?)
+        .spawn()
+        .map_err(|_| "Could not start admission controls.")?;
+    let mut terminated = false;
+    let result = tokio::time::timeout(std::time::Duration::from_secs(45), async {
+        let mut output = Vec::new();
+        while let Some(event) = events.recv().await {
+            match event {
+                CommandEvent::Stdout(bytes) => {
+                    if output.len() + bytes.len() > 4096 { return Err("Admission controls returned too much output.".to_string()); }
+                    output.extend(bytes);
+                }
+                CommandEvent::Terminated(payload) => {
+                    terminated = true;
+                    if payload.code != Some(0) { return Err("Could not confirm admission state. New claims may be blocked; refresh and try again.".into()); }
+                    let value = serde_json::from_slice(&output).map_err(|_| "Admission controls returned invalid state.")?;
+                    return admission_projection(value);
+                }
+                CommandEvent::Error(_) => return Err("Admission controls could not finish.".into()),
+                _ => {},
+            }
+        }
+        Err("Admission controls ended without confirmation.".into())
+    }).await;
+    match result {
+        Ok(Ok(value)) => Ok(value),
+        other => {
+            let error = match other {
+                Ok(Err(error)) => error,
+                _ => {
+                    "Admission confirmation timed out. Refresh its saved state before trying again."
+                        .into()
+                }
+            };
+            if terminated {
+                return Err(error);
+            }
+            // Unix sidecars exec Python in-place; Windows sidecars own a
+            // kill-on-close job containing Python. Keep ownership and the exit
+            // fence until the same event stream acknowledges termination.
+            let kill_failed = child.kill().is_err();
+            tauri::async_runtime::spawn(hold_admission_until_terminated(events, guard));
+            if kill_failed {
+                Err("Could not stop admission confirmation. Runner remains open while cleanup is supervised.".into())
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+#[tauri::command]
+async fn desktop_admission_status(app: AppHandle) -> Result<Value, String> {
+    admission_action(&app, "status").await
+}
+
+#[tauri::command]
+async fn set_desktop_admission_paused(app: AppHandle, paused: bool) -> Result<Value, String> {
+    admission_action(&app, if paused { "pause" } else { "resume" }).await
+}
+
 #[tauri::command]
 async fn desktop_model_cache_status(app: AppHandle) -> Result<Value, String> {
     cache_action(
@@ -2528,6 +2653,8 @@ pub fn run() {
             hf_credentials::save_desktop_hf_credential,
             hf_credentials::clear_desktop_hf_credential,
             desktop_model_cache_status,
+            desktop_admission_status,
+            set_desktop_admission_paused,
             clear_desktop_model_cache,
             set_desktop_model_keep,
             download_starter_gguf,
@@ -2554,6 +2681,60 @@ mod tests {
         WINDOWS_CUDA_BINARY_SET, WINDOWS_CUDA_PREVIEW_RUNTIME_ID,
     };
     use std::sync::{Mutex as TestMutex, OnceLock};
+
+    #[test]
+    fn admission_state_projection_is_closed_and_boolean() {
+        assert_eq!(
+            admission_projection(json!({"schema_version":"infergrade.admission.v1","paused":true}))
+                .unwrap()["paused"],
+            true
+        );
+        for state in [
+            json!({"schema_version":"future","paused":false}),
+            json!({"schema_version":"infergrade.admission.v1","paused":0}),
+            json!({"schema_version":"infergrade.admission.v1","paused":false,"extra":"private"}),
+        ] {
+            assert!(admission_projection(state).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn admission_cleanup_holds_exit_fence_until_termination_and_on_channel_loss() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        struct Fence(Arc<AtomicBool>);
+        impl Drop for Fence {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let alive = Arc::new(AtomicBool::new(true));
+        let (tx, rx) = tauri::async_runtime::channel(4);
+        let handle =
+            tauri::async_runtime::spawn(hold_admission_until_terminated(rx, Fence(alive.clone())));
+        tx.send(CommandEvent::Error("kill not confirmed".into()))
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+        assert!(alive.load(Ordering::SeqCst));
+        tx.send(CommandEvent::Terminated(
+            tauri_plugin_shell::process::TerminatedPayload {
+                code: None,
+                signal: Some(9),
+            },
+        ))
+        .await
+        .unwrap();
+        handle.await.unwrap();
+        assert!(!alive.load(Ordering::SeqCst));
+        let unconfirmed = Arc::new(AtomicBool::new(true));
+        let (tx, rx) = tauri::async_runtime::channel(1);
+        drop(tx);
+        hold_admission_until_terminated(rx, Fence(unconfirmed.clone())).await;
+        assert!(unconfirmed.load(Ordering::SeqCst));
+    }
 
     fn env_test_lock() -> &'static TestMutex<()> {
         static LOCK: OnceLock<TestMutex<()>> = OnceLock::new();
