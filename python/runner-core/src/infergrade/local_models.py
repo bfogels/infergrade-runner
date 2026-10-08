@@ -43,7 +43,8 @@ def _json(path, root):
 
 def default_roots():
     home = Path.home()
-    hf = Path(os.environ.get('HF_HUB_CACHE') or Path(os.environ.get('HF_HOME') or home / '.cache/huggingface') / 'hub')
+    cache_home = Path(os.environ.get('XDG_CACHE_HOME') or home / '.cache')
+    hf = Path(os.environ.get('HF_HUB_CACHE') or Path(os.environ.get('HF_HOME') or cache_home / 'huggingface') / 'hub')
     return [hf, home / '.lmstudio/models', home / '.cache/lm-studio/models',
             Path(os.environ.get('OLLAMA_MODELS') or home / '.ollama/models/blobs')]
 
@@ -74,7 +75,8 @@ def checkpoint(folder, root=None, supported=None):
     architectures = config.get('architectures') or []
     if not isinstance(architectures, list) or not all(isinstance(a, str) for a in architectures):
         architectures = []
-    row = dict(name=folder.name, path=str(folder), format='safetensors',
+    name = folder.parent.parent.name[len('models--') :].replace('--', '/') if folder.parent.name == 'snapshots' and folder.parent.parent.name.startswith('models--') else folder.name
+    row = dict(name=name, path=str(folder), format='safetensors',
                architecture=architectures[0] if architectures else None,
                status='needs_compatibility_check', read_only=True, identity_status='unverified', size_bytes=0)
     if config.get('quantization_config'):

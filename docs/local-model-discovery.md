@@ -1,6 +1,6 @@
 # Local models from Hugging Face and vLLM
 
-`infergrade models list` scans the standard Hugging Face cache (also used by vLLM), LM Studio folders and Ollama blobs. It respects `HF_HUB_CACHE`, `HF_HOME` and `OLLAMA_MODELS`. For a custom vLLM download directory, add `--folder /path/to/models`. `--json` returns local inventory without uploading paths or files to Hub.
+`infergrade models list` scans the standard Hugging Face cache (also used by vLLM), LM Studio folders and Ollama blobs. It respects `HF_HUB_CACHE`, `HF_HOME`, `XDG_CACHE_HOME` and `OLLAMA_MODELS`. For a custom vLLM download directory, add `--folder /path/to/models`. `--json` returns local inventory without uploading paths or files to Hub.
 
 The Desktop Models screen also lists detected Safetensors checkpoints. These are local observations, not verified benchmark artifacts. The hosted Benchmark catalog does not receive this local inventory or automatically substitute local files for requested Hub artifacts.
 

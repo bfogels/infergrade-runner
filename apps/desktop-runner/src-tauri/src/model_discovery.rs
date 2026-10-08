@@ -94,6 +94,12 @@ fn roots(home: &Path, folders: &[String]) -> Vec<(PathBuf, &'static str)> {
         (home.join(".cache/huggingface/hub"), "Hugging Face cache"),
         (home.join(".ollama/models/blobs"), "Ollama"),
     ];
+    if let Some(cache) = env::var_os("XDG_CACHE_HOME") {
+        result.push((
+            PathBuf::from(cache).join("huggingface/hub"),
+            "Hugging Face cache",
+        ));
+    }
     if let Some(cache) = env::var_os("HF_HUB_CACHE") {
         result.push((PathBuf::from(cache), "Hugging Face cache"));
     }
@@ -237,6 +243,10 @@ fn scan(roots: &[(PathBuf, &str)]) -> Value {
         };
         let mut queue = VecDeque::from([(root.clone(), 0usize)]);
         while let Some((dir, depth)) = queue.pop_front() {
+            if rows.len() >= MAX_FILES {
+                incomplete = true;
+                break 'roots;
+            }
             if !seen_dirs.insert(dir.clone()) {
                 continue;
             }

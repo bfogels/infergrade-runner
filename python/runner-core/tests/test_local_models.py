@@ -52,6 +52,7 @@ class LocalModelsTests(unittest.TestCase):
         (hub / 'escaped.gguf').symlink_to(outside)
         payload = models.discover([hub])
         self.assertEqual(len(payload['files']), 2)
+        self.assertIn('org/name', [r['name'] for r in payload['files']])
         self.assertEqual(models.checkpoint(snapshot, supported={'LlamaForCausalLM'})['status'], 'needs_conversion')
 
     def test_partial_limit_is_reported(self):
