@@ -675,6 +675,15 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         environment = capture_environment(request.execution_mode)
         mark_stage_completed(output_dir, progress, current_stage, metadata={"path": "artifacts/environment.json"})
 
+        if request.execution_mode == "local_native" and not request.simulate and request.capability != "none":
+            from infergrade.benchmark_catalog import capability_benchmark_ids_for_request
+            if "ifeval" in capability_benchmark_ids_for_request(request):
+                from infergrade.native_ifeval import preflight
+                current_stage = "native_evaluator_preflight"
+                mark_stage_started(output_dir, progress, current_stage)
+                evaluator = preflight()
+                mark_stage_completed(output_dir, progress, current_stage, metadata=evaluator)
+
         resolved_artifact = None
         current_stage = "artifact_resolution"
         mark_stage_started(output_dir, progress, current_stage)
