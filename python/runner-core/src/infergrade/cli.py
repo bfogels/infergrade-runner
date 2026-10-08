@@ -921,6 +921,8 @@ def main(argv: Optional[list] = None) -> int:
                 payload = set_limit(None if args.limit_gb == "none" else int(args.limit_gb), args.artifact_cache_dir, args.trim_oldest) if args.limit_gb is not None else budget_status(args.artifact_cache_dir)
             except (OSError, ValueError, RuntimeError) as exc:
                 raise SystemExit("Cache action failed: %s" % exc)
+            if args.budget_status and args.limit_gb is not None:
+                payload = payload["budget"]
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
         if args.managed_status or args.clear_unkept or args.keep or args.download_starter:
