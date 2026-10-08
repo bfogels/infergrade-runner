@@ -5,7 +5,19 @@ user-visible changes; full evidence boundaries and validation details live in
 the release PRs and tags. Versions without an entry shipped internal or
 incremental changes only — see the git history.
 
-## 0.3.68 (contract 0.3.43)
+## 0.3.69 (contract 0.3.43)
+
+- Publishes the fresh Linux CUDA setup fix and reviewed runtime/Desktop changes
+  prepared for 0.3.68 below.
+- Restores the native evaluator resource-directory scaffold required by a clean
+  macOS release preflight. Packaging still creates, signs and verifies the full
+  pinned offline evaluator bundle.
+
+## 0.3.68 (contract 0.3.43; source/image candidate only)
+
+- Installer publication stopped at a missing macOS resource directory during
+  dependency preflight. Its tag and container images remain intact; 0.3.69
+  supersedes this unpublished installer candidate.
 
 - Fixes fresh Linux CUDA setup on hosts without NCCL by selecting the verified
   portable CUDA build, which disables that optional dependency. CUDA package
