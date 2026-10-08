@@ -37,6 +37,7 @@ class RunRequest:
     resume: bool = False
     upload: bool = False
     backend_flags: List[str] = field(default_factory=list)
+    cuda_device_uuids: List[str] = field(default_factory=list)
     generation_preset: Optional[str] = None
     cloud_provider: Optional[str] = None
     cloud_instance_type: Optional[str] = None

@@ -13,6 +13,8 @@ from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
+from infergrade.cache_control import cache_read_lease, process_lock, record_install, touch_managed
+from infergrade.cache_budget import download_budget
 from infergrade.models import RunRequest
 from infergrade.tls import verified_https_context
 from infergrade.utils import ensure_dir, stable_hash
@@ -53,6 +55,7 @@ class ResolvedArtifact:
         }
 
 
+@cache_read_lease
 def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
     """Resolve the quantized weights for a run, downloading them when needed."""
     if not request.quant_artifact:
@@ -99,10 +102,11 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
         if request.quant_artifact_sha256
         else None,
     )
-    if cached_path:
+    def cached_receipt(cached_path):
         _verify_expected_size(cached_path, os.path.getsize(cached_path), expected_size_bytes)
         cached_sha = compute_file_sha256(cached_path)
         _verify_expected_sha256(cached_path, cached_sha, request.quant_artifact_sha256)
+        touch_managed(cache_dir, cached_path)
         return ResolvedArtifact(
             original_uri=resolved_artifact_uri,
             resolved_path=cached_path,
@@ -115,56 +119,65 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
             size_bytes=os.path.getsize(cached_path),
         )
 
-    required_free_bytes = min_artifact_cache_free_bytes() + (expected_size_bytes or 0)
-    ensure_min_free_space(cache_dir, required_free_bytes, "artifact cache plus authorized artifact")
-    tmp_fd, tmp_path = tempfile.mkstemp(prefix="infergrade-artifact-", suffix=".tmp", dir=cache_dir)
-    os.close(tmp_fd)
-    try:
+    if cached_path:
+        return cached_receipt(cached_path)
+
+    alternate = _cache_path(cache_dir, resolved_artifact_uri, filename, None, revision=cache_revision) if request.quant_artifact_sha256 else None
+    with download_budget(cache_dir, expected_size_bytes, (cache_path, alternate)) as winner:
+        if winner is not None:
+            return cached_receipt(winner)
+        required_free_bytes = min_artifact_cache_free_bytes() + (expected_size_bytes or 0)
+        ensure_min_free_space(cache_dir, required_free_bytes, "artifact cache plus authorized artifact")
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix="infergrade-artifact-", suffix=".tmp", dir=cache_dir)
+        os.close(tmp_fd)
         try:
-            _download_remote_artifact(
-                download_url,
-                tmp_path,
-                **({"expected_size_bytes": expected_size_bytes} if expected_size_bytes is not None else {}),
-            )
-        except Exception as exc:
-            if _is_huggingface_not_found(exc) and resolved_artifact_uri.startswith("hf://"):
-                canonical_artifact_uri = canonicalize_hf_artifact_reference(resolved_artifact_uri)
-                if canonical_artifact_uri != resolved_artifact_uri:
-                    resolved_artifact_uri = canonical_artifact_uri
-                    download_url = artifact_to_download_url(resolved_artifact_uri, revision=request.quant_artifact_revision)
-                    filename = _safe_artifact_filename(request.quant_artifact_filename) or _infer_filename(resolved_artifact_uri)
-                    cache_revision = _artifact_cache_revision(
-                        resolved_artifact_uri,
-                        request.quant_artifact_revision,
-                    )
-                    cache_path = _cache_path(
-                        cache_dir,
-                        resolved_artifact_uri,
-                        filename,
-                        request.quant_artifact_sha256,
-                        revision=cache_revision,
-                    )
-                    _download_remote_artifact(
-                        download_url,
-                        tmp_path,
-                        **({"expected_size_bytes": expected_size_bytes} if expected_size_bytes is not None else {}),
-                    )
+            try:
+                _download_remote_artifact(
+                    download_url,
+                    tmp_path,
+                    **({"expected_size_bytes": expected_size_bytes} if expected_size_bytes is not None else {}),
+                )
+            except Exception as exc:
+                if _is_huggingface_not_found(exc) and resolved_artifact_uri.startswith("hf://"):
+                    canonical_artifact_uri = canonicalize_hf_artifact_reference(resolved_artifact_uri)
+                    if canonical_artifact_uri != resolved_artifact_uri:
+                        resolved_artifact_uri = canonical_artifact_uri
+                        download_url = artifact_to_download_url(resolved_artifact_uri, revision=request.quant_artifact_revision)
+                        filename = _safe_artifact_filename(request.quant_artifact_filename) or _infer_filename(resolved_artifact_uri)
+                        cache_revision = _artifact_cache_revision(
+                            resolved_artifact_uri,
+                            request.quant_artifact_revision,
+                        )
+                        cache_path = _cache_path(
+                            cache_dir,
+                            resolved_artifact_uri,
+                            filename,
+                            request.quant_artifact_sha256,
+                            revision=cache_revision,
+                        )
+                        _download_remote_artifact(
+                            download_url,
+                            tmp_path,
+                            **({"expected_size_bytes": expected_size_bytes} if expected_size_bytes is not None else {}),
+                        )
+                    else:
+                        raise
                 else:
                     raise
-            else:
-                raise
-        sha256 = compute_file_sha256(tmp_path)
-        _verify_expected_size(tmp_path, os.path.getsize(tmp_path), expected_size_bytes)
-        _verify_expected_sha256(tmp_path, sha256, request.quant_artifact_sha256)
-        cache_was_installed = _install_cache_file_without_overwrite(tmp_path, cache_path)
-        if not cache_was_installed:
-            _verify_expected_size(cache_path, os.path.getsize(cache_path), expected_size_bytes)
-            sha256 = compute_file_sha256(cache_path)
-            _verify_expected_sha256(cache_path, sha256, request.quant_artifact_sha256)
-    except Exception:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
+            sha256 = compute_file_sha256(tmp_path)
+            _verify_expected_size(tmp_path, os.path.getsize(tmp_path), expected_size_bytes)
+            _verify_expected_sha256(tmp_path, sha256, request.quant_artifact_sha256)
+            cache_was_installed = _install_cache_file_without_overwrite(tmp_path, cache_path)
+            if cache_was_installed:
+                record_install(cache_dir, cache_path, sha256)
+            if not cache_was_installed:
+                _verify_expected_size(cache_path, os.path.getsize(cache_path), expected_size_bytes)
+                sha256 = compute_file_sha256(cache_path)
+                _verify_expected_sha256(cache_path, sha256, request.quant_artifact_sha256)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
 
     return ResolvedArtifact(
         original_uri=resolved_artifact_uri,
@@ -216,6 +229,17 @@ def artifact_cache_status(cache_dir: Optional[str] = None) -> Dict[str, object]:
 
 
 def prune_partial_artifacts(
+    cache_dir: Optional[str] = None,
+    dry_run: bool = False,
+    min_age_seconds: int = DEFAULT_PARTIAL_ARTIFACT_MIN_AGE_SECONDS,
+) -> Dict[str, object]:
+    """Explicit legacy partial cleanup, fenced against current Runner readers."""
+    path = _normalized_cache_dir(cache_dir or default_artifact_cache_dir())
+    with process_lock(path, shared=False, blocking=False):
+        return _prune_partial_artifacts_unlocked(path, dry_run, min_age_seconds)
+
+
+def _prune_partial_artifacts_unlocked(
     cache_dir: Optional[str] = None,
     dry_run: bool = False,
     min_age_seconds: int = DEFAULT_PARTIAL_ARTIFACT_MIN_AGE_SECONDS,
@@ -731,7 +755,7 @@ def _is_local_artifact_reference(uri: str) -> bool:
 def _normalize_local_path(uri: str) -> str:
     """Normalize local artifact references into absolute filesystem paths."""
     if uri.startswith("file://"):
-        return urllib_parse.unquote(urllib_parse.urlparse(uri).path)
+        return urllib_request.url2pathname(urllib_parse.urlparse(uri).path)
     return os.path.abspath(uri)
 
 
