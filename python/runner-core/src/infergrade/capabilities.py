@@ -2056,7 +2056,7 @@ def _write_ifeval_capability_run_artifact(request, spec, benchmark_dir, cases, p
     metadata = read_json(os.path.join(benchmark_dir, "benchmark_metadata.json"))
     strict = _read_jsonl(os.path.join(benchmark_dir, "strict_results.jsonl"))
     loose = _read_jsonl(os.path.join(benchmark_dir, "loose_results.jsonl"))
-    if len(strict) != len(cases) or len(loose) != len(cases):
+    if len(cases) != spec.case_limits.get(request.tier) or len(strict) != len(cases) or len(loose) != len(cases):
         raise ValueError("IFEval result denominator differs from selected cases")
     predictions_by_id = {str(item.get("case_id")): item for item in predictions}
     tasks = []
@@ -3852,10 +3852,10 @@ def _planned_benchmark_ids(execution: CapabilityExecution, suite: Optional[Dict[
 
 def _prepare_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir: str, tier: str) -> None:
     if spec.execution_mode == "native_evaluator":
-        from infergrade.native_ifeval import preflight, run_evaluator
+        from infergrade.native_ifeval import preflight, run_evaluator, prepared_input_receipt
         preflight()
         identity = run_evaluator("prepare", benchmark_dir, spec.case_limits.get(tier))
-        write_json(os.path.join(benchmark_dir, "native_evaluator_receipt.json"), identity)
+        write_json(os.path.join(benchmark_dir, "native_evaluator_receipt.json"), {"native_evaluator": identity, **prepared_input_receipt(benchmark_dir, spec.case_limits.get(tier))})
         return
     if spec.execution_mode == "native":
         _prepare_native_benchmark_cases(spec, benchmark_dir, tier)
@@ -3896,10 +3896,12 @@ def _evaluate_benchmark(
     expected_count: Optional[int],
 ) -> Dict[str, Any]:
     if spec.execution_mode == "native_evaluator":
-        from infergrade.native_ifeval import PROTOCOL_ID, run_evaluator
-        identity = run_evaluator("evaluate", benchmark_dir)
+        from infergrade.native_ifeval import PROTOCOL_ID, run_evaluator, prepared_input_receipt
         prepared = read_json(os.path.join(benchmark_dir, "native_evaluator_receipt.json"))
-        if identity != prepared:
+        if prepared_input_receipt(benchmark_dir, expected_count) != {key:prepared.get(key) for key in ("input_files_sha256", "case_count", "selection_sha256")}:
+            raise ValueError("native IFEval inputs changed after generation")
+        identity = run_evaluator("evaluate", benchmark_dir, expected_identity=prepared.get("native_evaluator"))
+        if identity != prepared.get("native_evaluator"):
             raise ValueError("native IFEval evaluator changed after case preparation")
         summary = read_json(os.path.join(benchmark_dir, "summary.json"))
         summary["scoring_policy"] = PROTOCOL_ID

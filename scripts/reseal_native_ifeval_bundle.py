@@ -6,7 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from prepare_native_ifeval_bundle import MANIFEST, RECEIPT, digest, write_trusted_identity
+from prepare_native_ifeval_bundle import MANIFEST, RECEIPT, digest, transform_binary_kind, write_trusted_identity
 
 TRANSFORMS = {'macos_developer_id_signing_v1', 'windows_authenticode', 'linuxdeploy_appimage_v1'}
 
@@ -51,11 +51,12 @@ def reseal(bundle, identity_output, transform):
             raise ValueError('packaging transform introduced an evaluator link')
         sha = digest(path)
         if sha != expected:
-            with path.open('rb') as stream:
-                magic = stream.read(4)
-            binary = magic == b'\x7fELF' or magic in (b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf', b'\xca\xfe\xba\xbe') or magic[:2] == b'MZ'
+            original_kind = (old.get('transformable_binaries') or {}).get(name)
+            required_kind = {'macos_developer_id_signing_v1':'macho', 'windows_authenticode':'pe',
+                             'linuxdeploy_appimage_v1':'elf'}[transform]
+            binary = original_kind == required_kind and transform_binary_kind(path, name) == required_kind
             runtime_receipt = name == 'python-runtime/infergrade-python-runtime-receipt.json'
-            if not (runtime_receipt or (binary and name.startswith(('python-runtime/', 'dependencies/')))):
+            if not (runtime_receipt or binary):
                 raise ValueError('packaging transform changed non-code evaluator assets')
         refreshed[name] = sha
     old['files'] = refreshed

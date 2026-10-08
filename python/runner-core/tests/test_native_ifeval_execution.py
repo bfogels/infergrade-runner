@@ -66,6 +66,36 @@ class NativeIFEvalExecutionTests(unittest.TestCase):
         self.assertEqual(capability_images_for_request(native),[])
         self.assertEqual(capability_images_for_request(container)[0]['benchmark_id'],'ifeval')
 
+    def test_quarantined_ifeval_tasks_keep_raw_outcomes_without_qualified_scores(self):
+        from infergrade.capabilities import _write_ifeval_capability_run_artifact
+        request = RunRequest(model='unit-test-fixture', backend='llama.cpp', tier='canary', execution_mode='local_native')
+        spec = _benchmark_spec_for_request(request,'ifeval')
+        cases = [{'case_id':str(i),'prompt':'fixture '+str(i),'instruction_id_list':['fixture_instruction']} for i in range(25)]
+        predictions = [{'case_id':row['case_id'],'response':'fixture response','generation_status':'completed'} for row in cases]
+        scored = [{'prompt':row['prompt'],'response':'fixture response','instruction_id_list':row['instruction_id_list'],
+                   'follow_instruction_list':[True],'follow_all_instructions':True} for row in cases]
+        summary = {'status':'not_comparable','primary_metric':{'value':None},
+                   'metrics':{'total_count':25,'prompt_strict_correct_count':25},
+                   'output_shape_gate':{'status':'blocked'},'native_evaluator':{'protocol_id':native_ifeval.PROTOCOL_ID}}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root/'benchmark_metadata.json').write_text(json.dumps({'selection_sha256':'0'*64}))
+            for name in ('strict_results.jsonl','loose_results.jsonl'):
+                (root/name).write_text(''.join(json.dumps(row)+'\n' for row in scored))
+            path = _write_ifeval_capability_run_artifact(request,spec,str(root),cases,predictions,summary)
+            artifact = json.loads(Path(path).read_text())
+            self.assertEqual(artifact['summary']['not_comparable_count'],25)
+            self.assertEqual(artifact['summary']['passed_count'],0)
+            for task in artifact['tasks']:
+                self.assertEqual(task['state'],'not_comparable')
+                self.assertIsNone(task['score'])
+                self.assertIsNone(task['scorer_type'])
+                self.assertEqual(task['strict_raw_prompt_score'],1.0)
+            scored[0]['response']='different response'
+            (root/'strict_results.jsonl').write_text(''.join(json.dumps(row)+'\n' for row in scored))
+            with self.assertRaisesRegex(ValueError,'generated response'):
+                _write_ifeval_capability_run_artifact(request,spec,str(root),cases,predictions,summary)
+
     def test_child_environment_drops_credentials_and_host_python_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

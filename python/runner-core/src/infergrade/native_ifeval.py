@@ -155,10 +155,12 @@ def preflight(root=None):
     return identity
 
 
-def run_evaluator(command, output_dir, limit=None):
+def run_evaluator(command, output_dir, limit=None, expected_identity=None):
     if command not in ('prepare', 'evaluate'):
         raise ValueError('unsupported native evaluator command')
     root, receipt, identity = verify_bundle()
+    if expected_identity is not None and identity != expected_identity:
+        raise ValueError("native IFEval evaluator changed after case preparation")
     args = [command, '--output-dir', str(Path(output_dir).resolve())]
     if command == 'prepare':
         if limit not in (25, 100, 541):
@@ -166,3 +168,32 @@ def run_evaluator(command, output_dir, limit=None):
         args.extend(['--limit', str(limit)])
     _execute(root, receipt, args)
     return identity
+
+
+def prepared_input_receipt(output_dir, expected_count):
+    """Seal exact scorer inputs before generation and verify before evaluation."""
+    expected_selections = {
+        25:'90e90cc5a7110d1d388a02626478909fdf08251a65830be1e5933db841f684d4',
+        100:'396ee19b26c5549e4e11325d55ede667a42cf136ac4f1ab0af0237819c61a8a3',
+        541:'45874aab7e499fbb3614697d09eda30682716303bf41ecfc6ea5ea4df153f2a4'}
+    if expected_count not in expected_selections:
+        raise ValueError('unreviewed native IFEval denominator')
+    output = Path(output_dir)
+    metadata = json.loads((output / 'benchmark_metadata.json').read_bytes())
+    inputs = [json.loads(line) for line in (output / 'input_data.jsonl').read_text().splitlines()]
+    cases = [json.loads(line) for line in (output / 'cases.jsonl').read_text().splitlines()]
+    if (len(inputs) != expected_count or len(cases) != expected_count
+            or metadata.get('case_count') != expected_count
+            or metadata.get('selection_sha256') != expected_selections[expected_count]):
+        raise ValueError('native IFEval prepared selection differs from reviewed tier')
+    selected = hashlib.sha256('\n'.join(sorted(str(row['key']) for row in inputs)).encode()).hexdigest()
+    if selected != expected_selections[expected_count] or len({str(row['key']) for row in inputs}) != expected_count:
+        raise ValueError('native IFEval prepared task IDs differ from reviewed tier')
+    for case, row in zip(cases, inputs):
+        sha = hashlib.sha256(json.dumps(row, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()).hexdigest()
+        if (case.get('case_id') != str(row['key']) or case.get('prompt') != row['prompt']
+                or case.get('instruction_id_list') != row['instruction_id_list']
+                or case.get('scorer_input_sha256') != sha):
+            raise ValueError('native IFEval scorer inputs are not bound to task revisions')
+    return {'input_files_sha256': {name:_digest(output / name) for name in ('cases.jsonl','input_data.jsonl','benchmark_metadata.json')},
+            'case_count':expected_count, 'selection_sha256':selected}

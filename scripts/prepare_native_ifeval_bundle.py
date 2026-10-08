@@ -123,6 +123,26 @@ def select_asset(package, target):
     return matches[0]
 
 
+def transform_binary_kind(path, relative):
+    """Classify only original reviewed executable/shared-library bytes."""
+    relative = PurePosixPath(relative)
+    if relative.suffix.lower() in ('.py', '.pyc', '.json', '.jsonl', '.txt', '.pickle', '.tab', '.pem'):
+        return None
+    eligible_name = relative.suffix.lower() in ('.exe', '.dll', '.pyd', '.so', '.dylib') or (
+        relative.parts[:2] == ('python-runtime', 'bin') and relative.name.startswith('python'))
+    if not eligible_name:
+        return None
+    with Path(path).open('rb') as stream:
+        magic = stream.read(4)
+    if magic == b'\x7fELF':
+        return 'elf'
+    if magic in (b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf', b'\xca\xfe\xba\xbe'):
+        return 'macho'
+    if magic[:2] == b'MZ':
+        return 'pe'
+    return None
+
+
 def prepare(output, target, cache):
     if target not in TARGET_TAGS:
         raise ValueError('native IFEval target is not reviewed')
@@ -190,6 +210,7 @@ def prepare(output, target, cache):
         shutil.copyfile(MANIFEST, bundle / 'manifest.json')
         files = {}
         links = {}
+        transformable = {}
         for path in sorted(bundle.rglob('*')):
             name = path.relative_to(bundle).as_posix()
             if path.is_symlink():
@@ -198,13 +219,16 @@ def prepare(output, target, cache):
                 links[name] = os.readlink(path)
             elif path.is_file():
                 files[name] = digest(path)
+                kind = transform_binary_kind(path, name)
+                if kind:
+                    transformable[name] = kind
         runtime = json.loads((bundle / 'python-runtime/infergrade-python-runtime-receipt.json').read_text())
         receipt = {'schema_version': 'infergrade.native_ifeval_receipt.v1',
                    'protocol_id': manifest['protocol_id'], 'container_parity': manifest['container_parity'],
                    'target': target, 'python_version': manifest['python_version'],
                    'manifest_sha256': hashlib.sha256(raw).hexdigest(),
                    'executable': 'python-runtime/' + runtime['executable'],
-                   'files': files, 'links': links}
+                   'files': files, 'links': links, 'transformable_binaries': transformable}
         (bundle / RECEIPT).write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
         if output.exists():
             raise ValueError('output already exists; choose a new staging directory')
