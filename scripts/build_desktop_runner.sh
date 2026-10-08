@@ -117,6 +117,11 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$MACOS_SIGNING_IDENTITY" != "-" ]; then
     runtime_signing_args+=(--keychain "$INFERGRADE_RELEASE_KEYCHAIN")
   fi
   python3 "$ROOT_DIR/scripts/sign_desktop_macos_runtime.py" "${runtime_signing_args[@]}"
+  evaluator_signing_args=(--runtime "$TAURI_DIR/native-ifeval" --evaluator --identity "$MACOS_CODESIGN_IDENTITY")
+  if [ -n "${INFERGRADE_RELEASE_KEYCHAIN:-}" ]; then evaluator_signing_args+=(--keychain "$INFERGRADE_RELEASE_KEYCHAIN"); fi
+  python3 "$ROOT_DIR/scripts/sign_desktop_macos_runtime.py" "${evaluator_signing_args[@]}"
+  python3 "$ROOT_DIR/scripts/prepare_desktop_python_runtime.py" --output "$TAURI_DIR/native-ifeval/python-runtime" --refresh-receipt macos_developer_id_signing_v1
+  python3 "$ROOT_DIR/scripts/reseal_native_ifeval_bundle.py" --bundle "$TAURI_DIR/native-ifeval" --identity-output "$ROOT_DIR/python/runner-core/src/infergrade/_native_ifeval_identity.py" --transform macos_developer_id_signing_v1
 fi
 
 build_config="$(python3 - <<'PY'
