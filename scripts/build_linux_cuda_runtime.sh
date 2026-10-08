@@ -13,6 +13,7 @@ cccl_commit=5fb1013e3c6f72877a2ebd30f54fe5158d64eec4
 cccl_sha256=a87760bed120043b2cb58ee0482e13bb246cf77ec14b49542fb8688842bd91b5
 eula_url=https://docs.nvidia.com/cuda/archive/12.8.1/eula/index.html
 eula_sha256=6722d4c310a2ec9ad869ede3371a648fe2cfc2baaf8e1ece2c35e1dccc05752c
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 output_dir="${1:?Pass an output directory}"
 abi="${INFERGRADE_RUNTIME_ABI:-ubuntu22}"
 case "$abi" in
@@ -186,4 +187,5 @@ if [ "$accelerator" = cuda ]; then
   if grep 'not found' "$output_dir/cuda-backend-relocated-ldd.txt" | grep -v 'libcuda.so.1'; then exit 1; fi
   env -u LD_LIBRARY_PATH readelf -d "$backend" > "$output_dir/cuda-backend-dynamic.txt"
   grep -F '$ORIGIN' "$output_dir/cuda-backend-dynamic.txt"
+  python3 "$script_dir/verify_linux_cuda_package.py" "$(dirname "$backend")" "$output_dir/dependency-closure"
 fi

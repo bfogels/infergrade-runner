@@ -68,6 +68,26 @@ This does not prove physical NVIDIA execution. The immutable
 [CUDA candidate](https://github.com/bfogels/infergrade-runner/releases/tag/managed-llama-cpp-b11429-ubuntu22-cuda-20261007)
 contains its archive checksum and qualification receipt.
 
+### CUDA dependency packaging correction
+
+The v0.3.67 Ubuntu 22 CUDA archive omitted `libnccl.so.2`. On a server with
+working NVIDIA drivers but no system NCCL, the dynamic CUDA backend therefore
+reported no devices. Installing NVIDIA's `libnccl2` version
+`2.26.2-1+cuda12.8` restored device detection on the reported two-GPU server.
+This is device-discovery evidence; it does not establish benchmark execution,
+scoring, upload, or multi-GPU model placement.
+
+The updated runtime build disables optional NCCL, so users do not need to install
+it. Package validation also requires CUDA runtime libraries to resolve within the
+archive, so build-host libraries cannot hide an omission. If a future build links
+NCCL, its library and license must be bundled. Only the host-owned `libcuda.so.1`
+may be absent on CPU-only CI. Listener setup retains verbose device diagnostics
+and names missing backend libraries instead of attributing every failure to the driver.
+
+The old immutable archive remains unchanged. Public release must promote the
+corrected native runtime manifest and rerun managed acceptance. Source changes
+alone do not repair an existing downloaded or explicitly selected runtime.
+
 The hardware inventory keeps largest-card memory for existing fit consumers and
 reports observed per-card capacities and total installed VRAM separately. Total
 installed memory is not a promise of one contiguous memory allocation or verified

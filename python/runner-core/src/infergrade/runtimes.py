@@ -466,12 +466,24 @@ def prepare_native_listener_runtime(emit_progress=None, prefer_managed=False) ->
             raise RuntimeError("llama.cpp %s could not start (exit %s): %s" % (kind, result.returncode, detail or "no diagnostic output"))
     if (selection or {}).get("accelerator") == "cuda" and not os.environ.get("INFERGRADE_LLAMA_CPP_CLI"):
         try:
-            result = subprocess.run([paths["cli"], "--list-devices"], capture_output=True, text=True, timeout=30)
+            result = subprocess.run([paths["cli"], "--verbose", "--list-devices"], capture_output=True, text=True, timeout=30)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise RuntimeError("The managed CUDA runtime could not inspect NVIDIA devices: %s" % exc) from exc
         if result.returncode or not re.search(r"^\s*CUDA\d+:", result.stdout or "", re.MULTILINE):
             detail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()[:4096]
-            raise RuntimeError("The managed CUDA runtime could not detect a usable NVIDIA device. Check the NVIDIA driver. %s" % detail)
+            backend = Path(paths["cli"]).parent / "libggml-cuda.so"
+            if backend.is_file() and platform.system() == "Linux" and shutil.which("ldd"):
+                try:
+                    loader = subprocess.run(["ldd", str(backend)], capture_output=True, text=True, timeout=15)
+                    missing = re.findall(r"^\s*(\S+)\s+=>\s+not found", loader.stdout or "", re.MULTILINE)
+                    redistributables = [name for name in missing if name != "libcuda.so.1"]
+                    if redistributables:
+                        raise RuntimeError("The managed CUDA backend could not load. Missing libraries: %s. %s" % (", ".join(redistributables), detail))
+                    if "libcuda.so.1" in missing:
+                        detail = "Host NVIDIA driver library libcuda.so.1 is unavailable. " + detail
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            raise RuntimeError("The managed CUDA runtime could not detect a usable NVIDIA device. Check CUDA visibility, runtime dependencies, and the NVIDIA driver. %s" % detail)
     if (selection or {}).get("accelerator") == "vulkan" and not os.environ.get("INFERGRADE_LLAMA_CPP_CLI"):
         try:
             result = subprocess.run([paths["cli"], "--list-devices"], capture_output=True, text=True, timeout=30)
