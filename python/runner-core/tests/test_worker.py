@@ -163,7 +163,7 @@ class WorkerTests(unittest.TestCase):
             expected_output_dir = os.path.join(os.path.realpath(output_root), "run_example")
             messages = []
             env = {
-                "INFERGRADE_HOST_ARTIFACT_CACHE_DIR": "/host/cache",
+                "INFERGRADE_HOST_ARTIFACT_CACHE_DIR": os.path.join(output_root, "host-cache"),
                 "INFERGRADE_RUNNER_OUTPUT_ROOT": output_root,
                 "INFERGRADE_DESKTOP_EVENTS": "1",
             }
@@ -242,7 +242,7 @@ class WorkerTests(unittest.TestCase):
             )
         )
         self.assertEqual(fake_request.output_dir, expected_output_dir)
-        self.assertEqual(fake_request.quant_artifact_cache_dir, "/host/cache")
+        self.assertEqual(fake_request.quant_artifact_cache_dir, os.path.join(output_root, "host-cache"))
         self.assertTrue(fake_request.resume)
         structured = [
             json.loads(message[len(DESKTOP_EVENT_PREFIX) :])

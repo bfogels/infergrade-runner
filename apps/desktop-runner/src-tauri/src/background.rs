@@ -16,6 +16,7 @@ enum CloseAction {
 #[derive(Default)]
 struct Lifecycle {
     active: usize,
+    maintenance: bool,
     exiting: bool,
     keep_running: bool,
     tray_available: bool,
@@ -23,6 +24,9 @@ struct Lifecycle {
 }
 impl Lifecycle {
     fn admit(&mut self) -> Result<(), String> {
+        if self.maintenance {
+            return Err("Cache cleanup is active. Try again after it finishes.".into());
+        }
         if self.exiting {
             return Err("Runner is quitting. Reopen it before starting work.".into());
         }
@@ -54,19 +58,46 @@ fn lifecycle() -> &'static Mutex<Lifecycle> {
     static STATE: OnceLock<Mutex<Lifecycle>> = OnceLock::new();
     STATE.get_or_init(|| Mutex::new(Lifecycle::default()))
 }
-pub(crate) struct WorkGuard;
+pub(crate) struct WorkGuard {
+    _lease: crate::cache_lease::ReadLease,
+}
 impl WorkGuard {
     pub(crate) fn begin() -> Result<Self, String> {
+        let lease = crate::cache_lease::ReadLease::acquire(&crate::desktop_artifact_cache_dir()?)?;
         lifecycle()
             .lock()
             .map_err(|_| "Runner lifecycle is unavailable".to_string())?
             .admit()?;
-        Ok(Self)
+        Ok(Self { _lease: lease })
     }
 }
 impl Drop for WorkGuard {
     fn drop(&mut self) {
         if let Ok(mut state) = lifecycle().lock() {
+            state.active = state.active.saturating_sub(1);
+        }
+    }
+}
+pub(crate) struct MaintenanceGuard;
+impl MaintenanceGuard {
+    pub(crate) fn begin() -> Result<Self, String> {
+        let mut state = lifecycle()
+            .lock()
+            .map_err(|_| "Runner lifecycle is unavailable")?;
+        if state.active > 0 || state.exiting {
+            return Err(
+                "Finish active work and stop listening before clearing cache space.".into(),
+            );
+        }
+        state.maintenance = true;
+        state.active = 1;
+        Ok(Self)
+    }
+}
+impl Drop for MaintenanceGuard {
+    fn drop(&mut self) {
+        if let Ok(mut state) = lifecycle().lock() {
+            state.maintenance = false;
             state.active = state.active.saturating_sub(1);
         }
     }
