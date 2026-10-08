@@ -17,7 +17,7 @@ export function createActivityLoader({fetchActivity,render,onError}){
 }
 export function initDesktopActivity({invoke,openRun}){
  const page=document.querySelector('[data-desktop-view="activity"]');if(!page)return null;
- const panel=document.createElement('section');panel.className='drawer-panel desktop-history';panel.innerHTML='<h2 tabindex="-1">Machine activity</h2><p data-activity-status role="status">Connect this Runner to view its Hub jobs.</p><div data-activity-history></div><button type="button" class="button-secondary" data-activity-refresh>Refresh activity</button>';
+ const panel=document.createElement('section');panel.className='drawer-panel desktop-history';panel.innerHTML='<h2 tabindex="-1">Machine activity</h2><p data-activity-status role="status">Connect this Runner to view its Hub jobs.</p><div data-activity-history></div><button type="button" class="button-secondary" data-activity-refresh disabled>Refresh activity</button>';
  page.insertBefore(panel,page.querySelector('.log-disclosure'));
  const status=panel.querySelector('[data-activity-status]'),list=panel.querySelector('[data-activity-history]'),refresh=panel.querySelector('[data-activity-refresh]');
  const render=(payload,key)=>{
