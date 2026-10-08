@@ -6,6 +6,7 @@ use std::{
 };
 #[cfg(target_os = "linux")]
 use tauri::Manager;
+#[cfg(any(unix, test))]
 fn nonce() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
