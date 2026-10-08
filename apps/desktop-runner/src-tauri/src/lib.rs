@@ -5,6 +5,7 @@ mod device_pairing;
 mod hf_credentials;
 mod machine_settings;
 mod run_results;
+mod startup;
 use device_pairing::{
     begin_runner_device_pairing, cancel_runner_device_pairing, poll_runner_device_pairing,
 };
@@ -2623,6 +2624,8 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            startup::desktop_startup_status,
+            startup::set_desktop_startup,
             background::desktop_background_status,
             background::set_desktop_keep_running,
             save_runner_token,

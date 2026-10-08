@@ -1,3 +1,4 @@
+import {initStartupSettings} from './startupSettings.js';
 import {initAdmissionSettings} from './admissionSettings.js';
 import {initMachineSettings} from './machineSettings.js';
 import {initBackgroundSettings,listenerEventMatches} from './backgroundSettings.js';
@@ -3796,6 +3797,7 @@ initBackgroundSettings({invoke:loadTauriInvoke,listen:async callback=>{
 
  desktopMachineSettings=initMachineSettings({invoke:loadTauriInvoke});
 
+initStartupSettings({invoke:loadTauriInvoke});
 initAdmissionSettings({invoke:loadTauriInvoke,onState:state=>{
  document.documentElement.dataset.admissionPaused=state.error?'unknown':state.paused===true?'true':state.paused===false?'false':'unknown';
  renderLocalReadinessChecklist();
