@@ -15,7 +15,7 @@ export function initGpuSettings({invoke}){
  const page=document.querySelector('[data-desktop-view="settings"]');if(!page)return null;
  const panel=document.createElement('section');panel.className='drawer-panel desktop-gpu-settings';
  panel.innerHTML='<h2 tabindex="-1">GPUs</h2><p class="desktop-sub">Choose physical NVIDIA devices for native llama.cpp. This changes the next benchmark; active work keeps its original choice.</p><div data-gpu-choices role="group" aria-label="GPUs"></div><p class="desktop-sub">Selecting both requests model splitting. Selection does not prove available memory or fit. Execution verifies successful load and observed placement.</p><div class="button-row"><button type="button" class="button-secondary" data-gpu-default>Use runtime default</button><button type="button" class="button-secondary" data-gpu-refresh>Refresh GPUs</button></div><p role="status" data-gpu-status>Checking saved GPU choice…</p>';
- page.append(panel);
+ page.insertBefore(panel,page.querySelector('.desktop-background')||page.querySelector('.desktop-hf'));
  const choices=panel.querySelector('[data-gpu-choices]'),status=panel.querySelector('[data-gpu-status]'),refresh=panel.querySelector('[data-gpu-refresh]'),reset=panel.querySelector('[data-gpu-default]');
  const call=async(command,args)=>{const native=await invoke();if(!native)throw Error();return native(command,args);};
  let selected=[],last=null,restoreFocus=null;
