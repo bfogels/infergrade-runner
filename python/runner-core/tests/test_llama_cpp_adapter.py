@@ -1475,6 +1475,47 @@ class LlamaCppAdapterTests(unittest.TestCase):
             ["Answer only A.\n/no_think", "Answer only A again.\n/no_think"],
         )
 
+    def test_interrupt_during_native_server_startup_reaps_actual_child(self):
+        import subprocess
+        child = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(60)"])
+        request = RunRequest(model="local", quant_artifact=self.model_path, backend="llama.cpp", tier="canary", execution_mode="local_native", simulate=False)
+        adapter = LlamaCppAdapter()
+        try:
+            with mock.patch.object(adapter, "_native_server_path", return_value=sys.executable), mock.patch(
+                "infergrade.adapters.llama_cpp.subprocess.Popen", return_value=child
+            ), mock.patch("infergrade.adapters.llama_cpp._wait_for_native_server_ready", side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    adapter._ensure_capability_server_session(request, self.model_path, 4096)
+            self.assertIsNotNone(child.poll())
+            self.assertIsNone(adapter._capability_server_session)
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait()
+
+    def test_interrupt_during_active_suite_reaps_actual_server(self):
+        import subprocess
+        child = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(60)"])
+        request = RunRequest(model="local", quant_artifact=self.model_path, backend="llama.cpp", tier="canary", execution_mode="local_native", simulate=False)
+        adapter = LlamaCppAdapter()
+        def interrupted(*args, **kwargs):
+            adapter._capability_server_session = {"process": child, "log_path": ""}
+            raise KeyboardInterrupt
+        try:
+            with mock.patch.object(adapter, "_ensure_backend_model_compatibility"), mock.patch.object(
+                adapter, "_native_server_path", return_value=sys.executable
+            ), mock.patch(
+                "infergrade.adapters.base.BaseAdapter.run_capability", side_effect=interrupted
+            ):
+                with self.assertRaises(KeyboardInterrupt):
+                    adapter.run_capability(request)
+            self.assertIsNotNone(child.poll())
+            self.assertIsNone(adapter._capability_server_session)
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait()
+
     def test_capability_suite_always_disables_reuse_and_cleans_up(self):
         request = RunRequest(
             model="Qwen/Qwen3.5-9B",
