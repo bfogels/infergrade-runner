@@ -484,7 +484,7 @@ def prepare_native_listener_runtime(emit_progress=None, prefer_managed=False) ->
                 "(e.g. mesa-vulkan-drivers) or set INFERGRADE_ACCELERATOR=cpu to benchmark on the CPU. %s" % detail
             )
     if emit_progress:
-        emit_progress("Native runtime ready. Connecting the paired runner.")
+        emit_progress("Native runtime ready.")
 
 
 def install_llama_cpp_runtime(runtime_id: Optional[str] = None, execute: bool = False) -> Dict[str, Any]:

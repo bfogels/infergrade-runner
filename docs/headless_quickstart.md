@@ -8,13 +8,13 @@ install, or re-pairing should be needed for an ordinary native benchmark.
 
 ## Delivery status
 
-The installer and packaging are under implementation. Do not advertise the
-following download command until a versioned release contains `install.sh`, the
-headless archive, its checksum, and the compatible runtime assets. Workflow
-artifacts are not public install packages. An Ubuntu 22 loader smoke is not proof
+Use the following download command with a published release that contains
+`install.sh`, the headless archive, its checksum, and the compatible runtime
+assets. The application release verifies this complete asset set before
+publication. Workflow artifacts are not public install packages. An Ubuntu 22 loader smoke is not proof
 of NVIDIA execution or a complete Hub loop.
 
-## Intended public commands
+## Install and pair
 
 ```bash
 curl -fsSL https://github.com/bfogels/infergrade-runner/releases/latest/download/install.sh | bash
@@ -58,6 +58,15 @@ That same run also installed the actual headless package twice and exercised
 zero blocking diagnostics. This fixture check is separate from hosted Hub
 acceptance. Runtime archives live in the
 [candidate distribution](https://github.com/bfogels/infergrade-runner/releases/tag/managed-llama-cpp-b11429-ubuntu22-20261007).
+
+The Ubuntu 22 CUDA candidate passed all four version checks and relocated
+loader checks in [its build workflow](https://github.com/bfogels/infergrade-runner/actions/runs/37694195635).
+[Managed acceptance](https://github.com/bfogels/infergrade-runner/actions/runs/37706060584)
+installed the published archive, generated text with explicit CPU execution, and
+confirmed that missing NVIDIA devices block listening and CUDA model requests.
+This does not prove physical NVIDIA execution. The immutable
+[CUDA candidate](https://github.com/bfogels/infergrade-runner/releases/tag/managed-llama-cpp-b11429-ubuntu22-cuda-20261007)
+contains its archive checksum and qualification receipt.
 
 The hardware inventory keeps largest-card memory for existing fit consumers and
 reports observed per-card capacities and total installed VRAM separately. Total

@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from infergrade import __version__
+from infergrade.runtime_placement import merge_runtime_placement_receipts, validated_runtime_placement
 from infergrade.benchmark_catalog import (
     REASONING_EXACT_ANSWER_GENERATION_CONSTRAINT_ID,
     benchmark_evidence_exclusion_reason,
@@ -4296,8 +4297,7 @@ def _generate_predictions(
         if generated.get("prompt_transform"):
             record["generation_prompt_transform"] = generated["prompt_transform"]
         if generated.get("runtime_placement"):
-            # Local predictions preserve invocation evidence. Uploaded timing
-            # samples still need a separately versioned placement reference.
+            # Uploaded item timing references this exact invocation receipt.
             record["runtime_placement"] = generated["runtime_placement"]
         if generated.get("generation_constraint_receipt"):
             record["generation_constraint_id"] = generated.get("generation_constraint_id")
@@ -4770,12 +4770,19 @@ def _summarize_task_performance_rows(rows: List[Dict[str, Any]]) -> Dict[str, An
     natural_stop_rate = _known_boolean_rate(rows, "natural_stop")
     token_budget_exhaustion_rate = _known_boolean_rate(rows, "token_budget_exhausted")
     sources = sorted({str(item.get("measurement_source")) for item in completed_rows if item.get("measurement_source")})
+    receipts, receipts_complete = merge_runtime_placement_receipts([[item["runtime_placement"] for item in rows[:10000] if item.get("runtime_placement")]])
+    receipt_ids = {item["invocation_id"] for item in receipts}
     observations = []
     for item in rows[:10000]:
+        placement = validated_runtime_placement(item.get("runtime_placement"))
+        if placement and placement["invocation_id"] not in receipt_ids:
+            placement = None
         benchmark_id = str(item.get("benchmark_id") or "")
         case_id = str(item.get("case_id") or item.get("task_id") or "")
         observations.append({
             "task_key": stable_hash([benchmark_id, case_id], length=64) if benchmark_id and case_id else None,
+            "placement_invocation_id": placement["invocation_id"] if placement else None,
+            "placement_fingerprint": placement["placement_fingerprint"] if placement else None,
             "benchmark_id": benchmark_id or None,
             "task_revision": item.get("task_revision") if isinstance(item.get("task_revision"), str)
                 and re.fullmatch(r"[a-f0-9]{64}", item["task_revision"]) else None,
@@ -4790,6 +4797,8 @@ def _summarize_task_performance_rows(rows: List[Dict[str, Any]]) -> Dict[str, An
             "protocol_recovery": bool(item.get("direct_answer_protocol_recovery")),
         })
     return {
+        "runtime_placement_receipts": receipts,
+        "runtime_placement_receipts_complete": receipts_complete and len(rows) <= 10000,
         "item_observations_version": "task_timing_observations_v1",
         "item_observations_complete": len(rows) <= 10000,
         "item_observations": observations,

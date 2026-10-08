@@ -1,6 +1,6 @@
 [package]
 name = "infergrade_desktop_runner"
-version = "0.3.66"
+version = "0.3.67"
 description = "Desktop companion app for the InferGrade Runner"
 authors = ["Brian Fogelson"]
 license = "Apache-2.0"
@@ -15,6 +15,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 infergrade_runner_engine = { path = "../../../crates/runner-engine" }
+libc = "0.2"
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "linux-native-sync-persistent"] }
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1.0.149"
