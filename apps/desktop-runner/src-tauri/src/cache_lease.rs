@@ -90,6 +90,9 @@ mod tests {
         drop(second);
         exclusive.try_lock().expect("cleanup after readers exit");
         assert!(ReadLease::acquire(&root).is_err());
+        // Parallel process tests may fork with this descriptor briefly inherited.
+        // Match production Python cleanup: unlock explicitly before closing.
+        exclusive.unlock().expect("release cleanup lock");
         drop(exclusive);
         ReadLease::acquire(&root).expect("reader after cleanup");
         let _ = fs::remove_dir_all(root);
@@ -144,6 +147,7 @@ mod tests {
         assert!(cleanup.try_lock().is_err());
         drop(selected);
         cleanup.try_lock().unwrap();
+        cleanup.unlock().unwrap();
         drop(cleanup);
         let _ = fs::remove_dir_all(root);
     }
