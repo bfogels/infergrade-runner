@@ -1,3 +1,6 @@
+export function listenerEventMatches(event, child) {
+  return !event?.listener_pid || !child?.rustManaged || child.pid===event.listener_pid;
+}
 export function backgroundSummary(state) {
   if(state?.warning)return state.warning;
   if(state?.tray_available!==true)return 'The system tray is unavailable. Keep this window open while Runner works.';

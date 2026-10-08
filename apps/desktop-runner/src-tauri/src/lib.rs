@@ -70,6 +70,7 @@ const PARTIAL_ARTIFACT_SUFFIX: &str = ".tmp";
 struct ListenerProcess {
     child: Mutex<Option<CommandChild>>,
     work: Mutex<Option<background::WorkGuard>>,
+    stopping: Mutex<Option<u32>>,
 }
 
 struct DesktopProfileStore;
@@ -599,6 +600,14 @@ fn start_runner_listener(
         return Ok(json!({"status":"already_running"}));
     }
 
+    if state
+        .stopping
+        .lock()
+        .map_err(|_| "listener stop state is unavailable".to_string())?
+        .is_some()
+    {
+        return Err("Runner is still finishing its stop request. Try again in a moment.".into());
+    }
     let mut work_slot = state
         .work
         .lock()
@@ -665,19 +674,25 @@ fn start_runner_listener(
             match event {
                 CommandEvent::Stdout(bytes) => {
                     let line = String::from_utf8_lossy(&bytes);
-                    for payload in listener_events_from_output("stdout", &line, &sensitive_values) {
+                    for mut payload in
+                        listener_events_from_output("stdout", &line, &sensitive_values)
+                    {
+                        payload["listener_pid"] = json!(pid);
                         emit_listener_event(&event_app, payload);
                     }
                 }
                 CommandEvent::Stderr(bytes) => {
                     let line = String::from_utf8_lossy(&bytes);
-                    for payload in listener_events_from_output("stderr", &line, &sensitive_values) {
+                    for mut payload in
+                        listener_events_from_output("stderr", &line, &sensitive_values)
+                    {
+                        payload["listener_pid"] = json!(pid);
                         emit_listener_event(&event_app, payload);
                     }
                 }
                 CommandEvent::Error(error) => emit_listener_event(
                     &event_app,
-                    json!({"type": "error", "detail": redact_listener_text(&error, &sensitive_values)}),
+                    json!({"type": "error", "listener_pid":pid, "detail": redact_listener_text(&error, &sensitive_values)}),
                 ),
                 CommandEvent::Terminated(payload) => {
                     let listener_state = event_app.state::<ListenerProcess>();
@@ -691,7 +706,7 @@ fn start_runner_listener(
                     }
                     emit_listener_event(
                         &event_app,
-                        json!({"type": "terminated", "code": payload.code}),
+                        json!({"type": "terminated", "listener_pid":pid, "code": payload.code}),
                     );
                     break;
                 }
@@ -710,25 +725,60 @@ fn start_runner_listener(
 
 #[tauri::command]
 async fn stop_runner_listener(state: State<'_, ListenerProcess>) -> Result<Value, String> {
-    let requested = request_listener_stop(&state)?;
-    if requested["status"] == "not_running" {
-        return Ok(requested);
+    let _work_guard = background::WorkGuard::begin()?;
+    let pid = {
+        let child = state
+            .child
+            .lock()
+            .map_err(|_| "listener state is unavailable".to_string())?;
+        let pid = match child.as_ref() {
+            Some(child) => child.pid(),
+            None => return Ok(json!({"status":"not_running"})),
+        };
+        let mut stopping = state
+            .stopping
+            .lock()
+            .map_err(|_| "listener stop state is unavailable".to_string())?;
+        if stopping.is_some() {
+            return Err("A listener stop request is already in progress.".into());
+        }
+        *stopping = Some(pid);
+        pid
+    };
+    struct StopFence<'a> {
+        slot: &'a Mutex<Option<u32>>,
+        pid: u32,
     }
+    impl Drop for StopFence<'_> {
+        fn drop(&mut self) {
+            if let Ok(mut slot) = self.slot.lock() {
+                if *slot == Some(self.pid) {
+                    *slot = None;
+                }
+            }
+        }
+    }
+    let _fence = StopFence {
+        slot: &state.stopping,
+        pid,
+    };
+    request_listener_stop(&state, pid)?;
     for _ in 0..300 {
-        if state
+        let stopped = state
             .child
             .lock()
             .map_err(|_| "listener state is unavailable".to_string())?
-            .is_none()
-        {
-            return Ok(json!({"status":"stopped"}));
+            .as_ref()
+            .is_none_or(|child| child.pid() != pid);
+        if stopped {
+            return Ok(json!({"status":"stopped","pid":pid}));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     Err("Runner has not confirmed that listening stopped. Keep it open and check Activity.".into())
 }
 
-fn request_listener_stop(state: &ListenerProcess) -> Result<Value, String> {
+fn request_listener_stop(state: &ListenerProcess, expected_pid: u32) -> Result<Value, String> {
     let child = state
         .child
         .lock()
@@ -737,6 +787,11 @@ fn request_listener_stop(state: &ListenerProcess) -> Result<Value, String> {
         return Ok(json!({"status":"not_running"}));
     };
     let pid = child.pid();
+    if pid != expected_pid {
+        return Err(
+            "Listener changed before the stop request. No other listener was interrupted.".into(),
+        );
+    }
     #[cfg(unix)]
     {
         // The long-running sidecar execs Python in place. SIGINT lets its

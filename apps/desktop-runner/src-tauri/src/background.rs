@@ -6,6 +6,13 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
 
+#[derive(Debug, PartialEq)]
+enum CloseAction {
+    Hide,
+    Block,
+    Close,
+}
+
 #[derive(Default)]
 struct Lifecycle {
     active: usize,
@@ -28,6 +35,16 @@ impl Lifecycle {
         }
         self.exiting = true;
         true
+    }
+    fn close_action(&mut self) -> CloseAction {
+        if self.can_hide() {
+            return CloseAction::Hide;
+        }
+        if self.request_exit() {
+            CloseAction::Close
+        } else {
+            CloseAction::Block
+        }
     }
     fn can_hide(&self) -> bool {
         self.keep_running && self.tray_available
@@ -178,18 +195,22 @@ pub(crate) fn initialize(app: &AppHandle) {
 }
 pub(crate) fn window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-        let (hide, busy) = lifecycle()
+        let action = lifecycle()
             .lock()
-            .map(|s| (s.can_hide(), s.active > 0))
-            .unwrap_or((false, true));
-        if hide {
-            api.prevent_close();
-            if window.hide().is_err() {
-                show_window(window.app_handle());
+            .map(|mut state| state.close_action())
+            .unwrap_or(CloseAction::Block);
+        match action {
+            CloseAction::Hide => {
+                api.prevent_close();
+                if window.hide().is_err() {
+                    show_window(window.app_handle());
+                }
             }
-        } else if busy {
-            api.prevent_close();
-            blocked_exit(window.app_handle());
+            CloseAction::Block => {
+                api.prevent_close();
+                blocked_exit(window.app_handle());
+            }
+            CloseAction::Close => {}
         }
     }
 }
@@ -217,6 +238,16 @@ mod tests {
         state.active -= 1;
         assert!(state.request_exit());
         assert!(state.admit().is_err());
+    }
+    #[test]
+    fn idle_window_close_fences_admission_before_destroying_the_window() {
+        let mut state = Lifecycle::default();
+        assert_eq!(state.close_action(), CloseAction::Close);
+        assert!(state.admit().is_err());
+        let mut busy = Lifecycle::default();
+        busy.admit().unwrap();
+        assert_eq!(busy.close_action(), CloseAction::Block);
+        assert!(!busy.exiting);
     }
     #[test]
     fn closing_only_hides_with_both_preference_and_actual_tray() {

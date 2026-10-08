@@ -1,4 +1,4 @@
-import {initBackgroundSettings} from './backgroundSettings.js';
+import {initBackgroundSettings,listenerEventMatches} from './backgroundSettings.js';
 import { initModelDiscovery, selectableLocalModel } from './modelDiscovery.js';
 import {initHfCredentials} from './hfCredentials.js';
 import { initDesktopActivity, activityRunUrl } from './desktopActivity.js';
@@ -1566,6 +1566,7 @@ async function ensureRunnerListenerEvents() {
   runnerListenerEventsReady = true;
   await listen("runner-listener-event", (event) => {
     const payload = event?.payload || {};
+    if (!listenerEventMatches(payload,childProcess)) return;
     if (payload.type === "assignment_update" || payload.type === "assignment_idle") {
       hubConnectionVerified = true;
       renderAssignmentFromListenerEvent(payload);
@@ -1595,12 +1596,11 @@ async function ensureRunnerListenerEvents() {
     if (payload.type === "error") {
       const detail = payload.detail || "Runner process error.";
       appendLog(`Runner process error: ${detail}`);
-      childProcess = null;
       if (currentFirstRunUploadRunId()) {
         renderAssignmentFromHandoff({ force: true });
       }
-      setRunnerButtonsDisabled("start", false);
-      setRunnerButtonsDisabled("stop", true);
+      setRunnerButtonsDisabled("start", true);
+      setRunnerButtonsDisabled("stop", false);
       setStatus("Failed", "error");
       renderLocalReadinessChecklist();
       resolveRunnerStartupWaiters(new Error(String(detail)));
