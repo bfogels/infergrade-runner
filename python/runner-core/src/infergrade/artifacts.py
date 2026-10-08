@@ -380,7 +380,7 @@ def _download_remote_artifact(
 ) -> None:
     """Download a remote artifact, falling back to curl when stdlib transport fails."""
     try:
-        with urllib_request.urlopen(
+        with open_artifact_request(
             _request_for_url(download_url), context=verified_https_context(download_url)
         ) as response, open(destination_path, "wb") as handle:
             content_length = response.headers.get("Content-Length") if getattr(response, "headers", None) else None
@@ -437,7 +437,7 @@ def _download_with_curl(
         _download_with_bounded_curl(download_url, destination_path, expected_size_bytes)
         return
     header_config = _curl_header_config(_auth_headers(download_url))
-    command = ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY
+    command = ["curl", "--disable", "-L", "--fail"] + _CURL_HTTPS_ONLY
     run_kwargs = {"capture_output": True, "text": True}
     if header_config:
         command.extend(["-K", "-"])
@@ -457,7 +457,7 @@ def _download_with_curl(
 def _download_with_bounded_curl(download_url: str, destination_path: str, expected_size_bytes: int) -> None:
     """Stream curl output through Runner so the byte cap does not depend on curl version."""
     header_config = _curl_header_config(_auth_headers(download_url))
-    command = ["curl", "-L", "--fail", "--silent", "--show-error"] + _CURL_HTTPS_ONLY
+    command = ["curl", "--disable", "-L", "--fail", "--silent", "--show-error"] + _CURL_HTTPS_ONLY
     if header_config:
         command.extend(["-K", "-"])
     command.append(download_url)
@@ -529,7 +529,7 @@ def _fetch_huggingface_siblings(repo_id: str) -> list:
     """Fetch sibling filenames for a Hugging Face model, using curl when needed."""
     url = "https://huggingface.co/api/models/%s" % urllib_parse.quote(repo_id, safe="/")
     try:
-        with urllib_request.urlopen(_request_for_url(url), context=verified_https_context(url)) as response:
+        with open_artifact_request(_request_for_url(url), context=verified_https_context(url)) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except Exception as exc:
         if not _should_fallback_to_curl(exc):
@@ -541,7 +541,7 @@ def _fetch_huggingface_siblings(repo_id: str) -> list:
 def _fetch_json_with_curl(url: str) -> Dict[str, object]:
     """Fetch JSON via curl as a pragmatic fallback on local Python SSL issues."""
     header_config = _curl_header_config(_auth_headers(url))
-    command = ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY
+    command = ["curl", "--disable", "-L", "--fail"] + _CURL_HTTPS_ONLY
     run_kwargs = {"capture_output": True, "text": True}
     if header_config:
         command.extend(["-K", "-"])
@@ -555,6 +555,31 @@ def _fetch_json_with_curl(url: str) -> Dict[str, object]:
         message = (completed.stderr or completed.stdout or "").strip()
         raise RuntimeError("curl failed while fetching %s: %s" % (url, message or "unknown error"))
     return json.loads(completed.stdout)
+
+
+class CredentialSafeRedirect(urllib_request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib_parse.urlparse(newurl)
+        if target.scheme != "https":
+            raise urllib_error.HTTPError(newurl, code, "Artifact redirect must use HTTPS", headers, fp)
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None:
+            # urllib normally copies Authorization to redirected hosts. A
+            # public CDN may serve bytes, but never receives the HF credential.
+            try:
+                same_origin = target.hostname == "huggingface.co" and target.port in (None, 443) and not target.username and not target.password
+            except ValueError:
+                same_origin = False
+            if not same_origin:
+                redirected.remove_header("Authorization")
+        return redirected
+
+
+def open_artifact_request(request, context=None, timeout=None):
+    opener = urllib_request.build_opener(
+        CredentialSafeRedirect(), urllib_request.HTTPSHandler(context=context)
+    )
+    return opener.open(request, timeout=timeout) if timeout is not None else opener.open(request)
 
 
 def _request_for_url(url: str):
@@ -586,12 +611,37 @@ def _auth_headers(url: str) -> Dict[str, str]:
 
 def _huggingface_token(url: str) -> Optional[str]:
     parsed = urllib_parse.urlparse(url)
-    if parsed.scheme != "https" or parsed.hostname != "huggingface.co":
+    if parsed.scheme != "https" or parsed.hostname != "huggingface.co" or parsed.username or parsed.password:
+        return None
+    try:
+        if parsed.port not in (None, 443):
+            return None
+    except ValueError:
         return None
     for env_name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HUGGINGFACE_TOKEN"):
         token = (os.environ.get(env_name) or "").strip()
         if token:
             return token
+    # Reuse the active personal access token written by `hf auth login`.
+    # Environment credentials retain their existing precedence. Never read
+    # this file for other origins or send it to InferGrade.
+    hf_home = os.environ.get("HF_HOME") or os.path.join(
+        os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "huggingface"
+    )
+    token_path = os.path.expanduser(os.environ.get("HF_TOKEN_PATH") or os.path.join(hf_home, "token"))
+    try:
+        import stat
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+        fd = os.open(token_path, flags)
+        with os.fdopen(fd, "rb") as handle:
+            metadata = os.fstat(handle.fileno())
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 4096:
+                return None
+            token = handle.read(4097).decode("utf-8").strip()
+        if token.startswith("hf_") and 20 <= len(token) <= 256 and all(c.isascii() and (c.isalnum() or c == "_") for c in token):
+            return token
+    except (OSError, UnicodeError):
+        pass
     return None
 
 
