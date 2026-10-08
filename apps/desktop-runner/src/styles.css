@@ -1414,3 +1414,9 @@ h4 {
 .desktop-machine-settings h2 { font-size: 21px; margin-top: 0; }
 [data-model-cache-list] label { display: flex; align-items: center; gap: 6px; }
 [data-model-cache-list] input[type="checkbox"] { width: 16px; height: 16px; margin: 0; }
+
+.desktop-admission h2 { font-size:21px; line-height:1.25; margin:0 0 18px; }
+.desktop-admission .background-toggle { display:flex; flex-direction:row; align-items:center; gap:10px; }
+.desktop-admission .background-toggle input { width:16px; height:16px; min-height:0; flex:none; }
+.desktop-admission p { margin:14px 0; }
+.desktop-admission button { width:auto; }

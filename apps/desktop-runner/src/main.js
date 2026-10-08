@@ -1,3 +1,4 @@
+import {initAdmissionSettings} from './admissionSettings.js';
 import {initMachineSettings} from './machineSettings.js';
 import {initBackgroundSettings,listenerEventMatches} from './backgroundSettings.js';
 import { initModelDiscovery, selectableLocalModel } from './modelDiscovery.js';
@@ -372,11 +373,13 @@ function renderPrimaryReadiness() {
     primaryStateMessage.textContent = presentation.message;
   }
   if (listenerTitle) {
-    listenerTitle.textContent = listening ? "Listening for Hub" : "Listening paused";
+    listenerTitle.textContent = pairingAuthFailure?.invalid ? "Pairing needed" : document.documentElement.dataset.admissionPaused === "unknown" ? "Admission state unconfirmed" : document.documentElement.dataset.admissionPaused === "true" ? "New benchmarks paused" : listening ? "Listening for Hub" : "Listener stopped";
   }
   if (listenerMessage) {
     listenerMessage.textContent = pairingAuthFailure?.invalid
       ? "Pair this machine again before it can accept Hub-assigned work."
+      : document.documentElement.dataset.admissionPaused === "unknown" ? "Refresh the saved admission state. Current work continues."
+      : document.documentElement.dataset.admissionPaused === "true" ? "New benchmarks are paused. Queued work keeps its place; any active benchmark continues."
       : listening
       ? "This machine can receive Hub-assigned runs. Keep the app open while work is active."
       : "Pairing is saved. Start listening when this machine should accept Hub-assigned work.";
@@ -3775,3 +3778,10 @@ initBackgroundSettings({invoke:loadTauriInvoke,listen:async callback=>{
 },onBlocked:()=>showDesktopPage('settings')});
 
  desktopMachineSettings=initMachineSettings({invoke:loadTauriInvoke});
+
+initAdmissionSettings({invoke:loadTauriInvoke,onState:state=>{
+ document.documentElement.dataset.admissionPaused=state.error?'unknown':state.paused===true?'true':state.paused===false?'false':'unknown';
+ renderLocalReadinessChecklist();
+ if(listenerTitle && state.error&&!pairingAuthFailure?.invalid)listenerTitle.textContent='Admission state unconfirmed';
+ if(listenerMessage && state.error&&!pairingAuthFailure?.invalid)listenerMessage.textContent='Refresh the saved admission state. Current work continues.';
+}});
