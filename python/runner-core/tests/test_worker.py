@@ -15,6 +15,13 @@ DESKTOP_EVENT_PREFIX = "INFERGRADE_DESKTOP_EVENT "
 
 
 class WorkerTests(unittest.TestCase):
+    def setUp(self):
+        admission_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(admission_dir.cleanup)
+        admission_env = mock.patch.dict(os.environ, {"INFERGRADE_CONFIG_DIR": admission_dir.name})
+        admission_env.start()
+        self.addCleanup(admission_env.stop)
+
     def test_worker_once_returns_unclaimed_when_no_job_available(self):
         messages = []
         with mock.patch("infergrade.worker.claim_run_job", return_value={"run": None}):

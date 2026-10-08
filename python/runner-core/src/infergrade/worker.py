@@ -9,6 +9,7 @@ import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from infergrade import __version__
+from infergrade.admission import claim_admission
 from infergrade.cache_control import cache_read_lease, request_cache_lease
 from infergrade.doctor import collect_runner_diagnostics, run_doctor
 from infergrade.pairing import load_runner_profile
@@ -496,18 +497,24 @@ def run_worker_once(
 ) -> Dict[str, Any]:
     """Claim and execute at most one run job."""
     resolved_worker_id = worker_id or _default_worker_id()
-    claimed = claim_run_job(
-        api_url,
-        worker_id=resolved_worker_id,
-        execution_mode=execution_mode,
-        run_id=run_id,
-        run_config_id=run_config_id,
-        provider_id=provider_id,
-        instance_type_id=instance_type_id,
-        hostname=hostname or socket.gethostname(),
-        api_token=api_token,
-        run_token=run_token,
-    )
+    with claim_admission() as allowed:
+        if not allowed:
+            if emit_progress and emit_idle_status:
+                emit_progress("New benchmarks are paused. Queued jobs keep their place.")
+            _emit_desktop_event(emit_progress, "admission_status", paused=True)
+            return {"claimed": False, "worker_id": resolved_worker_id, "admission_paused": True}
+        claimed = claim_run_job(
+            api_url,
+            worker_id=resolved_worker_id,
+            execution_mode=execution_mode,
+            run_id=run_id,
+            run_config_id=run_config_id,
+            provider_id=provider_id,
+            instance_type_id=instance_type_id,
+            hostname=hostname or socket.gethostname(),
+            api_token=api_token,
+            run_token=run_token,
+        )
     if claimed.get("error") or ("detail" in claimed and "run" not in claimed):
         raise RuntimeError(_claim_error_message(claimed))
     run_job = claimed.get("run")
@@ -657,7 +664,7 @@ def run_worker_loop(
                 hostname=hostname or socket.gethostname(),
                 provider_id=provider_id,
                 instance_type_id=instance_type_id,
-                metadata={"message": "Runner is listening for more work."},
+                metadata={"message": "New benchmarks are paused; queued jobs keep their place." if result.get("admission_paused") else "Runner is listening for more work.", "admission_paused": bool(result.get("admission_paused"))},
                 environment=runner_snapshot.get("environment"),
                 contract=runner_snapshot.get("contract"),
                 diagnostics=runner_snapshot.get("diagnostics"),

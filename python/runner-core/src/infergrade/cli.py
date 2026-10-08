@@ -338,6 +338,10 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     _add_api_token_argument(run_job_parser)
     _add_run_token_argument(run_job_parser)
 
+    admission_parser = subparsers.add_parser("admission", help="Pause or resume new machine benchmark claims without interrupting active work.")
+    admission_parser.add_argument("action", choices=("status", "pause", "resume"))
+    admission_parser.add_argument("--json", action="store_true")
+
     start_parser = subparsers.add_parser("start", help="Start a long-lived local runner that listens for Hub-backed local jobs.")
     start_parser.add_argument("--api-url")
     start_parser.add_argument("--execution-mode", choices=("local_container", "local_native"))
@@ -646,6 +650,17 @@ def main(argv: Optional[list] = None) -> int:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
     parser = build_parser(show_advanced="--all" in raw_argv)
     args = parser.parse_args(argv)
+
+    if args.command == "admission":
+        from infergrade.admission import admission_status, set_admission_paused
+        try:
+            state = admission_status() if args.action == "status" else set_admission_paused(args.action == "pause")
+        except (RuntimeError, OSError) as exc:
+            raise SystemExit(str(exc)) from exc
+        print(json.dumps(state, sort_keys=True) if args.json else
+              "New benchmarks paused; active work continues." if state["paused"] else
+              "New benchmarks enabled.")
+        return 0
 
     if args.command == "show-profiles":
         payload = {
@@ -1169,7 +1184,7 @@ def main(argv: Optional[list] = None) -> int:
         if args.json:
             print(json.dumps(result, indent=2, sort_keys=True))
         elif args.once:
-            print("Benchmark completed." if result.get("completed") else "No benchmark is queued for this runner.")
+            print("New benchmarks are paused; queued jobs keep their place." if result.get("admission_paused") else "Benchmark completed." if result.get("completed") else "No benchmark is queued for this runner.")
         elif args.autopilot:
             print("Benchmark plan finished · %s job%s processed." % (
                 result.get("processed_jobs", 0),
