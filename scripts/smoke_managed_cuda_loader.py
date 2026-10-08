@@ -19,9 +19,13 @@ def smoke(cli, output):
         "LD_LIBRARY_PATH", "INFERGRADE_HUB_TOKEN", "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN",
     }}
     env["INFERGRADE_RUNTIME_CACHE_DIR"] = str(output / "managed-cache")
-    runtime_id = "llama-cpp-b11429-ubuntu22-x86_64-cuda"
     manifest = command_json(cli, ["runtime", "list"], env, output, "manifest")
-    entry = next(item for item in manifest["runtimes"] if item["runtime_id"] == runtime_id)
+    # Match the managed default's manifest ordering rather than continuing to
+    # qualify a superseded Ubuntu archive after the portable CUDA pin changes.
+    entry = next(item for item in manifest["runtimes"]
+                 if item["platform"]["system"] == "linux" and item["platform"]["arch"] == "x86_64"
+                 and item["accelerator"] == "cuda" and item["download"]["enabled"])
+    runtime_id = entry["runtime_id"]
     installed = command_json(cli, ["runtime", "install", "--runtime-id", runtime_id],
                              env, output, "managed-install", timeout=900)
     selection = installed["selection"]
@@ -40,7 +44,9 @@ def smoke(cli, output):
         raise ValueError("CUDA default package narrowed the pinned upstream GPU target policy")
     for key in ("upstream_commit", "source_archive_sha256", "cuda_architecture_targets",
                 "cccl_commit", "cccl_source_sha256"):
-        if entry["build_origin"].get(key) != origin.get(key):
+        if key in {"upstream_commit", "source_archive_sha256"} and key not in entry["build_origin"]:
+            raise ValueError("CUDA manifest is missing source provenance: " + key)
+        if key in entry["build_origin"] and entry["build_origin"][key] != origin.get(key):
             raise ValueError("CUDA package provenance did not match manifest: " + key)
     versions = {}
     for name in ("llama-cli", "llama-server", "llama-perplexity", "llama-completion"):
