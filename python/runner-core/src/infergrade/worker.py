@@ -11,7 +11,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from infergrade import __version__
 from infergrade.admission import admission_heartbeat_metadata, claim_admission
 from infergrade.cache_control import cache_read_lease, request_cache_lease
-from infergrade.cuda_device_policy import apply_policy, policy_heartbeat_metadata
+from infergrade.cuda_device_policy import policy_heartbeat_metadata
+from infergrade.cuda_job_choices import apply_job_choice, heartbeat_metadata as choice_heartbeat_metadata
 from infergrade.doctor import collect_runner_diagnostics, run_doctor
 from infergrade.pairing import load_runner_profile
 from infergrade.paths import resolve_worker_output_dir
@@ -31,7 +32,7 @@ from infergrade.transport import (
 )
 
 def _machine_metadata(metadata=None):
-    return policy_heartbeat_metadata(admission_heartbeat_metadata(metadata))
+    return choice_heartbeat_metadata(policy_heartbeat_metadata(admission_heartbeat_metadata(metadata)))
 
 
 DESKTOP_EVENT_ENV = "INFERGRADE_DESKTOP_EVENTS"
@@ -192,7 +193,7 @@ def execute_run_job(
             request.cloud_provider = cloud.get("provider_id")
         if cloud.get("instance_type_id"):
             request.cloud_instance_type = cloud.get("instance_type_id")
-        apply_policy(request, run_job.get("native_device_policy_revision"), hub_job=True)
+        apply_job_choice(request, run_job)
         request_leases.enter_context(request_cache_lease(request))
         heartbeat_run_job(
             api_url,
