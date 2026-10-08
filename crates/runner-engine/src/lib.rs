@@ -3460,7 +3460,10 @@ mod tests {
         .unwrap();
         set_executable_if_needed(&path).unwrap();
         let error = smoke_runtime_binary(&path).expect_err("failed version smoke");
-        assert!(error.contains("GLIBC_2.38 not found"));
+        assert!(
+            error.contains("GLIBC_2.38 not found"),
+            "synthetic loader smoke error: {error}"
+        );
         let _ = fs::remove_file(path);
     }
 

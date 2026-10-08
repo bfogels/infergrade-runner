@@ -10,7 +10,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
-from infergrade.admission import admission_status, claim_admission, set_admission_paused
+from infergrade.admission import admission_heartbeat_metadata, admission_status, claim_admission, set_admission_paused
 from infergrade.worker import run_worker_loop, run_worker_once
 
 
@@ -155,3 +155,42 @@ class AdmissionTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(3)
+
+    def test_active_heartbeat_snapshot_never_waits_on_claim_lock_or_fails_on_corruption(self):
+        set_admission_paused(True)
+        with claim_admission():
+            result = admission_heartbeat_metadata({"message": "Scoring active job"})
+        self.assertEqual(result, {"message": "Scoring active job", "admission_paused": True})
+        Path(self.directory.name, "admission.json").write_text("broken")
+        with mock.patch("infergrade.admission.file_lock", side_effect=AssertionError("diagnostics must not lock")):
+            unknown = admission_heartbeat_metadata({"message": "Uploading active job"})
+        self.assertIsNone(unknown["admission_paused"])
+        self.assertEqual(unknown["message"], "Uploading active job")
+        self.assertIn("repair", unknown["admission_warning"])
+        with self.assertRaises(RuntimeError):
+            with claim_admission():
+                pass
+
+    def test_pause_and_corrupt_preference_during_active_execution_do_not_abort_upload(self):
+        request = mock.Mock()
+        request.execution_mode = "local_native"
+        request.output_dir = None
+        request.quant_artifact_cache_dir = None
+        request.cloud_provider = None
+        request.cloud_instance_type = None
+        request.simulate = True
+        def execute(request, emit_progress=None):
+            set_admission_paused(True)
+            emit_progress("Running deployment profile interactive_chat_v1...")
+            Path(self.directory.name, "admission.json").write_text("broken")
+            return {"bundle_id": "qb_test", "output_dir": request.output_dir}
+        with mock.patch.dict(os.environ, {"INFERGRADE_RUNNER_OUTPUT_ROOT": self.directory.name}), mock.patch("infergrade.worker.claim_run_job", return_value={"run":{"run_id":"run_active","run_config_id":"cfg","execution_mode":"local_native"}}), mock.patch("infergrade.worker.fetch_run_config", return_value={}), mock.patch("infergrade.worker.request_from_run_config_document", return_value=request), mock.patch("infergrade.worker.run_doctor", return_value={"ok":True,"checks":[]}), mock.patch("infergrade.worker.load_progress", return_value={}), mock.patch("infergrade.worker.run_infergrade", side_effect=execute), mock.patch("infergrade.worker.upload_run_bundle", return_value={"stored":True}) as upload, mock.patch("infergrade.worker.complete_run_job", return_value={"run":{"run_id":"run_active","status":"completed"}}), mock.patch("infergrade.worker.fail_run_job") as failure, mock.patch("infergrade.worker.heartbeat_run_job"), mock.patch("infergrade.worker.heartbeat_runner") as heartbeat:
+            result = run_worker_once("http://localhost:8000", "local_native", api_token="test_only_authority", simulate=True, emit_progress=lambda line:None)
+        self.assertTrue(result["completed"])
+        upload.assert_called_once()
+        failure.assert_not_called()
+        records = [call.kwargs for call in heartbeat.call_args_list]
+        self.assertTrue(any(row["status"]=="busy" and row["current_run_id"]=="run_active" and row["metadata"]["admission_paused"] is True for row in records))
+        self.assertTrue(any(row["metadata"]["admission_paused"] is None for row in records))
+        self.assertIsNone(records[-1]["metadata"]["admission_paused"])
+        self.assertEqual(records[-1]["status"], "listening")

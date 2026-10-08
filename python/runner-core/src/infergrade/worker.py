@@ -9,7 +9,7 @@ import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from infergrade import __version__
-from infergrade.admission import claim_admission
+from infergrade.admission import admission_heartbeat_metadata, claim_admission
 from infergrade.cache_control import cache_read_lease, request_cache_lease
 from infergrade.doctor import collect_runner_diagnostics, run_doctor
 from infergrade.pairing import load_runner_profile
@@ -126,7 +126,7 @@ def execute_run_job(
             hostname=hostname or socket.gethostname(),
             provider_id=provider_id,
             instance_type_id=instance_type_id,
-            metadata={"message": message} if message else None,
+            metadata=admission_heartbeat_metadata({"message": message} if message else None),
             environment=(runner_snapshot or {}).get("environment"),
             contract=(runner_snapshot or {}).get("contract"),
             diagnostics=(runner_snapshot or {}).get("diagnostics"),
@@ -585,6 +585,7 @@ def run_worker_loop(
         instance_type_id=instance_type_id,
         capabilities={"run_token_supported": True, "auto_upload": True},
         version=__version__,
+        metadata=admission_heartbeat_metadata(),
         environment=runner_snapshot.get("environment"),
         contract=runner_snapshot.get("contract"),
         diagnostics=runner_snapshot.get("diagnostics"),
@@ -597,7 +598,7 @@ def run_worker_loop(
         hostname=hostname or socket.gethostname(),
         provider_id=provider_id,
         instance_type_id=instance_type_id,
-        metadata={"message": "Runner registered and is listening for jobs."},
+        metadata=admission_heartbeat_metadata({"message": "Runner registered and is listening for jobs."}),
         environment=runner_snapshot.get("environment"),
         contract=runner_snapshot.get("contract"),
         diagnostics=runner_snapshot.get("diagnostics"),
@@ -643,7 +644,7 @@ def run_worker_loop(
                 hostname=hostname or socket.gethostname(),
                 provider_id=provider_id,
                 instance_type_id=instance_type_id,
-                metadata={"message": "Last claim failed: %s" % error_summary},
+                metadata=admission_heartbeat_metadata({"message": "Last claim failed: %s" % error_summary}),
                 environment=runner_snapshot.get("environment"),
                 contract=runner_snapshot.get("contract"),
                 diagnostics=runner_snapshot.get("diagnostics"),
@@ -664,7 +665,7 @@ def run_worker_loop(
                 hostname=hostname or socket.gethostname(),
                 provider_id=provider_id,
                 instance_type_id=instance_type_id,
-                metadata={"message": "New benchmarks are paused; queued jobs keep their place." if result.get("admission_paused") else "Runner is listening for more work.", "admission_paused": bool(result.get("admission_paused"))},
+                metadata=admission_heartbeat_metadata({"message": "New benchmarks are paused; queued jobs keep their place." if result.get("admission_paused") else "Runner is listening for more work."}),
                 environment=runner_snapshot.get("environment"),
                 contract=runner_snapshot.get("contract"),
                 diagnostics=runner_snapshot.get("diagnostics"),
