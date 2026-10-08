@@ -197,6 +197,25 @@ class NativeCudaGuardsTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Device fallback'):
                 _require_native_cuda_offload(request, bad)
 
+    def test_explicit_accelerator_device_conflicts_fail_in_both_directions(self):
+        for api in ('metal', 'vulkan', 'rocm', 'opencl', 'sycl'):
+            request = self.request(api)
+            request.llama_cpp_cli_path = '/custom/llama-cli'
+            request.backend_flags = ['--device', 'CUDA1']
+            with self.assertRaisesRegex(RuntimeError, 'non-CUDA runtime selector'):
+                _native_backend_flags(request)
+            self.assertEqual(request.runtime_selector['accelerator']['api'], api)
+        for device in ('Vulkan0', 'Metal', 'none', 'CPU'):
+            request = self.request('cuda')
+            request.backend_flags = ['--device', device]
+            with self.assertRaisesRegex(RuntimeError, 'non-CUDA devices'):
+                _native_backend_flags(request)
+        request = self.request()
+        request.runtime_selector['delivery']['binary_set'] = 'llama_cpp_linux_cuda_x86_64'
+        request.backend_flags = ['--device=Vulkan0']
+        with self.assertRaisesRegex(RuntimeError, 'non-CUDA devices'):
+            _native_backend_flags(request)
+
     def test_conflicting_mixed_or_cpu_cuda_selection_fails_before_execution(self):
         for flags in (['--device', 'CUDA0', '-dev', 'CUDA1'], ['--device', 'CUDA0,CPU'],
                       ['--device', 'CUDA0,CUDA0'], ['--device', 'CUDA1000'], ['--device']):

@@ -137,7 +137,7 @@ def requested_native_cuda_devices(request: RunRequest) -> Optional[Tuple[str, ..
     if request.execution_mode != "local_native" or request.backend != "llama.cpp":
         return None
     values = []
-    flags = request.backend_flags
+    flags = getattr(request, "backend_flags", [])
     for index, flag in enumerate(flags):
         if flag in ("--device", "-dev"):
             if index + 1 >= len(flags):
@@ -145,7 +145,11 @@ def requested_native_cuda_devices(request: RunRequest) -> Optional[Tuple[str, ..
             values.append(flags[index + 1])
         elif flag.startswith(("--device=", "-dev=")):
             values.append(flag.split("=", 1)[1])
-    if not values or not any("CUDA" in value.upper() for value in values):
+    if not values:
+        return None
+    if not any("CUDA" in value.upper() for value in values):
+        if _native_cuda_selector_required(request):
+            raise RuntimeError("A required CUDA runtime cannot select non-CUDA devices.")
         return None
     if len(set(values)) != 1:
         raise RuntimeError("Conflicting native CUDA device selections are not accepted.")
@@ -154,17 +158,22 @@ def requested_native_cuda_devices(request: RunRequest) -> Optional[Tuple[str, ..
         re.fullmatch(r"CUDA[0-9]{1,3}", device) for device in devices
     ):
         raise RuntimeError("Select distinct explicit native CUDA devices.")
-    if ((request.runtime_selector or {}).get("accelerator") or {}).get("api") == "cpu":
+    api = ((request.runtime_selector or {}).get("accelerator") or {}).get("api")
+    if api == "cpu":
         raise RuntimeError("A CPU runtime selector cannot request CUDA devices.")
+    if api not in (None, "unknown", "cuda"):
+        raise RuntimeError("A non-CUDA runtime selector cannot request CUDA devices.")
     return tuple(devices)
 
 
 def native_cuda_required(request: RunRequest) -> bool:
-    """Bind native accelerator intent to explicit selectors or the selected package."""
+    """Bind native accelerator intent without reconciling conflicting requests."""
+    return bool(requested_native_cuda_devices(request)) or _native_cuda_selector_required(request)
+
+
+def _native_cuda_selector_required(request: RunRequest) -> bool:
     if request.execution_mode != "local_native" or request.backend != "llama.cpp":
         return False
-    if requested_native_cuda_devices(request):
-        return True
     selector = request.runtime_selector or {}
     api = (selector.get("accelerator") or {}).get("api")
     if api == "cpu":
