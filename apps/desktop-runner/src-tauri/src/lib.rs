@@ -3,7 +3,9 @@ mod cache_lease;
 mod desktop_activity;
 mod device_pairing;
 mod finish_notifications;
+mod gpu_settings;
 mod hf_credentials;
+use gpu_settings::{desktop_gpu_status, set_desktop_gpu_choice};
 mod machine_settings;
 mod private_benchmark;
 mod run_results;
@@ -2670,6 +2672,8 @@ pub fn run() {
             hf_credentials::clear_desktop_hf_credential,
             desktop_model_cache_status,
             desktop_admission_status,
+            desktop_gpu_status,
+            set_desktop_gpu_choice,
             set_desktop_admission_paused,
             clear_desktop_model_cache,
             set_desktop_model_keep,
