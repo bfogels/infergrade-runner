@@ -64,6 +64,9 @@ jobs:
           npm ci
           npm run build:windows
 
+      - name: Verify reported platform hardware model names
+        run: python ./scripts/check_platform_hardware_identity.py
+
       - name: Verify native and Python cache lock interoperability
         run: cargo test -p infergrade_desktop_runner --lib cache_lease --locked
 
@@ -233,6 +236,9 @@ jobs:
           cd apps/desktop-runner
           npm ci
           npm run build:linux
+
+      - name: Verify reported platform hardware model names
+        run: python ./scripts/check_platform_hardware_identity.py
 
       - name: Verify native and Python cache lock interoperability
         run: cargo test -p infergrade_desktop_runner --lib cache_lease --locked
