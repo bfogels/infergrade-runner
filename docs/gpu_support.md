@@ -24,7 +24,13 @@ Linux builds declare what they need in `platform`:
 
 ## Current coverage (llama.cpp b11429)
 
-| Platform | Build | Works on |
+The table describes packaged runtime availability and declared ABI/driver
+requirements. Loader checks on CPU-only CI do not prove physical GPU inference,
+multi-GPU placement, or completed benchmark/upload execution. AMD Vulkan PCI/name
+discovery includes integrated APUs; without architecture proof it reports memory
+architecture as unknown rather than dedicated VRAM.
+
+| Platform | Build | ABI/driver requirements |
 |---|---|---|
 | macOS Apple Silicon | upstream Metal | macOS (Apple Silicon) |
 | Windows x86_64 + NVIDIA | upstream CUDA 12.4 | Windows 10/11, current NVIDIA driver |

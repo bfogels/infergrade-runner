@@ -268,6 +268,24 @@ class EnvironmentTests(unittest.TestCase):
             gpu = _detect_vulkan_gpu(root)
         self.assertEqual((gpu["accelerator_count"], gpu["accelerator_model"]), (2, "AMD GPU"))
 
+    @mock.patch("infergrade.environment.platform.system", return_value="Linux")
+    def test_amd_apu_reserved_vram_does_not_prove_discrete_memory(self, _system):
+        with tempfile.TemporaryDirectory() as root:
+            self._fake_drm(root, {
+                "card0": {"vendor": "0x1002\n", "device": "0x15bf\n", "class": "0x030000\n",
+                          "product_name": "AMD Radeon 780M\n", "mem_info_vram_total": "536870912\n"},
+            })
+            gpu = _detect_vulkan_gpu(root)
+        self.assertEqual(gpu["memory_architecture"], "unknown")
+        self.assertEqual(gpu["accelerator_vram_gb"], 0.5)
+        with mock.patch("infergrade.environment._detect_nvidia_gpu", return_value=None), \
+                mock.patch("infergrade.environment._detect_amd_gpu", return_value=None), \
+                mock.patch("infergrade.environment._detect_apple_silicon_gpu", return_value=None), \
+                mock.patch("infergrade.environment._detect_vulkan_gpu", return_value=gpu), \
+                mock.patch("infergrade.runtimes.selected_llama_cpp_runtime", return_value={"accelerator": "vulkan"}):
+            payload = capture_environment("local_native")
+        self.assertEqual(payload["memory_architecture"], "unknown")
+
     def test_capture_environment_prefers_detected_accelerator(self):
         with mock.patch(
             "infergrade.environment._detect_nvidia_gpu",
