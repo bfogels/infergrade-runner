@@ -25,7 +25,7 @@ cleanup() {
   rm -rf "$build_dir"
 }
 trap cleanup EXIT
-curl --fail --location --retry 3 --output "$build_dir/source.tar.gz" \
+curl --fail --location --retry 3 --connect-timeout 15 --max-time 600 --output "$build_dir/source.tar.gz" \
   "https://github.com/ggml-org/llama.cpp/archive/$source_commit.tar.gz"
 printf '%s  %s\n' "$source_sha256" "$build_dir/source.tar.gz" | sha256sum --check
 mkdir "$build_dir/source"
@@ -33,7 +33,7 @@ tar -xzf "$build_dir/source.tar.gz" --strip-components=1 -C "$build_dir/source"
 cmake_extra=()
 if [ "$accelerator" = cuda ]; then
   # Match upstream's CUDA 12.8 release headers without a mutable Git checkout.
-  curl --fail --location --retry 3 --output "$build_dir/cccl.tar.gz" \
+  curl --fail --location --retry 3 --connect-timeout 15 --max-time 600 --output "$build_dir/cccl.tar.gz" \
     "https://github.com/NVIDIA/cccl/archive/$cccl_commit.tar.gz"
   printf '%s  %s\n' "$cccl_sha256" "$build_dir/cccl.tar.gz" | sha256sum --check
   mkdir "$build_dir/cccl"
@@ -43,7 +43,7 @@ if [ "$accelerator" = cuda ]; then
   for library in libcublas.so.12 libcublasLt.so.12 libcudart.so.12; do
     cp -L "/usr/local/cuda/lib64/$library" "$build_dir/redistributables/$library"
   done
-  curl --fail --location --retry 3 --output "$build_dir/redistributables/EULA.cuda.html" "$eula_url"
+  curl --fail --location --retry 3 --connect-timeout 15 --max-time 600 --output "$build_dir/redistributables/EULA.cuda.html" "$eula_url"
   printf '%s  %s\n' "$eula_sha256" "$build_dir/redistributables/EULA.cuda.html" | sha256sum --check
   cp "$build_dir/cccl/LICENSE" "$build_dir/redistributables/LICENSE.cccl"
   cmake_extra=(-DGGML_CUDA_CCCL_VERSION=v3.4.3 "-DFETCHCONTENT_SOURCE_DIR_CCCL=$build_dir/cccl")
