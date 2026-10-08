@@ -218,6 +218,16 @@ def _request_checks(request: RunRequest) -> List[Dict[str, Any]]:
                 checks.extend(_capability_image_checks(request))
     if request.execution_mode == "local_native":
         checks.extend(_native_runtime_checks(request, environment))
+        from infergrade.benchmark_catalog import capability_benchmark_ids_for_request
+        if "ifeval" in capability_benchmark_ids_for_request(request) and not request.simulate:
+            from infergrade.native_ifeval import preflight
+            try:
+                evaluator = preflight()
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                checks.append(_check("native_ifeval_bundle", "error", "Packaged offline IFEval evaluator is missing or failed verification. Repair the Runner installation before benchmarking.", {}))
+            else:
+                checks.append(_check("native_ifeval_bundle", "ok", "Packaged offline IFEval evaluator verified.", evaluator))
+
     if _uses_remote_artifact(request):
         checks.append(_binary_check("curl", "curl", "curl is available for resilient artifact downloads.", severity_if_missing="warning"))
         checks.append(_cache_dir_check(request))
