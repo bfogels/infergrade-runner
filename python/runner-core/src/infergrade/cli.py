@@ -81,7 +81,7 @@ ADVANCED_COMMANDS = {
     "show-capabilities",
     "observe-runtime",
 }
-DEFAULT_COMMANDS = ("doctor", "discover-runtimes", "cache", "install-runtime", "pair", "unpair", "start")
+DEFAULT_COMMANDS = ("benchmark-local", "doctor", "discover-runtimes", "cache", "install-runtime", "pair", "unpair", "start")
 
 
 class _InferGradeHelpFormatter(argparse.HelpFormatter):
@@ -167,6 +167,14 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser("run", help=_command_help("run", "Run or simulate an InferGrade bundle.", show_advanced))
     _add_run_request_arguments(run_parser)
+
+    local_parser = subparsers.add_parser("benchmark-local", help="Score a local GGUF privately; keep the report on this machine.")
+    local_parser.add_argument("--model-file", required=True)
+    local_parser.add_argument("--use-case", choices=("general_assistant", "agentic_coding", "reasoning"), default="general_assistant")
+    local_parser.add_argument("--tier", choices=("canary", "standard"), default="canary")
+    local_parser.add_argument("--llama-cpp-cli-path", required=True)
+    local_parser.add_argument("--llama-cpp-server-path", required=True)
+    local_parser.add_argument("--json", action="store_true")
 
     doctor_parser = subparsers.add_parser("doctor", help="Check whether this machine is ready to benchmark.")
     doctor_actions = set(doctor_parser._actions)
@@ -650,6 +658,20 @@ def main(argv: Optional[list] = None) -> int:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
     parser = build_parser(show_advanced="--all" in raw_argv)
     args = parser.parse_args(argv)
+
+    if args.command == "benchmark-local":
+        from infergrade.private_benchmark import run_private_benchmark
+        try:
+            result = run_private_benchmark(
+                args.model_file, args.use_case, args.tier,
+                args.llama_cpp_cli_path, args.llama_cpp_server_path,
+                emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise SystemExit("Private benchmark could not finish: %s" % exc) from exc
+        print(json.dumps(result, sort_keys=True) if args.json else
+              "Private benchmark finished. The result stayed on this machine.\nLocal report: %s" % result["report_path"])
+        return 0
 
     if args.command == "admission":
         from infergrade.admission import admission_status, set_admission_paused
