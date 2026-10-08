@@ -260,6 +260,9 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     cache_parser.add_argument("--clear-unkept", action="store_true")
     cache_parser.add_argument("--artifact-id")
     cache_parser.add_argument("--keep", choices=("yes", "no"))
+    cache_parser.add_argument("--limit-gb", choices=("25", "50", "100", "200", "none"))
+    cache_parser.add_argument("--trim-oldest", action="store_true", help="Trim unkept owned downloads when setting a limit; active cache readers block deletion.")
+    cache_parser.add_argument("--budget-status", action="store_true")
     cache_parser.add_argument("--json", action="store_true", help="Print the complete machine-readable result.")
 
     runtime_parser = subparsers.add_parser("install-runtime", help="Inspect, install, or select an explicit managed runtime.")
@@ -906,6 +909,20 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.command == "cache":
         from infergrade.cache_control import managed_status, clear_unkept, set_keep, download_starter
+        if args.limit_gb is not None or args.budget_status or args.trim_oldest:
+            from infergrade.cache_budget import budget_status, set_limit
+            try:
+                if args.managed_status or args.clear_unkept or args.keep or args.download_starter or args.prune_partials or args.artifact_id:
+                    raise ValueError("Choose one cache action; budget options cannot be combined with other cache actions.")
+                if args.trim_oldest and args.limit_gb is None:
+                    raise ValueError("Choose a limit when trimming oldest downloads.")
+                if args.dry_run and args.limit_gb is not None:
+                    raise ValueError("Budget updates do not support dry-run; no limit was changed.")
+                payload = set_limit(None if args.limit_gb == "none" else int(args.limit_gb), args.artifact_cache_dir, args.trim_oldest) if args.limit_gb is not None else budget_status(args.artifact_cache_dir)
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise SystemExit("Cache action failed: %s" % exc)
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
         if args.managed_status or args.clear_unkept or args.keep or args.download_starter:
             try:
                 if args.download_starter:
