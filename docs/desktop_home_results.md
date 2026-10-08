@@ -1,0 +1,7 @@
+# Home accepted results
+
+The Home completion card retains the upload outcome and offers View results. That explicit action uses the existing native desktop_run_results validator, which proves the saved Runner owns a completed Hub job and projects a bounded closed navigation policy. Listener events never supply accepted score or chart qualification. Compare actions open the exact source in the paired Hub; report-only results offer Open report. Context points show naturally completed and attempted counts while retaining the full score denominator. Multiple profiles use the verified title and deployment profile.
+
+A connection transition clears previous completion and result data. Each started listener binds its connection identity; later assignment/output events from a previous pairing cannot restore the prior completion. PID fencing and termination cleanup remain intact. Result requests coalesce and fence disconnect, job changes and A-to-B-to-A transitions; errors clear prior accepted data and allow retry.
+
+Four controller tests cover these boundaries. Browser QA used the actual prior native-validated own-account Mac receipt (88/124 tasks, 34.8167 score, 1.39571 seconds) in a scoped UI adapter: 1060x900 and 375 px, light/dark, no overflow, keyboard exact source action, identity reset. All four captures inspected; no fixture score, new benchmark, installed Mac GUI or OS keyring acceptance is claimed.

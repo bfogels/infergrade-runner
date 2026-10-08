@@ -50,7 +50,7 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, 0)
         help_text = output.getvalue()
-        self.assertIn("{doctor,discover-runtimes,cache,install-runtime,pair,unpair,start}", help_text)
+        self.assertIn("{benchmark-local,doctor,discover-runtimes,cache,install-runtime,pair,unpair,start}", help_text)
         self.assertIn("start               Start a long-lived local runner", help_text)
         self.assertIn("infergrade --all --help", help_text)
         self.assertNotIn("run-job", help_text)
