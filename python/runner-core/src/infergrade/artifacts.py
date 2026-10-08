@@ -13,6 +13,7 @@ from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
+from infergrade.cache_control import cache_read_lease, process_lock, record_install, touch_managed
 from infergrade.models import RunRequest
 from infergrade.tls import verified_https_context
 from infergrade.utils import ensure_dir, stable_hash
@@ -53,6 +54,7 @@ class ResolvedArtifact:
         }
 
 
+@cache_read_lease
 def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
     """Resolve the quantized weights for a run, downloading them when needed."""
     if not request.quant_artifact:
@@ -103,6 +105,7 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
         _verify_expected_size(cached_path, os.path.getsize(cached_path), expected_size_bytes)
         cached_sha = compute_file_sha256(cached_path)
         _verify_expected_sha256(cached_path, cached_sha, request.quant_artifact_sha256)
+        touch_managed(cache_dir, cached_path)
         return ResolvedArtifact(
             original_uri=resolved_artifact_uri,
             resolved_path=cached_path,
@@ -157,6 +160,8 @@ def resolve_quant_artifact(request: RunRequest) -> Optional[ResolvedArtifact]:
         _verify_expected_size(tmp_path, os.path.getsize(tmp_path), expected_size_bytes)
         _verify_expected_sha256(tmp_path, sha256, request.quant_artifact_sha256)
         cache_was_installed = _install_cache_file_without_overwrite(tmp_path, cache_path)
+        if cache_was_installed:
+            record_install(cache_dir, cache_path, sha256)
         if not cache_was_installed:
             _verify_expected_size(cache_path, os.path.getsize(cache_path), expected_size_bytes)
             sha256 = compute_file_sha256(cache_path)
@@ -216,6 +221,17 @@ def artifact_cache_status(cache_dir: Optional[str] = None) -> Dict[str, object]:
 
 
 def prune_partial_artifacts(
+    cache_dir: Optional[str] = None,
+    dry_run: bool = False,
+    min_age_seconds: int = DEFAULT_PARTIAL_ARTIFACT_MIN_AGE_SECONDS,
+) -> Dict[str, object]:
+    """Explicit legacy partial cleanup, fenced against current Runner readers."""
+    path = _normalized_cache_dir(cache_dir or default_artifact_cache_dir())
+    with process_lock(path, shared=False, blocking=False):
+        return _prune_partial_artifacts_unlocked(path, dry_run, min_age_seconds)
+
+
+def _prune_partial_artifacts_unlocked(
     cache_dir: Optional[str] = None,
     dry_run: bool = False,
     min_age_seconds: int = DEFAULT_PARTIAL_ARTIFACT_MIN_AGE_SECONDS,
@@ -731,7 +747,7 @@ def _is_local_artifact_reference(uri: str) -> bool:
 def _normalize_local_path(uri: str) -> str:
     """Normalize local artifact references into absolute filesystem paths."""
     if uri.startswith("file://"):
-        return urllib_parse.unquote(urllib_parse.urlparse(uri).path)
+        return urllib_request.url2pathname(urllib_parse.urlparse(uri).path)
     return os.path.abspath(uri)
 
 
