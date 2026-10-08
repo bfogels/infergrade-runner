@@ -215,7 +215,9 @@ def _vulkan_gpu_payload(vendor: str, models, vrams, count: Optional[int] = None)
         "accelerator_vram_gb": max(vrams) if vrams else None,
         "accelerator_count": max(1, count or len(models)),
         "hardware_class": "amd_gpu" if vendor == "amd" else "intel_gpu",
-        "memory_architecture": "discrete_vram",
+        # AMD PCI/name discovery also includes integrated APUs. A reported
+        # VRAM pool can be firmware-reserved UMA; it does not prove dedicated VRAM.
+        "memory_architecture": "unknown" if vendor == "amd" else "discrete_vram",
         "accelerator_api": "vulkan",
     }
 
