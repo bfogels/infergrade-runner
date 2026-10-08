@@ -86,7 +86,8 @@ class LocalModelsTests(unittest.TestCase):
             self.assertEqual(models.default_roots()[0], Path('/tmp/vllm-cache'))
 
     def test_conversion_refuses_extra_link_escape_and_fifo(self):
-        outside = self.root / 'secret'; outside.write_text('private')
+        outside = self.root / 'secret'
+        outside.write_text('private')
         (self.folder / 'extra.safetensors').symlink_to(outside)
         with self.assertRaises(ValueError):
             models._source_manifest(self.folder.resolve())
