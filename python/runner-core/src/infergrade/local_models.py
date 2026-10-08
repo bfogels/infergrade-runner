@@ -136,7 +136,8 @@ def discover(roots=None, converter=None):
                     entries = []
                     for entry in iterator:
                         if len(entries) >= MAX_ENTRIES - visited:
-                            partial = True; break
+                            partial = True
+                            break
                         entries.append(Path(entry.path))
             except OSError:
                 unreadable += 1
@@ -146,13 +147,15 @@ def discover(roots=None, converter=None):
                     row = checkpoint(folder, root, supported)
                     key = ('checkpoint', str(folder))
                     if key not in seen:
-                        seen.add(key); rows.append(row)
+                        seen.add(key)
+                        rows.append(row)
                 except (OSError, ValueError, json.JSONDecodeError):
                     unreadable += 1
             for path in entries:
                 visited += 1
                 if visited > MAX_ENTRIES or len(rows) >= MAX_MODELS:
-                    partial = True; break
+                    partial = True
+                    break
                 try:
                     if path.is_dir() and not path.is_symlink():
                         if depth < 8:

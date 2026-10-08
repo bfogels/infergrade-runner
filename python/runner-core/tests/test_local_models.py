@@ -41,14 +41,16 @@ class LocalModelsTests(unittest.TestCase):
         repo = hub / 'models--org--name'
         snapshot = repo / 'snapshots' / 'revision'
         blobs = repo / 'blobs'
-        snapshot.mkdir(parents=True); blobs.mkdir()
+        snapshot.mkdir(parents=True)
+        blobs.mkdir()
         for name in ['config.json', 'tokenizer.json', 'model.safetensors']:
             blob = blobs / ('blob-' + name)
             blob.write_bytes((self.folder / name).read_bytes())
             (snapshot / name).symlink_to(blob)
         (hub / 'misnamed.bin').write_bytes(b'GGUFfixture')
         (hub / 'fake.gguf').write_bytes(b'not gguf')
-        outside = self.root / 'outside.gguf'; outside.write_bytes(b'GGUF')
+        outside = self.root / 'outside.gguf'
+        outside.write_bytes(b'GGUF')
         (hub / 'escaped.gguf').symlink_to(outside)
         payload = models.discover([hub])
         self.assertEqual(len(payload['files']), 2)
