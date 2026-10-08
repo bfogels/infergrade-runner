@@ -158,3 +158,102 @@ def run_private_benchmark(model_file, use_case, tier, cli_path, server_path, emi
     )
     with request_cache_lease(lease_request):
         return _run_private_benchmark(model_file, use_case, tier, cli_path, server_path, emit_progress)
+
+
+def _bounded_json(path, limit):
+    fd = os.open(str(path), os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+    try:
+        if path.is_symlink() or not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError('Not a regular private result file.')
+        with os.fdopen(fd, 'rb', closefd=False) as handle:
+            data = handle.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError('Private result exceeds the reader bound.')
+        return json.loads(data)
+    finally:
+        os.close(fd)
+
+
+def private_benchmark_history():
+    """Read closed metadata from bounded, locally owned result directories."""
+    import re
+    root = Path(runner_config_dir()) / 'private-runs'
+    if root.parent.is_symlink() or root.is_symlink():
+        raise ValueError('Private benchmark storage refuses linked directories.')
+    if not root.exists():
+        return {'schema_version': 'infergrade.private_history.v1', 'results': [], 'truncated': False, 'unreadable_count': 0}
+    _directory(root)
+    entries = []
+    truncated = False
+    with os.scandir(root) as scan:
+        inspected = 0
+        for entry in scan:
+            inspected += 1
+            if inspected > 10000:
+                truncated = True
+                break
+            if re.fullmatch(r'private_[0-9a-f]{32}', entry.name) and entry.is_dir(follow_symlinks=False):
+                entries.append(entry.name)
+    rows, unreadable = [], 0
+    # Receipt timestamps provide ordering after a bounded scan; no paths from
+    # mutable receipt content are ever followed.
+    for identifier in entries:
+        directory = root / identifier
+        try:
+            _directory(directory)
+            value = _bounded_json(directory / 'receipt.json', 16384)
+            expected = {'schema_version', 'id', 'created_at', 'status', 'use_case', 'tier', 'model_filename', 'artifact_sha256', 'benchmark_check_ids', 'uploaded', 'bundle_id'}
+            if not isinstance(value, dict) or set(value) != expected or value['schema_version'] != SCHEMA or value['id'] != identifier or value['uploaded'] is not False:
+                raise ValueError('Invalid private receipt.')
+            if value['status'] not in ('running', 'completed', 'failed') or value['use_case'] not in CHECKS or value['tier'] not in ('canary', 'standard'):
+                raise ValueError('Invalid private state.')
+            if value['benchmark_check_ids'] != CHECKS[value['use_case']] + ['interactive_chat_v1'] or not re.fullmatch(r'[0-9a-f]{64}', value['artifact_sha256']):
+                raise ValueError('Invalid private check inventory.')
+            if not isinstance(value['model_filename'], str) or not 1 <= len(value['model_filename']) <= 4096 or not isinstance(value['created_at'], str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z', value['created_at']):
+                raise ValueError('Invalid private display metadata.')
+            bundle = directory / 'bundle'
+            if bundle.is_symlink() or (bundle / 'results').is_symlink():
+                raise ValueError('Linked private bundle.')
+            report = bundle / 'report.md'
+            report_available = report.is_file() and not report.is_symlink()
+            row = {key: value[key] for key in ('id', 'created_at', 'status', 'use_case', 'tier', 'model_filename', 'artifact_sha256')}
+            row.update(report_available=report_available, report_path=str(report) if report_available else None, capability_status=None, score=None, component_scores={})
+            row['_bundle_id'] = value['bundle_id']
+            rows.append(row)
+        except (OSError, ValueError, TypeError, AttributeError, RecursionError):
+            unreadable += 1
+    rows.sort(key=lambda row: (row['created_at'], row['id']), reverse=True)
+    latest = []
+    for row in rows[:50]:
+        bundle_id = row.pop('_bundle_id')
+        try:
+            if row['status'] == 'completed':
+                _history_capability(row, root / row['id'] / 'bundle', bundle_id)
+            latest.append(row)
+        except (OSError, ValueError, TypeError, AttributeError, RecursionError):
+            unreadable += 1
+    return {'schema_version': 'infergrade.private_history.v1', 'results': latest, 'truncated': truncated or len(rows) > 50, 'unreadable_count': unreadable}
+
+
+def _history_capability(row, bundle, bundle_id):
+    import math
+    import re
+    if not isinstance(bundle_id, str) or not re.fullmatch(r'qb_[0-9]{8}_[0-9]{6}_[0-9a-f]{8}', bundle_id):
+        raise ValueError('Invalid private bundle identity.')
+    record = _bounded_json(bundle / 'results' / 'interactive_chat_v1.json', 2 * 1024 * 1024)
+    if record.get('bundle_id') != bundle_id or record.get('result_id') != bundle_id + '_interactive_chat_v1' or record.get('configuration', {}).get('quant_artifact_sha256') != row['artifact_sha256']:
+        raise ValueError('Private result identity mismatch.')
+    capability = record.get('capability', {})
+    state = capability.get('capability_status')
+    if state is not None and state not in ('completed', 'partial', 'failed', 'skipped', 'simulated', 'unavailable', 'not_comparable'):
+        raise ValueError('Invalid capability state.')
+    row['capability_status'] = state
+    if state == 'not_comparable':
+        return
+    details = capability.get('capability_score_details', {})
+    score = capability.get('capability_score')
+    if details.get('score_ready') is True and type(score) in (int, float) and math.isfinite(score) and 0 <= score <= 1:
+        row['score'] = score
+    for name, score in capability.get('capability_component_scores', {}).items():
+        if name in CHECKS[row['use_case']] and type(score) in (int, float) and math.isfinite(score) and 0 <= score <= 1:
+            row['component_scores'][name] = score

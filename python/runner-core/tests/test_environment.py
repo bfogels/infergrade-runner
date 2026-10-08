@@ -16,6 +16,7 @@ from infergrade.environment import (
     _detect_machine_model,
     _hardware_label,
     _windows_model,
+    _windows_model_probe,
     _detect_nvidia_gpu,
     _detect_process_translation,
     capture_environment,
@@ -50,6 +51,18 @@ class EnvironmentTests(unittest.TestCase):
         failure = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid OEM output")
         with mock.patch("infergrade.environment.subprocess.run", side_effect=failure):
             self.assertIsNone(_windows_model("Win32_ComputerSystem", "Model"))
+
+    def test_windows_probe_diagnostics_are_bounded_codes_without_error_text(self):
+        import subprocess
+        for error, status in [(subprocess.TimeoutExpired('fixed probe', 5, output='private output'), 'timeout'),
+                              (OSError('private failure'), 'command_unavailable'),
+                              (UnicodeError('private output'), 'unreadable_output')]:
+            with mock.patch('infergrade.environment.subprocess.run', side_effect=error):
+                self.assertEqual(_windows_model_probe('Win32_ComputerSystem', 'Model'),
+                                 {'status': status, 'value': None})
+        with mock.patch('infergrade.environment.subprocess.run', return_value=mock.Mock(stdout='Default string')):
+            self.assertEqual(_windows_model_probe('Win32_ComputerSystem', 'Model'),
+                             {'status': 'missing_or_placeholder', 'value': None})
 
     def test_hardware_labels_reject_placeholders_controls_and_excessive_length(self):
         for label in [None, "unknown", "Default string", "System Product Name", "Bad\nName", "Bad\u0085Name", "x" * 257]:

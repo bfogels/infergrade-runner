@@ -1981,6 +1981,7 @@ dependencies = [
  "infergrade_runner_engine",
  "keyring",
  "libc",
+ "open",
  "mac-notification-sys",
  "notify-rust",
  "plist",

@@ -1,3 +1,4 @@
+import {initPrivateBenchmark} from './privateBenchmark.js';
 import {initFinishNotifications} from './finishNotifications.js';
 import {initStartupSettings} from './startupSettings.js';
 import {initAdmissionSettings} from './admissionSettings.js';
@@ -3778,7 +3779,9 @@ window.setTimeout(applyPreviewStateFromUrl, 50);
 // First-run setup shares the managed installer with Runtime options.
 setupRuntimeButton?.addEventListener("click", () => runtimeInstallManagedButton?.click());
 
-initModelDiscovery({invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
+const privateBenchmark=initPrivateBenchmark({invoke:loadTauriInvoke,onRun:()=>showDesktopPage('home')});
+
+initModelDiscovery({benchmarkFile:path=>privateBenchmark?.chooseFile(path),invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
   if(!await loadTauriInvoke())throw new Error('Desktop only');
   const {open}=await import('@tauri-apps/plugin-dialog');
   return open({directory:true,multiple:false,title:'Choose a local model folder'});

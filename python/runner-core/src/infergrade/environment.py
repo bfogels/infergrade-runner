@@ -335,14 +335,23 @@ def _read_hardware_text(path, limit=4096):
         return None
 
 
-def _windows_model(class_name, property_name):
+def _windows_model_probe(class_name, property_name):
     # Fixed callers below query model names only: no serial, UUID, account or network fields.
     script = "(Get-CimInstance -ClassName %s -ErrorAction Stop | Select-Object -First 1).%s" % (class_name, property_name)
     try:
         result = subprocess.run(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], check=True, capture_output=True, text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError, UnicodeError):
-        return None
-    return _hardware_label(result.stdout)
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout", "value": None}
+    except (OSError, subprocess.SubprocessError):
+        return {"status": "command_unavailable", "value": None}
+    except UnicodeError:
+        return {"status": "unreadable_output", "value": None}
+    value = _hardware_label(result.stdout)
+    return {"status": "available" if value else "missing_or_placeholder", "value": value}
+
+
+def _windows_model(class_name, property_name):
+    return _windows_model_probe(class_name, property_name)["value"]
 
 
 def _detect_cpu_model() -> str:

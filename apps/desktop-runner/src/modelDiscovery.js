@@ -8,7 +8,7 @@ export function discoveryRows(payload) {
     Number.isFinite(file?.size_bytes) && file.size_bytes >= 0 && file.read_only === true
   ).slice(0, 500);
 }
-export function initModelDiscovery({invoke, chooseFolder, useFile, formatBytes}) {
+export function initModelDiscovery({invoke, chooseFolder, useFile, benchmarkFile, formatBytes}) {
   const page=document.querySelector('[data-desktop-view="models"]');if(!page)return;
   const panel=document.createElement('section');panel.className='drawer-panel desktop-discovery';
   panel.innerHTML='<h2 tabindex="-1">Found on this machine</h2><p>Runner reads local GGUF files in LM Studio, Ollama and the Hugging Face cache. Choose a folder to include your own files.</p><p data-discovery-status role="status">Checking local files…</p><div data-discovery-list></div><div data-discovery-folders></div><div class="button-row"><button type="button" class="button-secondary" data-discovery-refresh>Refresh files</button><button type="button" class="button-secondary" data-discovery-add>Add a folder…</button></div>';
@@ -26,7 +26,9 @@ export function initModelDiscovery({invoke, chooseFolder, useFile, formatBytes})
       const path=document.createElement('p');path.className='discovered-path';path.textContent=file.path;
       const notice=document.createElement('p');notice.textContent='GGUF header detected. File name does not verify publisher, quantization, compatibility or memory fit. This local check does not add a point to Compare.';
       const button=document.createElement('button');button.type='button';button.className='button-secondary';button.textContent='Use for local engine check';button.onclick=()=>useFile(file.path);
-      details.append(summary,source,path,notice,button);list.append(details);
+      details.append(summary,source,path,notice,button);
+      if(benchmarkFile){const benchmark=document.createElement('button');benchmark.type='button';benchmark.className='button-primary';benchmark.textContent='Benchmark privately';benchmark.onclick=()=>benchmarkFile(file.path);details.append(benchmark);}
+      list.append(details);
     }
     if(files.length>5){const nav=document.createElement('div');nav.className='button-row';const label=document.createElement('span');label.textContent=`Page ${pageIndex+1} of ${Math.ceil(files.length/5)}`;for(const [text,delta] of [['Previous',-1],['Next',1]]){const b=document.createElement('button');b.type='button';b.className='button-secondary';b.textContent=text;b.disabled=delta<0?pageIndex===0:(pageIndex+1)*5>=files.length;b.onclick=()=>{pageIndex+=delta;render(current);[...list.querySelectorAll('summary,button')].find(e=>!e.disabled)?.focus();};nav.append(b);}nav.append(label);list.append(nav);}
     for(const folder of (Array.isArray(payload.folders)?payload.folders:[]).filter(v=>typeof v==='string').slice(0,16)){
