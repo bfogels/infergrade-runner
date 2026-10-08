@@ -5,6 +5,7 @@ mod device_pairing;
 mod finish_notifications;
 mod hf_credentials;
 mod machine_settings;
+mod private_benchmark;
 mod run_results;
 mod startup;
 use device_pairing::{
@@ -2614,6 +2615,7 @@ pub fn run() {
             }
         }))
         .manage(ListenerProcess::default())
+        .manage(private_benchmark::PrivateProcess::default())
         .setup(|app| {
             background::initialize(app.handle());
             Ok(())
@@ -2625,6 +2627,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            private_benchmark::desktop_private_benchmark_status,
+            private_benchmark::start_desktop_private_benchmark,
+            private_benchmark::stop_desktop_private_benchmark,
+            private_benchmark::desktop_private_benchmark_history,
+            private_benchmark::open_desktop_private_report,
             finish_notifications::desktop_notification_status,
             finish_notifications::set_desktop_notifications,
             finish_notifications::notify_desktop_run_completed,

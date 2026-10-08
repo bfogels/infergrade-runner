@@ -17,6 +17,7 @@ enum CloseAction {
 struct Lifecycle {
     active: usize,
     maintenance: bool,
+    exclusive: bool,
     exiting: bool,
     keep_running: bool,
     tray_available: bool,
@@ -24,6 +25,9 @@ struct Lifecycle {
 }
 impl Lifecycle {
     fn admit(&mut self) -> Result<(), String> {
+        if self.exclusive {
+            return Err("A private benchmark is active. Wait for it to finish or stop it.".into());
+        }
         if self.maintenance {
             return Err("Cache cleanup is active. Try again after it finishes.".into());
         }
@@ -31,6 +35,16 @@ impl Lifecycle {
             return Err("Runner is quitting. Reopen it before starting work.".into());
         }
         self.active += 1;
+        Ok(())
+    }
+    fn admit_exclusive(&mut self) -> Result<(), String> {
+        if self.active > 0 || self.exiting || self.maintenance || self.exclusive {
+            return Err(
+                "Finish active work and stop listening before starting a private benchmark.".into(),
+            );
+        }
+        self.active = 1;
+        self.exclusive = true;
         Ok(())
     }
     fn request_exit(&mut self) -> bool {
@@ -60,6 +74,7 @@ fn lifecycle() -> &'static Mutex<Lifecycle> {
 }
 pub(crate) struct WorkGuard {
     _lease: crate::cache_lease::ReadLease,
+    exclusive: bool,
 }
 impl WorkGuard {
     pub(crate) fn begin() -> Result<Self, String> {
@@ -68,13 +83,30 @@ impl WorkGuard {
             .lock()
             .map_err(|_| "Runner lifecycle is unavailable".to_string())?
             .admit()?;
-        Ok(Self { _lease: lease })
+        Ok(Self {
+            _lease: lease,
+            exclusive: false,
+        })
+    }
+    pub(crate) fn begin_exclusive() -> Result<Self, String> {
+        let lease = crate::cache_lease::ReadLease::acquire(&crate::desktop_artifact_cache_dir()?)?;
+        let mut state = lifecycle()
+            .lock()
+            .map_err(|_| "Runner lifecycle is unavailable")?;
+        state.admit_exclusive()?;
+        Ok(Self {
+            _lease: lease,
+            exclusive: true,
+        })
     }
 }
 impl Drop for WorkGuard {
     fn drop(&mut self) {
         if let Ok(mut state) = lifecycle().lock() {
             state.active = state.active.saturating_sub(1);
+            if self.exclusive {
+                state.exclusive = false;
+            }
         }
     }
 }
@@ -259,6 +291,18 @@ pub(crate) fn run_event(app: &AppHandle, event: tauri::RunEvent) {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn private_admission_requires_idle_and_blocks_other_work_and_exit() {
+        let mut state = super::Lifecycle::default();
+        state.admit().expect("ordinary work");
+        assert!(state.admit_exclusive().is_err());
+        state.active = 0;
+        state.admit_exclusive().expect("private work when idle");
+        assert!(state.admit().is_err());
+        assert!(!state.request_exit());
+        assert_eq!(state.close_action(), super::CloseAction::Block);
+    }
+
     use super::*;
     #[test]
     fn active_work_refuses_exit_without_losing_admission() {
