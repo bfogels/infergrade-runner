@@ -1,5 +1,6 @@
 """Worker loop for claiming and executing InferGrade run jobs."""
 
+import contextlib
 import json
 import os
 import re
@@ -8,6 +9,8 @@ import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from infergrade import __version__
+from infergrade.admission import claim_admission
+from infergrade.cache_control import cache_read_lease, request_cache_lease
 from infergrade.doctor import collect_runner_diagnostics, run_doctor
 from infergrade.pairing import load_runner_profile
 from infergrade.paths import resolve_worker_output_dir
@@ -94,6 +97,7 @@ def _emit_desktop_event(emit_progress: Optional[Callable[[str], None]], event_ty
     emit_progress(DESKTOP_EVENT_PREFIX + json.dumps(safe_payload, sort_keys=True))
 
 
+@cache_read_lease
 def execute_run_job(
     api_url: str,
     run_job: Dict[str, Any],
@@ -128,6 +132,7 @@ def execute_run_job(
             diagnostics=(runner_snapshot or {}).get("diagnostics"),
         )
 
+    request_leases = contextlib.ExitStack()
     doctor_report = None
     progress_reporting_warning_emitted = False
     last_hub_progress_at = 0.0
@@ -182,6 +187,7 @@ def execute_run_job(
             request.cloud_provider = cloud.get("provider_id")
         if cloud.get("instance_type_id"):
             request.cloud_instance_type = cloud.get("instance_type_id")
+        request_leases.enter_context(request_cache_lease(request))
         heartbeat_run_job(
             api_url,
             run_id,
@@ -468,7 +474,11 @@ def execute_run_job(
             "failure": failure,
         }
 
+    finally:
+        request_leases.close()
 
+
+@cache_read_lease
 def run_worker_once(
     api_url: str,
     execution_mode: str,
@@ -487,18 +497,24 @@ def run_worker_once(
 ) -> Dict[str, Any]:
     """Claim and execute at most one run job."""
     resolved_worker_id = worker_id or _default_worker_id()
-    claimed = claim_run_job(
-        api_url,
-        worker_id=resolved_worker_id,
-        execution_mode=execution_mode,
-        run_id=run_id,
-        run_config_id=run_config_id,
-        provider_id=provider_id,
-        instance_type_id=instance_type_id,
-        hostname=hostname or socket.gethostname(),
-        api_token=api_token,
-        run_token=run_token,
-    )
+    with claim_admission() as allowed:
+        if not allowed:
+            if emit_progress and emit_idle_status:
+                emit_progress("New benchmarks are paused. Queued jobs keep their place.")
+            _emit_desktop_event(emit_progress, "admission_status", paused=True)
+            return {"claimed": False, "worker_id": resolved_worker_id, "admission_paused": True}
+        claimed = claim_run_job(
+            api_url,
+            worker_id=resolved_worker_id,
+            execution_mode=execution_mode,
+            run_id=run_id,
+            run_config_id=run_config_id,
+            provider_id=provider_id,
+            instance_type_id=instance_type_id,
+            hostname=hostname or socket.gethostname(),
+            api_token=api_token,
+            run_token=run_token,
+        )
     if claimed.get("error") or ("detail" in claimed and "run" not in claimed):
         raise RuntimeError(_claim_error_message(claimed))
     run_job = claimed.get("run")
@@ -535,6 +551,7 @@ def run_worker_once(
     return result
 
 
+@cache_read_lease
 def run_worker_loop(
     api_url: str,
     execution_mode: str,
@@ -647,7 +664,7 @@ def run_worker_loop(
                 hostname=hostname or socket.gethostname(),
                 provider_id=provider_id,
                 instance_type_id=instance_type_id,
-                metadata={"message": "Runner is listening for more work."},
+                metadata={"message": "New benchmarks are paused; queued jobs keep their place." if result.get("admission_paused") else "Runner is listening for more work.", "admission_paused": bool(result.get("admission_paused"))},
                 environment=runner_snapshot.get("environment"),
                 contract=runner_snapshot.get("contract"),
                 diagnostics=runner_snapshot.get("diagnostics"),
