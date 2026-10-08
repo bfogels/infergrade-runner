@@ -38,7 +38,7 @@ from infergrade.generation_policies import (
 from infergrade.models import DeploymentExecution, FidelityExecution, RunRequest
 from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
 from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cpp_runtime
-from infergrade.runtime_placement import record_runtime_placement
+from infergrade.runtime_placement import parse_runtime_placement, record_runtime_placement
 from infergrade.utils import env_value, stable_hash, utcnow_iso
 
 
@@ -132,10 +132,39 @@ def _llama_cpp_version_label(output: str) -> Optional[str]:
     return first
 
 
+def requested_native_cuda_devices(request: RunRequest) -> Optional[Tuple[str, ...]]:
+    """Bind explicit CUDA device arguments to runtime allocation identities."""
+    if request.execution_mode != "local_native" or request.backend != "llama.cpp":
+        return None
+    values = []
+    flags = request.backend_flags
+    for index, flag in enumerate(flags):
+        if flag in ("--device", "-dev"):
+            if index + 1 >= len(flags):
+                raise RuntimeError("A native device selection requires an explicit device value.")
+            values.append(flags[index + 1])
+        elif flag.startswith(("--device=", "-dev=")):
+            values.append(flag.split("=", 1)[1])
+    if not values or not any("CUDA" in value.upper() for value in values):
+        return None
+    if len(set(values)) != 1:
+        raise RuntimeError("Conflicting native CUDA device selections are not accepted.")
+    devices = values[-1].split(",")
+    if len(devices) > 16 or len(set(devices)) != len(devices) or not all(
+        re.fullmatch(r"CUDA[0-9]{1,3}", device) for device in devices
+    ):
+        raise RuntimeError("Select distinct explicit native CUDA devices.")
+    if ((request.runtime_selector or {}).get("accelerator") or {}).get("api") == "cpu":
+        raise RuntimeError("A CPU runtime selector cannot request CUDA devices.")
+    return tuple(devices)
+
+
 def native_cuda_required(request: RunRequest) -> bool:
     """Bind native accelerator intent to explicit selectors or the selected package."""
     if request.execution_mode != "local_native" or request.backend != "llama.cpp":
         return False
+    if requested_native_cuda_devices(request):
+        return True
     selector = request.runtime_selector or {}
     api = (selector.get("accelerator") or {}).get("api")
     if api == "cpu":
@@ -185,6 +214,7 @@ def _supports_automatic_fit(binary: str) -> bool:
 
 def _native_backend_flags(request: RunRequest) -> List[str]:
     flags = _llama_cpp_backend_flags(request.backend_flags)
+    requested_native_cuda_devices(request)
     api = ((request.runtime_selector or {}).get("accelerator") or {}).get("api")
     if request.execution_mode == "local_native" and api == "cpu":
         return [*flags, "--n-gpu-layers", "0"]
@@ -205,6 +235,18 @@ def _require_native_cuda_offload(request: RunRequest, logs: str) -> None:
             "Requested CUDA runtime did not prove CUDA device use and nonzero GPU layer offload. "
             "CPU fallback is not accepted; check the NVIDIA driver, GPU memory and managed CUDA dependencies."
         )
+    selected_devices = requested_native_cuda_devices(request)
+    if selected_devices:
+        placement = parse_runtime_placement(logs, request.backend_flags)
+        observed_devices = placement["gpu_devices_with_positive_model_buffers"] or []
+        if (set(observed_devices) != set(selected_devices)
+                or placement["offloaded_layers"] is None
+                or placement["offloaded_layers"] <= 0
+                or placement["allocation_evidence_truncated"]):
+            raise RuntimeError(
+                "Requested CUDA devices did not prove positive model allocations on exactly "
+                "the selected devices. Device fallback is not accepted."
+            )
     observed = "CUDA offloaded %s/%s layers" % (offload.group(1), offload.group(2))
     request._native_cuda_offload_evidence = observed
     selector = request.runtime_selector

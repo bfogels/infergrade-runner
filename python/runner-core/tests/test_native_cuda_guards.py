@@ -170,6 +170,45 @@ class NativeCudaGuardsTests(unittest.TestCase):
             self.assertEqual(request.runtime_selector["accelerator"]["vendor"], "nvidia")
             self.assertEqual(request.runtime_selector["compatibility"]["probes"][0]["observed"], "CUDA offloaded 3/5 layers")
 
+    def test_explicit_cuda_device_flags_bind_custom_runtime_and_exact_allocations(self):
+        request = self.request()
+        request.llama_cpp_cli_path = '/custom/llama-cli'
+        for flags in (['--device', 'CUDA1'], ['--device=CUDA1'], ['-dev', 'CUDA1']):
+            request.backend_flags = flags
+            self.assertTrue(native_cuda_required(request))
+            logs = 'load_tensors: CUDA1 model buffer size = 4 MiB\nload_tensors: offloaded 3/5 layers'
+            _require_native_cuda_offload(request, logs)
+            for bad in ('load_tensors: CUDA0 model buffer size = 4 MiB',
+                        'load_tensors: CUDA1 model buffer size = 0 MiB',
+                        'load: using device CUDA1'):
+                with self.assertRaisesRegex(RuntimeError, 'Device fallback'):
+                    _require_native_cuda_offload(request, bad + '\nload_tensors: offloaded 3/5 layers')
+
+    def test_both_devices_require_positive_model_buffers_on_both_and_no_extra_device(self):
+        request = self.request('cuda')
+        request.backend_flags = ['--device', 'CUDA0,CUDA1', '--split-mode', 'layer', '--tensor-split', '1,1']
+        first = 'load_tensors: CUDA0 model buffer size = 4 MiB\n'
+        second = 'load_tensors: CUDA1 model buffer size = 4 MiB\n'
+        layers = 'load_tensors: offloaded 3/5 layers'
+        _require_native_cuda_offload(request, first + second + layers)
+        for bad in (first + layers, second + layers,
+                    first + second + 'load_tensors: CUDA2 model buffer size = 1 MiB\n' + layers,
+                    first + second + layers + '\nload_tensors: offloaded 2/5 layers'):
+            with self.assertRaisesRegex(RuntimeError, 'Device fallback'):
+                _require_native_cuda_offload(request, bad)
+
+    def test_conflicting_mixed_or_cpu_cuda_selection_fails_before_execution(self):
+        for flags in (['--device', 'CUDA0', '-dev', 'CUDA1'], ['--device', 'CUDA0,CPU'],
+                      ['--device', 'CUDA0,CUDA0'], ['--device', 'CUDA1000'], ['--device']):
+            request = self.request('cuda')
+            request.backend_flags = flags
+            with self.assertRaises(RuntimeError):
+                _native_backend_flags(request)
+        request = self.request('cpu')
+        request.backend_flags = ['--device', 'CUDA1']
+        with self.assertRaisesRegex(RuntimeError, 'CPU runtime'):
+            _native_backend_flags(request)
+
     def test_explicit_cuda_rejects_cpu_zero_offload_and_missing_device(self):
         for logs in ("CPU model buffer\noffloaded 0/5 layers to GPU",
                      "using device CUDA0\noffloaded 0/5 layers to GPU",
