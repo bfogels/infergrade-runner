@@ -1,0 +1,124 @@
+name: Portable Linux runtime (glibc 2.28)
+
+# One Linux x86_64 llama.cpp build per accelerator that runs on every mainstream
+# distribution: Ubuntu 20.04+, Debian 10+, RHEL/Rocky/Alma 8+, Amazon Linux 2023,
+# Fedora, Arch. Built once per pinned llama.cpp source and published as a
+# managed runtime asset; ordinary pushes never rebuild it.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/portable-linux-runtime.yml"
+      - "scripts/build_linux_cuda_runtime.sh"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-linux-runtime-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.accelerator }} (glibc 2.28)
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    container: nvidia/cuda:12.8.1-devel-rockylinux8
+    strategy:
+      fail-fast: false
+      matrix:
+        accelerator: [cuda, cpu]
+    env:
+      INFERGRADE_RUNTIME_ABI: glibc228
+      INFERGRADE_BUILD_JOBS: "3"
+      CCACHE_DIR: /github/home/.ccache
+      CCACHE_MAXSIZE: 5G
+    steps:
+      - name: Install toolchain
+        run: |
+          dnf -y install dnf-plugins-core epel-release
+          dnf -y install gcc-toolset-12-gcc gcc-toolset-12-gcc-c++ gcc-toolset-12-binutils \
+            python39 python39-pip curl tar gzip which findutils ccache git
+          alternatives --set python3 /usr/bin/python3.9
+          python3 -m pip install --no-cache-dir cmake==3.31.10 ninja==1.11.1.1
+          # OpenSSL/curl development headers are deliberately absent: linking
+          # Rocky 8's OpenSSL 1.1 would break Ubuntu 22+ hosts.
+          for package in openssl-devel libcurl-devel; do
+            if rpm -q "$package" >/dev/null; then echo "$package must not be installed" >&2; exit 1; fi
+          done
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /github/home/.ccache
+          key: portable-${{ matrix.accelerator }}-${{ hashFiles('scripts/build_linux_cuda_runtime.sh') }}
+          restore-keys: portable-${{ matrix.accelerator }}-
+
+      - name: Build pinned upstream source against glibc 2.28
+        shell: bash
+        run: |
+          source /opt/rh/gcc-toolset-12/enable
+          export PATH="/usr/local/bin:$PATH"
+          gcc --version | head -1
+          bash scripts/build_linux_cuda_runtime.sh output/glibc228-runtime "${{ matrix.accelerator }}"
+          cat output/glibc228-runtime/abi-ceiling.txt
+          cat output/glibc228-runtime/SHA256SUMS
+          ccache --show-stats || true
+
+      # Keep compiled objects and any recovery archive even when packaging
+      # fails, so a retry never recompiles CUDA from scratch.
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /github/home/.ccache
+          key: portable-${{ matrix.accelerator }}-${{ hashFiles('scripts/build_linux_cuda_runtime.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: portable-glibc228-${{ matrix.accelerator }}-${{ github.sha }}
+          path: output/glibc228-runtime/
+          if-no-files-found: error
+          retention-days: 30
+
+  # The relocated archive must load on the oldest and newest supported families.
+  smoke:
+    name: load on ${{ matrix.image }} (${{ matrix.accelerator }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        accelerator: [cuda, cpu]
+        image: ["ubuntu:22.04", "ubuntu:24.04", "debian:12", "rockylinux:9", "amazonlinux:2023"]
+    steps:
+      - name: Ensure archive tools in the minimal image
+        shell: sh
+        run: |
+          command -v tar >/dev/null && command -v gzip >/dev/null && exit 0
+          if command -v dnf >/dev/null; then dnf -y install tar gzip; else apt-get update && apt-get install -y tar gzip; fi
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: portable-glibc228-${{ matrix.accelerator }}-${{ github.sha }}
+          path: runtime
+      - name: Run every packaged binary without a GPU
+        shell: sh
+        run: |
+          set -eu
+          cd runtime
+          sha256sum -c SHA256SUMS
+          mkdir extracted
+          tar -xzf llama-b11429-bin-glibc228-*-x64.tar.gz -C extracted
+          set -- extracted/*/
+          [ "$#" -eq 1 ] && [ -d "$1" ] || { echo "expected one extracted directory" >&2; exit 1; }
+          dir=${1%/}
+          for binary in llama-cli llama-completion llama-server llama-perplexity; do
+            "$dir/$binary" --version
+          done

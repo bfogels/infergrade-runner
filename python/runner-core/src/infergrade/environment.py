@@ -184,6 +184,105 @@ def _detect_amd_gpu() -> Optional[Dict[str, Any]]:
     }
 
 
+_INTEL_DISCRETE_DEVICE_RANGES = ((0x5690, 0x56FF), (0xE200, 0xE2FF))  # Arc Alchemist, Battlemage
+
+
+def _classify_pci_gpu(vendor: int, device: int, pci_class: int) -> Optional[str]:
+    """Mirror the Runner engine: AMD GPUs and discrete Intel Arc use Vulkan."""
+    if pci_class >> 16 != 0x03:
+        return None
+    if vendor == 0x1002:
+        return "amd"
+    if vendor == 0x8086 and any(low <= device <= high for low, high in _INTEL_DISCRETE_DEVICE_RANGES):
+        return "intel"
+    return None
+
+
+def _read_sysfs_hex(path: str) -> Optional[int]:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return int(handle.read().strip(), 16)
+    except (OSError, ValueError):
+        return None
+
+
+def _vulkan_gpu_payload(vendor: str, models, vrams, count: Optional[int] = None) -> Dict[str, Any]:
+    label = "AMD GPU" if vendor == "amd" else "Intel Arc GPU"
+    return {
+        "accelerator_type": "gpu",
+        "accelerator_vendor": vendor,
+        "accelerator_model": models[0] if models else label,
+        "accelerator_vram_gb": max(vrams) if vrams else None,
+        "accelerator_count": max(1, count or len(models)),
+        "hardware_class": "amd_gpu" if vendor == "amd" else "intel_gpu",
+        "memory_architecture": "discrete_vram",
+        "accelerator_api": "vulkan",
+    }
+
+
+def _detect_vulkan_gpu(drm_root: str = "/sys/class/drm") -> Optional[Dict[str, Any]]:
+    """Detect AMD or Intel Arc GPUs that the managed Vulkan build drives.
+
+    Runs after NVIDIA and ROCm detection, so it covers AMD hosts without ROCm
+    tooling and Intel Arc. Integrated Intel graphics stay CPU-only.
+    """
+    system = platform.system().lower()
+    if system == "linux":
+        try:
+            cards = sorted(name for name in os.listdir(drm_root) if name.startswith("card") and "-" not in name)
+        except OSError:
+            return None
+        found: Dict[str, Dict[str, list]] = {}
+        for card in cards:
+            device_dir = os.path.join(drm_root, card, "device")
+            vendor_id = _read_sysfs_hex(os.path.join(device_dir, "vendor"))
+            device_id = _read_sysfs_hex(os.path.join(device_dir, "device"))
+            pci_class = _read_sysfs_hex(os.path.join(device_dir, "class"))
+            if vendor_id is None or device_id is None or pci_class is None:
+                continue
+            vendor = _classify_pci_gpu(vendor_id, device_id, pci_class)
+            if not vendor:
+                continue
+            bucket = found.setdefault(vendor, {"models": [], "vrams": [], "count": 0})
+            bucket["count"] += 1
+            try:
+                with open(os.path.join(device_dir, "product_name"), "r", encoding="utf-8") as handle:
+                    name = handle.read().strip()
+                if name:
+                    bucket["models"].append(name)
+            except OSError:
+                pass
+            vram_bytes = _read_sysfs_hex_or_int(os.path.join(device_dir, "mem_info_vram_total"))
+            if vram_bytes:
+                bucket["vrams"].append(round(vram_bytes / (1024.0 ** 3), 2))
+        for vendor in ("amd", "intel"):
+            if vendor in found:
+                return _vulkan_gpu_payload(vendor, found[vendor]["models"], found[vendor]["vrams"], found[vendor]["count"])
+        return None
+    if system == "windows":
+        output = _run_command(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                               "(Get-CimInstance Win32_VideoController).Name"])
+        if not output:
+            return None
+        names = [line.strip() for line in output.splitlines() if line.strip()]
+        amd = [name for name in names if "radeon" in name.lower() or name.lower().startswith("amd ")]
+        if amd:
+            return _vulkan_gpu_payload("amd", amd, [])
+        arc = [name for name in names if "intel" in name.lower() and "arc" in name.lower()]
+        if arc:
+            return _vulkan_gpu_payload("intel", arc, [])
+    return None
+
+
+def _read_sysfs_hex_or_int(path: str) -> Optional[int]:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            raw = handle.read().strip()
+        return int(raw, 16) if raw.lower().startswith("0x") else int(raw)
+    except (OSError, ValueError):
+        return None
+
+
 def _detect_apple_silicon_gpu() -> Optional[Dict[str, Any]]:
     """Detect Apple Silicon GPU characteristics through `system_profiler`."""
     if platform.system().lower() != "darwin":
@@ -279,12 +378,14 @@ def _normalize_accelerator_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             hardware_class = "amd_gpu"
         elif vendor == "apple":
             hardware_class = "apple_silicon"
+        elif vendor == "intel" and accelerator_type == "gpu":
+            hardware_class = "intel_gpu"
         elif accelerator_type == "cpu":
             hardware_class = "cpu_only"
     if not memory_architecture:
         if hardware_class == "apple_silicon":
             memory_architecture = "unified_memory"
-        elif hardware_class in ("nvidia_gpu", "amd_gpu"):
+        elif hardware_class in ("nvidia_gpu", "amd_gpu", "intel_gpu"):
             memory_architecture = "discrete_vram"
         elif accelerator_type == "cpu":
             memory_architecture = "system_memory"
@@ -295,6 +396,8 @@ def _normalize_accelerator_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             accelerator_api = "rocm"
         elif hardware_class == "apple_silicon":
             accelerator_api = "metal"
+        elif hardware_class == "intel_gpu":
+            accelerator_api = "vulkan"
 
     normalized["hardware_class"] = hardware_class
     normalized["memory_architecture"] = memory_architecture
@@ -348,10 +451,32 @@ def _detect_process_translation() -> Optional[str]:
     return None
 
 
+def _vulkan_execution_expected(execution_mode: str) -> bool:
+    """Only report a Vulkan GPU when native runs can actually execute on it.
+
+    Containers never use the managed Vulkan build, and an explicit CPU (or other)
+    accelerator choice or an installed non-Vulkan runtime means the run executes
+    elsewhere; labelling it amd_gpu/intel_gpu would present CPU work as GPU evidence.
+    """
+    if execution_mode != "local_native":
+        return False
+    override = os.environ.get("INFERGRADE_ACCELERATOR", "").strip().lower()
+    if override in ("cuda", "metal", "cpu"):
+        return False
+    from infergrade.runtimes import selected_llama_cpp_runtime
+
+    selected_accelerator = (selected_llama_cpp_runtime() or {}).get("accelerator")
+    return selected_accelerator in (None, "vulkan")
+
+
 def capture_environment(execution_mode: str) -> Dict[str, Any]:
     """Capture hardware and OS facts for a InferGrade run."""
     gpu = _normalize_accelerator_payload(
-        _detect_nvidia_gpu() or _detect_amd_gpu() or _detect_apple_silicon_gpu() or _default_accelerator_payload()
+        _detect_nvidia_gpu()
+        or _detect_amd_gpu()
+        or _detect_apple_silicon_gpu()
+        or (_detect_vulkan_gpu() if _vulkan_execution_expected(execution_mode) else None)
+        or _default_accelerator_payload()
     )
     environment_class = {
         "local_container": "local_workstation",

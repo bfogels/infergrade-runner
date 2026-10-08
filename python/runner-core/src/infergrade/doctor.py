@@ -13,6 +13,7 @@ from infergrade.adapters.llama_cpp import LlamaCppAdapter
 from infergrade.artifacts import (
     artifact_cache_status,
     artifact_request_headers,
+    open_artifact_request,
     artifact_to_download_url,
     default_artifact_cache_dir,
     min_artifact_cache_free_bytes,
@@ -691,7 +692,7 @@ def _artifact_reference_check(request: RunRequest) -> Dict[str, Any]:
         headers=probe_headers,
     )
     try:
-        with urllib_request.urlopen(
+        with open_artifact_request(
             probe_request,
             timeout=15,
             context=verified_https_context(download_url),
