@@ -4,6 +4,7 @@ mod desktop_activity;
 mod device_pairing;
 mod hf_credentials;
 mod machine_settings;
+mod run_results;
 use device_pairing::{
     begin_runner_device_pairing, cancel_runner_device_pairing, poll_runner_device_pairing,
 };
@@ -2522,6 +2523,7 @@ pub fn run() {
             model_discovery::desktop_discovered_models,
             model_discovery::set_desktop_model_folder,
             desktop_activity::desktop_machine_activity,
+            run_results::desktop_run_results,
             machine_settings::desktop_machine_name,
             machine_settings::set_desktop_machine_name,
             hf_credentials::desktop_hf_credential_status,
