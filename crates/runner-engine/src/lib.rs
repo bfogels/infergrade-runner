@@ -2140,6 +2140,15 @@ fn cleanup_stale_runtime_dir(path: &Path, label: &str) -> Result<(), String> {
     }
 }
 
+struct RuntimeStagingDirectory(PathBuf);
+
+impl Drop for RuntimeStagingDirectory {
+    fn drop(&mut self) {
+        // This operation owns only its staging path; an activated build has moved.
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 fn normalized_join(base: &Path, relative: &Path) -> Option<PathBuf> {
     let mut output = base.to_path_buf();
     for component in relative.components() {
@@ -2252,8 +2261,17 @@ fn smoke_runtime_binary(path: &Path) -> Result<String, String> {
         .map_err(|error| format!("could not run managed llama.cpp version smoke: {error}"))?;
     if !output.status.success() {
         return Err(format!(
-            "managed llama.cpp version smoke failed with exit code {:?}",
-            output.status.code()
+            "managed llama.cpp version smoke failed with exit code {:?}: {}",
+            output.status.code(),
+            format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stderr),
+                String::from_utf8_lossy(&output.stdout)
+            )
+            .trim()
+            .chars()
+            .take(4096)
+            .collect::<String>()
         ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -2261,6 +2279,54 @@ fn smoke_runtime_binary(path: &Path) -> Result<String, String> {
         return Ok(stdout);
     }
     Ok(String::from_utf8_lossy(&output.stderr).trim().to_string())
+}
+
+fn check_glibc_version(required: &str, observed: &str) -> Result<(), String> {
+    fn version(value: &str) -> Option<Vec<u32>> {
+        value
+            .split('.')
+            .map(str::parse::<u32>)
+            .collect::<Result<Vec<_>, _>>()
+            .ok()
+    }
+    let minimum = version(required).ok_or("invalid managed runtime glibc requirement")?;
+    let installed = version(observed).ok_or("could not determine the host glibc version")?;
+    if installed < minimum {
+        return Err(format!(
+            "This llama.cpp package requires glibc {required}, but this machine has glibc {observed}. \
+             The package is incompatible with this operating system; no runtime was downloaded. \
+             An InferGrade runtime built for this system is required."
+        ));
+    }
+    Ok(())
+}
+
+fn check_managed_runtime_host(entry: &Value) -> Result<(), String> {
+    if cfg!(target_os = "linux") {
+        if let Some(required) = entry
+            .pointer("/platform/minimum_glibc")
+            .and_then(Value::as_str)
+        {
+            let output = StdCommand::new("getconf")
+                .arg("GNU_LIBC_VERSION")
+                .output()
+                .map_err(|error| {
+                    format!("could not check runtime operating-system compatibility: {error}")
+                })?;
+            if !output.status.success() {
+                return Err(
+                    "could not determine the host glibc version before runtime installation".into(),
+                );
+            }
+            let text = String::from_utf8_lossy(&output.stdout);
+            let observed = text
+                .split_whitespace()
+                .last()
+                .ok_or("missing host glibc version")?;
+            check_glibc_version(required, observed)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn install_managed_llama_cpp_runtime(
@@ -2556,6 +2622,7 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
     options: ManagedRuntimeInstallOptions,
 ) -> Result<Value, String> {
     verify_runtime_download_manifest(&entry)?;
+    check_managed_runtime_host(&entry)?;
     let runtime_id = entry["runtime_id"]
         .as_str()
         .ok_or_else(|| "managed runtime id missing".to_string())?;
@@ -2590,6 +2657,7 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         std::process::id()
     ));
     cleanup_stale_runtime_dir(&staging_root, "staging")?;
+    let _staging_cleanup = RuntimeStagingDirectory(staging_root.clone());
     safe_extract_runtime_archive(
         &bytes,
         &staging_root,
@@ -2655,6 +2723,7 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
     }
     let server = find_runtime_binary(&staging_root, server_name)?;
     let perplexity = find_runtime_binary(&staging_root, perplexity_name)?;
+    let mut required_paths = Vec::new();
     for expected in expected_binaries {
         let Some(name) = expected.as_str() else {
             return Err("expected_binaries must contain only binary names".to_string());
@@ -2668,11 +2737,10 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
         } else {
             find_runtime_binary(&staging_root, name)?
         };
-        if found.is_none() {
-            return Err(format!(
-                "managed runtime archive did not contain expected binary `{name}`"
-            ));
-        }
+        let path = found.ok_or_else(|| {
+            format!("managed runtime archive did not contain expected binary `{name}`")
+        })?;
+        required_paths.push(path);
     }
     set_executable_if_needed(&cli)?;
     if let Some(path) = server.as_ref() {
@@ -2680,6 +2748,11 @@ pub fn install_managed_llama_cpp_runtime_from_manifest_entry(
     }
     if let Some(path) = perplexity.as_ref() {
         set_executable_if_needed(path)?;
+    }
+    // Validate the complete protocol before changing the selected build.
+    for path in &required_paths {
+        set_executable_if_needed(path)?;
+        smoke_runtime_binary(path).map_err(|error| format!("{}: {error}", path.display()))?;
     }
     let version_output = smoke_runtime_binary(&cli)?;
     let server =
@@ -3365,6 +3438,88 @@ mod tests {
             .expect_err("symlinked cache must fail");
         assert!(error.contains("must not be a symlink"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn managed_runtime_glibc_floor_rejects_ubuntu22_upstream_archive() {
+        let error = check_glibc_version("2.38", "2.35").expect_err("Ubuntu22 is incompatible");
+        assert!(error.contains("no runtime was downloaded"));
+        assert!(check_glibc_version("2.35", "2.35").is_ok());
+        assert!(check_glibc_version("2.38", "2.39").is_ok());
+        assert!(check_glibc_version("2.38", "unknown").is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn managed_smoke_failure_preserves_loader_diagnostics() {
+        let path = env::temp_dir().join(format!("infergrade-smoke-error-{}", std::process::id()));
+        fs::write(
+            &path,
+            "#!/bin/sh\necho 'GLIBC_2.38 not found' >&2\nexit 1\n",
+        )
+        .unwrap();
+        set_executable_if_needed(&path).unwrap();
+        let error = smoke_runtime_binary(&path).expect_err("failed version smoke");
+        assert!(error.contains("GLIBC_2.38 not found"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn failed_server_smoke_preserves_selected_runtime() {
+        let _guard = env_test_lock().lock().unwrap();
+        let cache = env::temp_dir().join(format!(
+            "infergrade-server-smoke-failure-{}",
+            std::process::id()
+        ));
+        let previous = env::var("INFERGRADE_RUNTIME_CACHE_DIR").ok();
+        env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", &cache);
+        fs::create_dir_all(cache.join("llama.cpp")).unwrap();
+        let selection_path = selected_llama_cpp_runtime_path().unwrap();
+        fs::write(
+            &selection_path,
+            "{\"runtime_id\":\"previous-working-build\"}",
+        )
+        .unwrap();
+        let mut builder = Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+        for name in ["llama-cli", "llama-server", "llama-perplexity"] {
+            let body = if name == "llama-server" {
+                b"#!/bin/sh\necho 'server library missing' >&2\nexit 1\n".to_vec()
+            } else {
+                test_runtime_binary_body(name, "working")
+            };
+            append_tar_file(&mut builder, &format!("bin/{name}"), &body, 0o755);
+        }
+        let archive = builder.into_inner().unwrap().finish().unwrap();
+        let error = install_managed_llama_cpp_runtime_from_manifest_entry(
+            test_runtime_manifest_entry(&archive),
+            ManagedRuntimeInstallOptions {
+                runtime_id: None,
+                archive_bytes: Some(archive),
+            },
+        )
+        .expect_err("bad server");
+        assert!(error.contains("server library missing"));
+        assert!(!runtime_builds_root()
+            .unwrap()
+            .read_dir()
+            .unwrap()
+            .any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".staging-")
+            }));
+        assert_eq!(
+            fs::read_to_string(&selection_path).unwrap(),
+            "{\"runtime_id\":\"previous-working-build\"}"
+        );
+        match previous {
+            Some(value) => env::set_var("INFERGRADE_RUNTIME_CACHE_DIR", value),
+            None => env::remove_var("INFERGRADE_RUNTIME_CACHE_DIR"),
+        }
+        let _ = fs::remove_dir_all(cache);
     }
 
     fn append_tar_file(

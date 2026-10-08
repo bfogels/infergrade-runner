@@ -427,6 +427,9 @@ class ContractExportTests(unittest.TestCase):
             self.assertEqual("1.2.3", manifest["contract_version"])
             self.assertEqual(__version__, manifest["runner_version"])
             self.assertEqual("preview", manifest["release_channel"])
+            headless = manifest["golden_paths"]["linux_headless_local_native"]
+            self.assertTrue(headless["pair_and_start_supported"])
+            self.assertEqual("https://github.com/bfogels/infergrade-runner/releases/download/v1.2.3-preview/install.sh", headless["installer_url"])
             self.assertEqual(
                 "ghcr.io/bfogels/infergrade-runner-core:1.2.3-preview",
                 manifest["golden_paths"]["local_listener_container"]["runner_image"],

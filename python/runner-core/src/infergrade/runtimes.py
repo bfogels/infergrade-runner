@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -418,6 +419,61 @@ def _native_runtime_command(arguments: List[str]) -> Dict[str, Any]:
         return json.loads(completed.stdout)
     except ValueError as exc:
         raise RuntimeError("Native Runner returned an invalid runtime receipt.") from exc
+
+
+def prepare_native_listener_runtime(emit_progress=None, prefer_managed=False) -> None:
+    """Make first-start setup part of starting the paired native listener.
+
+    Preserve an existing or explicit selection. Never repair a broken custom
+    runtime by silently switching its build or accelerator.
+    Installation prefers the managed default over unselected system binaries;
+    ordinary listener starts retain the existing system-runtime path.
+    """
+    selection = selected_llama_cpp_runtime()
+    install_default = prefer_managed and not selection and not any(
+        os.environ.get("INFERGRADE_LLAMA_CPP_" + kind) for kind in ("CLI", "SERVER")
+    )
+    paths = {}
+    for kind, name in (("cli", "llama-cli"), ("server", "llama-server")):
+        explicit = os.environ.get("INFERGRADE_LLAMA_CPP_" + kind.upper())
+        if explicit:
+            paths[kind] = shutil.which(explicit)
+        elif install_default:
+            paths[kind] = None
+        else:
+            paths[kind] = managed_llama_cpp_binary_path(kind)
+            if not paths[kind] and not selection:
+                paths[kind] = shutil.which(name)
+        if explicit and not paths[kind]:
+            raise RuntimeError("The configured %s runtime binary is unavailable: %s" % (name, explicit))
+    if not all(paths.values()):
+        if selection or any(paths.values()):
+            raise RuntimeError("The selected llama.cpp runtime is incomplete. Its llama-cli and llama-server must both be available.")
+        if emit_progress:
+            emit_progress("Preparing llama.cpp for this machine. First-start setup may download the runtime.")
+        install_llama_cpp_runtime(execute=True)
+        selection = selected_llama_cpp_runtime()
+        paths = {kind: managed_llama_cpp_binary_path(kind) for kind in paths}
+        if not all(paths.values()):
+            raise RuntimeError("Runtime installation did not provide both llama-cli and llama-server.")
+    for kind, path in paths.items():
+        try:
+            result = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("llama.cpp %s could not start: %s" % (kind, exc)) from exc
+        if result.returncode:
+            detail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()[:4096]
+            raise RuntimeError("llama.cpp %s could not start (exit %s): %s" % (kind, result.returncode, detail or "no diagnostic output"))
+    if (selection or {}).get("accelerator") == "cuda" and not os.environ.get("INFERGRADE_LLAMA_CPP_CLI"):
+        try:
+            result = subprocess.run([paths["cli"], "--list-devices"], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("The managed CUDA runtime could not inspect NVIDIA devices: %s" % exc) from exc
+        if result.returncode or not re.search(r"^\s*CUDA\d+:", result.stdout or "", re.MULTILINE):
+            detail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()[:4096]
+            raise RuntimeError("The managed CUDA runtime could not detect a usable NVIDIA device. Check the NVIDIA driver. %s" % detail)
+    if emit_progress:
+        emit_progress("Native runtime ready.")
 
 
 def install_llama_cpp_runtime(runtime_id: Optional[str] = None, execute: bool = False) -> Dict[str, Any]:

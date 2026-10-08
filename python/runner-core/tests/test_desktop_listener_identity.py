@@ -54,9 +54,9 @@ class DesktopListenerIdentityTests(unittest.TestCase):
                        PYTHONPATH=str(ROOT / 'python/runner-core/src'), INFERGRADE_HUB_TOKEN='fixture-token')
             env.pop('INFERGRADE_CONFIG_DIR', None)
             env.pop('XDG_CONFIG_HOME', None)
-            # Bound the listener before any job claim, generation, or model download.
+            # Exercise identity handoff without native setup, generation, or model download.
             command = [sys.executable, '-m', 'infergrade', 'start', '--api-url',
-                       'http://127.0.0.1:%s' % server.server_port, '--max-jobs', '0', '--json']
+                       'http://127.0.0.1:%s' % server.server_port, '--max-jobs', '0', '--simulate', '--json']
             rejected = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn('bound to another runner', rejected.stderr)

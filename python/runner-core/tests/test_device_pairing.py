@@ -107,3 +107,53 @@ class DevicePairingTests(unittest.TestCase):
         self.assertIn('K7QM-4F2X', err.getvalue())
         self.assertNotIn('runner-secret', out.getvalue() + err.getvalue())
         self.assertNotIn(self.issued()['device_code'], out.getvalue() + err.getvalue())
+
+    def test_device_pair_and_start_checks_runtime_before_listening(self):
+        profile = {'runner_id': 'r1', 'api_url': 'https://api.infergrade.com', 'access_token': 'runner-secret'}
+        with mock.patch.dict('os.environ', {'INFERGRADE_PAIR_CODE': ''}), \
+                mock.patch('infergrade.cli.capture_environment', return_value={}), \
+                mock.patch('infergrade.cli.authorize_runner_device', return_value={'runner_profile': profile}) as authorize, \
+                mock.patch('infergrade.cli.save_runner_profile', return_value='/tmp/profile') as save, \
+                mock.patch('infergrade.cli.preferred_local_execution_mode', return_value='local_native'), \
+                mock.patch('infergrade.cli.resolve_runner_api_token', return_value='runner-secret'), \
+                mock.patch('infergrade.cli.prepare_native_listener_runtime') as prepare, \
+                mock.patch('infergrade.cli.run_worker_loop', return_value={}) as listen, \
+                redirect_stdout(io.StringIO()):
+            order = mock.Mock()
+            for name, operation in [('save', save), ('prepare', prepare), ('listen', listen)]:
+                order.attach_mock(operation, name)
+            self.assertEqual(main(['pair', '--start']), 0)
+        authorize.assert_called_once()
+        self.assertEqual([call[0] for call in order.mock_calls], ['save', 'prepare', 'listen'])
+
+    def test_legacy_fallback_pair_and_start_preserves_profile_when_runtime_fails(self):
+        profile = {'runner_id': 'r1', 'api_url': 'https://api.infergrade.com', 'access_token': 'runner-secret'}
+        with mock.patch.dict('os.environ', {'INFERGRADE_PAIR_CODE': ''}), \
+                mock.patch('infergrade.cli.capture_environment', return_value={}), \
+                mock.patch('infergrade.cli.authorize_runner_device', side_effect=DeviceAuthorizationUnavailable()), \
+                mock.patch('infergrade.cli.sys.stdin.isatty', return_value=True), \
+                mock.patch('infergrade.cli.getpass.getpass', return_value='legacy-code'), \
+                mock.patch('infergrade.cli.redeem_runner_pairing', return_value={'runner_profile': profile}) as redeem, \
+                mock.patch('infergrade.cli.save_runner_profile', return_value='/tmp/profile') as save, \
+                mock.patch('infergrade.cli.preferred_local_execution_mode', return_value='local_native'), \
+                mock.patch('infergrade.cli.resolve_runner_api_token', return_value='runner-secret'), \
+                mock.patch('infergrade.cli.prepare_native_listener_runtime', side_effect=RuntimeError('runtime unavailable')), \
+                mock.patch('infergrade.cli.run_worker_loop') as listen, \
+                mock.patch('infergrade.cli.clear_runner_profile') as clear, \
+                redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(SystemExit, 'Runner setup failed: runtime unavailable'):
+                main(['pair', '--start'])
+        self.assertEqual(redeem.call_args.kwargs['pair_code'], 'legacy-code')
+        save.assert_called_once_with(profile)
+        listen.assert_not_called()
+        clear.assert_not_called()
+
+    def test_tty_stdin_pair_code_preserves_hidden_input_failure_policy(self):
+        def no_echo(*args):
+            warnings.warn('Cannot control echo', getpass.GetPassWarning)
+            self.fail('must stop before echoed input')
+        with mock.patch.dict('os.environ', {'INFERGRADE_PAIR_CODE': ''}), \
+                mock.patch('infergrade.cli.sys.stdin.isatty', return_value=True), \
+                mock.patch('infergrade.cli.getpass.getpass', side_effect=no_echo):
+            with self.assertRaisesRegex(SystemExit, 'Unable to hide'):
+                _resolve_pair_code(SimpleNamespace(pair_code_stdin=True))

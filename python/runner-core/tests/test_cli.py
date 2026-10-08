@@ -13,6 +13,11 @@ from infergrade.transport import RunnerConnectionError
 
 
 class CliTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch("infergrade.cli.prepare_native_listener_runtime")
+        self.prepare_runtime = patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_run_request_file_preserves_resume_and_output_overrides(self):
         request = RunRequest(model="example/model", backend="llama.cpp", tier="standard", simulate=False)
         output = io.StringIO()
@@ -497,6 +502,50 @@ class CliTests(unittest.TestCase):
         self.assertIn("No pairing profile found", str(caught.exception))
         self.assertIn("infergrade.com/?tab=setup", str(caught.exception))
         loop_mock.assert_not_called()
+
+    def test_native_start_prepares_runtime_before_registration(self):
+        with mock.patch("infergrade.cli.run_worker_loop", return_value={}) as loop, mock.patch(
+            "infergrade.cli.resolve_runner_execution_mode", return_value="local_native"
+        ), mock.patch("infergrade.cli.resolve_runner_api_token", return_value="test-token"), redirect_stdout(io.StringIO()):
+            main(["start", "--api-url", "https://api.infergrade.com"])
+        self.prepare_runtime.assert_called_once()
+        loop.assert_called_once()
+
+    def test_failed_runtime_setup_never_registers_listener(self):
+        self.prepare_runtime.side_effect = RuntimeError("GLIBC_2.38 not found")
+        with mock.patch("infergrade.cli.run_worker_loop") as loop, mock.patch(
+            "infergrade.cli.resolve_runner_execution_mode", return_value="local_native"
+        ), mock.patch("infergrade.cli.resolve_runner_api_token", return_value="test-token"):
+            with self.assertRaisesRegex(SystemExit, "GLIBC_2.38 not found"):
+                main(["start", "--api-url", "https://api.infergrade.com"])
+        loop.assert_not_called()
+
+    def test_simulated_listener_does_not_download_runtime(self):
+        with mock.patch("infergrade.cli.run_worker_loop", return_value={}), mock.patch(
+            "infergrade.cli.resolve_runner_execution_mode", return_value="local_native"
+        ), redirect_stdout(io.StringIO()):
+            main(["start", "--api-url", "https://api.infergrade.com", "--simulate"])
+        self.prepare_runtime.assert_not_called()
+
+    def test_pair_start_saves_profile_before_starting_listener(self):
+        from infergrade.cli import main as cli_main
+        saved = mock.Mock()
+        loop = mock.Mock(return_value={})
+        with mock.patch("infergrade.cli.redeem_runner_pairing", return_value={"runner_profile": {
+            "api_url": "https://api.infergrade.com", "runner_id": "paired", "label": "Server"
+        }}), mock.patch("infergrade.cli.save_runner_profile", saved), mock.patch(
+            "infergrade.cli.run_worker_loop", loop
+        ), mock.patch("infergrade.cli.resolve_runner_api_token", return_value="test-token"), mock.patch(
+            "infergrade.cli._resolve_pair_code", return_value="test-code"
+        ), mock.patch("infergrade.cli.capture_environment", return_value={}), mock.patch(
+            "infergrade.cli.preferred_local_execution_mode", return_value="local_native"
+        ), redirect_stdout(io.StringIO()):
+            order = mock.Mock()
+            order.attach_mock(saved, "save")
+            order.attach_mock(loop, "listen")
+            cli_main(["pair", "--start"])
+        self.assertEqual([call[0] for call in order.mock_calls], ["save", "listen"])
+        self.assertEqual(loop.call_args.kwargs["api_url"], "https://api.infergrade.com")
 
     def test_start_command_uses_paired_profile_when_api_url_is_omitted(self):
         output = io.StringIO()

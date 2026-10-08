@@ -46,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--required-updater-platform", action="append", default=[], help="Require this platform key in the signed updater manifest; repeat for each shipped platform.")
     parser.add_argument("--require-windows", action="store_true", help="Require the signed x64 Windows MSI and NSIS assets (signature verification runs on Windows).")
+    parser.add_argument("--required-headless-version", default="", help="Require checksummed install.sh and the Linux headless archive for this exact version.")
     parser.add_argument(
         "--reject-unexpected",
         action="store_true",
@@ -197,6 +198,14 @@ def main() -> int:
         if dmg_names != [args.required_dmg_name]:
             raise SystemExit(f"Public release must contain exactly one DMG named {args.required_dmg_name}.")
     verified_names = {path.name for path in verified}
+    if args.required_headless_version:
+        version = args.required_headless_version
+        if not version or any(character not in "0123456789." for character in version):
+            raise SystemExit("--required-headless-version must be a numeric release version.")
+        required_headless = {"install.sh", f"infergrade-runner-{version}-linux-x86_64.tar.gz"}
+        missing_headless = sorted(required_headless - verified_names)
+        if missing_headless:
+            raise SystemExit("Required headless release asset(s) were not verified: " + ", ".join(missing_headless))
     if args.require_linux:
         required_linux = {
             "InferGrade.Runner.Linux-x86_64.deb",

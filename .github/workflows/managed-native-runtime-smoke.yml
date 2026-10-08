@@ -10,6 +10,13 @@ on:
       - "crates/runner-engine/**"
       - "runtime/llama_cpp_native_releases.json"
       - "scripts/smoke_managed_native_runtime.py"
+      - "scripts/smoke_headless_installer.py"
+      - "scripts/install.sh"
+      - "scripts/package_headless_runner.py"
+      - "python/runner-core/src/infergrade/cli.py"
+      - "python/runner-core/src/infergrade/runtimes.py"
+      - "python/runner-core/src/infergrade/environment.py"
+      - "scripts/smoke_managed_cuda_loader.py"
       - "python/runner-core/src/infergrade/adapters/llama_cpp.py"
       - "python/runner-core/src/infergrade/runner.py"
       - "scripts/verify_llama_cpp_model_canary.py"
@@ -24,6 +31,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ubuntu22-cuda-loader:
+    name: Ubuntu 22 CUDA loader and CPU-only canary
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - run: cargo build --locked -p infergrade-runner-cli
+      - run: python3 scripts/smoke_managed_cuda_loader.py --cli target/debug/infergrade-runner --output output/cuda-loader-smoke
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: ubuntu22-cuda-loader-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            output/cuda-loader-smoke/*.json
+            output/cuda-loader-smoke/*.txt
+          if-no-files-found: error
+          retention-days: 7
   native-cpu:
     # Automated main-to-develop sync PRs only merge commits that already passed
     # this smoke on their way to main; required CI still runs on the merge.
@@ -32,7 +59,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-24.04]
+        os: [windows-latest, ubuntu-22.04, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -62,3 +89,18 @@ jobs:
             output/managed-native-smoke/*.json
             output/managed-native-smoke/*.txt
             output/managed-native-smoke/first-run/*.json
+      - name: Exercise packaged Linux installer and pair/start
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          python scripts/package_headless_runner.py --cli target/debug/infergrade-runner --output output/headless
+          python scripts/smoke_headless_installer.py --bundle output/headless --output output/headless-smoke
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && runner.os == 'Linux'
+        with:
+          name: headless-install-pair-${{ matrix.os }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            output/headless-smoke/*.json
+            output/headless-smoke/*.txt
+          if-no-files-found: error
+          retention-days: 7
