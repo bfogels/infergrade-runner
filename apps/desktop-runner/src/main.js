@@ -1,3 +1,4 @@
+import {initFinishNotifications} from './finishNotifications.js';
 import {initAdmissionSettings} from './admissionSettings.js';
 import {initMachineSettings} from './machineSettings.js';
 import {initBackgroundSettings,listenerEventMatches} from './backgroundSettings.js';
@@ -191,6 +192,7 @@ let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
 let desktopActivity = null;
 let homeResults = null;
+let finishNotifications = null;
 let desktopConnectionKey = "";
 function setDesktopConnectionKey(next) {
   if (desktopConnectionKey !== next) {
@@ -199,6 +201,7 @@ function setDesktopConnectionKey(next) {
     renderAssignmentIdle();
   }
   homeResults?.setConnectionKey(next);
+  finishNotifications?.setConnectionKey(next);
   desktopActivity?.setConnectionKey(next);
   desktopMachineSettings?.setConnectionKey(next);
 }
@@ -1936,6 +1939,7 @@ function renderAssignmentFromListenerEvent(payload = {}) {
       lifecycleTiming: payload.lifecycle_timing || {},
     };
     homeResults?.setRun(runId);
+    void finishNotifications?.completed(runId);
     currentAssignmentResultId = recentCompletion.resultId;
     if (assignmentOpenHubButton) assignmentOpenHubButton.textContent = recentCompletion.resultId ? "Open evidence" : "Open run";
     if (shouldClearCompletedHandoff({ phase, runId, handoffRunId: currentFirstRunUploadRunId() })) {
@@ -3781,6 +3785,8 @@ initModelDiscovery({invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
   if(firstRunModelPathInput){discoveredModelPath=path;firstRunModelPathInput.value=path;firstRunModelPathInput.dispatchEvent(new Event('input'));firstRunModelPathInput.focus();firstRunModelPathInput.scrollIntoView({block:'center'});}
 }});
 
+finishNotifications=initFinishNotifications({invoke:loadTauriInvoke});
+finishNotifications?.setConnectionKey(desktopConnectionKey);
 homeResults=initHomeResults({invoke:loadTauriInvoke,openResult:async (result,apiUrl)=>{await openExternalUrl(activityResultUrl(apiUrl,result.result_id,result.kind));}});
 
 desktopActivity=initDesktopActivity({invoke:loadTauriInvoke,openResult:async (result,apiUrl)=>{await openExternalUrl(activityResultUrl(apiUrl,result.result_id,result.kind));},openRun:async (id,apiUrl)=>{

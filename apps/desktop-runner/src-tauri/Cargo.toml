@@ -29,3 +29,9 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-updater = "2"
 tokio = { version = "1", features = ["macros", "rt", "time"] }
 url = "2.5.4"
+
+[target.'cfg(any(target_os = "linux", windows))'.dependencies]
+notify-rust = "=4.18.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mac-notification-sys = "=0.6.15"

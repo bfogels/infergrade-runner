@@ -115,6 +115,23 @@ async fn fetch(api: &str, token: &str, path: &str) -> Result<Value, String> {
 }
 #[tauri::command]
 pub async fn desktop_run_results(run_id: String) -> Result<Value, String> {
+    desktop_run_results_expected(run_id, None).await
+}
+fn require_expected_connection(
+    api: &str,
+    runner: &str,
+    token: &str,
+    expected: Option<&(String, String, String)>,
+) -> Result<(), String> {
+    if expected.is_some_and(|value| value.0 != api || value.1 != runner || value.2 != token) {
+        return Err("Runner connection changed before result verification".into());
+    }
+    Ok(())
+}
+pub(crate) async fn desktop_run_results_expected(
+    run_id: String,
+    expected: Option<(String, String, String)>,
+) -> Result<Value, String> {
     validate_hub_path_id(&run_id, "run_id").map_err(|_| "Invalid Hub job identity")?;
     let (api, runner, token) = {
         let _guard = super::PAIRING_STATE_LOCK.read().await;
@@ -129,6 +146,7 @@ pub async fn desktop_run_results(run_id: String) -> Result<Value, String> {
             super::load_runner_token_value()?.ok_or("Connect this Runner to view results")?;
         (api, runner, token)
     };
+    require_expected_connection(&api, &runner, &token, expected.as_ref())?;
     let watch = fetch(&api, &token, &format!("/v1/runs/{run_id}/watch")).await?;
     validate_target(&watch, &run_id, &runner)?;
     let body = fetch(&api, &token, &format!("/v1/runs/{run_id}/results")).await?;
@@ -152,6 +170,30 @@ pub async fn desktop_run_results(run_id: String) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn original_connection_is_required_before_any_result_verification() {
+        let original = (
+            "https://api.infergrade.com".to_string(),
+            "runner_A".to_string(),
+            "token_A".to_string(),
+        );
+        assert!(
+            require_expected_connection(&original.0, "runner_B", "token_B", Some(&original))
+                .is_err()
+        );
+        // Returning to A later cannot retroactively admit a verification made under B.
+        assert!(
+            require_expected_connection(&original.0, "runner_A", "token_A", Some(&original))
+                .is_ok()
+        );
+        assert!(require_expected_connection(
+            &original.0,
+            "runner_A",
+            "rotated_token",
+            Some(&original)
+        )
+        .is_err());
+    }
     #[test]
     fn explicit_target_is_authoritative_and_completed_job_is_required() {
         let mut watch = json!({"run":{"run_id":"run_one","status":"completed","target_runner_id":"runner_one","worker":{"runner_id":"runner_two"}}});
