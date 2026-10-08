@@ -335,6 +335,25 @@ def _read_hardware_text(path, limit=4096):
         return None
 
 
+def _windows_registry_model(kind):
+    """Read only two OS-reported model labels, without launching PowerShell."""
+    fields = {
+        "cpu": (r"HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString"),
+        "machine": (r"HARDWARE\DESCRIPTION\System\BIOS", "SystemProductName"),
+    }
+    if kind not in fields:
+        raise ValueError("Unsupported hardware model field.")
+    try:
+        import winreg
+        path, name = fields[kind]
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0,
+                            winreg.KEY_QUERY_VALUE | winreg.KEY_WOW64_64KEY) as key:
+            value, value_type = winreg.QueryValueEx(key, name)
+        return _hardware_label(value) if value_type == winreg.REG_SZ else None
+    except (ImportError, OSError, UnicodeError):
+        return None
+
+
 def _windows_model_probe(class_name, property_name):
     # Fixed callers below query model names only: no serial, UUID, account or network fields.
     script = "(Get-CimInstance -ClassName %s -ErrorAction Stop | Select-Object -First 1).%s" % (class_name, property_name)
@@ -370,7 +389,7 @@ def _detect_cpu_model() -> str:
                 if brand:
                     return brand
     elif system == "windows":
-        brand = _windows_model("Win32_Processor", "Name")
+        brand = _windows_registry_model("cpu") or _windows_model("Win32_Processor", "Name")
         if brand:
             return brand
     return platform.processor() or platform.machine()
@@ -382,7 +401,7 @@ def _detect_machine_model() -> Optional[str]:
     if system == "darwin":
         return _hardware_label(_run_command(["sysctl", "-n", "hw.model"]))
     if system == "windows":
-        return _windows_model("Win32_ComputerSystem", "Model")
+        return _windows_registry_model("machine") or _windows_model("Win32_ComputerSystem", "Model")
     if system == "linux":
         for path in ("/sys/devices/virtual/dmi/id/product_name", "/proc/device-tree/model"):
             name = _hardware_label(_read_hardware_text(path))
