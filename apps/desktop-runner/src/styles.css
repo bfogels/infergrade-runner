@@ -1422,3 +1422,8 @@ h4 {
 .desktop-admission button { width:auto; }
 
 .home-accepted-results{grid-column:1 / -1;min-width:0;border-top:1px solid var(--border);padding-top:14px}.home-accepted-results>div{margin:12px 0}.home-accepted-results p{font-size:12px;color:var(--text-muted);overflow-wrap:anywhere}.home-accepted-results[hidden]{display:none}
+.desktop-startup h2 { font-size:21px; line-height:1.25; margin:0 0 18px; }
+.desktop-startup .background-toggle { display:flex; flex-direction:row; align-items:center; gap:10px; }
+.desktop-startup .background-toggle input { width:16px; height:16px; min-height:0; flex:none; }
+.desktop-startup p { margin:14px 0; }
+.desktop-startup button { width:auto; }

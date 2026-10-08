@@ -68,7 +68,9 @@ jobs:
         run: python ./scripts/check_platform_hardware_identity.py
 
       - name: Verify native and Python cache lock interoperability
-        run: cargo test -p infergrade_desktop_runner --lib cache_lease --locked
+        run: |
+          cargo test -p infergrade_desktop_runner --lib cache_lease --locked
+          cargo test -p infergrade_desktop_runner --lib startup::tests --locked
 
       - name: Install and launch Windows packages
         shell: pwsh
@@ -241,7 +243,9 @@ jobs:
         run: python ./scripts/check_platform_hardware_identity.py
 
       - name: Verify native and Python cache lock interoperability
-        run: cargo test -p infergrade_desktop_runner --lib cache_lease --locked
+        run: |
+          cargo test -p infergrade_desktop_runner --lib cache_lease --locked
+          cargo test -p infergrade_desktop_runner --lib startup::tests --locked
 
       - name: Install and launch Linux packages
         run: |
