@@ -1,7 +1,11 @@
+import {initAdmissionSettings} from './admissionSettings.js';
+import {initMachineSettings} from './machineSettings.js';
 import {initBackgroundSettings,listenerEventMatches} from './backgroundSettings.js';
 import { initModelDiscovery, selectableLocalModel } from './modelDiscovery.js';
 import {initHfCredentials} from './hfCredentials.js';
 import { initDesktopActivity, activityRunUrl } from './desktopActivity.js';
+import { activityResultUrl } from './activityResults.js';
+import { initHomeResults, listenerConnectionMatches } from './homeResults.js';
 import "./styles.css";
 import {devicePairingController} from "./devicePairing.js";
 import {initDesktopNavigation,showDesktopPage} from "./desktopNavigation.js";
@@ -186,6 +190,19 @@ let modelCachePage = 0;
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
 let desktopActivity = null;
+let homeResults = null;
+let desktopConnectionKey = "";
+function setDesktopConnectionKey(next) {
+  if (desktopConnectionKey !== next) {
+    desktopConnectionKey = next;
+    recentCompletion = null;
+    renderAssignmentIdle();
+  }
+  homeResults?.setConnectionKey(next);
+  desktopActivity?.setConnectionKey(next);
+  desktopMachineSettings?.setConnectionKey(next);
+}
+let desktopMachineSettings = null;
 let hubConnectionVerified = false;
 let lastFirstRunPayload = null;
 let lastReadinessCheckAt = null;
@@ -369,11 +386,13 @@ function renderPrimaryReadiness() {
     primaryStateMessage.textContent = presentation.message;
   }
   if (listenerTitle) {
-    listenerTitle.textContent = listening ? "Listening for Hub" : "Listening paused";
+    listenerTitle.textContent = pairingAuthFailure?.invalid ? "Pairing needed" : document.documentElement.dataset.admissionPaused === "unknown" ? "Admission state unconfirmed" : document.documentElement.dataset.admissionPaused === "true" ? "New benchmarks paused" : listening ? "Listening for Hub" : "Listener stopped";
   }
   if (listenerMessage) {
     listenerMessage.textContent = pairingAuthFailure?.invalid
       ? "Pair this machine again before it can accept Hub-assigned work."
+      : document.documentElement.dataset.admissionPaused === "unknown" ? "Refresh the saved admission state. Current work continues."
+      : document.documentElement.dataset.admissionPaused === "true" ? "New benchmarks are paused. Queued work keeps its place; any active benchmark continues."
       : listening
       ? "This machine can receive Hub-assigned runs. Keep the app open while work is active."
       : "Pairing is saved. Start listening when this machine should accept Hub-assigned work.";
@@ -539,6 +558,7 @@ function renderRecentCompletion() {
     return;
   }
   const completion = recentCompletion;
+  homeResults?.setRun(completion.runId);
   pendingRequiredRuntime = null;
   pendingManagedRuntimeRepair = false;
   assignmentPanel.dataset.state = "completed";
@@ -551,7 +571,7 @@ function renderRecentCompletion() {
   if (assignmentTitle) assignmentTitle.textContent = completion.title;
   if (assignmentDescription) {
     assignmentDescription.textContent = completion.resultId
-      ? "Your result is ready to inspect and share in Hub."
+      ? "The upload completed. Verify the accepted result below to open your data point or report."
       : "The run is complete in Hub. Open it to inspect publication and evidence status.";
   }
   if (assignmentProgressWrap) assignmentProgressWrap.hidden = false;
@@ -585,6 +605,7 @@ function renderAssignmentActive({
   const nextRunId = runId || currentAssignmentRunId;
   if (phase !== "Complete" && nextRunId && recentCompletion) {
     recentCompletion = null;
+    homeResults?.setRun('');
     currentAssignmentResultId = "";
   }
   const clock = assignmentClockTransition({
@@ -783,7 +804,7 @@ function applyPreviewStateFromUrl() {
   } else if (mockState === "unpaired") {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
-    desktopActivity?.setConnectionKey('');
+    setDesktopConnectionKey('');
     childProcess = null;
     setRunnerButtonsDisabled("start", false);
     setRunnerButtonsDisabled("stop", true);
@@ -1083,7 +1104,30 @@ function renderModelCache(payload = null) {
     name.textContent = displayCacheArtifactName(artifact.name);
     const size = document.createElement("em");
     size.textContent = formatBytes(artifact.size_bytes);
-    item.append(name, size);
+    const ownership = document.createElement("span");
+    ownership.className = "cache-ownership";
+    ownership.textContent = artifact.managed ? "Runner download" : "Legacy or unowned file · preserved";
+    item.append(name, size, ownership);
+    if (artifact.managed && artifact.artifact_id) {
+      const label = document.createElement("label");
+      const keep = document.createElement("input");
+      keep.type = "checkbox"; keep.checked = artifact.keep === true;
+      keep.setAttribute("aria-label", `Keep ${displayCacheArtifactName(artifact.name)} when clearing space`);
+      label.append(keep, document.createTextNode(" Keep when clearing space"));
+      keep.addEventListener("change", async () => {
+        const wanted = keep.checked; keep.disabled = true;
+        try { const invoke = await loadTauriInvoke(); if (!invoke) throw new Error("Open the desktop app to update Keep."); const updated = await invoke("set_desktop_model_keep", { artifactId: artifact.artifact_id, keep: wanted }); renderModelCache(updated); }
+        catch (error) { keep.checked = !wanted; keep.disabled = false; if (modelCacheStatus) modelCacheStatus.textContent = `Could not update Keep: ${error.message || error}`; appendLog(`Could not update Keep: ${error.message || error}`); }
+      });
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "button-secondary compact-button"; remove.textContent = "Delete download"; remove.disabled = artifact.keep === true;
+      remove.addEventListener("click", async () => {
+        if (!window.confirm(`Delete ${displayCacheArtifactName(artifact.name)}? It can be downloaded again.`)) return;
+        remove.disabled = true;
+        try { const invoke = await loadTauriInvoke(); if (!invoke) throw new Error("Open the desktop app to delete downloads."); const updated = await invoke("clear_desktop_model_cache", { artifactId: artifact.artifact_id }); renderModelCache(updated.status); }
+        catch (error) { remove.disabled = false; if (modelCacheStatus) modelCacheStatus.textContent = `Could not delete download: ${error.message || error}`; appendLog(`Could not delete download: ${error.message || error}`); }
+      });
+      item.append(label, remove);
+    }
     modelCacheList.append(item);
   });
   if (modelCachePagination && modelCachePageLabel && modelCachePreviousButton && modelCacheNextButton) {
@@ -1112,7 +1156,7 @@ async function refreshModelCache() {
 }
 
 async function clearModelCache() {
-  if (!window.confirm("Clear cached model artifacts downloaded by InferGrade? Active downloads are left alone.")) {
+  if (!window.confirm("Clear managed Runner downloads without Keep? Legacy and external files are preserved. Finish active work and stop listening first.")) {
     return null;
   }
   if (clearModelCacheButton) {
@@ -1567,6 +1611,7 @@ async function ensureRunnerListenerEvents() {
   await listen("runner-listener-event", (event) => {
     const payload = event?.payload || {};
     if (!listenerEventMatches(payload,childProcess)) return;
+    if (["assignment_update", "assignment_idle", "stdout", "stderr"].includes(payload.type) && !listenerConnectionMatches(childProcess,desktopConnectionKey)) return;
     if (payload.type === "assignment_update" || payload.type === "assignment_idle") {
       hubConnectionVerified = true;
       renderAssignmentFromListenerEvent(payload);
@@ -1666,12 +1711,12 @@ async function updateTokenState() {
         hubConnectionVerified = false;
       }
       const profile = status?.profile?.profile || {};
-      desktopActivity?.setConnectionKey(savedTokenAvailable && runnerProfileAvailable ? `${profile.runner_id}|${profile.api_url}` : '');
+      setDesktopConnectionKey(savedTokenAvailable && runnerProfileAvailable ? `${profile.runner_id}|${profile.api_url}` : '');
       if (tokenState) {
         if (runnerProfileAvailable && hasToken) {
-          tokenState.textContent = `Runner profile and OS token saved${profile.label ? ` for ${profile.label}` : ""}.`;
+          tokenState.textContent = "Runner profile and OS token saved.";
         } else if (runnerProfileAvailable) {
-          tokenState.textContent = `Runner profile saved${profile.label ? ` for ${profile.label}` : ""}, but the OS token is unavailable.`;
+          tokenState.textContent = "Runner profile saved, but the OS token is unavailable.";
         } else if (hasToken) {
           tokenState.textContent = "Runner token is saved in the OS credential store, but no runner profile is saved.";
         } else {
@@ -1685,7 +1730,7 @@ async function updateTokenState() {
   } catch (error) {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
-    desktopActivity?.setConnectionKey('');
+    setDesktopConnectionKey('');
     hubConnectionVerified = false;
     if (tokenState) {
       tokenState.textContent = userSafeTokenFailure(error.message || error);
@@ -1695,6 +1740,7 @@ async function updateTokenState() {
   }
   savedTokenAvailable = hasToken;
   runnerProfileAvailable = false;
+  setDesktopConnectionKey('');
   if (isTauriRuntime()) {
     if (tokenState) {
       tokenState.textContent = hasToken
@@ -1889,6 +1935,7 @@ function renderAssignmentFromListenerEvent(payload = {}) {
       title: redactSecrets(payload.title || assignmentTitleFromRunId(runId)),
       lifecycleTiming: payload.lifecycle_timing || {},
     };
+    homeResults?.setRun(runId);
     currentAssignmentResultId = recentCompletion.resultId;
     if (assignmentOpenHubButton) assignmentOpenHubButton.textContent = recentCompletion.resultId ? "Open evidence" : "Open run";
     if (shouldClearCompletedHandoff({ phase, runId, handoffRunId: currentFirstRunUploadRunId() })) {
@@ -3049,6 +3096,7 @@ async function startRunner({ confirmStarted = false } = {}) {
   }
   await ensureRunnerListenerEvents();
   runnerStartupLines = [];
+  const listenerConnectionKey = desktopConnectionKey;
   const output = await invoke("start_runner_listener", {
     apiUrl,
     typedToken: null,
@@ -3059,7 +3107,7 @@ async function startRunner({ confirmStarted = false } = {}) {
   appendLog(
     `Runner start plan: ${plan.execution_mode || "default mode"} using ${credentialSourceLabel(plan.credential_source)}${runner}.`
   );
-  childProcess = { rustManaged: true, pid: output?.pid || null };
+  childProcess = { rustManaged: true, pid: output?.pid || null, connectionKey: listenerConnectionKey };
   setRunnerButtonsDisabled("stop", false);
   setStatus("Listening", "good");
   renderLocalReadinessChecklist();
@@ -3568,7 +3616,7 @@ modelCacheNextButton?.addEventListener("click", () => {
 clearModelCacheButton?.addEventListener("click", () => {
   clearModelCache().catch((error) => {
     if (modelCacheStatus) {
-      modelCacheStatus.textContent = "Could not clear cached models.";
+      modelCacheStatus.textContent = `Could not clear cached models: ${error.message || error}`;
     }
     appendLog(`Could not clear model cache: ${error.message || error}`);
   });
@@ -3733,7 +3781,9 @@ initModelDiscovery({invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
   if(firstRunModelPathInput){discoveredModelPath=path;firstRunModelPathInput.value=path;firstRunModelPathInput.dispatchEvent(new Event('input'));firstRunModelPathInput.focus();firstRunModelPathInput.scrollIntoView({block:'center'});}
 }});
 
-desktopActivity=initDesktopActivity({invoke:loadTauriInvoke,openRun:async (id,apiUrl)=>{
+homeResults=initHomeResults({invoke:loadTauriInvoke,openResult:async (result,apiUrl)=>{await openExternalUrl(activityResultUrl(apiUrl,result.result_id,result.kind));}});
+
+desktopActivity=initDesktopActivity({invoke:loadTauriInvoke,openResult:async (result,apiUrl)=>{await openExternalUrl(activityResultUrl(apiUrl,result.result_id,result.kind));},openRun:async (id,apiUrl)=>{
  await openExternalUrl(activityRunUrl(apiUrl,id));
 }});
 initHfCredentials({invoke:loadTauriInvoke,openExternal:openExternalUrl});
@@ -3743,3 +3793,12 @@ initBackgroundSettings({invoke:loadTauriInvoke,listen:async callback=>{
  const {listen}=await import('@tauri-apps/api/event');
  return listen('infergrade-background-exit-blocked',callback);
 },onBlocked:()=>showDesktopPage('settings')});
+
+ desktopMachineSettings=initMachineSettings({invoke:loadTauriInvoke});
+
+initAdmissionSettings({invoke:loadTauriInvoke,onState:state=>{
+ document.documentElement.dataset.admissionPaused=state.error?'unknown':state.paused===true?'true':state.paused===false?'false':'unknown';
+ renderLocalReadinessChecklist();
+ if(listenerTitle && state.error&&!pairingAuthFailure?.invalid)listenerTitle.textContent='Admission state unconfirmed';
+ if(listenerMessage && state.error&&!pairingAuthFailure?.invalid)listenerMessage.textContent='Refresh the saved admission state. Current work continues.';
+}});

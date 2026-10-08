@@ -309,7 +309,8 @@ class RunnerTests(unittest.TestCase):
         validation = self.read_json(os.path.join(output_dir, "validation.json"))
         self.assertEqual(validation["comparison_grade"], "comparable")
 
-    def test_local_native_run_records_path_free_exact_runtime_receipt(self):
+    @mock.patch("infergrade.native_ifeval.preflight", return_value={"protocol_id":"ifeval_native_packaged_v1"})
+    def test_local_native_run_records_path_free_exact_runtime_receipt(self, evaluator_mock):
         from infergrade.models import CapabilityExecution, FidelityExecution
 
         output_dir = os.path.join(self.tempdir, "runtime-receipt")
@@ -390,7 +391,22 @@ class RunnerTests(unittest.TestCase):
         self.assertGreaterEqual(len(full_receipt["files"]), len(full_receipt["role_files"]))
         self.assertNotIn(self.tempdir, json.dumps(full_receipt, sort_keys=True))
 
-    def test_model_preflight_failure_aborts_before_capability_cases(self):
+    def test_missing_native_evaluator_aborts_before_artifact_and_model_loading(self):
+        request = RunRequest(model="fixture", backend="llama.cpp", tier="canary", use_case="general_assistant",
+                             output_dir=os.path.join(self.tempdir, "missing-evaluator"), execution_mode="local_native", simulate=False)
+        with mock.patch("infergrade.runner.get_adapter") as adapter_mock, mock.patch(
+            "infergrade.runner.capture_environment", return_value={}
+        ), mock.patch("infergrade.runner.resolve_quant_artifact") as artifact_mock, mock.patch(
+            "infergrade.native_ifeval.preflight", side_effect=ValueError("native evaluator missing")
+        ):
+            with self.assertRaisesRegex(ValueError, "native evaluator missing"):
+                run_infergrade(request)
+        artifact_mock.assert_not_called()
+        adapter_mock.return_value.preflight_model.assert_not_called()
+        adapter_mock.return_value.run_capability.assert_not_called()
+
+    @mock.patch("infergrade.native_ifeval.preflight", return_value={"protocol_id":"ifeval_native_packaged_v1"})
+    def test_model_preflight_failure_aborts_before_capability_cases(self, evaluator_mock):
         output_dir = os.path.join(self.tempdir, "preflight-failure")
         request = RunRequest(
             model="google/gemma-4-E4B-it",
