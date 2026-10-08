@@ -263,9 +263,12 @@ pub async fn set_desktop_model_folder(folder: String, remove: bool) -> Result<Va
 mod tests {
     use super::*;
     fn root() -> PathBuf {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let ordinal = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let path = env::temp_dir().join(format!(
-            "ig-discovery-{}-{}",
+            "ig-discovery-{}-{}-{}",
             std::process::id(),
+            ordinal,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
