@@ -241,6 +241,11 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     cache_parser.add_argument("--prune-partials", action="store_true", help="Remove interrupted artifact downloads.")
     cache_parser.add_argument("--dry-run", action="store_true", help="Report what would be removed without deleting files.")
     cache_parser.add_argument("--partial-min-age-seconds", type=int, default=3600, help="Only prune partial downloads at least this old.")
+    cache_parser.add_argument("--download-starter", action="store_true", help=argparse.SUPPRESS)
+    cache_parser.add_argument("--managed-status", action="store_true")
+    cache_parser.add_argument("--clear-unkept", action="store_true")
+    cache_parser.add_argument("--artifact-id")
+    cache_parser.add_argument("--keep", choices=("yes", "no"))
     cache_parser.add_argument("--json", action="store_true", help="Print the complete machine-readable result.")
 
     runtime_parser = subparsers.add_parser("install-runtime", help="Inspect, install, or select an explicit managed runtime.")
@@ -822,6 +827,21 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "cache":
+        from infergrade.cache_control import managed_status, clear_unkept, set_keep, download_starter
+        if args.managed_status or args.clear_unkept or args.keep or args.download_starter:
+            try:
+                if args.download_starter:
+                    payload = download_starter()
+                elif args.keep:
+                    payload = set_keep(args.artifact_id, args.keep == "yes", args.artifact_cache_dir)
+                elif args.clear_unkept:
+                    payload = clear_unkept(args.artifact_cache_dir, args.artifact_id, args.dry_run)
+                else:
+                    payload = managed_status(args.artifact_cache_dir)
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise SystemExit("Cache action failed: %s" % exc)
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
         if args.prune_partials:
             payload = prune_partial_artifacts(
                 cache_dir=args.artifact_cache_dir,

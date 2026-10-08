@@ -22,6 +22,7 @@ from infergrade.capabilities import (
     remove_capability_case_checkpoints,
     summarize_capability_execution,
 )
+from infergrade.cache_control import cache_read_lease
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.memory_fit import estimate_memory_fit, standard_context_estimates
 from infergrade.ontology import build_ontology, resolve_artifact_sha256, resolve_quant_format
@@ -593,6 +594,7 @@ def _load_resumable_result(output_dir: str, progress: Dict[str, Any], profile_id
     return read_json(absolute_path)
 
 
+@cache_read_lease
 def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
     """Execute an InferGrade request and write a reproducible bundle to disk.
 
