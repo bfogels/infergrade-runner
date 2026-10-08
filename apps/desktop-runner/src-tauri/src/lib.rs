@@ -620,11 +620,7 @@ fn start_runner_listener(
     } else {
         stored_token
     };
-    let hf_token = if hf_credentials::inherited_token().is_none() {
-        hf_credentials::saved_token()?
-    } else {
-        None
-    };
+    let (hf_token, hf_warning) = hf_credentials::listener_token();
     let mut sensitive_values = token_for_child
         .as_ref()
         .map(|token| vec![token.clone()])
@@ -697,6 +693,7 @@ fn start_runner_listener(
         "status": "started",
         "pid": pid,
         "plan": plan,
+        "credential_warning": if hf_warning { Some("The optional Hugging Face credential could not be read. Public and cached models can still run; check Hugging Face Settings for gated downloads.") } else { None },
     }))
 }
 

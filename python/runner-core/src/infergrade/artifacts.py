@@ -437,7 +437,7 @@ def _download_with_curl(
         _download_with_bounded_curl(download_url, destination_path, expected_size_bytes)
         return
     header_config = _curl_header_config(_auth_headers(download_url))
-    command = ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY
+    command = ["curl", "--disable", "-L", "--fail"] + _CURL_HTTPS_ONLY
     run_kwargs = {"capture_output": True, "text": True}
     if header_config:
         command.extend(["-K", "-"])
@@ -457,7 +457,7 @@ def _download_with_curl(
 def _download_with_bounded_curl(download_url: str, destination_path: str, expected_size_bytes: int) -> None:
     """Stream curl output through Runner so the byte cap does not depend on curl version."""
     header_config = _curl_header_config(_auth_headers(download_url))
-    command = ["curl", "-L", "--fail", "--silent", "--show-error"] + _CURL_HTTPS_ONLY
+    command = ["curl", "--disable", "-L", "--fail", "--silent", "--show-error"] + _CURL_HTTPS_ONLY
     if header_config:
         command.extend(["-K", "-"])
     command.append(download_url)
@@ -541,7 +541,7 @@ def _fetch_huggingface_siblings(repo_id: str) -> list:
 def _fetch_json_with_curl(url: str) -> Dict[str, object]:
     """Fetch JSON via curl as a pragmatic fallback on local Python SSL issues."""
     header_config = _curl_header_config(_auth_headers(url))
-    command = ["curl", "-L", "--fail"] + _CURL_HTTPS_ONLY
+    command = ["curl", "--disable", "-L", "--fail"] + _CURL_HTTPS_ONLY
     run_kwargs = {"capture_output": True, "text": True}
     if header_config:
         command.extend(["-K", "-"])

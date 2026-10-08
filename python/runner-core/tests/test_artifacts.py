@@ -368,6 +368,7 @@ class ArtifactResolutionTests(unittest.TestCase):
             destination_path = command[command.index("-o") + 1]
             # Verify the hardened curl invocation pins protocols to https so
             # a 30x redirect cannot downgrade the transfer to cleartext.
+            self.assertEqual(command[1], "--disable")
             self.assertEqual(command[command.index("--proto") + 1], "=https")
             self.assertEqual(command[command.index("--proto-redir") + 1], "=https")
             self.assertIsNone(input)

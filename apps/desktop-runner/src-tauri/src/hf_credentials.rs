@@ -39,6 +39,22 @@ pub(crate) fn saved_token() -> Result<Option<String>, String> {
         Err(_) => Err("Could not read the OS credential store.".into()),
     }
 }
+fn resolve_listener_token(
+    inherited: bool,
+    load: impl FnOnce() -> Result<Option<String>, String>,
+) -> (Option<String>, bool) {
+    if inherited {
+        return (None, false);
+    }
+    match load() {
+        Ok(Some(token)) if valid(&token) => (Some(token), false),
+        Ok(None) => (None, false),
+        _ => (None, true),
+    }
+}
+pub(crate) fn listener_token() -> (Option<String>, bool) {
+    resolve_listener_token(inherited_token().is_some(), saved_token)
+}
 #[tauri::command]
 pub fn desktop_hf_credential_status() -> Result<Value, String> {
     let saved = saved_token()?.is_some();
@@ -108,5 +124,26 @@ mod tests {
         ] {
             assert!(!valid(&token));
         }
+    }
+    #[test]
+    fn optional_store_failure_does_not_block_public_listener_or_env_priority() {
+        assert_eq!(resolve_listener_token(false, || Ok(None)), (None, false));
+        assert_eq!(
+            resolve_listener_token(false, || Err("locked OS store".into())),
+            (None, true)
+        );
+        assert_eq!(
+            resolve_listener_token(false, || Ok(Some("malformed".into()))),
+            (None, true)
+        );
+        assert_eq!(
+            resolve_listener_token(true, || panic!("environment must take precedence")),
+            (None, false)
+        );
+        let token = format!("hf_{}", "a".repeat(30));
+        assert_eq!(
+            resolve_listener_token(false, || Ok(Some(token.clone()))),
+            (Some(token), false)
+        );
     }
 }
