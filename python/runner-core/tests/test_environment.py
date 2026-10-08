@@ -12,6 +12,10 @@ from infergrade.environment import (
     _detect_apple_silicon_fallback,
     _detect_apple_silicon_gpu,
     _detect_cpu_architecture,
+    _detect_cpu_model,
+    _detect_machine_model,
+    _hardware_label,
+    _windows_model,
     _detect_nvidia_gpu,
     _detect_process_translation,
     capture_environment,
@@ -19,6 +23,39 @@ from infergrade.environment import (
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_linux_cpu_and_machine_names_use_reported_fields_only(self):
+        data = {"/proc/cpuinfo": "processor: 0\nmodel name: AMD Ryzen 9 7950X\nSerial: private-serial", "/sys/devices/virtual/dmi/id/product_name": "Precision 3660\n"}
+        with mock.patch("infergrade.environment.platform.system", return_value="Linux"), mock.patch("infergrade.environment._read_hardware_text", side_effect=lambda path, *args: data.get(path)), mock.patch("infergrade.environment._run_command") as command:
+            self.assertEqual(_detect_cpu_model(), "AMD Ryzen 9 7950X")
+            self.assertEqual(_detect_machine_model(), "Precision 3660")
+            command.assert_not_called()
+
+    def test_linux_missing_dmi_uses_device_tree_and_missing_identity_stays_none(self):
+        with mock.patch("infergrade.environment.platform.system", return_value="Linux"), mock.patch("infergrade.environment._read_hardware_text", side_effect=lambda path, *args: "Raspberry Pi 5 Model B\x00" if path == "/proc/device-tree/model" else "To Be Filled By O.E.M."):
+            self.assertEqual(_detect_machine_model(), "Raspberry Pi 5 Model B")
+        with mock.patch("infergrade.environment.platform.system", return_value="Linux"), mock.patch("infergrade.environment._read_hardware_text", return_value=None):
+            self.assertIsNone(_detect_machine_model())
+
+    def test_windows_model_queries_are_bounded_and_exclude_serials(self):
+        with mock.patch("infergrade.environment.platform.system", return_value="Windows"), mock.patch("infergrade.environment.subprocess.run", return_value=mock.Mock(stdout="Precision 3660\n")) as run:
+            self.assertEqual(_detect_machine_model(), "Precision 3660")
+            args, kwargs = run.call_args
+            self.assertIn("Win32_ComputerSystem", args[0][-1])
+            self.assertTrue(args[0][-1].endswith(".Model"))
+            self.assertEqual(kwargs["timeout"], 5)
+        with mock.patch("infergrade.environment.subprocess.run", side_effect=OSError("unavailable")):
+            self.assertIsNone(_windows_model("Win32_Processor", "Name"))
+
+    def test_windows_unreadable_output_preserves_missing_identity(self):
+        failure = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid OEM output")
+        with mock.patch("infergrade.environment.subprocess.run", side_effect=failure):
+            self.assertIsNone(_windows_model("Win32_ComputerSystem", "Model"))
+
+    def test_hardware_labels_reject_placeholders_controls_and_excessive_length(self):
+        for label in [None, "unknown", "Default string", "System Product Name", "Bad\nName", "Bad\u0085Name", "x" * 257]:
+            self.assertIsNone(_hardware_label(label))
+        self.assertEqual(_hardware_label(" Dell Precision \n"), "Dell Precision")
+
     def test_detect_nvidia_gpu_parses_name_and_vram(self):
         with mock.patch("infergrade.environment._run_command", return_value="NVIDIA RTX 4090, 24564\n"):
             gpu = _detect_nvidia_gpu()
