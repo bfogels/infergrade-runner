@@ -97,13 +97,16 @@ def _detect_nvidia_gpu() -> Optional[Dict[str, Any]]:
     models = []
     vrams = []
     driver_versions = []
+    devices = []
     for line in lines:
         parts = [part.strip() for part in line.split(",")]
         if len(parts) < 2:
             continue
         models.append(parts[0])
         try:
-            vrams.append(float(parts[1]))
+            memory_mib = float(parts[1])
+            vrams.append(memory_mib)
+            devices.append({"model": parts[0], "vram_gb": round(memory_mib / 1024.0, 2)})
         except ValueError:
             continue
         if len(parts) >= 3 and parts[2]:
@@ -122,6 +125,8 @@ def _detect_nvidia_gpu() -> Optional[Dict[str, Any]]:
         "accelerator_model": models[0],
         "accelerator_vram_gb": round(max(vrams) / 1024.0, 2) if vrams else None,
         "accelerator_count": len(models),
+        "accelerator_devices": devices,
+        "accelerator_vram_total_gb": round(sum(vrams) / 1024.0, 2) if len(vrams) == len(models) else None,
         "hardware_class": "nvidia_gpu",
         "memory_architecture": "discrete_vram",
         "accelerator_api": "cuda",
@@ -378,6 +383,9 @@ def capture_environment(execution_mode: str) -> Dict[str, Any]:
     }
     if gpu.get("driver_versions"):
         payload["driver_versions"] = gpu["driver_versions"]
+    for key in ("accelerator_devices", "accelerator_vram_total_gb"):
+        if key in gpu:
+            payload[key] = gpu[key]
     if gpu.get("machine_model"):
         payload["machine_model"] = gpu["machine_model"]
     if gpu.get("chip_type"):

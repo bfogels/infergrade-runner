@@ -157,7 +157,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_manifest_declares_versioned_contract(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.40")
+        self.assertEqual(manifest["contract_version"], "0.3.41")
         self.assertEqual("infergrade-runner", manifest["publisher"])
 
     def test_run_request_contract_accepts_authorized_artifact_download_size(self):
@@ -345,7 +345,7 @@ class ContractExportTests(unittest.TestCase):
 
     def test_contract_declares_observed_quick_suite_boundary(self):
         manifest = load_contract_manifest()
-        self.assertEqual(manifest["contract_version"], "0.3.40")
+        self.assertEqual(manifest["contract_version"], "0.3.41")
         self.assertIn("schemas/json/observed_quick_suite.schema.json", manifest["schema_files"])
         self.assertIn("docs/observed_quick_suite_v1.md", manifest["supporting_docs"])
         schema = json.loads(
@@ -427,6 +427,9 @@ class ContractExportTests(unittest.TestCase):
             self.assertEqual("1.2.3", manifest["contract_version"])
             self.assertEqual(__version__, manifest["runner_version"])
             self.assertEqual("preview", manifest["release_channel"])
+            headless = manifest["golden_paths"]["linux_headless_local_native"]
+            self.assertTrue(headless["pair_and_start_supported"])
+            self.assertEqual("https://github.com/bfogels/infergrade-runner/releases/download/v1.2.3-preview/install.sh", headless["installer_url"])
             self.assertEqual(
                 "ghcr.io/bfogels/infergrade-runner-core:1.2.3-preview",
                 manifest["golden_paths"]["local_listener_container"]["runner_image"],

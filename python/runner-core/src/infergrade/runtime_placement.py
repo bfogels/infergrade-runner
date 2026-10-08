@@ -1,9 +1,14 @@
 """Bounded local allocation artifacts; requested placement is never observation."""
 
+import json
 import os
 import re
 import shlex
 import uuid
+from functools import lru_cache
+
+from infergrade.json_schema_subset import validate_json_schema
+from infergrade.paths import runner_root
 
 from infergrade.utils import stable_hash, write_json
 
@@ -170,3 +175,50 @@ def record_runtime_placement(request, command, logs, role):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         write_json(path, receipt)
     return receipt
+
+
+@lru_cache(maxsize=1)
+def _runtime_placement_schema():
+    path = runner_root() / "schemas" / "json" / "runtime_placement.schema.json"
+    return json.loads(path.read_text()), path
+
+
+def validated_runtime_placement(receipt):
+    """Return the exact path-free local shape only when its digest validates."""
+    if not isinstance(receipt, dict):
+        return None
+    try:
+        schema, path = _runtime_placement_schema()
+    except (OSError, ValueError):
+        return None
+    if validate_json_schema(receipt, schema, path):
+        return None
+    payload = {key: value for key, value in receipt.items()
+               if key not in ("invocation_id", "placement_fingerprint")}
+    if stable_hash(payload, length=64) != receipt["placement_fingerprint"]:
+        return None
+    return json.loads(json.dumps(receipt))
+
+
+def merge_runtime_placement_receipts(groups):
+    """Bound deduplicated invocations, excluding conflicting ID reuse."""
+    receipts, conflicts = {}, set()
+    complete = True
+    for group in groups:
+        for candidate in group:
+            receipt = validated_runtime_placement(candidate)
+            if receipt is None:
+                complete = False
+                continue
+            invocation = receipt["invocation_id"]
+            if invocation in conflicts:
+                continue
+            if invocation in receipts and receipts[invocation] != receipt:
+                conflicts.add(invocation)
+                receipts.pop(invocation)
+                complete = False
+                continue
+            receipts[invocation] = receipt
+    if len(receipts) > 128:
+        complete = False
+    return [receipts[key] for key in sorted(receipts)[:128]], complete

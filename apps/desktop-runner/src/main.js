@@ -1,4 +1,6 @@
+import { initModelDiscovery, selectableLocalModel } from './modelDiscovery.js';
 import "./styles.css";
+import {devicePairingController} from "./devicePairing.js";
 import {initDesktopNavigation,showDesktopPage} from "./desktopNavigation.js";
 initDesktopNavigation();
 import packageInfo from "../package.json";
@@ -1150,8 +1152,9 @@ function currentFirstRunUploadRunId() {
   return firstRunUploadRunIdInput?.value.trim() || currentHandoffRunId || "";
 }
 
+let discoveredModelPath = null;
 function hasSelectedModelPath() {
-  return currentFirstRunModelPath().toLowerCase().endsWith(".gguf");
+  return selectableLocalModel(currentFirstRunModelPath(), discoveredModelPath);
 }
 
 function renderFirstRunChecklist() {
@@ -2483,7 +2486,7 @@ function readFirstRunModelPath() {
   if (!modelPath) {
     throw new Error("Select a local GGUF model file before running assigned local work.");
   }
-  if (!modelPath.toLowerCase().endsWith(".gguf")) {
+  if (!selectableLocalModel(modelPath, discoveredModelPath)) {
     throw new Error("Use a local GGUF model file for assigned local work.");
   }
   modelPathReadiness = `First-run model selected: ${modelPath}`;
@@ -3025,6 +3028,18 @@ async function startRunner({ confirmStarted = false } = {}) {
     return { started: false, disposition: startDisposition };
   }
 
+  const runtimePlan = await inspectRuntimePlan();
+  if (runtimePlan?.native_runtime_status !== "available") {
+    if (runtimePlan?.selected_runtime?.status !== "not_selected") {
+      throw new Error("The selected runtime needs repair before listening. Open Runtime options to repair it.");
+    }
+    setStatus("Preparing runtime", "warning");
+    try {
+      await installManagedRuntime();
+    } finally {
+      setRuntimeActionDisabled(false);
+    }
+  }
   await ensureRunnerListenerEvents();
   runnerStartupLines = [];
   const output = await invoke("start_runner_listener", {
@@ -3052,6 +3067,55 @@ async function startRunner({ confirmStarted = false } = {}) {
   }
   return { started: true };
 }
+
+let browserPairing=null,deviceStartBlocked=false,devicePairingCompleting=false;
+async function connectRunnerInBrowser(){
+  const invoke=await loadTauriInvoke();
+  if(!invoke){pairState.textContent="Open the desktop app to connect this machine in your browser.";return;}
+  browserPairing??=devicePairingController({
+    invoke,openExternal:openExternalUrl,
+    onStatus:message=>{pairState.textContent=message;},
+    onIssued:issued=>{
+      document.querySelector('[data-device-user-code]').textContent=issued.user_code;
+      document.querySelector('[data-device-expiry]').textContent=`Expires in ${Math.ceil(issued.expires_in/60)} minutes. Approve only if this is your machine.`;
+      document.querySelector('[data-device-pairing]').hidden=false;
+    },
+    onActive:active=>{
+      document.querySelector('[data-browser-pair-runner]').disabled=active;
+      pairButton.disabled=active;
+      for(const name of ['apiUrl','pairCode','runnerLabel'])form.elements[name].disabled=active;
+      if(active||!childProcess)setRunnerButtonsDisabled('start',active||deviceStartBlocked);
+      if(!active)document.querySelector('[data-device-pairing]').hidden=true;
+    },
+    onCompleting:completing=>{
+      devicePairingCompleting=completing;
+      if(completing)document.querySelector('[data-device-pairing]').hidden=true;
+      resetPairingButtons.forEach(button=>{button.disabled=completing;});
+      if(repairPairingButton)repairPairingButton.disabled=completing;
+    },
+    onStopped:async()=>{pairState.textContent='Stopped waiting. You can start a new connection.';await updateTokenState();},
+    onPaired:async output=>{
+      hubConnectionVerified=false;pairingAuthFailure=null;
+      appendLog(pairingSummary(JSON.stringify(output||{})));
+      await updateTokenState();setStatus('Paired','good');
+      pairState.textContent='Connected. Starting the local Runner listener…';
+      try{
+        const result=await startRunner({confirmStarted:true});
+        deviceStartBlocked=result?.started===false;
+        pairState.textContent=result?.started===false?`Connected. ${result.disposition.presentation.description}`:'Connected and listening for Hub runs.';
+      }catch(error){
+        deviceStartBlocked=true;
+        pairState.textContent=`Connected. ${userSafeStartFailure(error.message||error)}`;
+        setStatus('Paired; start blocked','warning');await checkRunnerStartupSelfTest();
+      }
+    },
+  });
+  deviceStartBlocked=false;
+  await browserPairing.start(readApiUrl(),form.elements.runnerLabel.value.trim());
+}
+document.querySelector('[data-browser-pair-runner]').onclick=()=>connectRunnerInBrowser().catch(error=>{pairState.textContent=String(error.message||error);});
+document.querySelector('[data-device-open-browser]').onclick=()=>browserPairing?.open().catch(()=>{pairState.textContent='Could not open your browser. Check your default browser and try again.';});
+document.querySelector('[data-device-cancel]').onclick=()=>browserPairing?.cancel().catch(error=>{pairState.textContent=String(error.message||error);});
 
 async function pairRunner() {
   const apiUrl = readApiUrl();
@@ -3112,6 +3176,8 @@ async function pairRunner() {
 }
 
 async function resetPairing() {
+  if(devicePairingCompleting)throw new Error("Finishing this connection. Try disconnecting again in a moment.");
+  if(browserPairing?.isActive())await browserPairing.cancel();
   const wasListening = Boolean(childProcess);
   if (wasListening) {
     await stopRunner();
@@ -3527,7 +3593,7 @@ downloadStarterGgufButton?.addEventListener("click", () => {
 firstRunModelPathInput?.addEventListener("input", () => {
   const modelPath = currentFirstRunModelPath();
   modelPathReadiness = modelPath
-    ? modelPath.toLowerCase().endsWith(".gguf")
+    ? selectableLocalModel(modelPath, discoveredModelPath)
       ? `First-run model selected: ${modelPath}`
       : "Use a local GGUF model file for native first-run."
     : "Download the public starter model above, or paste a local GGUF path.";
@@ -3649,3 +3715,11 @@ window.setTimeout(applyPreviewStateFromUrl, 50);
 
 // First-run setup shares the managed installer with Runtime options.
 setupRuntimeButton?.addEventListener("click", () => runtimeInstallManagedButton?.click());
+
+initModelDiscovery({invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
+  if(!await loadTauriInvoke())throw new Error('Desktop only');
+  const {open}=await import('@tauri-apps/plugin-dialog');
+  return open({directory:true,multiple:false,title:'Choose a local model folder'});
+},useFile:path=>{
+  if(firstRunModelPathInput){discoveredModelPath=path;firstRunModelPathInput.value=path;firstRunModelPathInput.dispatchEvent(new Event('input'));firstRunModelPathInput.focus();firstRunModelPathInput.scrollIntoView({block:'center'});}
+}});

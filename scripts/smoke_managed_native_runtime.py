@@ -62,9 +62,9 @@ def smoke(cli, output):
     accelerator = "metal" if (system, arch) == ("macos", "aarch64") else "cpu"
     candidates = [row for row in manifest["runtimes"]
                   if row["platform"]["system"] == system and row["platform"]["arch"] == arch
-                  and row["accelerator"] == accelerator and row["channel"] == "upstream_release"]
-    if len(candidates) != 1:
-        raise ValueError(f"Expected one pinned upstream {system}/{arch}/{accelerator} runtime")
+                  and row["accelerator"] == accelerator and row["upstream"].get("tag") == "b11429"]
+    if not candidates:
+        raise ValueError(f"Expected a pinned {system}/{arch}/{accelerator} runtime")
     entry = candidates[0]
     installed = command_json(cli, ["runtime", "install", "--runtime-id", entry["runtime_id"]],
                              env, output, "managed-install", timeout=600)
