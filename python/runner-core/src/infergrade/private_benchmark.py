@@ -139,6 +139,9 @@ def _run_private_benchmark(model_file, use_case, tier, cli_path, server_path, em
         receipt_path = directory / "receipt.json"
         _receipt(receipt_path, receipt)
         try:
+            if cuda_device_uuids is None:
+                from infergrade.cuda_device_policy import apply_policy
+                apply_policy(request)
             result = run_infergrade(request, emit_progress=emit_progress)
             if result.get("validation", {}).get("valid") is not True:
                 raise RuntimeError("The local result bundle did not pass validation. Inspect its local report.")
