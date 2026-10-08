@@ -25,8 +25,9 @@ Reset preserves the runtime's existing default; it does not imply one GPU.
 Hub jobs on this native lane must bind `native_device_policy_revision` to the
 reported preference revision. Missing, changed or cleared consent fails before
 local doctor/model execution and asks the user to review and queue again. A
-revision on a different execution lane is invalid. Hub planning and desktop
-controls must consume this protocol before their GPU choices are enabled.
+revision on a different execution lane is invalid. Hub planning consumes this
+protocol and binds review consent to the descriptor; successful queue retries
+retain their original immutable job even after the preference changes.
 
 The `infergrade.cuda_device_policy.v1` descriptor contains a 64-hex revision,
 the existing physical selection fingerprint, selected count and ordered
@@ -44,3 +45,17 @@ The policy reuses contract 0.3.42's immutable native request and placement proof
 it does not change canonical scoring, export physical IDs in public run configs,
 or qualify untested NVIDIA hardware. Physical GPU, desktop GUI and end-to-end
 Hub consent acceptance are separate gates from synthetic protocol tests.
+
+Desktop Settings provides per-device choices, a Both control for two cards, and
+an explicit selected-device checklist for larger inventories. Use runtime
+default clears the saved preference. Controls wait for durable confirmation,
+retain the last confirmed choice on failure and provide Refresh/reset recovery.
+The bounded local helper keeps hardware UUIDs on the machine; it does not make
+Hub requests. Its work/exit fence remains held until process termination is
+acknowledged after a timeout or failure.
+
+Local status distinguishes `available` inventory from `selection_ready` saved
+hardware. A missing device or changed model/exact capacity leaves the preference
+visible but unready; no device fallback is allowed. Installed VRAM does not prove
+free memory or fit. Changing this machine preference requires another Hub plan
+review; a separate per-job Both override is not implemented by these controls.

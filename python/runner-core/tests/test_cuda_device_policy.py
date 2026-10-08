@@ -56,6 +56,29 @@ class CudaDevicePolicyTests(unittest.TestCase):
         self.assertNotIn('uuid', json.dumps(metadata))
         self.assertFalse(list(self.directory.glob('.cuda-policy-*')))
 
+    def test_status_distinguishes_live_inventory_from_valid_saved_selection(self):
+        policy.set_policy([B, A])
+        ready = policy.policy_status()
+        self.assertTrue(ready['available'])
+        self.assertTrue(ready['selection_ready'])
+        self.assertTrue(all(device['selected'] for device in ready['devices']))
+        for devices in ((DEVICES[0],), (Device(A, 2, 'pci', 'Changed card', 16384), DEVICES[1]),
+                        (Device(A, 2, 'pci', 'Card A', 32768), DEVICES[1])):
+            with mock.patch('infergrade.cuda_device_policy.inventory', return_value=devices):
+                status = policy.policy_status()
+                self.assertTrue(status['available'])
+                self.assertFalse(status['selection_ready'])
+                self.assertIn('no fallback', status['message'])
+                self.assertEqual(status['policy'], ready['policy'])
+        with mock.patch('infergrade.cuda_device_policy.inventory', side_effect=RuntimeError('private detail')):
+            status = policy.policy_status()
+            self.assertFalse(status['available'])
+            self.assertFalse(status['selection_ready'])
+            self.assertNotIn('private detail', str(status))
+        policy.set_policy([])
+        with mock.patch('infergrade.cuda_device_policy.inventory', side_effect=RuntimeError()):
+            self.assertTrue(policy.policy_status()['selection_ready'])
+
     def test_hub_job_requires_exact_revision_before_device_query(self):
         first = policy.set_policy([A])
         policy.set_policy([B])

@@ -168,13 +168,21 @@ def policy_heartbeat_metadata(metadata=None):
 
 def policy_status():
     policy = load_policy()
+    result = {"schema_version": SCHEMA, "policy": descriptor(policy), "available": False,
+              "selection_ready": policy is None, "devices": []}
     try:
         devices = inventory()
     except RuntimeError:
-        return {"schema_version": SCHEMA, "policy": descriptor(policy), "available": False, "devices": [],
-                "message": "Physical NVIDIA device inventory is unavailable."}
-    return {"schema_version": SCHEMA, "policy": descriptor(policy), "available": True,
-            "devices": [{"uuid": d.uuid, "index": d.index, "model": d.model,
-                         "vram_gb": round(d.memory_mib / 1024.0, 2),
-                         "selected": bool(policy and d.uuid in {v["uuid"] for v in policy["devices"]})}
-                        for d in devices]}
+        result["message"] = "Physical NVIDIA device inventory is unavailable."
+        return result
+    selected = {device["uuid"] for device in policy["devices"]} if policy else set()
+    physical = {device.uuid: {"uuid": device.uuid, "model": device.model, "memory_mib": device.memory_mib}
+                for device in devices}
+    result.update(available=True, selection_ready=not policy or all(
+        physical.get(device["uuid"]) == device for device in policy["devices"]),
+        devices=[{"uuid": d.uuid, "index": d.index, "model": d.model,
+                  "vram_gb": round(d.memory_mib / 1024.0, 2), "selected": d.uuid in selected}
+                 for d in devices])
+    if not result["selection_ready"]:
+        result["message"] = "Selected GPU hardware changed or is unavailable. Select the devices again; no fallback is allowed."
+    return result
