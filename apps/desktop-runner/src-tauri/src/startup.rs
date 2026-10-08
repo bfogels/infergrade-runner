@@ -4,6 +4,8 @@ use std::{
     path::{Path, PathBuf},
     sync::Mutex,
 };
+#[cfg(target_os = "linux")]
+use tauri::Manager;
 fn nonce() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
