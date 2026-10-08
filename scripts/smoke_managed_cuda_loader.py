@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 from smoke_managed_native_runtime import command_json, write_json
+from verify_linux_cuda_package import verify_package
 from verify_llama_cpp_model_canary import canary_command, download_model, model_spec, LEGACY_CANARY_ID
 
 
@@ -27,6 +28,7 @@ def smoke(cli, output):
     if selection["archive"]["sha256"] != entry["archive"]["sha256"] or not selection["archive"]["checksum_verified"]:
         raise ValueError("CUDA package archive identity did not match its pin")
     directory = Path(selection["binaries"]["cli"]).parent
+    verify_package(directory, output / "dependency-closure")
     if any(directory.rglob("libcuda.so*")):
         raise ValueError("CUDA package must use the host NVIDIA driver, not a bundled driver or stub")
     if not (directory / "libggml-cuda.so").is_file():

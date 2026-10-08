@@ -17,6 +17,8 @@ on:
       - "python/runner-core/src/infergrade/runtimes.py"
       - "python/runner-core/src/infergrade/environment.py"
       - "scripts/smoke_managed_cuda_loader.py"
+      - "scripts/verify_linux_cuda_package.py"
+      - "scripts/build_linux_cuda_runtime.sh"
       - "python/runner-core/src/infergrade/adapters/llama_cpp.py"
       - "python/runner-core/src/infergrade/runner.py"
       - "scripts/verify_llama_cpp_model_canary.py"
@@ -49,6 +51,7 @@ jobs:
           path: |
             output/cuda-loader-smoke/*.json
             output/cuda-loader-smoke/*.txt
+            output/cuda-loader-smoke/dependency-closure/*.txt
           if-no-files-found: error
           retention-days: 7
   native-cpu:
