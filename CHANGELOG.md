@@ -5,6 +5,21 @@ user-visible changes; full evidence boundaries and validation details live in
 the release PRs and tags. Versions without an entry shipped internal or
 incremental changes only — see the git history.
 
+## 0.3.68 (contract 0.3.43)
+
+- Fixes fresh Linux CUDA setup on hosts without NCCL by selecting the verified
+  portable CUDA build, which disables that optional dependency. CUDA package
+  checks now reject missing or host-supplied runtime libraries.
+- Reports missing CUDA backend libraries separately from an unavailable NVIDIA
+  driver and retains verbose device-discovery diagnostics.
+- Selects Linux runtimes compatible with the host's glibc and C++ runtime;
+  records Vulkan availability only where a native run can execute on it.
+- Includes the reviewed Desktop machine, GPU, startup, cache, result navigation,
+  completion notification and private benchmark controls already on main, plus
+  additive CUDA job-choice and selected-device contracts.
+- Ubuntu package and CPU-only loader checks remain separate from physical GPU
+  inference, model placement and a complete paired benchmark/upload loop.
+
 ## 0.3.67 (contract 0.3.41)
 
 - Adds a per-user Linux server installer that supplies dependencies, the native
