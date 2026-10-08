@@ -586,12 +586,37 @@ def _auth_headers(url: str) -> Dict[str, str]:
 
 def _huggingface_token(url: str) -> Optional[str]:
     parsed = urllib_parse.urlparse(url)
-    if parsed.scheme != "https" or parsed.hostname != "huggingface.co":
+    if parsed.scheme != "https" or parsed.hostname != "huggingface.co" or parsed.username or parsed.password:
+        return None
+    try:
+        if parsed.port not in (None, 443):
+            return None
+    except ValueError:
         return None
     for env_name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HUGGINGFACE_TOKEN"):
         token = (os.environ.get(env_name) or "").strip()
         if token:
             return token
+    # Reuse the active personal access token written by `hf auth login`.
+    # Environment credentials retain their existing precedence. Never read
+    # this file for other origins or send it to InferGrade.
+    hf_home = os.environ.get("HF_HOME") or os.path.join(
+        os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "huggingface"
+    )
+    token_path = os.path.expanduser(os.environ.get("HF_TOKEN_PATH") or os.path.join(hf_home, "token"))
+    try:
+        import stat
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+        fd = os.open(token_path, flags)
+        with os.fdopen(fd, "rb") as handle:
+            metadata = os.fstat(handle.fileno())
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 4096:
+                return None
+            token = handle.read(4097).decode("utf-8").strip()
+        if token.startswith("hf_") and 20 <= len(token) <= 256 and all(c.isascii() and (c.isalnum() or c == "_") for c in token):
+            return token
+    except (OSError, UnicodeError):
+        pass
     return None
 
 

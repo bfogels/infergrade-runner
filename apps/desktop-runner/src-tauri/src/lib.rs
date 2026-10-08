@@ -1,5 +1,6 @@
 mod desktop_activity;
 mod device_pairing;
+mod hf_credentials;
 use device_pairing::{
     begin_runner_device_pairing, cancel_runner_device_pairing, poll_runner_device_pairing,
 };
@@ -619,11 +620,19 @@ fn start_runner_listener(
     } else {
         stored_token
     };
-    let sensitive_values = token_for_child
+    let hf_token = if hf_credentials::inherited_token().is_none() {
+        hf_credentials::saved_token()?
+    } else {
+        None
+    };
+    let mut sensitive_values = token_for_child
         .as_ref()
         .map(|token| vec![token.clone()])
         .unwrap_or_default();
 
+    if let Some(token) = hf_credentials::inherited_token().or_else(|| hf_token.clone()) {
+        sensitive_values.push(token);
+    }
     let mut command = app
         .shell()
         .sidecar(SIDECAR_BINARY_NAME)
@@ -635,6 +644,9 @@ fn start_runner_listener(
         .env("INFERGRADE_DESKTOP_EVENTS", "1");
     if let Some(token) = token_for_child {
         command = command.env("INFERGRADE_HUB_TOKEN", token);
+    }
+    if let Some(token) = hf_token {
+        command = command.env("HF_TOKEN", token);
     }
     let (mut events, child) = command
         .spawn()
@@ -2508,6 +2520,9 @@ pub fn run() {
             model_discovery::desktop_discovered_models,
             model_discovery::set_desktop_model_folder,
             desktop_activity::desktop_machine_activity,
+            hf_credentials::desktop_hf_credential_status,
+            hf_credentials::save_desktop_hf_credential,
+            hf_credentials::clear_desktop_hf_credential,
             desktop_model_cache_status,
             clear_desktop_model_cache,
             download_starter_gguf,

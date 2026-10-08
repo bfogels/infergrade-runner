@@ -13,6 +13,7 @@ from infergrade.artifacts import (
     _download_remote_artifact,
     _download_with_bounded_curl,
     _install_cache_file_without_overwrite,
+    _huggingface_token,
     artifact_cache_status,
     artifact_to_download_url,
     canonicalize_hf_artifact_reference,
@@ -25,8 +26,46 @@ from infergrade.models import RunRequest
 
 
 class ArtifactResolutionTests(unittest.TestCase):
+    def test_hf_login_token_file_is_origin_scoped_and_env_takes_precedence(self):
+        with tempfile.TemporaryDirectory() as root:
+            token = "hf_" + "a" * 30
+            path = os.path.join(root, "token")
+            with open(path, "w") as handle:
+                handle.write(token + "\n")
+            with mock.patch.dict(os.environ, {"HF_HOME":root}, clear=True):
+                self.assertEqual(_huggingface_token("https://huggingface.co/repo"),token)
+                self.assertIsNone(_huggingface_token("https://api.infergrade.com"))
+                self.assertIsNone(_huggingface_token("http://huggingface.co/repo"))
+                self.assertIsNone(_huggingface_token("https://huggingface.co:8443/repo"))
+                self.assertIsNone(_huggingface_token("https://user@huggingface.co/repo"))
+                with mock.patch.dict(os.environ, {"HF_TOKEN":"environment-priority"}):
+                    self.assertEqual(_huggingface_token("https://huggingface.co/repo"),"environment-priority")
+                with open(path, "w") as handle:
+                    handle.write("hf_" + "a" * 5000)
+                self.assertIsNone(_huggingface_token("https://huggingface.co/repo"))
+
+    def test_explicit_hf_token_path_and_nonregular_file_rejection(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root,"credential")
+            token = "hf_" + "b" * 30
+            with open(path,"w") as handle:
+                handle.write(token)
+            with mock.patch.dict(os.environ,{"HF_TOKEN_PATH":path,"HF_HOME":"/unavailable"},clear=True):
+                self.assertEqual(_huggingface_token("https://huggingface.co/repo"),token)
+            if hasattr(os,"mkfifo"):
+                fifo=os.path.join(root,"fifo")
+                os.mkfifo(fifo)
+                with mock.patch.dict(os.environ,{"HF_TOKEN_PATH":fifo},clear=True):
+                    self.assertIsNone(_huggingface_token("https://huggingface.co/repo"))
+
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory(prefix="infergrade-artifacts-")
+        # Mocked downloads must never consume the developer's active HF login.
+        self.credential_env = mock.patch.dict(os.environ, {
+            "HF_TOKEN_PATH": os.path.join(self.tempdir.name, "no-active-hf-token"),
+        })
+        self.credential_env.start()
+        self.addCleanup(self.credential_env.stop)
         self.cache_dir = os.path.join(self.tempdir.name, "cache")
         self.local_model = os.path.join(self.tempdir.name, "model.gguf")
         with open(self.local_model, "wb") as handle:

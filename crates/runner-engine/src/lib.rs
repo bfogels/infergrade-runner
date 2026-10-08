@@ -543,12 +543,28 @@ pub fn worker_request_preview(
 }
 
 pub fn redact_listener_text(text: &str, sensitive_values: &[String]) -> String {
-    sensitive_values
+    let redacted = sensitive_values
         .iter()
         .filter(|value| !value.trim().is_empty())
         .fold(text.to_string(), |redacted, value| {
             redacted.replace(value, "[redacted]")
-        })
+        });
+    // HF login files are resolved inside the Python child, so the supervisor
+    // may not know their value. Never forward token-shaped strings to the UI.
+    let mut remaining = redacted.as_str();
+    let mut output = String::new();
+    while let Some(start) = remaining.find("hf_") {
+        output.push_str(&remaining[..start]);
+        let candidate = &remaining[start..];
+        let end = candidate
+            .bytes()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == b'_')
+            .count();
+        output.push_str("[redacted]");
+        remaining = &candidate[end..];
+    }
+    output.push_str(remaining);
+    output
 }
 
 pub fn redact_worker_text(text: &str, sensitive_values: &[String]) -> String {
@@ -4812,6 +4828,14 @@ mod tests {
 
         assert_eq!(redacted, "starting with [redacted] in stderr");
         assert!(!redacted.contains("qbhr_secret_token"));
+        assert_eq!(
+            redact_listener_text("login hf_test_private_credential, done", &[]),
+            "login [redacted], done"
+        );
+        assert_eq!(
+            redact_listener_text("Unicode ✓ hf_first_token hf_second_token", &[]),
+            "Unicode ✓ [redacted] [redacted]"
+        );
     }
 
     #[test]
