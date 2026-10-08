@@ -6,6 +6,7 @@ mod finish_notifications;
 mod hf_credentials;
 mod machine_settings;
 mod run_results;
+mod startup;
 use device_pairing::{
     begin_runner_device_pairing, cancel_runner_device_pairing, poll_runner_device_pairing,
 };
@@ -2627,6 +2628,8 @@ pub fn run() {
             finish_notifications::desktop_notification_status,
             finish_notifications::set_desktop_notifications,
             finish_notifications::notify_desktop_run_completed,
+            startup::desktop_startup_status,
+            startup::set_desktop_startup,
             background::desktop_background_status,
             background::set_desktop_keep_running,
             save_runner_token,

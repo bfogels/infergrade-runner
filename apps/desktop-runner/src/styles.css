@@ -1430,3 +1430,8 @@ h4 {
 .desktop-notification-home p:empty { display:none; }
 .assignment-panel[data-state="idle"] .desktop-notification-home { display:none; }
 .desktop-notification-home { grid-column:1 / -1; margin-top:0; }
+.desktop-startup h2 { font-size:21px; line-height:1.25; margin:0 0 18px; }
+.desktop-startup .background-toggle { display:flex; flex-direction:row; align-items:center; gap:10px; }
+.desktop-startup .background-toggle input { width:16px; height:16px; min-height:0; flex:none; }
+.desktop-startup p { margin:14px 0; }
+.desktop-startup button { width:auto; }
