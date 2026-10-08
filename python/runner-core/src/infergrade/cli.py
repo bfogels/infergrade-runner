@@ -352,6 +352,11 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     _add_api_token_argument(run_job_parser)
     _add_run_token_argument(run_job_parser)
 
+    gpu_parser = subparsers.add_parser("gpu-choice", help="Select physical NVIDIA GPUs for this machine's native benchmarks.")
+    gpu_parser.add_argument("action", choices=("status", "select", "reset"))
+    gpu_parser.add_argument("--cuda-device", dest="cuda_device_uuids", action="append")
+    gpu_parser.add_argument("--json", action="store_true")
+
     admission_parser = subparsers.add_parser("admission", help="Pause or resume new machine benchmark claims without interrupting active work.")
     admission_parser.add_argument("action", choices=("status", "pause", "resume"))
     admission_parser.add_argument("--json", action="store_true")
@@ -688,6 +693,25 @@ def main(argv: Optional[list] = None) -> int:
             raise SystemExit("Private benchmark could not finish: %s" % exc) from exc
         print(json.dumps(result, sort_keys=True) if args.json else
               "Private benchmark finished. The result stayed on this machine.\nLocal report: %s" % result["report_path"])
+        return 0
+
+    if args.command == "gpu-choice":
+        from infergrade.cuda_device_policy import policy_status, set_policy
+        try:
+            if args.action == "select":
+                if not args.cuda_device_uuids:
+                    raise ValueError("Select at least one full GPU UUID, or explicitly reset the preference.")
+                set_policy(args.cuda_device_uuids)
+            elif args.cuda_device_uuids:
+                raise ValueError("--cuda-device is only valid with select.")
+            elif args.action == "reset":
+                set_policy([])
+            result = policy_status()
+        except (OSError, ValueError, RuntimeError, RecursionError) as exc:
+            raise SystemExit("GPU choice unavailable: %s" % exc) from exc
+        print(json.dumps(result, sort_keys=True) if args.json else
+              "GPU choice: %s" % ("%s selected device(s)" % result["policy"]["device_count"]
+                                  if result["policy"] else "runtime default"))
         return 0
 
     if args.command == "admission":
