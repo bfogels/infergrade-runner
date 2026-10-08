@@ -387,7 +387,7 @@ test("desktop public local check keeps upload recovery fields out of the product
   assert.ok(js.includes("urlHandoff.runId ? urlHandoff.workerId : storedWorkerId"));
   assert.ok(js.includes("removeItem(FIRST_RUN_HANDOFF_WORKER_ID_STORAGE_KEY)"));
   assert.ok(js.includes("applyFirstRunHandoff();"));
-  assert.ok(js.includes(".endsWith(\".gguf\")"));
+  assert.ok(js.includes("selectableLocalModel(modelPath, discoveredModelPath)"));
   assert.ok(js.includes("native_first_run evidence"));
   assert.ok(js.includes("payload?.artifact?.path"));
   assert.ok(js.includes("payload?.bundle_artifact?.path"));
