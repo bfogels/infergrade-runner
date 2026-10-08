@@ -210,7 +210,11 @@ jobs:
         run: cargo test --workspace --exclude infergrade_desktop_runner --locked
 
       - name: Build desktop sidecar binary (needed by Tauri shell)
-        run: bash ./scripts/build_desktop_sidecar.sh
+        run: |
+          bash ./scripts/build_desktop_sidecar.sh
+          # Shell unit tests do not execute or distribute evaluator assets.
+          # Package workflows materialize and verify the actual pinned bundle.
+          mkdir -p apps/desktop-runner/src-tauri/native-ifeval
 
       - name: cargo build (desktop shell)
         run: cargo build -p infergrade_desktop_runner --lib --locked

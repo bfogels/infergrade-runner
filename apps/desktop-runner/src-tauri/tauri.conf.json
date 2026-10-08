@@ -39,7 +39,8 @@
     "resources": {
       "../../../python/runner-core/src": "runner-core/src",
       "../../../schemas": "schemas",
-      "desktop-python": "python-runtime"
+      "desktop-python": "python-runtime",
+      "native-ifeval": "native-ifeval"
     },
     "category": "DeveloperTool",
     "shortDescription": "Local companion app for InferGrade Hub runs",
