@@ -315,19 +315,70 @@ def _load_host_environment_override() -> Optional[Dict[str, Any]]:
     return payload if isinstance(payload, dict) else None
 
 
+def _hardware_label(value):
+    """Keep a bounded reported model name; never use serials or placeholder labels."""
+    if not isinstance(value, str):
+        return None
+    value = value.rstrip("\x00").strip()
+    if not value or len(value) > 256 or any(ord(ch) < 32 or 127 <= ord(ch) <= 159 for ch in value):
+        return None
+    if value.casefold() in {"none", "unknown", "not specified", "default string", "system product name", "to be filled by o.e.m.", "to be filled by oem"}:
+        return None
+    return value
+
+
+def _read_hardware_text(path, limit=4096):
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read(limit)
+    except OSError:
+        return None
+
+
+def _windows_model(class_name, property_name):
+    # Fixed callers below query model names only: no serial, UUID, account or network fields.
+    script = "(Get-CimInstance -ClassName %s -ErrorAction Stop | Select-Object -First 1).%s" % (class_name, property_name)
+    try:
+        result = subprocess.run(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], check=True, capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return None
+    return _hardware_label(result.stdout)
+
+
 def _detect_cpu_model() -> str:
-    """Detect the most helpful CPU label for the current platform."""
-    brand = _run_command(["sysctl", "-n", "machdep.cpu.brand_string"])
-    if brand:
-        return brand
+    """Capture a reported CPU brand, retaining the architecture fallback when unavailable."""
+    system = platform.system().lower()
+    if system == "darwin":
+        brand = _hardware_label(_run_command(["sysctl", "-n", "machdep.cpu.brand_string"]))
+        if brand:
+            return brand
+    elif system == "linux":
+        cpuinfo = _read_hardware_text("/proc/cpuinfo", 65536) or ""
+        for line in cpuinfo.splitlines():
+            key, separator, value = line.partition(":")
+            if separator and key.strip().casefold() in {"model name", "hardware"}:
+                brand = _hardware_label(value)
+                if brand:
+                    return brand
+    elif system == "windows":
+        brand = _windows_model("Win32_Processor", "Name")
+        if brand:
+            return brand
     return platform.processor() or platform.machine()
 
 
 def _detect_machine_model() -> Optional[str]:
-    """Detect the most useful machine-model identifier when the platform exposes one."""
-    hw_model = _run_command(["sysctl", "-n", "hw.model"])
-    if hw_model:
-        return hw_model
+    """Capture reported hardware model names without substituting an invented identity."""
+    system = platform.system().lower()
+    if system == "darwin":
+        return _hardware_label(_run_command(["sysctl", "-n", "hw.model"]))
+    if system == "windows":
+        return _windows_model("Win32_ComputerSystem", "Model")
+    if system == "linux":
+        for path in ("/sys/devices/virtual/dmi/id/product_name", "/proc/device-tree/model"):
+            name = _hardware_label(_read_hardware_text(path))
+            if name:
+                return name
     return None
 
 
