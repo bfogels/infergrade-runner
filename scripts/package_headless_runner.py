@@ -32,6 +32,12 @@ def main():
         with tarfile.open(fileobj=io.BytesIO(archive)) as source:
             # git archive is a local, tracked source tree, not a downloaded archive.
             source.extractall(bundle / 'runner')
+        if system != 'linux' or arch != 'x86_64':
+            raise ValueError('headless native evaluator packaging supports reviewed Linux x86_64 only')
+        from prepare_native_ifeval_bundle import prepare_package_bundle
+        prepare_package_bundle(bundle / 'runner/native-ifeval', 'x86_64-unknown-linux-gnu',
+                               Path.home() / '.cache/infergrade/native-ifeval-build',
+                               bundle / 'runner/python/runner-core/src/infergrade/_native_ifeval_identity.py')
         with tarfile.open(args.output / name, 'w:gz') as output:
             for child in sorted(bundle.iterdir()):
                 output.add(child, arcname=child.name)
