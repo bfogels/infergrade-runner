@@ -380,7 +380,7 @@ def _download_remote_artifact(
 ) -> None:
     """Download a remote artifact, falling back to curl when stdlib transport fails."""
     try:
-        with urllib_request.urlopen(
+        with open_artifact_request(
             _request_for_url(download_url), context=verified_https_context(download_url)
         ) as response, open(destination_path, "wb") as handle:
             content_length = response.headers.get("Content-Length") if getattr(response, "headers", None) else None
@@ -529,7 +529,7 @@ def _fetch_huggingface_siblings(repo_id: str) -> list:
     """Fetch sibling filenames for a Hugging Face model, using curl when needed."""
     url = "https://huggingface.co/api/models/%s" % urllib_parse.quote(repo_id, safe="/")
     try:
-        with urllib_request.urlopen(_request_for_url(url), context=verified_https_context(url)) as response:
+        with open_artifact_request(_request_for_url(url), context=verified_https_context(url)) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except Exception as exc:
         if not _should_fallback_to_curl(exc):
@@ -555,6 +555,31 @@ def _fetch_json_with_curl(url: str) -> Dict[str, object]:
         message = (completed.stderr or completed.stdout or "").strip()
         raise RuntimeError("curl failed while fetching %s: %s" % (url, message or "unknown error"))
     return json.loads(completed.stdout)
+
+
+class CredentialSafeRedirect(urllib_request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib_parse.urlparse(newurl)
+        if target.scheme != "https":
+            raise urllib_error.HTTPError(newurl, code, "Artifact redirect must use HTTPS", headers, fp)
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None:
+            # urllib normally copies Authorization to redirected hosts. A
+            # public CDN may serve bytes, but never receives the HF credential.
+            try:
+                same_origin = target.hostname == "huggingface.co" and target.port in (None, 443) and not target.username and not target.password
+            except ValueError:
+                same_origin = False
+            if not same_origin:
+                redirected.remove_header("Authorization")
+        return redirected
+
+
+def open_artifact_request(request, context=None, timeout=None):
+    opener = urllib_request.build_opener(
+        CredentialSafeRedirect(), urllib_request.HTTPSHandler(context=context)
+    )
+    return opener.open(request, timeout=timeout) if timeout is not None else opener.open(request)
 
 
 def _request_for_url(url: str):
