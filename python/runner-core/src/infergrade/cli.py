@@ -63,6 +63,7 @@ from infergrade.worker import run_worker_loop, run_worker_once
 
 ADVANCED_COMMANDS = {
     "run",
+    "private-history",
     "run-job",
     "worker",
     "init-request",
@@ -167,6 +168,9 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser("run", help=_command_help("run", "Run or simulate an InferGrade bundle.", show_advanced))
     _add_run_request_arguments(run_parser)
+
+    history_parser = subparsers.add_parser("private-history", help=_command_help("private-history", "Read local private benchmark metadata.", show_advanced))
+    history_parser.add_argument("--json", action="store_true")
 
     local_parser = subparsers.add_parser("benchmark-local", help="Score a local GGUF privately; keep the report on this machine.")
     local_parser.add_argument("--model-file", required=True)
@@ -658,6 +662,16 @@ def main(argv: Optional[list] = None) -> int:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
     parser = build_parser(show_advanced="--all" in raw_argv)
     args = parser.parse_args(argv)
+
+    if args.command == "private-history":
+        from infergrade.private_benchmark import private_benchmark_history
+        try:
+            result = private_benchmark_history()
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise SystemExit("Private history unavailable: %s" % exc) from exc
+        print(json.dumps(result, sort_keys=True) if args.json else
+              "Private benchmarks on this machine: %s" % len(result["results"]))
+        return 0
 
     if args.command == "benchmark-local":
         from infergrade.private_benchmark import run_private_benchmark

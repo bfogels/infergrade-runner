@@ -1981,6 +1981,7 @@ dependencies = [
  "infergrade_runner_engine",
  "keyring",
  "libc",
+ "open",
  "plist",
  "reqwest 0.12.28",
  "serde",
