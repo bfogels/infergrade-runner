@@ -18,6 +18,7 @@ infergrade_runner_engine = { path = "../../../crates/runner-engine" }
 libc = "0.2"
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "linux-native-sync-persistent"] }
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = "0.10.9"
 tauri = { version = "2", features = ["tray-icon"] }
@@ -29,3 +30,13 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-updater = "2"
 tokio = { version = "1", features = ["macros", "rt", "time"] }
 url = "2.5.4"
+
+[target.'cfg(any(target_os = "linux", windows))'.dependencies]
+notify-rust = "=4.18.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mac-notification-sys = "=0.6.15"
+plist = "=1.10.0"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "=0.55.0"
