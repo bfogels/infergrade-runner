@@ -35,6 +35,11 @@ def finalize_appimage(bundle_dir, plugin=DEFAULT_PLUGIN, runner=subprocess.run):
 
     runtime = app_dir / "usr" / "lib" / "InferGrade Runner" / "python-runtime"
     refresh_runtime_receipt(runtime, TRANSFORM)
+    evaluator = runtime.parent / "native-ifeval"
+    if evaluator.is_dir():
+        refresh_runtime_receipt(evaluator / "python-runtime", TRANSFORM)
+        from reseal_native_ifeval_bundle import reseal
+        reseal(evaluator, runtime.parent / "runner-core/src/infergrade/_native_ifeval_identity.py", TRANSFORM)
 
     resealed = appimage.with_name(appimage.stem + ".resealed.AppImage")
     resealed.unlink(missing_ok=True)

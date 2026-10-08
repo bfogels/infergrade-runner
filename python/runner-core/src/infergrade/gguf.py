@@ -51,25 +51,33 @@ def normalize_architecture(value: str) -> str:
     return str(value or "").strip().lower().replace("-", "").replace("_", "")
 
 
-def read_gguf_architecture(path: str) -> Optional[str]:
+def read_gguf_architecture_stream(handle) -> Optional[str]:
+    """Read bounded metadata from an already verified regular-file handle."""
     try:
-        with open(path, "rb") as handle:
-            if _read_exact(handle, 4) != b"GGUF":
-                return None
-            _read_u32(handle)
-            _read_u64(handle)
-            metadata_count = _read_u64(handle)
-            if metadata_count > 100000:
-                return None
-            for _ in range(metadata_count):
-                key = _read_string(handle)
-                value_type = _read_u32(handle)
-                if key == "general.architecture" and value_type == 8:
-                    return normalize_architecture(_read_string(handle))
-                _skip_value(handle, value_type)
+        if _read_exact(handle, 4) != b"GGUF":
+            return None
+        _read_u32(handle)
+        _read_u64(handle)
+        metadata_count = _read_u64(handle)
+        if metadata_count > 100000:
+            return None
+        for _ in range(metadata_count):
+            key = _read_string(handle)
+            value_type = _read_u32(handle)
+            if key == "general.architecture" and value_type == 8:
+                return normalize_architecture(_read_string(handle))
+            _skip_value(handle, value_type)
     except (OSError, struct.error, UnicodeDecodeError, ValueError):
         return None
     return None
+
+
+def read_gguf_architecture(path: str) -> Optional[str]:
+    try:
+        with open(path, "rb") as handle:
+            return read_gguf_architecture_stream(handle)
+    except OSError:
+        return None
 
 
 def infer_llama_cpp_architecture(request: Any) -> Optional[str]:
