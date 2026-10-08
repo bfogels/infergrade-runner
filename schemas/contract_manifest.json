@@ -1,5 +1,5 @@
 {
-  "contract_version": "0.3.42",
+  "contract_version": "0.3.43",
   "publisher": "infergrade-runner",
   "ontology_source": "schemas/json/model_ontology.schema.json",
   "schema_files": [
@@ -20,7 +20,8 @@
     "schemas/json/runtime_selector.schema.json",
     "schemas/json/runtime_placement.schema.json",
     "schemas/json/runner_device_authorization.schema.json",
-    "schemas/json/task_timing_sample.schema.json"
+    "schemas/json/task_timing_sample.schema.json",
+    "schemas/json/native_cuda_job_choices.schema.json"
   ],
   "example_files": [
     "schemas/examples/model_ontology.qwen2.5-7b-instruct.gguf.json",
@@ -63,6 +64,7 @@
     "docs/runner_device_authorization.md",
     "docs/task_timing_observations.md",
     "docs/runtime_placement_artifacts.md",
-    "docs/native_cuda_device_policy.md"
+    "docs/native_cuda_device_policy.md",
+    "docs/native_cuda_job_choices.md"
   ]
 }

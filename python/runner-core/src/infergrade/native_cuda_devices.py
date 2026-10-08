@@ -95,7 +95,7 @@ def _reject_placement_overrides(flags):
         raise ValueError("Physical CUDA selection owns device/split flags; remove conflicting backend placement overrides.")
 
 
-def prepare(request):
+def prepare(request, *, device_inventory=None):
     values = requested_uuids(request)
     previous = getattr(request, "_native_cuda_selection", None)
     if not values and previous is None:
@@ -107,7 +107,7 @@ def prepare(request):
             raise RuntimeError("Physical CUDA selection changed after it was frozen.")
         return previous
     _reject_placement_overrides(getattr(request, "backend_flags", []))
-    devices = {device.uuid: device for device in inventory()}
+    devices = {device.uuid: device for device in (inventory() if device_inventory is None else device_inventory)}
     if any(value not in devices for value in values):
         raise RuntimeError("A selected physical CUDA GPU is unavailable. No device fallback is allowed.")
     selection = Selection(values, tuple(devices[value] for value in values),
