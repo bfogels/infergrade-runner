@@ -18,6 +18,22 @@ class CliTests(unittest.TestCase):
         self.prepare_runtime = patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_cache_budget_rejects_ambiguous_or_nonwriting_updates(self):
+        cases = [(['--limit-gb', '25', '--clear-unkept'], 'Choose one cache action'),
+                 (['--budget-status', '--prune-partials'], 'Choose one cache action'),
+                 (['--trim-oldest'], 'Choose a limit'),
+                 (['--limit-gb', '25', '--dry-run'], 'no limit was changed')]
+        with mock.patch('infergrade.cache_budget.set_limit') as setter:
+            for flags, message in cases:
+                with self.subTest(flags=flags), self.assertRaisesRegex(SystemExit, message):
+                    main(['cache'] + flags)
+            setter.assert_not_called()
+
+    def test_cache_budget_cli_preserves_selected_root_and_no_limit(self):
+        with mock.patch('infergrade.cache_budget.set_limit', return_value={'budget': {}}) as setter, redirect_stdout(io.StringIO()):
+            self.assertEqual(main(['cache', '--artifact-cache-dir', '/tmp/owned-cache', '--limit-gb', 'none']), 0)
+        setter.assert_called_once_with(None, '/tmp/owned-cache', False)
+
     def test_physical_cuda_selection_cannot_be_published_as_reusable_config(self):
         request = RunRequest(model='example/model', backend='llama.cpp', tier='canary',
                              execution_mode='local_native', cuda_device_uuids=['GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'])
