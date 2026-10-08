@@ -306,6 +306,20 @@ class ListenerRuntimeSetupTests(unittest.TestCase):
             self.prepare()
         self.assertEqual(run.call_args_list[-1].args[0], ['ldd', '/managed/libggml-cuda.so'])
 
+    @mock.patch('infergrade.runtimes.platform.system', return_value='Linux')
+    @mock.patch('infergrade.runtimes.Path.is_file', return_value=True)
+    @mock.patch('infergrade.runtimes.shutil.which', return_value='/usr/bin/ldd')
+    @mock.patch('infergrade.runtimes.selected_llama_cpp_runtime', return_value={'accelerator': 'cuda'})
+    @mock.patch('infergrade.runtimes.managed_llama_cpp_binary_path', side_effect=['/managed/cli', '/managed/server'])
+    @mock.patch('infergrade.runtimes.subprocess.run')
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_absent_host_driver_is_not_a_missing_redistributable(self, run, managed, selected, which, is_file, system):
+        run.side_effect = [mock.Mock(returncode=0), mock.Mock(returncode=0),
+                           mock.Mock(returncode=0, stdout='Available devices:\n  (none)\n', stderr=''),
+                           mock.Mock(returncode=0, stdout='libcuda.so.1 => not found\n', stderr='')]
+        with self.assertRaisesRegex(RuntimeError, 'usable NVIDIA device.*Host NVIDIA driver library libcuda.so.1 is unavailable'):
+            self.prepare()
+
     @mock.patch('infergrade.runtimes.selected_llama_cpp_runtime', return_value={'accelerator': 'cuda'})
     @mock.patch('infergrade.runtimes.managed_llama_cpp_binary_path', side_effect=['/managed/cli', '/managed/server'])
     @mock.patch('infergrade.runtimes.subprocess.run')

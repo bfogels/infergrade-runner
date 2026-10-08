@@ -476,8 +476,11 @@ def prepare_native_listener_runtime(emit_progress=None, prefer_managed=False) ->
                 try:
                     loader = subprocess.run(["ldd", str(backend)], capture_output=True, text=True, timeout=15)
                     missing = re.findall(r"^\s*(\S+)\s+=>\s+not found", loader.stdout or "", re.MULTILINE)
-                    if missing:
-                        raise RuntimeError("The managed CUDA backend could not load. Missing libraries: %s. %s" % (", ".join(missing), detail))
+                    redistributables = [name for name in missing if name != "libcuda.so.1"]
+                    if redistributables:
+                        raise RuntimeError("The managed CUDA backend could not load. Missing libraries: %s. %s" % (", ".join(redistributables), detail))
+                    if "libcuda.so.1" in missing:
+                        detail = "Host NVIDIA driver library libcuda.so.1 is unavailable. " + detail
                 except (OSError, subprocess.TimeoutExpired):
                     pass
             raise RuntimeError("The managed CUDA runtime could not detect a usable NVIDIA device. Check CUDA visibility, runtime dependencies, and the NVIDIA driver. %s" % detail)
