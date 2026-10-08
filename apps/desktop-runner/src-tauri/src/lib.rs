@@ -2,6 +2,7 @@ mod background;
 mod cache_lease;
 mod desktop_activity;
 mod device_pairing;
+mod finish_notifications;
 mod hf_credentials;
 mod machine_settings;
 mod private_benchmark;
@@ -2631,6 +2632,9 @@ pub fn run() {
             private_benchmark::stop_desktop_private_benchmark,
             private_benchmark::desktop_private_benchmark_history,
             private_benchmark::open_desktop_private_report,
+            finish_notifications::desktop_notification_status,
+            finish_notifications::set_desktop_notifications,
+            finish_notifications::notify_desktop_run_completed,
             startup::desktop_startup_status,
             startup::set_desktop_startup,
             background::desktop_background_status,
