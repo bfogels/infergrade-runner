@@ -473,7 +473,7 @@ def prepare_native_listener_runtime(emit_progress=None, prefer_managed=False) ->
             detail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()[:4096]
             raise RuntimeError("The managed CUDA runtime could not detect a usable NVIDIA device. Check the NVIDIA driver. %s" % detail)
     if emit_progress:
-        emit_progress("Native runtime ready. Connecting the paired runner.")
+        emit_progress("Native runtime ready.")
 
 
 def install_llama_cpp_runtime(runtime_id: Optional[str] = None, execute: bool = False) -> Dict[str, Any]:
