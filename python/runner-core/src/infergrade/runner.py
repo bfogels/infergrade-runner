@@ -16,12 +16,14 @@ from infergrade.benchmark_catalog import (
 )
 from infergrade.cuda import WINDOWS_CUDA_BINARY_SET, windows_cuda_preflight
 from infergrade.environment import capture_environment
+from infergrade import native_cuda_devices
 from infergrade.capabilities import (
     CAPABILITY_BENCHMARKS,
     attach_quant_fidelity_capability_artifact,
     remove_capability_case_checkpoints,
     summarize_capability_execution,
 )
+from infergrade.cache_control import cache_read_lease
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.memory_fit import estimate_memory_fit, standard_context_estimates
 from infergrade.ontology import build_ontology, resolve_artifact_sha256, resolve_quant_format
@@ -192,6 +194,9 @@ def _build_result_record(
         "backend_flags": request.backend_flags,
         "runtime_build_id": (request.runtime_lock or {}).get("runtime_build_id"),
     }
+    device_layout = native_cuda_devices.logical_layout(request)
+    if device_layout is not None:
+        config_payload["cuda_device_layout"] = device_layout
     configuration_id = "cfg_%s" % stable_hash(config_payload)
     verification_level = _verification_level(request, environment, adapter_version)
     has_capability = capability.status in ("completed", "partial")
@@ -361,6 +366,9 @@ def _build_result_record(
     if slices and record["derived"]["passes_capability_floor"]:
         record["derived"]["is_pareto_frontier_member"] = True
         record["derived"]["recommendation_labels"] = ["candidate_frontier_member"]
+    if device_layout is not None:
+        record["configuration"]["cuda_device_layout"] = device_layout
+
     return record
 
 
@@ -593,6 +601,7 @@ def _load_resumable_result(output_dir: str, progress: Dict[str, Any], profile_id
     return read_json(absolute_path)
 
 
+@cache_read_lease
 def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
     """Execute an InferGrade request and write a reproducible bundle to disk.
 
@@ -622,6 +631,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         # llama.cpp chooses fitting per executable/pinned image when building
         # argv; injecting a layer count here would disable the upstream fitter.
     validate_request(request)
+    native_cuda_devices.prepare(request)
 
     if request.resume and not request.output_dir:
         raise ValueError("Resume requires an explicit output directory.")
@@ -672,8 +682,17 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         current_stage = "environment_capture"
         mark_stage_started(output_dir, progress, current_stage)
         _emit_progress(emit_progress, "Capturing environment...")
-        environment = capture_environment(request.execution_mode)
+        environment = native_cuda_devices.selected_environment(request, capture_environment(request.execution_mode))
         mark_stage_completed(output_dir, progress, current_stage, metadata={"path": "artifacts/environment.json"})
+
+        if request.execution_mode == "local_native" and not request.simulate and request.capability != "none":
+            from infergrade.benchmark_catalog import capability_benchmark_ids_for_request
+            if "ifeval" in capability_benchmark_ids_for_request(request):
+                from infergrade.native_ifeval import preflight
+                current_stage = "native_evaluator_preflight"
+                mark_stage_started(output_dir, progress, current_stage)
+                evaluator = preflight()
+                mark_stage_completed(output_dir, progress, current_stage, metadata=evaluator)
 
         resolved_artifact = None
         current_stage = "artifact_resolution"
@@ -965,6 +984,8 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             {
                 "backend": request.backend,
                 "backend_version": adapter_version,
+                **({"cuda_device_layout": native_cuda_devices.logical_layout(request)}
+                   if native_cuda_devices.logical_layout(request) is not None else {}),
                 "backend_flags": request.backend_flags,
                 "generation_preset": request.generation_preset,
                 "simulate": request.simulate,

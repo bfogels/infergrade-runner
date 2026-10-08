@@ -9,6 +9,7 @@ from functools import lru_cache
 
 from infergrade.json_schema_subset import validate_json_schema
 from infergrade.paths import runner_root
+from infergrade.native_cuda_devices import frozen
 
 from infergrade.utils import stable_hash, write_json
 
@@ -167,6 +168,10 @@ def record_runtime_placement(request, command, logs, role):
     receipt["requested_accelerator_api"] = accelerator.get("api") if accelerator.get("api") in (
         "cpu", "cuda", "metal", "vulkan", "rocm", "opencl", "sycl",
     ) else None
+    selection = frozen(request)
+    if selection:
+        receipt["native_device_policy_fingerprint"] = selection.fingerprint
+        receipt["requested_accelerator_api"] = "cuda"
     receipt["placement_fingerprint"] = stable_hash(receipt, length=64)
     receipt["invocation_id"] = uuid.uuid4().hex
     relative_path = os.path.join("artifacts", "runtime-placement", receipt["invocation_id"] + ".json")

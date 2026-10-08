@@ -9,6 +9,8 @@ from unittest import mock
 
 sys.path.insert(0, "python/runner-core/src")
 
+from infergrade.cache_control import managed_status
+
 from infergrade.artifacts import (
     _download_remote_artifact,
     _download_with_bounded_curl,
@@ -258,6 +260,10 @@ class ArtifactResolutionTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(resolved.resolved_path))
         self.assertEqual(resolved.sha256, compute_file_sha256(resolved.resolved_path))
         self.assertTrue(resolved.resolved_path.startswith(self.cache_dir))
+        installed = managed_status(self.cache_dir)["artifacts"]
+        self.assertEqual(len(installed), 1)
+        self.assertTrue(installed[0]["managed"])
+        self.assertFalse(installed[0]["keep"])
 
     @mock.patch("infergrade.artifacts.open_artifact_request")
     def test_remote_artifact_resolution_expands_user_cache_dir(self, urlopen_mock):
@@ -328,7 +334,7 @@ class ArtifactResolutionTests(unittest.TestCase):
             "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         )
 
-    @mock.patch("infergrade.artifacts.compute_file_sha256", return_value="abc123")
+    @mock.patch("infergrade.artifacts.compute_file_sha256", return_value="a" * 64)
     @mock.patch("infergrade.artifacts._fetch_huggingface_siblings")
     @mock.patch("infergrade.artifacts._download_remote_artifact")
     def test_remote_artifact_resolution_retries_with_canonical_hf_path_on_404(
@@ -562,7 +568,7 @@ class ArtifactResolutionTests(unittest.TestCase):
         self.assertTrue(pinned.cache_hit)
         self.assertEqual(pinned.resolved_path, unpinned.resolved_path)
         self.assertEqual(pinned.sha256, expected_sha)
-        self.assertEqual(os.listdir(self.cache_dir), [os.path.basename(unpinned.resolved_path)])
+        self.assertEqual(sorted(name for name in os.listdir(self.cache_dir) if os.path.isfile(os.path.join(self.cache_dir, name))), [os.path.basename(unpinned.resolved_path)])
         download_mock.assert_not_called()
 
     @mock.patch("infergrade.artifacts._download_remote_artifact")

@@ -1,5 +1,5 @@
 {
-  "contract_version": "0.3.41",
+  "contract_version": "0.3.42",
   "publisher": "infergrade-runner",
   "ontology_source": "schemas/json/model_ontology.schema.json",
   "schema_files": [
@@ -32,7 +32,8 @@
     "schemas/examples/run_config.llama_cpp.qwen2.5-7b.json",
     "schemas/examples/run_request.canary.yaml",
     "schemas/examples/run_request.standard.yaml",
-    "schemas/examples/runner_device_authorization.example.json"
+    "schemas/examples/runner_device_authorization.example.json",
+    "schemas/examples/run_request.native_cuda_selection.json"
   ],
   "catalog_files": [
     "schemas/capability_catalog.json",
@@ -61,6 +62,7 @@
     "docs/coverage_expansion_v0_3_5.md",
     "docs/runner_device_authorization.md",
     "docs/task_timing_observations.md",
-    "docs/runtime_placement_artifacts.md"
+    "docs/runtime_placement_artifacts.md",
+    "docs/native_cuda_device_policy.md"
   ]
 }

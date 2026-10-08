@@ -1,0 +1,9 @@
+# Finish notifications
+
+Settings and the active Home assignment share an opt-in machine-local preference, default off. Reading it never creates it. Writes use an atomic private file and Unix parent-directory sync; invalid state blocks notices until explicit repair. The UI preserves confirmed values through pending or failed saves and offers an explicit off/reset action. Completion arriving during preference IO waits for confirmed state.
+
+A listener Complete event is emitted only after upload and Hub completion. The event triggers a native verification request; it does not supply accepted scores or notification content. The existing result helper verifies completed status, exact assigned Runner, closed accepted result choices, and current pairing. Notifications additionally require the original API/Runner/token snapshot before Hub lookup and again before submission, preventing A-to-B-to-A result substitution. Disabled, disconnected, unverified, empty-result and duplicate requests do not submit notices.
+
+OS text is constant: no model name, result/job identity, private prompt, URL, handle or score. macOS uses explicit mac-notification-sys submission with application identity initialized once. Linux and Windows use notify-rust; Windows uses the installed app identifier. Native operations hold the pairing and desktop lifecycle fences through the OS call. A bounded per-process history records successful submissions; errors remain retryable.
+
+`submitted` means the notification API call completed without a surfaced backend error. It does not prove visible delivery, OS approval, permission, or absence of muting. In particular, macOS can return from its safety timeout without visible delivery. Development builds cannot enable or submit finish notices. Tests use injected senders and isolated preference files, never synthetic OS finish notices. Installed-app notification delivery remains a separate acceptance gate.

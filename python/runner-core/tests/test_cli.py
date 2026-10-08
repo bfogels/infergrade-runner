@@ -18,6 +18,16 @@ class CliTests(unittest.TestCase):
         self.prepare_runtime = patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_physical_cuda_selection_cannot_be_published_as_reusable_config(self):
+        request = RunRequest(model='example/model', backend='llama.cpp', tier='canary',
+                             execution_mode='local_native', cuda_device_uuids=['GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'])
+        with mock.patch('infergrade.cli._request_from_args', return_value=request), \
+             mock.patch('infergrade.cli.publish_run_config') as publish:
+            with self.assertRaisesRegex(SystemExit, 'machine-local'):
+                main(['--all', 'publish-run-config', '--model', 'example/model', '--backend', 'llama.cpp',
+                      '--api-url', 'https://example.com', '--name', 'test'])
+        publish.assert_not_called()
+
     def test_run_request_file_preserves_resume_and_output_overrides(self):
         request = RunRequest(model="example/model", backend="llama.cpp", tier="standard", simulate=False)
         output = io.StringIO()
@@ -50,7 +60,7 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, 0)
         help_text = output.getvalue()
-        self.assertIn("{doctor,discover-runtimes,cache,install-runtime,pair,unpair,start}", help_text)
+        self.assertIn("{benchmark-local,doctor,discover-runtimes,cache,install-runtime,pair,unpair,start}", help_text)
         self.assertIn("start               Start a long-lived local runner", help_text)
         self.assertIn("infergrade --all --help", help_text)
         self.assertNotIn("run-job", help_text)
