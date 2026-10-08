@@ -10,6 +10,7 @@ from urllib import request as urllib_request
 
 from infergrade.benchmark_catalog import normalize_request_selection
 from infergrade.models import RunRequest
+from infergrade.native_cuda_devices import requested_uuids
 from infergrade.tls import verified_https_context
 
 
@@ -113,6 +114,7 @@ def request_from_cli(args: argparse.Namespace) -> RunRequest:
         resume=bool(getattr(args, "resume", False)),
         upload=args.upload,
         backend_flags=list(args.backend_flags or []),
+        cuda_device_uuids=list(getattr(args, "cuda_device_uuids", None) or []),
         generation_preset=args.generation_preset,
         cloud_provider=args.cloud_provider,
         cloud_instance_type=args.cloud_instance_type,
@@ -200,6 +202,7 @@ def request_from_dict(data: Dict[str, Any], simulate: bool = True, run_config_so
         resume=bool(run.get("resume", False)),
         upload=bool(run.get("upload", False)),
         backend_flags=list(overrides.get("backend_flags", [])),
+        cuda_device_uuids=copy.deepcopy(overrides.get("cuda_device_uuids", [])),
         generation_preset=overrides.get("generation_preset"),
         cloud_provider=run.get("cloud_provider"),
         cloud_instance_type=run.get("cloud_instance_type"),
@@ -270,4 +273,7 @@ def request_to_dict(request: RunRequest) -> Dict[str, Any]:
         payload["quant_artifact_download_size_bytes"] = request.quant_artifact_download_size_bytes
     if request.quant_artifact_source:
         payload["quant_artifact_source"] = dict(request.quant_artifact_source)
+    uuids = requested_uuids(request)
+    if uuids:
+        payload["cuda_device_uuids"] = list(uuids)
     return payload

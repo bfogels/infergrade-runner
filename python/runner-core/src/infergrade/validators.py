@@ -12,6 +12,7 @@ from infergrade.constants import (
     SUPPORTED_USE_CASES,
 )
 from infergrade.models import RunRequest, ValidationResult
+from infergrade.native_cuda_devices import requested_uuids
 from infergrade.utils import read_json
 
 
@@ -22,6 +23,10 @@ class RequestValidationError(ValueError):
 def validate_request(request: RunRequest) -> None:
     normalize_request_selection(request)
     errors: List[str] = []
+    try:
+        requested_uuids(request)
+    except ValueError as exc:
+        errors.append(str(exc))
     if request.backend not in SUPPORTED_BACKENDS:
         errors.append("Unsupported backend: %s" % request.backend)
     if request.tier not in SUPPORTED_TIERS:

@@ -44,6 +44,34 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "cuda_device_layout": {
+          "type": "object", "additionalProperties": false,
+          "required": ["policy", "device_count", "split_mode", "tensor_split_weights_mib"],
+          "properties": {
+            "policy": {"const": "native_cuda_uuid_mask_v1"},
+            "device_count": {"type": "integer", "minimum": 1, "maximum": 16},
+            "split_mode": {"enum": ["none", "layer"]},
+            "tensor_split_weights_mib": {"type": "array", "maxItems": 16, "items": {"type": "integer", "minimum": 1, "maximum": 4194304}}
+          },
+          "allOf": [
+            {"if": {"properties": {"device_count": {"const": 1}}}, "then": {"properties": {"split_mode": {"const": "none"}, "tensor_split_weights_mib": {"maxItems": 0}}}, "else": {"properties": {"split_mode": {"const": "layer"}, "tensor_split_weights_mib": {"minItems": 2}}}},
+            {"if": {"properties": {"device_count": {"const": 2}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 2, "maxItems": 2}}}},
+            {"if": {"properties": {"device_count": {"const": 3}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 3, "maxItems": 3}}}},
+            {"if": {"properties": {"device_count": {"const": 4}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 4, "maxItems": 4}}}},
+            {"if": {"properties": {"device_count": {"const": 5}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 5, "maxItems": 5}}}},
+            {"if": {"properties": {"device_count": {"const": 6}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 6, "maxItems": 6}}}},
+            {"if": {"properties": {"device_count": {"const": 7}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 7, "maxItems": 7}}}},
+            {"if": {"properties": {"device_count": {"const": 8}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 8, "maxItems": 8}}}},
+            {"if": {"properties": {"device_count": {"const": 9}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 9, "maxItems": 9}}}},
+            {"if": {"properties": {"device_count": {"const": 10}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 10, "maxItems": 10}}}},
+            {"if": {"properties": {"device_count": {"const": 11}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 11, "maxItems": 11}}}},
+            {"if": {"properties": {"device_count": {"const": 12}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 12, "maxItems": 12}}}},
+            {"if": {"properties": {"device_count": {"const": 13}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 13, "maxItems": 13}}}},
+            {"if": {"properties": {"device_count": {"const": 14}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 14, "maxItems": 14}}}},
+            {"if": {"properties": {"device_count": {"const": 15}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 15, "maxItems": 15}}}},
+            {"if": {"properties": {"device_count": {"const": 16}}}, "then": {"properties": {"tensor_split_weights_mib": {"minItems": 16, "maxItems": 16}}}}
+          ]
+        },
         "tokenizer_id": { "type": ["string", "null"] },
         "chat_template_id": { "type": ["string", "null"] },
         "generation_preset_id": { "type": ["string", "null"] }

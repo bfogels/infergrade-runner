@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
-from infergrade import __version__
+from infergrade import __version__, native_cuda_devices
 from infergrade.adapters.base import BaseAdapter
 from infergrade.benchmark_catalog import (
     REASONING_EXACT_ANSWER_GENERATION_CONSTRAINT_ID,
@@ -168,7 +168,7 @@ def requested_native_cuda_devices(request: RunRequest) -> Optional[Tuple[str, ..
 
 def native_cuda_required(request: RunRequest) -> bool:
     """Bind native accelerator intent without reconciling conflicting requests."""
-    return bool(requested_native_cuda_devices(request)) or _native_cuda_selector_required(request)
+    return bool(native_cuda_devices.requested_uuids(request)) or bool(requested_native_cuda_devices(request)) or _native_cuda_selector_required(request)
 
 
 def _native_cuda_selector_required(request: RunRequest) -> bool:
@@ -244,7 +244,7 @@ def _require_native_cuda_offload(request: RunRequest, logs: str) -> None:
             "Requested CUDA runtime did not prove CUDA device use and nonzero GPU layer offload. "
             "CPU fallback is not accepted; check the NVIDIA driver, GPU memory and managed CUDA dependencies."
         )
-    selected_devices = requested_native_cuda_devices(request)
+    selected_devices = native_cuda_devices.namespace_devices(request) or requested_native_cuda_devices(request)
     if selected_devices:
         placement = parse_runtime_placement(logs, request.backend_flags)
         observed_devices = placement["gpu_devices_with_positive_model_buffers"] or []
@@ -288,6 +288,9 @@ class LlamaCppAdapter(BaseAdapter):
         return ["--n-gpu-layers", "99"] if shutil.which("nvidia-smi") is not None else []
 
     def _backend_flags(self, request: RunRequest, tool: str) -> List[str]:
+        return native_cuda_devices.placement_flags(request, self._backend_flags_base(request, tool))
+
+    def _backend_flags_base(self, request: RunRequest, tool: str) -> List[str]:
         # Explicit backend flags keep their existing precedence. The pinned
         # container ref supports fitting; custom images have unknown capabilities.
         api = ((request.runtime_selector or {}).get("accelerator") or {}).get("api")
@@ -347,7 +350,7 @@ class LlamaCppAdapter(BaseAdapter):
             self._ensure_backend_model_compatibility(request)
         if request and request.execution_mode == "local_native":
             command = [self._native_command_path(request), "--version"]
-            completed = subprocess.run(command, capture_output=True)
+            completed = subprocess.run(command, capture_output=True, **native_cuda_devices.environment_kwargs(request))
             stdout = _decode_utf8_lossy(completed.stdout)
             stderr = _decode_utf8_lossy(completed.stderr)
             if completed.returncode != 0:
@@ -361,7 +364,7 @@ class LlamaCppAdapter(BaseAdapter):
         self._ensure_docker()
         install_image(self._image_name(request))
         command = ["docker", "run", "--rm", "--entrypoint", _DEFAULT_COMMAND, self._image_name(request), "--version"]
-        completed = subprocess.run(command, capture_output=True)
+        completed = subprocess.run(command, capture_output=True, **native_cuda_devices.environment_kwargs(request))
         stdout = _decode_utf8_lossy(completed.stdout)
         stderr = _decode_utf8_lossy(completed.stderr)
         if completed.returncode != 0:
@@ -408,7 +411,7 @@ class LlamaCppAdapter(BaseAdapter):
         started = time.perf_counter()
         try:
             with open(log_path, "wb") as log_file:
-                process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
+                process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, **native_cuda_devices.environment_kwargs(request))
             _wait_for_native_server_ready(process, published_port, started, log_path)
             record_runtime_placement(request, command, _read_log_file(log_path), "preflight")
             _require_native_cuda_offload(request, _read_log_file(log_path))
@@ -710,7 +713,7 @@ class LlamaCppAdapter(BaseAdapter):
                     request=request,
                 )
             )
-        completed = subprocess.run(command, capture_output=True)
+        completed = subprocess.run(command, capture_output=True, **native_cuda_devices.environment_kwargs(request))
         stdout = _decode_utf8_lossy(completed.stdout)
         stderr = _decode_utf8_lossy(completed.stderr)
         raw_log = "%s\n%s" % (stdout, stderr)
@@ -812,7 +815,7 @@ class LlamaCppAdapter(BaseAdapter):
         started = time.perf_counter()
         try:
             with open(log_path, "wb") as log_file:
-                process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
+                process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, **native_cuda_devices.environment_kwargs(request))
             base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
             placement = record_runtime_placement(request, command, _read_log_file(log_path), "capability_server")
             _require_native_cuda_offload(request, _read_log_file(log_path))
@@ -889,7 +892,7 @@ class LlamaCppAdapter(BaseAdapter):
         started = time.perf_counter()
         try:
             with open(log_path, "wb") as log_file:
-                process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
+                process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, **native_cuda_devices.environment_kwargs(request))
             base_url, load_time_ms = _wait_for_native_server_ready(
                 process,
                 published_port,
@@ -1259,12 +1262,12 @@ class LlamaCppAdapter(BaseAdapter):
 
         effective_prompt = str(profile_spec["prompt"])
         chat_messages, prompt_transform = _prepare_llama_server_chat(request, effective_prompt)
-        monitor = _start_gpu_monitor()
+        monitor = _start_gpu_monitor(request)
         memory_monitor = None
         started = time.perf_counter()
         logs_text = ""
         try:
-            completed = subprocess.run(command, capture_output=True)
+            completed = subprocess.run(command, capture_output=True, **native_cuda_devices.environment_kwargs(request))
             stdout = _decode_utf8_lossy(completed.stdout)
             stderr = _decode_utf8_lossy(completed.stderr)
             startup_output = (stdout or stderr or "").strip()
@@ -1381,7 +1384,7 @@ class LlamaCppAdapter(BaseAdapter):
         )
         effective_prompt = str(profile_spec["prompt"])
         chat_messages, prompt_transform = _prepare_llama_server_chat(request, effective_prompt)
-        monitor = _start_gpu_monitor()
+        monitor = _start_gpu_monitor(request)
         started = time.perf_counter()
         process = None
         memory_monitor = None
@@ -1392,6 +1395,7 @@ class LlamaCppAdapter(BaseAdapter):
                     command,
                     stdout=log_file,
                     stderr=subprocess.STDOUT,
+                    **native_cuda_devices.environment_kwargs(request),
                 )
             memory_monitor = _start_process_rss_monitor(process.pid)
             base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
@@ -1691,7 +1695,7 @@ class LlamaCppAdapter(BaseAdapter):
                     ]
                 )
             started = time.perf_counter()
-            completed = subprocess.run(command, capture_output=True)
+            completed = subprocess.run(command, capture_output=True, **native_cuda_devices.environment_kwargs(request))
             stdout = _decode_utf8_lossy(completed.stdout)
             stderr = _decode_utf8_lossy(completed.stderr)
             raw_log = "%s\n%s" % (stdout, stderr)
@@ -1921,14 +1925,17 @@ def _deployment_confidence(profile_id: str, measured_successes: int, measured_ta
     return round(max(0.2, min(base, 0.95)), 2)
 
 
-def _start_gpu_monitor() -> Dict[str, object]:
-    baseline_vram_mb = sample_total_gpu_memory_used_mb()
+def _start_gpu_monitor(request=None) -> Dict[str, object]:
+    sampler = (lambda: native_cuda_devices.sample_selected_memory_used_mb(request)) if (
+        request is not None and native_cuda_devices.frozen(request)
+    ) else sample_total_gpu_memory_used_mb
+    baseline_vram_mb = sampler()
     stop_event = threading.Event()
     samples: List[float] = []
 
     def monitor() -> None:
         while not stop_event.is_set():
-            sample = sample_total_gpu_memory_used_mb()
+            sample = sampler()
             if sample is not None:
                 samples.append(sample)
             stop_event.wait(0.1)
