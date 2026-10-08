@@ -12,7 +12,7 @@ verify this policy. Before creating a benchmark bundle, Runner freezes a bounded
 five-second deadline and a 64 KiB result limit. Errors never substitute another
 card. UUID order is preserved across serialization and resume request hashes.
 
-Each native execution child receives its own `CUDA_VISIBLE_DEVICES` UUID mask
+Each evidence-producing native child and its version gate receives its own `CUDA_VISIBLE_DEVICES` UUID mask
 and `CUDA_DEVICE_ORDER=PCI_BUS_ID`; the parent process environment is unchanged.
 CUDA remaps visible ordinals, so choosing physical card 7 alone requests `CUDA0`.
 Two selected cards request `CUDA0,CUDA1`, layer split, main GPU 0 and tensor split
@@ -29,7 +29,8 @@ share a configuration identity; hardware identity still captures the selected
 model/capacity. Placement receipts additionally bind the frozen policy through
 `native_device_policy_fingerprint`. Both bindings are content digests, not
 independent physical hardware attestation. Raw UUIDs remain in the private
-request and child environment; they do not appear in normalized hardware,
+request and child environment; `publish-run-config` rejects such machine-local
+selections. They do not appear in normalized hardware,
 configuration layout or placement receipts.
 
 Hardware capture reports selected card count, model and capacities, preserving

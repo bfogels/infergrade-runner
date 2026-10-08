@@ -1048,6 +1048,8 @@ def main(argv: Optional[list] = None) -> int:
     if args.command == "publish-run-config":
         api_url = _require_secure_hub_api_url(args.api_url)
         request = _request_from_args(args)
+        if request.cuda_device_uuids:
+            raise SystemExit("Physical CUDA selections are machine-local and cannot be published as reusable run configs.")
         request_payload = {
             "spec_version": "0.1-draft",
             "run": {
@@ -1062,7 +1064,6 @@ def main(argv: Optional[list] = None) -> int:
             },
             "overrides": {
                 "backend_flags": request.backend_flags,
-                **({"cuda_device_uuids": request.cuda_device_uuids} if request.cuda_device_uuids else {}),
                 "generation_preset": request.generation_preset,
             },
             "cost": {

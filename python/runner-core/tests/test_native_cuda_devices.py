@@ -229,7 +229,7 @@ class NativeCudaDevicesTests(unittest.TestCase):
                 record = _build_result_record('bundle', request, {}, {}, 'b10069', {}, capability, fidelity,
                                               deployment, 'interactive_chat_v1', '2026-10-08T00:00:00Z', '2026-10-08T00:00:01Z')
             config = record['configuration']
-            validate_json_schema(config, schema['properties']['configuration'], runner_root() / 'schemas/json/result_record.schema.json')
+            self.assertEqual(validate_json_schema(config, schema['properties']['configuration'], runner_root() / 'schemas/json/result_record.schema.json'), [])
             self.assertNotIn(A, json.dumps(config))
             self.assertNotIn(B, json.dumps(config))
             records.append(config)
@@ -237,6 +237,18 @@ class NativeCudaDevicesTests(unittest.TestCase):
         self.assertEqual(records[1]['configuration_id'], records[2]['configuration_id'])
         self.assertNotEqual(records[0]['configuration_id'], records[1]['configuration_id'])
         self.assertNotEqual(records[1]['configuration_id'], records[3]['configuration_id'])
+
+    def test_layout_schema_requires_exact_split_weight_count(self):
+        schema_path = runner_root() / 'schemas/json/result_record.schema.json'
+        schema = json.loads(schema_path.read_text())['properties']['configuration']['properties']['cuda_device_layout']
+        for count in range(2, 17):
+            value = {'policy': 'native_cuda_uuid_mask_v1', 'device_count': count,
+                     'split_mode': 'layer', 'tensor_split_weights_mib': [16384] * count}
+            self.assertEqual(validate_json_schema(value, schema, schema_path), [])
+            for wrong_count in (count - 1, count + 1):
+                invalid = {**value, 'tensor_split_weights_mib': [16384] * wrong_count}
+                with self.subTest(count=count, wrong_count=wrong_count):
+                    self.assertTrue(validate_json_schema(invalid, schema, schema_path))
 
 
 if __name__ == '__main__':
