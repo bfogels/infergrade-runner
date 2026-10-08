@@ -5,6 +5,18 @@ user-visible changes; full evidence boundaries and validation details live in
 the release PRs and tags. Versions without an entry shipped internal or
 incremental changes only — see the git history.
 
+## 0.3.70 (contract 0.3.43)
+
+- Finds local Hugging Face/vLLM Safetensors checkpoints alongside GGUF files,
+  including standard cache paths and explicitly selected folders on Ubuntu.
+- Distinguishes incomplete checkpoints and unverified compatibility from
+  architecture support confirmed by an explicitly selected llama.cpp converter.
+- Adds explicit offline conversion into a new GGUF output with source-manifest
+  checks and a local conversion receipt; existing files are never replaced.
+- Keeps AWQ/GPTQ conversion unverified. Converter source and requirements must
+  be supplied separately; actual Ubuntu conversion/loading and hosted inventory
+  reuse remain outside the validated scope of this release.
+
 ## 0.3.69 (contract 0.3.43)
 
 - Publishes the fresh Linux CUDA setup fix and reviewed runtime/Desktop changes

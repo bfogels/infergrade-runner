@@ -6,7 +6,9 @@ import json
 import os
 import socket
 import sys
+import subprocess
 import warnings
+from pathlib import Path
 from typing import Dict, Optional
 from urllib.error import URLError
 
@@ -82,7 +84,7 @@ ADVANCED_COMMANDS = {
     "show-capabilities",
     "observe-runtime",
 }
-DEFAULT_COMMANDS = ("benchmark-local", "doctor", "discover-runtimes", "cache", "install-runtime", "pair", "unpair", "start")
+DEFAULT_COMMANDS = ("benchmark-local", "doctor", "discover-runtimes", "models", "cache", "install-runtime", "pair", "unpair", "start")
 
 
 class _InferGradeHelpFormatter(argparse.HelpFormatter):
@@ -193,6 +195,19 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     doctor_api_token = _add_api_token_argument(doctor_parser)
     doctor_api_token.help = argparse.SUPPRESS
     doctor_parser.add_argument("--json", action="store_true", help="Print the complete machine-readable report.")
+
+    models_parser = subparsers.add_parser("models", help="Find local GGUF and Hugging Face/vLLM checkpoints; explicitly convert supported checkpoints.")
+    model_commands = models_parser.add_subparsers(dest="model_action", required=True)
+    model_list = model_commands.add_parser("list", help="Read local model metadata; no downloads or conversion.")
+    model_list.add_argument("--folder", action="append", help="Additional model folder; repeat as needed.")
+    model_list.add_argument("--converter", help="Explicit local llama.cpp convert_hf_to_gguf.py for architecture support checks.")
+    model_list.add_argument("--json", action="store_true")
+    model_convert = model_commands.add_parser("convert", help="Convert a complete supported Safetensors checkpoint into a new GGUF file.")
+    model_convert.add_argument("--folder", required=True)
+    model_convert.add_argument("--converter", required=True)
+    model_convert.add_argument("--output", required=True, help="New output .gguf; f16 may need substantial disk space.")
+    model_convert.add_argument("--outtype", choices=("f16", "bf16", "f32"), default="f16")
+    model_convert.add_argument("--json", action="store_true")
 
     discover_parser = subparsers.add_parser(
         "discover-runtimes",
@@ -741,6 +756,27 @@ def main(argv: Optional[list] = None) -> int:
 
     if args.command == "show-capabilities":
         print(json.dumps(load_capability_catalog(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "models":
+        from .local_models import convert, default_roots, discover
+        try:
+            if args.model_action == "convert":
+                payload = convert(args.folder, args.converter, args.output, args.outtype)
+            else:
+                payload = discover(default_roots() + [Path(p).expanduser() for p in (args.folder or [])], args.converter)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise SystemExit("Local model operation failed: %s" % exc)
+        if args.json or args.model_action == "convert":
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            labels = {"gguf_detected": "GGUF detected", "needs_conversion": "Ready to convert", "needs_compatibility_check": "Check compatibility", "incomplete": "Incomplete checkpoint"}
+            for item in payload["files"]:
+                print("%s · %s\n  %s\n  %s" % (item["name"], labels[item["status"]], item["path"], item["reason"]))
+            if not payload["files"]:
+                print("No local models found. Add a model directory with --folder.")
+            if not payload["scan_complete"]:
+                print("Scan is partial; some locations were unreadable or the scan limit was reached.")
         return 0
 
     if args.command == "discover-runtimes":
