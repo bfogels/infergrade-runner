@@ -1,4 +1,5 @@
 import { initModelDiscovery, selectableLocalModel } from './modelDiscovery.js';
+import {initHfCredentials} from './hfCredentials.js';
 import { initDesktopActivity, activityRunUrl } from './desktopActivity.js';
 import "./styles.css";
 import {devicePairingController} from "./devicePairing.js";
@@ -3052,6 +3053,7 @@ async function startRunner({ confirmStarted = false } = {}) {
     typedToken: null,
   });
   const plan = output?.plan || {};
+  if(output?.credential_warning)appendLog(output.credential_warning);
   const runner = plan.runner_id ? ` for ${plan.runner_id}` : "";
   appendLog(
     `Runner start plan: ${plan.execution_mode || "default mode"} using ${credentialSourceLabel(plan.credential_source)}${runner}.`
@@ -3732,3 +3734,4 @@ initModelDiscovery({invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
 desktopActivity=initDesktopActivity({invoke:loadTauriInvoke,openRun:async (id,apiUrl)=>{
  await openExternalUrl(activityRunUrl(apiUrl,id));
 }});
+initHfCredentials({invoke:loadTauriInvoke,openExternal:openExternalUrl});
