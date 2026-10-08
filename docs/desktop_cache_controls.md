@@ -15,3 +15,11 @@ Enabled budgets require a verified expected byte size and reserve capacity befor
 `--limit-gb 25 --trim-oldest` explicitly removes the oldest eligible unkept downloads only when necessary to lower the cap. Kept, replaced, unowned and partial files are preserved. An active listener or execution blocks trimming; policy changes are refused during downloads. If eligible files cannot satisfy the requested cap, files and policy remain unchanged. There is no automatic eviction on download admission in this foundation. Desktop controls and durable reservations for offline remote queued jobs remain separate work.
 
 Budget metadata is read through bounded regular-file descriptors, with nonblocking/no-follow flags where supported; FIFO, link replacement and growth regression tests exercise this boundary. This does not extend protection to older executables outside the lease protocol.
+
+## Desktop storage controls
+
+Models shows confirmed owned-download usage, kept bytes, live reservation bytes and physical disk capacity/free space. Units are GiB (1024-based). The meter shows owned downloads as a proportion of a saved cap; it is hidden for no limit or unknown state. Discovery is not a complete disk inventory, so the UI does not invent a total for other applications' models or add reservations to installed usage.
+
+The 25/50/100/200 GiB and no-limit selector changes only after native confirmation. Lowering below owned usage asks before oldest eligible unkept trimming. Cancel preserves the old setting; errors retain the last confirmation and disable further changes until refresh. Active work/listening is never stopped automatically. Offline remote queued jobs are not locally reserved by this slice, and download admission does not automatically evict.
+
+Fixed local IPC status/set commands use a bounded, 45-second supervised helper with a closed scalar projection and an environment allowlist. Read/nontrim updates retain a work guard; trimming retains a maintenance guard instead, avoiding a shared-cache lease that would block deletion. Failed termination or event-channel loss retains the cleanup/exit fence. The helper always uses the native default cache root; renderer paths and command arguments are not accepted. `cache --budget-status --limit-gb 25` likewise returns only the confirmed scalar budget, excluding artifact-list metadata.

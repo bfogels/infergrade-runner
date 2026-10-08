@@ -5,6 +5,7 @@ mod device_pairing;
 mod finish_notifications;
 mod gpu_settings;
 mod hf_credentials;
+mod storage_controls;
 use gpu_settings::{desktop_gpu_status, set_desktop_gpu_choice};
 mod machine_settings;
 mod private_benchmark;
@@ -2671,6 +2672,8 @@ pub fn run() {
             hf_credentials::save_desktop_hf_credential,
             hf_credentials::clear_desktop_hf_credential,
             desktop_model_cache_status,
+            storage_controls::desktop_storage_status,
+            storage_controls::set_desktop_download_limit,
             desktop_admission_status,
             desktop_gpu_status,
             set_desktop_gpu_choice,

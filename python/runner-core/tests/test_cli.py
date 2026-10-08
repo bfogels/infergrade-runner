@@ -34,6 +34,12 @@ class CliTests(unittest.TestCase):
             self.assertEqual(main(['cache', '--artifact-cache-dir', '/tmp/owned-cache', '--limit-gb', 'none']), 0)
         setter.assert_called_once_with(None, '/tmp/owned-cache', False)
 
+    def test_cache_budget_status_modifier_returns_only_confirmed_budget_after_update(self):
+        output = io.StringIO()
+        with mock.patch('infergrade.cache_budget.set_limit', return_value={'budget': {'limit_gb': 25}, 'status': {'private': 'excluded'}}), redirect_stdout(output):
+            self.assertEqual(main(['cache', '--budget-status', '--limit-gb', '25']), 0)
+        self.assertEqual(json.loads(output.getvalue()), {'limit_gb': 25})
+
     def test_physical_cuda_selection_cannot_be_published_as_reusable_config(self):
         request = RunRequest(model='example/model', backend='llama.cpp', tier='canary',
                              execution_mode='local_native', cuda_device_uuids=['GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'])
