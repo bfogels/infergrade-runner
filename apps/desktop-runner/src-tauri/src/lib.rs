@@ -2,6 +2,7 @@ mod background;
 mod cache_lease;
 mod desktop_activity;
 mod device_pairing;
+mod finish_notifications;
 mod hf_credentials;
 mod machine_settings;
 mod run_results;
@@ -2624,6 +2625,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            finish_notifications::desktop_notification_status,
+            finish_notifications::set_desktop_notifications,
+            finish_notifications::notify_desktop_run_completed,
             startup::desktop_startup_status,
             startup::set_desktop_startup,
             background::desktop_background_status,
