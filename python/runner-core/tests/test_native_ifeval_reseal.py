@@ -43,6 +43,30 @@ class NativeIFEvalResealTests(unittest.TestCase):
             self.assertEqual(RESEAL._trusted_identity(identity)['receipt_sha256'],BUILDER.digest(bundle/BUILDER.RECEIPT))
             self.assertEqual(receipt['files']['python-runtime/bin/python3.12'],BUILDER.digest(bundle/'python-runtime/bin/python3.12'))
 
+    def test_versioned_shared_library_is_anchored_before_packaging_transform(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bundle, identity = self.fixture(root)
+            library = bundle / 'python-runtime/lib/libpython3.12.so.1.0'
+            library.parent.mkdir()
+            library.write_bytes(b'\x7fELF reviewed versioned library')
+            name = library.relative_to(bundle).as_posix()
+            self.assertEqual(BUILDER.transform_binary_kind(library, name), 'elf')
+            receipt = json.loads((bundle / BUILDER.RECEIPT).read_text())
+            receipt['files'][name] = BUILDER.digest(library)
+            receipt['transformable_binaries'][name] = BUILDER.transform_binary_kind(library, name)
+            (bundle / BUILDER.RECEIPT).write_text(json.dumps(receipt))
+            BUILDER.write_trusted_identity(bundle, identity)
+            library.write_bytes(b'\x7fELF reviewed RPATH transform')
+            RESEAL.reseal(bundle, identity, 'linuxdeploy_appimage_v1')
+            self.assertEqual(RESEAL._trusted_identity(identity)['receipt_sha256'],
+                             BUILDER.digest(bundle / BUILDER.RECEIPT))
+            source = bundle / 'dependencies/module.py'
+            source.write_bytes(b'\x7fELF is still a changed Python source')
+            self.assertIsNone(BUILDER.transform_binary_kind(source, 'dependencies/module.py'))
+            with self.assertRaisesRegex(ValueError, 'non-code evaluator assets'):
+                RESEAL.reseal(bundle, identity, 'linuxdeploy_appimage_v1')
+
     def test_source_change_is_not_a_signing_transform(self):
         with tempfile.TemporaryDirectory() as temporary:
             bundle,identity=self.fixture(Path(temporary))
