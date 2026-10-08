@@ -11,20 +11,25 @@ export function discoveryRows(payload) {
 export function initModelDiscovery({invoke, chooseFolder, useFile, benchmarkFile, formatBytes}) {
   const page=document.querySelector('[data-desktop-view="models"]');if(!page)return;
   const panel=document.createElement('section');panel.className='drawer-panel desktop-discovery';
-  panel.innerHTML='<h2 tabindex="-1">Found on this machine</h2><p>Runner reads local GGUF files in LM Studio, Ollama and the Hugging Face cache. Choose a folder to include your own files.</p><p data-discovery-status role="status">Checking local files…</p><div data-discovery-list></div><div data-discovery-folders></div><div class="button-row"><button type="button" class="button-secondary" data-discovery-refresh>Refresh files</button><button type="button" class="button-secondary" data-discovery-add>Add a folder…</button></div>';
+  panel.innerHTML='<h2 tabindex="-1">Found on this machine</h2><p>Runner finds GGUF files and Safetensors checkpoints in LM Studio, Ollama and the Hugging Face/vLLM cache. Choose a folder to include your own files.</p><p data-discovery-status role="status">Checking local files…</p><div data-discovery-list></div><div data-discovery-folders></div><div class="button-row"><button type="button" class="button-secondary" data-discovery-refresh>Refresh files</button><button type="button" class="button-secondary" data-discovery-add>Add a folder…</button></div>';
   page.insertBefore(panel,page.querySelector('.desktop-models'));
   const status=panel.querySelector('[data-discovery-status]'),list=panel.querySelector('[data-discovery-list]'),folders=panel.querySelector('[data-discovery-folders]');
   let generation=0,pageIndex=0,current=null;
   const render=payload=>{
     current=payload;const files=discoveryRows(payload);list.replaceChildren();folders.replaceChildren();
-    status.textContent=files.length?`${files.length} local GGUF file${files.length===1?'':'s'} found.`:'No local GGUF files found.';
+    status.textContent=files.length?`${files.length} local model${files.length===1?'':'s'} found.`:'No local models found.';
     if(payload.scan_complete===false)status.textContent+=' Scan is partial: some locations are unreadable or the scan limit was reached.';
     pageIndex=Math.min(pageIndex,Math.max(0,Math.ceil(files.length/5)-1));
     for(const file of files.slice(pageIndex*5,pageIndex*5+5)){
-      const details=document.createElement('details');details.className='discovered-model';const summary=document.createElement('summary');summary.textContent=`${file.name} · ${formatBytes(file.size_bytes)}`;
+      const details=document.createElement('details');details.className='discovered-model';const summary=document.createElement('summary');summary.textContent=`${file.name} · ${formatBytes(file.size_bytes)} · ${file.format==='safetensors'?(file.status==='incomplete'?'Incomplete checkpoint':'Check compatibility'):'GGUF detected'}`;
       const source=document.createElement('p');source.textContent=`${file.source || 'Local folder'} · identity unverified`;
       const path=document.createElement('p');path.className='discovered-path';path.textContent=file.path;
       const notice=document.createElement('p');notice.textContent='GGUF header detected. File name does not verify publisher, quantization, compatibility or memory fit. This local check does not add a point to Compare.';
+      if(file.format==='safetensors'){
+        notice.textContent=file.reason||'This checkpoint needs a compatibility check and conversion to GGUF before llama.cpp can load it.';
+        const instructions=document.createElement('p');instructions.textContent='On Ubuntu, run infergrade models list --converter /path/to/llama.cpp/convert_hf_to_gguf.py to check support. Then explicitly run infergrade models convert --folder with this checkpoint path, --converter with that script and --output with a new .gguf file. Install the converter’s requirements first; conversion may need substantial RAM and disk space. Source files stay unchanged.';
+        details.append(summary,source,path,notice,instructions);list.append(details);continue;
+      }
       const button=document.createElement('button');button.type='button';button.className='button-secondary';button.textContent='Use for local engine check';button.onclick=()=>useFile(file.path);
       details.append(summary,source,path,notice,button);
       if(benchmarkFile){const benchmark=document.createElement('button');benchmark.type='button';benchmark.className='button-primary';benchmark.textContent='Benchmark privately';benchmark.onclick=()=>benchmarkFile(file.path);details.append(benchmark);}
