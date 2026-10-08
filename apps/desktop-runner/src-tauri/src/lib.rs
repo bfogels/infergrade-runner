@@ -1,3 +1,4 @@
+mod desktop_activity;
 mod device_pairing;
 use device_pairing::{
     begin_runner_device_pairing, cancel_runner_device_pairing, poll_runner_device_pairing,
@@ -2506,6 +2507,7 @@ pub fn run() {
             desktop_update_installation,
             model_discovery::desktop_discovered_models,
             model_discovery::set_desktop_model_folder,
+            desktop_activity::desktop_machine_activity,
             desktop_model_cache_status,
             clear_desktop_model_cache,
             download_starter_gguf,

@@ -1,4 +1,5 @@
 import { initModelDiscovery, selectableLocalModel } from './modelDiscovery.js';
+import { initDesktopActivity, activityRunUrl } from './desktopActivity.js';
 import "./styles.css";
 import {devicePairingController} from "./devicePairing.js";
 import {initDesktopNavigation,showDesktopPage} from "./desktopNavigation.js";
@@ -182,6 +183,7 @@ let modelCachePayload = null;
 let modelCachePage = 0;
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
+let desktopActivity = null;
 let hubConnectionVerified = false;
 let lastFirstRunPayload = null;
 let lastReadinessCheckAt = null;
@@ -779,6 +781,7 @@ function applyPreviewStateFromUrl() {
   } else if (mockState === "unpaired") {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
+    desktopActivity?.setConnectionKey('');
     childProcess = null;
     setRunnerButtonsDisabled("start", false);
     setRunnerButtonsDisabled("stop", true);
@@ -1661,6 +1664,7 @@ async function updateTokenState() {
         hubConnectionVerified = false;
       }
       const profile = status?.profile?.profile || {};
+      desktopActivity?.setConnectionKey(savedTokenAvailable && runnerProfileAvailable ? `${profile.runner_id}|${profile.api_url}` : '');
       if (tokenState) {
         if (runnerProfileAvailable && hasToken) {
           tokenState.textContent = `Runner profile and OS token saved${profile.label ? ` for ${profile.label}` : ""}.`;
@@ -1679,6 +1683,7 @@ async function updateTokenState() {
   } catch (error) {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
+    desktopActivity?.setConnectionKey('');
     hubConnectionVerified = false;
     if (tokenState) {
       tokenState.textContent = userSafeTokenFailure(error.message || error);
@@ -3722,4 +3727,8 @@ initModelDiscovery({invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
   return open({directory:true,multiple:false,title:'Choose a local model folder'});
 },useFile:path=>{
   if(firstRunModelPathInput){discoveredModelPath=path;firstRunModelPathInput.value=path;firstRunModelPathInput.dispatchEvent(new Event('input'));firstRunModelPathInput.focus();firstRunModelPathInput.scrollIntoView({block:'center'});}
+}});
+
+desktopActivity=initDesktopActivity({invoke:loadTauriInvoke,openRun:async (id,apiUrl)=>{
+ await openExternalUrl(activityRunUrl(apiUrl,id));
 }});
