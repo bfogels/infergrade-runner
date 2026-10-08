@@ -6,7 +6,7 @@ Stop listening confirms interruption, sends SIGINT to the Unix sidecar that exec
 
 ## Validation and boundaries
 
-Independent lifecycle review approved the final atomic idle-close and PID stop fences. The initial committed full suite passed 1204 Python tests plus tier/product audits; the final committed candidate repeats the required full suite before landing. Focused adapter tests passed82, including real long-lived subprocess interruption during server startup and active suite. Native55 tests pass, with two opt-in HTTP tests ignored; Clippy passes. Desktop68 tests and build pass.
+Independent lifecycle review approved the final atomic idle-close and PID stop fences. Both committed full-suite candidates passed 1204 Python tests plus tier/product audits. The final code candidate was740b5d9; its clean run is recorded in /tmp/infergrade-redesign-background-full-final.log. Focused adapter tests passed82, including real long-lived subprocess interruption during server startup and active suite. Native55 tests pass, with two opt-in HTTP tests ignored; Clippy passes. Desktop68 tests and build pass.
 
 Four final Settings screenshots at1060/375 px, light/dark, were inspected with no overflow and a21px section heading. Browser keyboard navigation passed. A separate, labeled, browser-only adapter checked Space-to-enable, failed-write checkbox rollback and blocked-exit heading focus, then was removed by reload. It did not create a tray, alter OS preferences or execute a model.
 
