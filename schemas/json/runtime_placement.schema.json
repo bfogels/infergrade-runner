@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime_placement.schema.json",
+  "title": "Bounded llama.cpp invocation placement artifact v1",
+  "type": "object",
+  "required": [
+    "artifact_format",
+    "evidence_source",
+    "fit_argument",
+    "requested_context_tokens",
+    "requested_gpu_layers",
+    "requested_devices",
+    "requested_split_mode",
+    "requested_main_gpu_index",
+    "requested_tensor_split",
+    "observed_context_tokens",
+    "observed_context_per_sequence_tokens",
+    "offloaded_layers",
+    "total_layers",
+    "layer_placement",
+    "gpu_devices_with_positive_model_buffers",
+    "allocations",
+    "allocation_evidence_truncated",
+    "reason_codes",
+    "claim_boundary",
+    "role",
+    "requested_accelerator_api",
+    "placement_fingerprint",
+    "invocation_id"
+  ],
+  "properties": {
+    "artifact_format": {
+      "const": "llama_cpp_placement_artifact_v1"
+    },
+    "evidence_source": {
+      "const": "runtime_log_buffer_and_layer_markers"
+    },
+    "fit_argument": {
+      "enum": [
+        "on",
+        "off",
+        null
+      ]
+    },
+    "requested_context_tokens": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 999999999
+    },
+    "requested_gpu_layers": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": -999999999,
+      "maximum": 999999999
+    },
+    "requested_devices": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "maxLength": 24,
+        "pattern": "^(CUDA[0-9]{1,3}(_Mapped)?|Vulkan[0-9]{1,3}|MTL[0-9]{1,3}(_Mapped)?|Metal[0-9]{0,3}(_Mapped)?|CPU_Mapped|CPU|none)$"
+      }
+    },
+    "requested_split_mode": {
+      "enum": [
+        "none",
+        "layer",
+        "row",
+        null
+      ]
+    },
+    "requested_main_gpu_index": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 999
+    },
+    "requested_tensor_split": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128,
+      "pattern": "^[0-9]+(\\.[0-9]+)?(,[0-9]+(\\.[0-9]+)?){0,15}$"
+    },
+    "observed_context_tokens": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "observed_context_per_sequence_tokens": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "offloaded_layers": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "total_layers": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "layer_placement": {
+      "enum": [
+        "unknown",
+        "no_reported_layers_offloaded",
+        "partial_layer_offload",
+        "all_reported_layers_offloaded"
+      ]
+    },
+    "gpu_devices_with_positive_model_buffers": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 24,
+        "pattern": "^(CUDA[0-9]{1,3}|VULKAN[0-9]{1,3}|MTL[0-9]{1,3}|Metal[0-9]{0,3})$"
+      }
+    },
+    "allocations": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "required": [
+          "device",
+          "kind",
+          "bytes"
+        ],
+        "properties": {
+          "device": {
+            "type": "string",
+            "maxLength": 24,
+            "pattern": "^(CUDA[0-9]{1,3}(_Mapped)?|VULKAN[0-9]{1,3}|MTL[0-9]{1,3}(_Mapped)?|Metal[0-9]{0,3}(_Mapped)?|CPU_Mapped|CPU)$"
+          },
+          "kind": {
+            "enum": [
+              "model",
+              "kv"
+            ]
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "allocation_evidence_truncated": {
+      "type": "boolean"
+    },
+    "reason_codes": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "enum": [
+          "contradictory_layer_evidence",
+          "contradictory_context_evidence",
+          "contradictory_device_layer_evidence",
+          "allocation_evidence_truncated",
+          "gpu_model_allocation_devices_unknown",
+          "layer_counts_unknown",
+          "runtime_context_unknown"
+        ]
+      }
+    },
+    "claim_boundary": {
+      "const": "Runtime buffer sizes are not RSS or VRAM. All layers offloaded does not prove zero CPU/RAM use."
+    },
+    "role": {
+      "enum": [
+        "preflight",
+        "capability_completion",
+        "capability_server",
+        "deployment_server",
+        "perplexity"
+      ]
+    },
+    "requested_accelerator_api": {
+      "enum": [
+        "cpu",
+        "cuda",
+        "metal",
+        "vulkan",
+        "rocm",
+        "opencl",
+        "sycl",
+        null
+      ]
+    },
+    "placement_fingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "invocation_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{32}$"
+    }
+  },
+  "additionalProperties": false
+}

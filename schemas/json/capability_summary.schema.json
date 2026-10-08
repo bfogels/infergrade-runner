@@ -297,6 +297,8 @@
     "task_performance_summary": {
       "type": "object",
       "properties": {
+        "runtime_placement_receipts": { "type": "array", "maxItems": 128, "items": { "$ref": "runtime_placement.schema.json" } },
+        "runtime_placement_receipts_complete": { "type": "boolean" },
         "item_observations_version": { "const": "task_timing_observations_v1" },
         "item_observations_complete": { "type": "boolean" },
         "item_observations": { "type": "array", "maxItems": 10000, "items": { "$ref": "task_timing_sample.schema.json" } },
