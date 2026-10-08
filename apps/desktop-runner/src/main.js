@@ -3785,8 +3785,6 @@ initModelDiscovery({invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
   if(firstRunModelPathInput){discoveredModelPath=path;firstRunModelPathInput.value=path;firstRunModelPathInput.dispatchEvent(new Event('input'));firstRunModelPathInput.focus();firstRunModelPathInput.scrollIntoView({block:'center'});}
 }});
 
-finishNotifications=initFinishNotifications({invoke:loadTauriInvoke});
-finishNotifications?.setConnectionKey(desktopConnectionKey);
 homeResults=initHomeResults({invoke:loadTauriInvoke,openResult:async (result,apiUrl)=>{await openExternalUrl(activityResultUrl(apiUrl,result.result_id,result.kind));}});
 
 desktopActivity=initDesktopActivity({invoke:loadTauriInvoke,openResult:async (result,apiUrl)=>{await openExternalUrl(activityResultUrl(apiUrl,result.result_id,result.kind));},openRun:async (id,apiUrl)=>{
@@ -3799,6 +3797,9 @@ initBackgroundSettings({invoke:loadTauriInvoke,listen:async callback=>{
  const {listen}=await import('@tauri-apps/api/event');
  return listen('infergrade-background-exit-blocked',callback);
 },onBlocked:()=>showDesktopPage('settings')});
+
+finishNotifications=initFinishNotifications({invoke:loadTauriInvoke});
+finishNotifications?.setConnectionKey(desktopConnectionKey);
 
  desktopMachineSettings=initMachineSettings({invoke:loadTauriInvoke});
 
