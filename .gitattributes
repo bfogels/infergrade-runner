@@ -2,3 +2,19 @@
 # platform checkout rewrite line endings inside these trust artifacts.
 runtime/catalog/signed/*.json -text
 runtime/catalog/roots/*.json -text
+
+# Offline evaluator identity pins are hashes of repository bytes.
+runtime/native_ifeval_bundle.json -text
+runtime/native_ifeval_bootstrap.py -text
+containers/capability-ifeval/runner.py -text
+third_party/instruction_following_eval/LICENSE -text
+third_party/instruction_following_eval/README.md -text
+third_party/instruction_following_eval/evaluation_lib.py -text
+third_party/instruction_following_eval/evaluation_main.py -text
+third_party/instruction_following_eval/instructions.py -text
+third_party/instruction_following_eval/instructions_registry.py -text
+third_party/instruction_following_eval/instructions_test.py -text
+third_party/instruction_following_eval/instructions_util.py -text
+third_party/instruction_following_eval/instructions_util_test.py -text
+third_party/instruction_following_eval/requirements.txt -text
+third_party/instruction_following_eval/run.sh -text
