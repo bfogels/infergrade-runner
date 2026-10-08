@@ -1,3 +1,4 @@
+import {initBackgroundSettings} from './backgroundSettings.js';
 import { initModelDiscovery, selectableLocalModel } from './modelDiscovery.js';
 import {initHfCredentials} from './hfCredentials.js';
 import { initDesktopActivity, activityRunUrl } from './desktopActivity.js';
@@ -3187,7 +3188,7 @@ async function resetPairing() {
   if(browserPairing?.isActive())await browserPairing.cancel();
   const wasListening = Boolean(childProcess);
   if (wasListening) {
-    await stopRunner();
+    if (await stopRunner() === false) return;
     childProcess = null;
     setRunnerButtonsDisabled("start", false);
     setRunnerButtonsDisabled("stop", true);
@@ -3331,6 +3332,7 @@ async function stopRunner() {
     return;
   }
 
+  if (!window.confirm("Stop listening? An active benchmark will be interrupted. Partial results may be resumable.")) return false;
   const invoke = await loadTauriInvoke();
   if (invoke && childProcess.rustManaged) {
     await invoke("stop_runner_listener");
@@ -3735,3 +3737,9 @@ desktopActivity=initDesktopActivity({invoke:loadTauriInvoke,openRun:async (id,ap
  await openExternalUrl(activityRunUrl(apiUrl,id));
 }});
 initHfCredentials({invoke:loadTauriInvoke,openExternal:openExternalUrl});
+
+initBackgroundSettings({invoke:loadTauriInvoke,listen:async callback=>{
+ if(!await loadTauriInvoke())return;
+ const {listen}=await import('@tauri-apps/api/event');
+ return listen('infergrade-background-exit-blocked',callback);
+},onBlocked:()=>showDesktopPage('settings')});

@@ -1,3 +1,4 @@
+mod background;
 mod desktop_activity;
 mod device_pairing;
 mod hf_credentials;
@@ -68,6 +69,7 @@ const PARTIAL_ARTIFACT_SUFFIX: &str = ".tmp";
 #[derive(Default)]
 struct ListenerProcess {
     child: Mutex<Option<CommandChild>>,
+    work: Mutex<Option<background::WorkGuard>>,
 }
 
 struct DesktopProfileStore;
@@ -588,15 +590,19 @@ fn start_runner_listener(
     api_url: String,
     typed_token: Option<String>,
 ) -> Result<Value, String> {
-    if state
+    let work_guard = background::WorkGuard::begin()?;
+    let mut child_slot = state
         .child
         .lock()
-        .map_err(|_| "listener state is unavailable".to_string())?
-        .is_some()
-    {
-        return Ok(json!({"status": "already_running"}));
+        .map_err(|_| "listener state is unavailable".to_string())?;
+    if child_slot.is_some() {
+        return Ok(json!({"status":"already_running"}));
     }
 
+    let mut work_slot = state
+        .work
+        .lock()
+        .map_err(|_| "listener lifecycle is unavailable".to_string())?;
     let typed_token = typed_token.unwrap_or_default().trim().to_string();
     let typed_token_present = !typed_token.is_empty();
     let profile = load_runner_profile()?;
@@ -648,10 +654,10 @@ fn start_runner_listener(
         .spawn()
         .map_err(|error| format!("could not start Runner listener: {error}"))?;
     let pid = child.pid();
-    *state
-        .child
-        .lock()
-        .map_err(|_| "listener state is unavailable".to_string())? = Some(child);
+    *child_slot = Some(child);
+    *work_slot = Some(work_guard);
+    drop(work_slot);
+    drop(child_slot);
 
     let event_app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -676,7 +682,12 @@ fn start_runner_listener(
                 CommandEvent::Terminated(payload) => {
                     let listener_state = event_app.state::<ListenerProcess>();
                     if let Ok(mut child) = listener_state.child.lock() {
-                        *child = None;
+                        if child.as_ref().is_some_and(|child| child.pid() == pid) {
+                            *child = None;
+                            if let Ok(mut work) = listener_state.work.lock() {
+                                *work = None;
+                            }
+                        }
                     }
                     emit_listener_event(
                         &event_app,
@@ -698,26 +709,62 @@ fn start_runner_listener(
 }
 
 #[tauri::command]
-fn stop_runner_listener(state: State<ListenerProcess>) -> Result<Value, String> {
+async fn stop_runner_listener(state: State<'_, ListenerProcess>) -> Result<Value, String> {
+    let requested = request_listener_stop(&state)?;
+    if requested["status"] == "not_running" {
+        return Ok(requested);
+    }
+    for _ in 0..300 {
+        if state
+            .child
+            .lock()
+            .map_err(|_| "listener state is unavailable".to_string())?
+            .is_none()
+        {
+            return Ok(json!({"status":"stopped"}));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Err("Runner has not confirmed that listening stopped. Keep it open and check Activity.".into())
+}
+
+fn request_listener_stop(state: &ListenerProcess) -> Result<Value, String> {
     let child = state
         .child
         .lock()
-        .map_err(|_| "listener state is unavailable".to_string())?
-        .take();
-    match child {
-        Some(child) => {
-            let pid = child.pid();
-            child
-                .kill()
-                .map_err(|error| format!("could not stop Runner listener: {error}"))?;
-            Ok(json!({"status": "stop_requested", "pid": pid}))
+        .map_err(|_| "listener state is unavailable".to_string())?;
+    let Some(child) = child.as_ref() else {
+        return Ok(json!({"status":"not_running"}));
+    };
+    let pid = child.pid();
+    #[cfg(unix)]
+    {
+        // The long-running sidecar execs Python in place. SIGINT lets its
+        // KeyboardInterrupt/finally paths stop model servers and report failure.
+        if unsafe { libc::kill(pid as libc::pid_t, libc::SIGINT) } != 0 {
+            return Err("Could not request listener interruption. Runner remains open.".into());
         }
-        None => Ok(json!({"status": "not_running"})),
     }
+    #[cfg(windows)]
+    {
+        // The sidecar owns a kill-on-close Windows job; /T also covers the
+        // development fallback. Retain supervision until Terminated is observed.
+        let status = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .status()
+            .map_err(|_| {
+                "Could not request listener interruption. Runner remains open.".to_string()
+            })?;
+        if !status.success() {
+            return Err("Could not request listener interruption. Runner remains open.".into());
+        }
+    }
+    Ok(json!({"status":"stop_requested","pid":pid}))
 }
 
 #[tauri::command]
 async fn desktop_sidecar_diagnostic(app: AppHandle, args: Vec<String>) -> Result<Value, String> {
+    let _work_guard = background::WorkGuard::begin()?;
     if args.is_empty()
         || args
             .iter()
@@ -1633,6 +1680,7 @@ async fn run_observed_runtime(
     observed_run_id: String,
     observed_api_url: Option<String>,
 ) -> Result<Value, String> {
+    let _work_guard = background::WorkGuard::begin()?;
     // Pairing mutation takes the write side of this lock. Keeping the read
     // guard through the terminal upload closes the profile/token TOCTOU gap.
     let _pairing_guard = PAIRING_STATE_LOCK.read().await;
@@ -1821,6 +1869,7 @@ fn select_existing_llama_cpp_runtime(
 
 #[tauri::command]
 async fn install_managed_llama_cpp_runtime(runtime_id: Option<String>) -> Result<Value, String> {
+    let _work_guard = background::WorkGuard::begin()?;
     tauri::async_runtime::spawn_blocking(move || {
         engine_install_managed_llama_cpp_runtime(ManagedRuntimeInstallOptions {
             runtime_id: runtime_id
@@ -1838,6 +1887,7 @@ async fn install_required_runtime_catalog_target(
     target_name: String,
     consent_runtime_build_id: String,
 ) -> Result<Value, String> {
+    let _work_guard = background::WorkGuard::begin()?;
     let target_name = target_name.trim().to_string();
     let consent_runtime_build_id = consent_runtime_build_id.trim().to_string();
     tauri::async_runtime::spawn_blocking(move || {
@@ -1849,6 +1899,7 @@ async fn install_required_runtime_catalog_target(
 
 #[tauri::command]
 async fn refresh_desktop_runtime_catalog() -> Result<Value, String> {
+    let _work_guard = background::WorkGuard::begin()?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut payload = engine_refresh_default_runtime_catalog(None)?;
         payload["platform"] = json!({
@@ -1938,6 +1989,7 @@ fn verify_starter_gguf(path: &Path) -> Result<(), String> {
 
 #[tauri::command]
 async fn download_starter_gguf() -> Result<Value, String> {
+    let _work_guard = background::WorkGuard::begin()?;
     let path = desktop_artifact_cache_dir()?.join(STARTER_GGUF_FILENAME);
     if path.is_file() {
         verify_starter_gguf(&path)?;
@@ -2320,6 +2372,7 @@ async fn retry_desktop_native_first_run_upload(
     upload_run_id: String,
     upload_worker_id: Option<String>,
 ) -> Result<Value, String> {
+    let _work_guard = background::WorkGuard::begin()?;
     let run_id = upload_run_id.trim().to_string();
     if run_id.is_empty() {
         return Err("Enter a Hub run ID before retrying upload.".to_string());
@@ -2354,6 +2407,7 @@ async fn run_desktop_native_first_run(
     upload_run_id: Option<String>,
     upload_worker_id: Option<String>,
 ) -> Result<Value, String> {
+    let _work_guard = background::WorkGuard::begin()?;
     model_discovery::validate_local_gguf(model_path.trim())?;
     let input = native_first_run_input(&model_path);
     let runtime_path = runtime_path
@@ -2488,12 +2542,19 @@ pub fn run() {
             }
         }))
         .manage(ListenerProcess::default())
+        .setup(|app| {
+            background::initialize(app.handle());
+            Ok(())
+        })
+        .on_window_event(background::window_event)
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            background::desktop_background_status,
+            background::set_desktop_keep_running,
             save_runner_token,
             clear_runner_token,
             runner_pairing_status,
@@ -2531,8 +2592,9 @@ pub fn run() {
             poll_runner_device_pairing,
             cancel_runner_device_pairing
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running InferGrade desktop runner");
+        .build(tauri::generate_context!())
+        .expect("error while building InferGrade desktop runner")
+        .run(background::run_event);
 }
 
 #[cfg(test)]
