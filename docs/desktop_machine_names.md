@@ -1,0 +1,7 @@
+# Desktop machine names
+
+Settings reads and saves the Hub-authoritative name of the saved paired Runner. Requests use the saved Hub URL, Runner ID and OS credential; form edits cannot retarget them. Native commands snapshot pairing under a read lock and reject results if the paired identity, normalized Hub URL or credential changed while waiting. Native output contains only the confirmed ID/name. No local profile or OS token is rewritten by naming.
+
+The frontend clears name and controls on disconnect, pairing-status failure and missing native transport. Generation fences prevent late responses from replacing another connection's name. Invalid Unicode controls and names outside 1–120 characters are refused. A failed save preserves the confirmed name, shows the error, and allows retry. The sidebar uses the confirmed name; Hub preserves it across old worker heartbeats.
+
+Validation: 65 engine tests including an actual loopback PUT/JSON/auth transport; 58 native tests (two existing opt-in ignored), Clippy, 72 desktop tests and Vite build passed. Four Settings captures at 1060×900/375px, light/dark, were inspected; keyboard Enter save, failure rollback and no overflow passed using a temporary explicitly scoped UI command adapter, then that browser was closed. These are UI/transport checks, not native OS keyring or production account acceptance. Core full-suite result is recorded in the PR/root delivery receipt after validation. Cache Keep checkbox layout is aligned with its label.

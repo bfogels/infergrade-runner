@@ -22,6 +22,7 @@ from infergrade.capabilities import (
     remove_capability_case_checkpoints,
     summarize_capability_execution,
 )
+from infergrade.cache_control import cache_read_lease
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.memory_fit import estimate_memory_fit, standard_context_estimates
 from infergrade.ontology import build_ontology, resolve_artifact_sha256, resolve_quant_format
@@ -593,6 +594,7 @@ def _load_resumable_result(output_dir: str, progress: Dict[str, Any], profile_id
     return read_json(absolute_path)
 
 
+@cache_read_lease
 def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
     """Execute an InferGrade request and write a reproducible bundle to disk.
 
@@ -674,6 +676,15 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         _emit_progress(emit_progress, "Capturing environment...")
         environment = capture_environment(request.execution_mode)
         mark_stage_completed(output_dir, progress, current_stage, metadata={"path": "artifacts/environment.json"})
+
+        if request.execution_mode == "local_native" and not request.simulate and request.capability != "none":
+            from infergrade.benchmark_catalog import capability_benchmark_ids_for_request
+            if "ifeval" in capability_benchmark_ids_for_request(request):
+                from infergrade.native_ifeval import preflight
+                current_stage = "native_evaluator_preflight"
+                mark_stage_started(output_dir, progress, current_stage)
+                evaluator = preflight()
+                mark_stage_completed(output_dir, progress, current_stage, metadata=evaluator)
 
         resolved_artifact = None
         current_stage = "artifact_resolution"

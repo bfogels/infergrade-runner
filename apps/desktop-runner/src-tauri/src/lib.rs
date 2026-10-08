@@ -1,7 +1,10 @@
 mod background;
+mod cache_lease;
 mod desktop_activity;
 mod device_pairing;
 mod hf_credentials;
+mod machine_settings;
+mod run_results;
 use device_pairing::{
     begin_runner_device_pairing, cancel_runner_device_pairing, poll_runner_device_pairing,
 };
@@ -30,13 +33,11 @@ use infergrade_runner_engine::{
 };
 use keyring::{Entry, Error as KeyringError};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
@@ -58,13 +59,6 @@ const OBSERVED_RUNTIME_TERMINATION_GRACE_SECONDS: u64 = 5;
 const OBSERVED_RUNTIME_CONTRACT_VERSION: &str = "observed_quick_suite_v1";
 const OBSERVED_EVIDENCE_CLAIM_BOUNDARY: &str = "Local observed diagnostic only. The endpoint, runtime build, model artifact, publisher, and quantization are not independently verified. Scores are not comparable, promotion-eligible, recommendation evidence, or headline capability evidence.";
 static PAIRING_STATE_LOCK: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
-const STARTER_GGUF_URL: &str = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/52e7645ba7c309695bec7ac98f4f005b139cf465/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
-const STARTER_GGUF_BYTES: u64 = 668788096;
-const STARTER_GGUF_SHA256: &str =
-    "9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0";
-const STARTER_GGUF_FILENAME: &str = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
-const PARTIAL_ARTIFACT_PREFIX: &str = "infergrade-artifact-";
-const PARTIAL_ARTIFACT_SUFFIX: &str = ".tmp";
 
 #[derive(Default)]
 struct ListenerProcess {
@@ -214,70 +208,6 @@ fn desktop_artifact_cache_dir() -> Result<PathBuf, String> {
         )
     })?;
     Ok(path)
-}
-
-fn is_partial_artifact_name(name: &str) -> bool {
-    name.starts_with(PARTIAL_ARTIFACT_PREFIX) && name.ends_with(PARTIAL_ARTIFACT_SUFFIX)
-}
-
-fn cached_model_artifacts(cache_dir: &Path) -> Result<Vec<Value>, String> {
-    if !cache_dir.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut artifacts = Vec::new();
-    for entry in fs::read_dir(cache_dir).map_err(|error| {
-        format!(
-            "could not read model cache at {}: {error}",
-            cache_dir.display()
-        )
-    })? {
-        let entry =
-            entry.map_err(|error| format!("could not inspect model cache entry: {error}"))?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().to_string();
-        if is_partial_artifact_name(&name) {
-            continue;
-        }
-        let metadata = entry
-            .metadata()
-            .map_err(|error| format!("could not read cached model metadata for {name}: {error}"))?;
-        let modified_unix_seconds = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map(|duration| duration.as_secs());
-        artifacts.push(json!({
-            "name": name,
-            "path": path.display().to_string(),
-            "size_bytes": metadata.len(),
-            "modified_unix_seconds": modified_unix_seconds,
-        }));
-    }
-    artifacts.sort_by(|left, right| {
-        left["name"]
-            .as_str()
-            .unwrap_or("")
-            .cmp(right["name"].as_str().unwrap_or(""))
-    });
-    Ok(artifacts)
-}
-
-fn desktop_model_cache_status_payload() -> Result<Value, String> {
-    let cache_dir = desktop_artifact_cache_dir()?;
-    let artifacts = cached_model_artifacts(&cache_dir)?;
-    let artifact_bytes = artifacts
-        .iter()
-        .map(|artifact| artifact["size_bytes"].as_u64().unwrap_or(0))
-        .sum::<u64>();
-    Ok(json!({
-        "cache_dir": cache_dir.display().to_string(),
-        "artifact_count": artifacts.len(),
-        "artifact_bytes": artifact_bytes,
-        "artifacts": artifacts,
-    }))
 }
 
 fn load_runner_profile() -> Result<Option<Value>, String> {
@@ -1977,128 +1907,86 @@ fn desktop_update_installation() -> Value {
     json!({"platform": env::consts::OS, "appimage": cfg!(target_os = "linux") && env::var_os("APPIMAGE").is_some()})
 }
 
-#[tauri::command]
-fn desktop_model_cache_status() -> Result<Value, String> {
-    desktop_model_cache_status_payload()
-}
-
-#[tauri::command]
-fn clear_desktop_model_cache() -> Result<Value, String> {
-    let cache_dir = desktop_artifact_cache_dir()?;
-    let artifacts = cached_model_artifacts(&cache_dir)?;
-    let mut removed = Vec::new();
-    for artifact in artifacts {
-        let path = artifact["path"].as_str().unwrap_or("").to_string();
-        if path.is_empty() {
-            continue;
-        }
-        let artifact_path = PathBuf::from(&path);
-        if artifact_path.parent() != Some(cache_dir.as_path()) || !artifact_path.is_file() {
-            continue;
-        }
-        fs::remove_file(&artifact_path).map_err(|error| {
-            format!(
-                "could not remove cached model {}: {error}",
-                artifact_path.display()
-            )
-        })?;
-        removed.push(artifact);
-    }
-    let removed_bytes = removed
-        .iter()
-        .map(|artifact| artifact["size_bytes"].as_u64().unwrap_or(0))
-        .sum::<u64>();
-    Ok(json!({
-        "cache_dir": cache_dir.display().to_string(),
-        "removed_count": removed.len(),
-        "removed_bytes": removed_bytes,
-        "removed": removed,
-        "status": desktop_model_cache_status_payload()?,
-    }))
-}
-
-fn verify_starter_gguf(path: &Path) -> Result<(), String> {
-    use std::io::Read;
-    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
-    if file.metadata().map_err(|error| error.to_string())?.len() != STARTER_GGUF_BYTES {
-        return Err(
-            "Starter model length mismatch. Clear the model cache and retry the download.".into(),
-        );
-    }
-    let mut digest = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    loop {
-        let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
-        if count == 0 {
-            break;
-        }
-        digest.update(&buffer[..count]);
-    }
-    if format!("{:x}", digest.finalize()) != STARTER_GGUF_SHA256 {
-        return Err(
-            "Starter model checksum mismatch. Clear the model cache and retry the download.".into(),
-        );
-    }
-    Ok(())
-}
-
-#[tauri::command]
-async fn download_starter_gguf() -> Result<Value, String> {
-    let _work_guard = background::WorkGuard::begin()?;
-    let path = desktop_artifact_cache_dir()?.join(STARTER_GGUF_FILENAME);
-    if path.is_file() {
-        verify_starter_gguf(&path)?;
-        return Ok(json!({
-            "status": "already_present",
-            "path": path.display().to_string(),
-            "url": STARTER_GGUF_URL,
-        }));
-    }
-
-    let partial_path = path.with_extension("gguf.download");
-    let mut response = reqwest::get(STARTER_GGUF_URL)
+async fn cache_action(app: &AppHandle, args: Vec<String>) -> Result<Value, String> {
+    let output = app
+        .shell()
+        .sidecar(SIDECAR_BINARY_NAME)
+        .map_err(|_| "Could not prepare cache controls.")?
+        .args(args)
+        .output()
         .await
-        .map_err(|error| format!("could not download starter GGUF: {error}"))?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "starter GGUF download failed: HTTP {}",
-            response.status().as_u16()
-        ));
+        .map_err(|_| "Could not run cache controls.")?;
+    if !output.status.success() || output.stdout.len() > 2 * 1024 * 1024 {
+        return Err("Cache action unavailable. Finish active work and stop listening before clearing space; legacy or external files are preserved.".into());
     }
-    let mut file = fs::File::create(&partial_path).map_err(|error| {
-        format!(
-            "could not create starter GGUF at {}: {error}",
-            partial_path.display()
-        )
-    })?;
-    let mut size_bytes: u64 = 0;
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|error| format!("could not read starter GGUF download: {error}"))?
+    serde_json::from_slice(&output.stdout)
+        .map_err(|_| "Cache controls returned an invalid response.".into())
+}
+
+#[tauri::command]
+async fn desktop_model_cache_status(app: AppHandle) -> Result<Value, String> {
+    cache_action(
+        &app,
+        vec!["cache".into(), "--managed-status".into(), "--json".into()],
+    )
+    .await
+}
+
+#[tauri::command]
+async fn clear_desktop_model_cache(
+    app: AppHandle,
+    artifact_id: Option<String>,
+) -> Result<Value, String> {
+    let _maintenance = background::MaintenanceGuard::begin()?;
+    let mut args = vec!["cache".into(), "--clear-unkept".into(), "--json".into()];
+    if let Some(id) = artifact_id {
+        if id.len() != 64
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            return Err("Invalid managed artifact.".into());
+        }
+        args.extend(["--artifact-id".into(), id]);
+    }
+    cache_action(&app, args).await
+}
+
+#[tauri::command]
+async fn set_desktop_model_keep(
+    app: AppHandle,
+    artifact_id: String,
+    keep: bool,
+) -> Result<Value, String> {
+    if artifact_id.len() != 64
+        || !artifact_id
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
     {
-        file.write_all(&chunk)
-            .map_err(|error| format!("could not write starter GGUF: {error}"))?;
-        size_bytes += chunk.len() as u64;
-        if size_bytes > STARTER_GGUF_BYTES {
-            return Err("Starter model download exceeded its pinned length.".into());
-        }
+        return Err("Invalid managed artifact.".into());
     }
-    file.flush()
-        .map_err(|error| format!("could not flush starter GGUF: {error}"))?;
-    verify_starter_gguf(&partial_path)?;
-    fs::rename(&partial_path, &path).map_err(|error| {
-        format!(
-            "could not finalize starter GGUF at {}: {error}",
-            path.display()
-        )
-    })?;
-    Ok(json!({
-        "status": "downloaded",
-        "path": path.display().to_string(),
-        "url": STARTER_GGUF_URL,
-        "size_bytes": size_bytes,
-    }))
+    cache_action(
+        &app,
+        vec![
+            "cache".into(),
+            "--artifact-id".into(),
+            artifact_id,
+            "--keep".into(),
+            if keep { "yes".into() } else { "no".into() },
+            "--json".into(),
+        ],
+    )
+    .await
+}
+
+#[tauri::command]
+async fn download_starter_gguf(app: AppHandle) -> Result<Value, String> {
+    let _work_guard = background::WorkGuard::begin()?;
+    cache_action(
+        &app,
+        vec!["cache".into(), "--download-starter".into(), "--json".into()],
+    )
+    .await
 }
 
 fn native_first_run_input(model_path: &str) -> NativeFirstRunInput {
@@ -2463,6 +2351,7 @@ async fn run_desktop_native_first_run(
     upload_worker_id: Option<String>,
 ) -> Result<Value, String> {
     let _work_guard = background::WorkGuard::begin()?;
+    let _model_lease = cache_lease::ReadLease::for_managed_model(Path::new(model_path.trim()))?;
     model_discovery::validate_local_gguf(model_path.trim())?;
     let input = native_first_run_input(&model_path);
     let runtime_path = runtime_path
@@ -2473,6 +2362,7 @@ async fn run_desktop_native_first_run(
     let local_artifact_dir = artifact_dir.clone();
     let event_app = app.clone();
     let mut result = tauri::async_runtime::spawn_blocking(move || {
+        let _model_lease = _model_lease;
         emit_first_run_event(
             &event_app,
             RunnerEvent::BenchmarkProgress {
@@ -2633,11 +2523,15 @@ pub fn run() {
             model_discovery::desktop_discovered_models,
             model_discovery::set_desktop_model_folder,
             desktop_activity::desktop_machine_activity,
+            run_results::desktop_run_results,
+            machine_settings::desktop_machine_name,
+            machine_settings::set_desktop_machine_name,
             hf_credentials::desktop_hf_credential_status,
             hf_credentials::save_desktop_hf_credential,
             hf_credentials::clear_desktop_hf_credential,
             desktop_model_cache_status,
             clear_desktop_model_cache,
+            set_desktop_model_keep,
             download_starter_gguf,
             run_desktop_native_first_run,
             retry_desktop_native_first_run_upload,
@@ -3123,39 +3017,6 @@ mod tests {
         let _ = fs::remove_file(outside_path);
 
         let _ = fs::remove_dir_all(artifact_dir);
-    }
-
-    #[test]
-    fn desktop_model_cache_lists_and_clears_top_level_artifacts_only() {
-        let _guard = env_test_lock().lock().expect("env lock");
-        let home_dir = env::temp_dir().join(format!(
-            "infergrade-desktop-model-cache-home-{}",
-            std::process::id()
-        ));
-        let previous_home = env::var("HOME").ok();
-        env::set_var("HOME", &home_dir);
-        let cache_dir = home_dir.join(".cache").join("infergrade").join("artifacts");
-        fs::create_dir_all(&cache_dir).expect("cache dir");
-        fs::write(cache_dir.join("qwen3.5-9b-q4.gguf"), b"model-bytes").expect("model");
-        fs::write(cache_dir.join("infergrade-artifact-active.tmp"), b"partial").expect("partial");
-
-        let status = desktop_model_cache_status().expect("cache status");
-        assert_eq!(status["artifact_count"], 1);
-        assert_eq!(status["artifacts"][0]["name"], "qwen3.5-9b-q4.gguf");
-        assert!(status["artifact_bytes"].as_u64().unwrap_or(0) > 0);
-
-        let cleared = clear_desktop_model_cache().expect("cache clear");
-        assert_eq!(cleared["removed_count"], 1);
-        assert!(!cache_dir.join("qwen3.5-9b-q4.gguf").exists());
-        assert!(cache_dir.join("infergrade-artifact-active.tmp").exists());
-        assert_eq!(cleared["status"]["artifact_count"], 0);
-
-        if let Some(previous_home) = previous_home {
-            env::set_var("HOME", previous_home);
-        } else {
-            env::remove_var("HOME");
-        }
-        let _ = fs::remove_dir_all(home_dir);
     }
 
     #[test]

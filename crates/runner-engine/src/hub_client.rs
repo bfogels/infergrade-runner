@@ -41,6 +41,7 @@ pub fn shared_hub_upload_client() -> &'static reqwest::Client {
 pub enum HubMethod {
     Get,
     Post,
+    Put,
 }
 
 impl HubMethod {
@@ -48,6 +49,7 @@ impl HubMethod {
         match self {
             Self::Get => "GET",
             Self::Post => "POST",
+            Self::Put => "PUT",
         }
     }
 }
@@ -165,6 +167,7 @@ pub async fn execute_hub_json_request(
     let mut builder = match request.method {
         HubMethod::Get => client.get(&request.url),
         HubMethod::Post => client.post(&request.url),
+        HubMethod::Put => client.put(&request.url),
     };
     if let Some(authorization) = request.authorization_header() {
         builder = builder.header("Authorization", authorization);
@@ -342,4 +345,64 @@ fn redact_response_detail(detail: String, token: Option<&str>) -> String {
     detail
         .replace(token, "[redacted]")
         .replace(&format!("Bearer {token}"), "Bearer [redacted]")
+}
+
+#[cfg(test)]
+mod name_transport_tests {
+    use super::*;
+    #[tokio::test]
+    async fn machine_name_update_sends_put_json_and_authorization() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0; 2048];
+            loop {
+                let count = stream.read(&mut buffer).unwrap();
+                assert!(count > 0);
+                bytes.extend_from_slice(&buffer[..count]);
+                assert!(bytes.len() < 8192);
+                let text = String::from_utf8_lossy(&bytes);
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let size: usize = text[..end]
+                        .lines()
+                        .find_map(|line| {
+                            line.to_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|s| s.trim().parse().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if bytes.len() >= end + 4 + size {
+                        break;
+                    }
+                }
+            }
+            let text = String::from_utf8(bytes).unwrap();
+            assert!(text.starts_with("PUT /v1/runners/runner_test/name HTTP/1.1"));
+            assert!(text
+                .to_lowercase()
+                .contains("authorization: bearer isolated-test-token"));
+            let payload: Value =
+                serde_json::from_str(text.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+            assert_eq!(payload, json!({"label":"Study Mac"}));
+            let body = r#"{"schema_version":"hub.machine_name.v1","runner":{"runner_id":"runner_test","label":"Study Mac"}}"#;
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+        });
+        let request = build_hub_json_request(
+            HubMethod::Put,
+            &format!("http://{addr}"),
+            "/v1/runners/runner_test/name",
+            Some(json!({"label":"Study Mac"})),
+            Some("isolated-test-token"),
+        )
+        .unwrap();
+        let response = execute_hub_json_request(&request).await.unwrap();
+        assert_eq!(response.body["runner"]["label"], "Study Mac");
+        server.join().unwrap();
+    }
 }
