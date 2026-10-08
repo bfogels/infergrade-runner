@@ -1439,3 +1439,5 @@ h4 {
 .desktop-private-benchmark h2,.desktop-private-running h2,.desktop-private-history h2{font-size:21px;line-height:1.25;margin:0 0 18px}.desktop-private-benchmark p,.desktop-private-running p,.desktop-private-history p{overflow-wrap:anywhere}.desktop-private-benchmark label{display:block;margin:12px 0}.private-history-row{border-top:1px solid var(--border);padding:16px 0;overflow-wrap:anywhere}.desktop-private-running[hidden]{display:none}
 
 .desktop-gpu-settings [data-gpu-choices]{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.desktop-gpu-settings [aria-pressed="true"]{outline:2px solid var(--accent, #36a574);outline-offset:2px}.desktop-gpu-settings form{display:grid;gap:10px;width:100%}.desktop-gpu-settings form label{display:flex;gap:8px;align-items:center}
+
+.desktop-gpu-settings h2{font-size:21px;line-height:1.25;margin:0 0 18px}
