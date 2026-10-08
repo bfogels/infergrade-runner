@@ -134,6 +134,7 @@ def _add_run_request_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--upload", action="store_true")
     parser.add_argument("--backend-flags", action="append")
+    parser.add_argument("--cuda-device", dest="cuda_device_uuids", action="append", help="Select a physical NVIDIA GPU UUID for native execution; repeat for a split selection.")
     parser.add_argument("--generation-preset")
     parser.add_argument("--cloud-provider")
     parser.add_argument("--cloud-instance-type")
@@ -178,6 +179,7 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     local_parser.add_argument("--tier", choices=("canary", "standard"), default="canary")
     local_parser.add_argument("--llama-cpp-cli-path", required=True)
     local_parser.add_argument("--llama-cpp-server-path", required=True)
+    local_parser.add_argument("--cuda-device", dest="cuda_device_uuids", action="append", help="Physical NVIDIA GPU UUID; repeat to split across selected GPUs.")
     local_parser.add_argument("--json", action="store_true")
 
     doctor_parser = subparsers.add_parser("doctor", help="Check whether this machine is ready to benchmark.")
@@ -680,6 +682,7 @@ def main(argv: Optional[list] = None) -> int:
                 args.model_file, args.use_case, args.tier,
                 args.llama_cpp_cli_path, args.llama_cpp_server_path,
                 emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
+                **({"cuda_device_uuids": args.cuda_device_uuids} if args.cuda_device_uuids else {}),
             )
         except (OSError, ValueError, RuntimeError) as exc:
             raise SystemExit("Private benchmark could not finish: %s" % exc) from exc
@@ -1059,6 +1062,7 @@ def main(argv: Optional[list] = None) -> int:
             },
             "overrides": {
                 "backend_flags": request.backend_flags,
+                **({"cuda_device_uuids": request.cuda_device_uuids} if request.cuda_device_uuids else {}),
                 "generation_preset": request.generation_preset,
             },
             "cost": {
