@@ -25,3 +25,8 @@ apps/desktop-runner/sidecar/target/
 
 # Local runtime qualification receipts, archives and downloaded models.
 /output/
+
+# Trusted evaluator identity is generated only in a package/source build.
+python/runner-core/src/infergrade/_native_ifeval_identity.py
+apps/desktop-runner/src-tauri/native-ifeval/
+/runtime/native-ifeval/
