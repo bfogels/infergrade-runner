@@ -98,7 +98,7 @@ def _private_permissions():
         os.umask(previous)
 
 
-def _run_private_benchmark(model_file, use_case, tier, cli_path, server_path, emit_progress=None):
+def _run_private_benchmark(model_file, use_case, tier, cli_path, server_path, emit_progress=None, cuda_device_uuids=None):
     """Run a selected native check inventory and retain its ordinary local bundle."""
     if use_case not in CHECKS or tier not in ("canary", "standard"):
         raise ValueError("Choose an available local use case and canary or standard depth.")
@@ -121,6 +121,7 @@ def _run_private_benchmark(model_file, use_case, tier, cli_path, server_path, em
             quant_artifact_sha256=digest, quant_artifact_filename=model.name,
             quant_artifact_download_size_bytes=size, llama_cpp_cli_path=str(cli),
             llama_cpp_server_path=str(server),
+            cuda_device_uuids=list(cuda_device_uuids or []),
             benchmark_check_ids=CHECKS[use_case] + ["interactive_chat_v1"],
             deployment_profiles=["interactive_chat_v1"],
             deployment_warmup_runs=1, deployment_measured_runs=3,
@@ -150,14 +151,15 @@ def _run_private_benchmark(model_file, use_case, tier, cli_path, server_path, em
             raise
 
 
-def run_private_benchmark(model_file, use_case, tier, cli_path, server_path, emit_progress=None):
+def run_private_benchmark(model_file, use_case, tier, cli_path, server_path, emit_progress=None, cuda_device_uuids=None):
     """Keep managed files leased across verification and canonical execution."""
     lease_request = RunRequest(
         model="local/unverified", backend="llama.cpp", tier="canary", simulate=False,
         quant_artifact=str(Path(model_file).expanduser().absolute()),
     )
     with request_cache_lease(lease_request):
-        return _run_private_benchmark(model_file, use_case, tier, cli_path, server_path, emit_progress)
+        return _run_private_benchmark(model_file, use_case, tier, cli_path, server_path, emit_progress,
+                                      **({"cuda_device_uuids": cuda_device_uuids} if cuda_device_uuids else {}))
 
 
 def _bounded_json(path, limit):
