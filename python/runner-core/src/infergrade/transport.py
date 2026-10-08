@@ -502,6 +502,9 @@ def publish_run_config(
     return response
 
 
+CLAIM_REQUEST_TIMEOUT_SECONDS = 30.0
+
+
 def claim_run_job(
     api_url: str,
     worker_id: str,
@@ -519,6 +522,7 @@ def claim_run_job(
         api_url,
         "/v1/runs/claim",
         method="POST",
+        timeout=CLAIM_REQUEST_TIMEOUT_SECONDS,
         payload={
             "worker_id": worker_id,
             "execution_mode": execution_mode,
@@ -777,6 +781,7 @@ def register_runner(
     environment: Dict[str, Any] = None,
     contract: Dict[str, Any] = None,
     diagnostics: Dict[str, Any] = None,
+    metadata: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """Register a long-lived runner with the Hub."""
     try:
@@ -798,6 +803,7 @@ def register_runner(
                 "environment": environment or {},
                 "contract": contract or {},
                 "diagnostics": diagnostics or {},
+                **({"metadata": metadata} if metadata is not None else {}),
             },
             api_token=api_token,
         )

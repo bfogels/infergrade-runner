@@ -18,6 +18,38 @@ class CliTests(unittest.TestCase):
         self.prepare_runtime = patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_cache_budget_rejects_ambiguous_or_nonwriting_updates(self):
+        cases = [(['--limit-gb', '25', '--clear-unkept'], 'Choose one cache action'),
+                 (['--budget-status', '--prune-partials'], 'Choose one cache action'),
+                 (['--trim-oldest'], 'Choose a limit'),
+                 (['--limit-gb', '25', '--dry-run'], 'no limit was changed')]
+        with mock.patch('infergrade.cache_budget.set_limit') as setter:
+            for flags, message in cases:
+                with self.subTest(flags=flags), self.assertRaisesRegex(SystemExit, message):
+                    main(['cache'] + flags)
+            setter.assert_not_called()
+
+    def test_cache_budget_cli_preserves_selected_root_and_no_limit(self):
+        with mock.patch('infergrade.cache_budget.set_limit', return_value={'budget': {}}) as setter, redirect_stdout(io.StringIO()):
+            self.assertEqual(main(['cache', '--artifact-cache-dir', '/tmp/owned-cache', '--limit-gb', 'none']), 0)
+        setter.assert_called_once_with(None, '/tmp/owned-cache', False)
+
+    def test_cache_budget_status_modifier_returns_only_confirmed_budget_after_update(self):
+        output = io.StringIO()
+        with mock.patch('infergrade.cache_budget.set_limit', return_value={'budget': {'limit_gb': 25}, 'status': {'private': 'excluded'}}), redirect_stdout(output):
+            self.assertEqual(main(['cache', '--budget-status', '--limit-gb', '25']), 0)
+        self.assertEqual(json.loads(output.getvalue()), {'limit_gb': 25})
+
+    def test_physical_cuda_selection_cannot_be_published_as_reusable_config(self):
+        request = RunRequest(model='example/model', backend='llama.cpp', tier='canary',
+                             execution_mode='local_native', cuda_device_uuids=['GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'])
+        with mock.patch('infergrade.cli._request_from_args', return_value=request), \
+             mock.patch('infergrade.cli.publish_run_config') as publish:
+            with self.assertRaisesRegex(SystemExit, 'machine-local'):
+                main(['--all', 'publish-run-config', '--model', 'example/model', '--backend', 'llama.cpp',
+                      '--api-url', 'https://example.com', '--name', 'test'])
+        publish.assert_not_called()
+
     def test_run_request_file_preserves_resume_and_output_overrides(self):
         request = RunRequest(model="example/model", backend="llama.cpp", tier="standard", simulate=False)
         output = io.StringIO()
@@ -50,7 +82,7 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, 0)
         help_text = output.getvalue()
-        self.assertIn("{doctor,discover-runtimes,cache,install-runtime,pair,unpair,start}", help_text)
+        self.assertIn("{benchmark-local,doctor,discover-runtimes,cache,install-runtime,pair,unpair,start}", help_text)
         self.assertIn("start               Start a long-lived local runner", help_text)
         self.assertIn("infergrade --all --help", help_text)
         self.assertNotIn("run-job", help_text)

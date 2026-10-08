@@ -12,6 +12,12 @@ from infergrade.environment import (
     _detect_apple_silicon_fallback,
     _detect_apple_silicon_gpu,
     _detect_cpu_architecture,
+    _detect_cpu_model,
+    _detect_machine_model,
+    _hardware_label,
+    _windows_model,
+    _windows_model_probe,
+    _windows_registry_model,
     _detect_nvidia_gpu,
     _detect_process_translation,
     _detect_vulkan_gpu,
@@ -20,6 +26,57 @@ from infergrade.environment import (
 
 
 class EnvironmentTests(unittest.TestCase):
+    def setUp(self):
+        # Synthetic cross-platform cases must not read the actual Windows CI host.
+        patcher = mock.patch('infergrade.environment._windows_registry_model', return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_linux_cpu_and_machine_names_use_reported_fields_only(self):
+        data = {"/proc/cpuinfo": "processor: 0\nmodel name: AMD Ryzen 9 7950X\nSerial: private-serial", "/sys/devices/virtual/dmi/id/product_name": "Precision 3660\n"}
+        with mock.patch("infergrade.environment.platform.system", return_value="Linux"), mock.patch("infergrade.environment._read_hardware_text", side_effect=lambda path, *args: data.get(path)), mock.patch("infergrade.environment._run_command") as command:
+            self.assertEqual(_detect_cpu_model(), "AMD Ryzen 9 7950X")
+            self.assertEqual(_detect_machine_model(), "Precision 3660")
+            command.assert_not_called()
+
+    def test_linux_missing_dmi_uses_device_tree_and_missing_identity_stays_none(self):
+        with mock.patch("infergrade.environment.platform.system", return_value="Linux"), mock.patch("infergrade.environment._read_hardware_text", side_effect=lambda path, *args: "Raspberry Pi 5 Model B\x00" if path == "/proc/device-tree/model" else "To Be Filled By O.E.M."):
+            self.assertEqual(_detect_machine_model(), "Raspberry Pi 5 Model B")
+        with mock.patch("infergrade.environment.platform.system", return_value="Linux"), mock.patch("infergrade.environment._read_hardware_text", return_value=None):
+            self.assertIsNone(_detect_machine_model())
+
+    def test_windows_model_queries_are_bounded_and_exclude_serials(self):
+        with mock.patch("infergrade.environment.platform.system", return_value="Windows"), mock.patch("infergrade.environment.subprocess.run", return_value=mock.Mock(stdout="Precision 3660\n")) as run:
+            self.assertEqual(_detect_machine_model(), "Precision 3660")
+            args, kwargs = run.call_args
+            self.assertIn("Win32_ComputerSystem", args[0][-1])
+            self.assertTrue(args[0][-1].endswith(".Model"))
+            self.assertEqual(kwargs["timeout"], 5)
+        with mock.patch("infergrade.environment.subprocess.run", side_effect=OSError("unavailable")):
+            self.assertIsNone(_windows_model("Win32_Processor", "Name"))
+
+    def test_windows_unreadable_output_preserves_missing_identity(self):
+        failure = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid OEM output")
+        with mock.patch("infergrade.environment.subprocess.run", side_effect=failure):
+            self.assertIsNone(_windows_model("Win32_ComputerSystem", "Model"))
+
+    def test_windows_probe_diagnostics_are_bounded_codes_without_error_text(self):
+        import subprocess
+        for error, status in [(subprocess.TimeoutExpired('fixed probe', 5, output='private output'), 'timeout'),
+                              (OSError('private failure'), 'command_unavailable'),
+                              (UnicodeError('private output'), 'unreadable_output')]:
+            with mock.patch('infergrade.environment.subprocess.run', side_effect=error):
+                self.assertEqual(_windows_model_probe('Win32_ComputerSystem', 'Model'),
+                                 {'status': status, 'value': None})
+        with mock.patch('infergrade.environment.subprocess.run', return_value=mock.Mock(stdout='Default string')):
+            self.assertEqual(_windows_model_probe('Win32_ComputerSystem', 'Model'),
+                             {'status': 'missing_or_placeholder', 'value': None})
+
+    def test_hardware_labels_reject_placeholders_controls_and_excessive_length(self):
+        for label in [None, "unknown", "Default string", "System Product Name", "Bad\nName", "Bad\u0085Name", "x" * 257]:
+            self.assertIsNone(_hardware_label(label))
+        self.assertEqual(_hardware_label(" Dell Precision \n"), "Dell Precision")
+
     def test_detect_nvidia_gpu_parses_name_and_vram(self):
         with mock.patch("infergrade.environment._run_command", return_value="NVIDIA RTX 4090, 24564\n"):
             gpu = _detect_nvidia_gpu()
@@ -282,8 +339,81 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(payload["cpu_model"], "AMD Ryzen 9 7950X")
 
 
-if __name__ == "__main__":
-    unittest.main()
+
+
+
+class WindowsRegistryModelTests(unittest.TestCase):
+    def registry(self, value='AMD EPYC 9V45', kind=1):
+        registry = mock.MagicMock()
+        registry.HKEY_LOCAL_MACHINE = 1
+        registry.KEY_QUERY_VALUE = 2
+        registry.KEY_WOW64_64KEY = 256
+        registry.REG_SZ = 1
+        registry.QueryValueEx.return_value = (value, kind)
+        return registry
+
+    def test_queries_only_fixed_model_fields_with_read_only_access(self):
+        registry = self.registry()
+        with mock.patch.dict(sys.modules, {'winreg': registry}):
+            self.assertEqual(_windows_registry_model('cpu'), 'AMD EPYC 9V45')
+            _windows_registry_model('machine')
+            with self.assertRaises(ValueError):
+                _windows_registry_model('serial')
+        self.assertEqual(registry.OpenKey.call_count, 2)
+        for call in registry.OpenKey.call_args_list:
+            self.assertEqual(call.args[-1], 258)
+            self.assertEqual(call.args[0], 1)
+        self.assertEqual([call.args[1] for call in registry.QueryValueEx.call_args_list],
+                         ['ProcessorNameString', 'SystemProductName'])
+        registry.SetValueEx.assert_not_called()
+        registry.CreateKey.assert_not_called()
+
+    def test_missing_denied_placeholder_controls_and_wrong_types_are_unknown(self):
+        for value, kind in [('unknown', 1), ('Bad\x01Name', 1), ('x' * 257, 1), (['machine'], 7), ('Model', 2)]:
+            registry = self.registry(value, kind)
+            with mock.patch.dict(sys.modules, {'winreg': registry}):
+                self.assertIsNone(_windows_registry_model('machine'))
+        registry = self.registry()
+        registry.OpenKey.side_effect = PermissionError('private registry failure')
+        with mock.patch.dict(sys.modules, {'winreg': registry}):
+            self.assertIsNone(_windows_registry_model('cpu'))
+        with mock.patch.dict(sys.modules, {'winreg': None}):
+            self.assertIsNone(_windows_registry_model('cpu'))
+
+    def test_detectors_use_reported_registry_names_without_launching_cim(self):
+        with mock.patch('infergrade.environment.platform.system', return_value='Windows'), \
+             mock.patch('infergrade.environment._windows_registry_model', side_effect=['AMD EPYC 9V45', 'Virtual Machine']), \
+             mock.patch('infergrade.environment._windows_model', side_effect=AssertionError('no PowerShell')):
+            self.assertEqual(_detect_cpu_model(), 'AMD EPYC 9V45')
+            self.assertEqual(_detect_machine_model(), 'Virtual Machine')
+
+    def test_platform_gate_rejects_windows_architecture_fallback_with_present_machine(self):
+        import contextlib
+        import io
+        import runpy
+        from pathlib import Path
+        script = Path(__file__).resolve().parents[3] / 'scripts/check_platform_hardware_identity.py'
+        output = io.StringIO()
+        with mock.patch('infergrade.environment._detect_cpu_model', return_value='AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD'), \
+             mock.patch('infergrade.environment._detect_machine_model', return_value='Virtual Machine'), \
+             mock.patch('infergrade.environment._windows_model_probe', return_value={'status': 'available', 'value': 'diagnostic name'}), \
+             mock.patch('platform.system', return_value='Windows'), \
+             mock.patch('platform.machine', return_value='AMD64'), contextlib.redirect_stdout(output):
+            with self.assertRaisesRegex(SystemExit, 'unavailable'):
+                runpy.run_path(str(script), run_name='__main__')
+        rows = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertFalse(rows[0]['identity_available'])
+        self.assertTrue(rows[1]['diagnostic_only'])
+
+    def test_missing_registry_falls_back_to_bounded_cim_and_preserves_unknown(self):
+        with mock.patch('infergrade.environment.platform.system', return_value='Windows'), \
+             mock.patch('infergrade.environment._windows_registry_model', return_value=None), \
+             mock.patch('infergrade.environment.subprocess.run', side_effect=TimeoutError) as run:
+            # Exercise the existing subprocess timeout path, not a synthetic brand.
+            import subprocess
+            run.side_effect = subprocess.TimeoutExpired('probe', 5)
+            self.assertIsNone(_detect_machine_model())
+        self.assertEqual(run.call_args.kwargs['timeout'], 5)
 
 
 class MultiGpuInventoryTests(unittest.TestCase):
@@ -311,3 +441,7 @@ class MultiGpuInventoryTests(unittest.TestCase):
         ]):
             gpu = _detect_nvidia_gpu()
         self.assertIsNone(gpu['accelerator_vram_total_gb'])
+
+
+if __name__ == "__main__":
+    unittest.main()
