@@ -82,7 +82,7 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, 0)
         help_text = output.getvalue()
-        self.assertIn("{benchmark-local,doctor,discover-runtimes,cache,install-runtime,pair,unpair,start}", help_text)
+        self.assertIn("{benchmark-local,doctor,discover-runtimes,models,cache,install-runtime,pair,unpair,start}", help_text)
         self.assertIn("start               Start a long-lived local runner", help_text)
         self.assertIn("infergrade --all --help", help_text)
         self.assertNotIn("run-job", help_text)
@@ -1008,3 +1008,15 @@ class NativeRequestDefaultTests(unittest.TestCase):
             self.assertEqual(request_from_cli(args).execution_mode, expected)
             args.execution_mode = "local_container"
             self.assertEqual(request_from_cli(args).execution_mode, "local_container")
+
+    def test_models_cli_lists_default_and_custom_roots(self):
+        output = io.StringIO()
+        with mock.patch('infergrade.local_models.default_roots', return_value=[]), mock.patch('infergrade.local_models.discover', return_value={'files': [], 'scan_complete': True}) as discover, redirect_stdout(output):
+            self.assertEqual(main(['models', 'list', '--folder', '/tmp/custom-models', '--json']), 0)
+        self.assertEqual(str(discover.call_args.args[0][0]), '/tmp/custom-models')
+        self.assertEqual(json.loads(output.getvalue())['files'], [])
+
+    def test_models_cli_requires_explicit_conversion_arguments(self):
+        with mock.patch('infergrade.local_models.convert') as convert, self.assertRaises(SystemExit):
+            main(['models', 'convert', '--folder', '/tmp/model'])
+        convert.assert_not_called()

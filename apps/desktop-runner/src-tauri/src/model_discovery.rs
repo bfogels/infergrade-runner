@@ -134,6 +134,92 @@ fn open_regular_file(path: &Path) -> Result<fs::File, String> {
     }
     Ok(file)
 }
+fn local_json(path: &Path, root: &Path) -> Result<Value, String> {
+    let canonical = fs::canonicalize(path).map_err(|_| "Missing metadata")?;
+    if !canonical.starts_with(root) {
+        return Err("Metadata outside model folder".into());
+    }
+    let file = open_regular_file(&canonical)?;
+    if file.metadata().map_err(|_| "Unreadable metadata")?.len() > 4 * 1024 * 1024 {
+        return Err("Metadata exceeds scan limit".into());
+    }
+    let mut text = String::new();
+    file.take(4 * 1024 * 1024 + 1)
+        .read_to_string(&mut text)
+        .map_err(|_| "Unreadable metadata")?;
+    serde_json::from_str(&text).map_err(|_| "Invalid checkpoint metadata".into())
+}
+fn checkpoint_row(dir: &Path, root: &Path, source: &str) -> Result<Value, String> {
+    let config = local_json(&dir.join("config.json"), root)?;
+    let architecture = config["architectures"]
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(Value::as_str);
+    let mut names = HashSet::new();
+    if dir.join("model.safetensors.index.json").exists() {
+        let index = local_json(&dir.join("model.safetensors.index.json"), root)?;
+        let weights = index["weight_map"]
+            .as_object()
+            .ok_or("Invalid shard index")?;
+        if weights.is_empty() || weights.len() > 100_000 {
+            return Err("Invalid shard index".into());
+        }
+        for value in weights.values() {
+            let name = value.as_str().ok_or("Invalid shard name")?;
+            if name.contains(['/', '\\']) || !name.ends_with(".safetensors") {
+                return Err("Unsafe shard name".into());
+            }
+            names.insert(name.to_string());
+        }
+    } else {
+        names.insert("model.safetensors".to_string());
+    }
+    if names.len() > 1000 {
+        return Err("Too many shards".into());
+    }
+    let mut complete = true;
+    let mut size = 0u64;
+    for name in names {
+        match fs::canonicalize(dir.join(name))
+            .ok()
+            .filter(|p| p.starts_with(root))
+            .and_then(|p| open_regular_file(&p).ok())
+            .and_then(|f| f.metadata().ok())
+        {
+            Some(meta) if meta.len() > 0 => size += meta.len(),
+            _ => complete = false,
+        }
+    }
+    let tokenizer = ["tokenizer.json", "tokenizer.model", "vocab.json"]
+        .iter()
+        .any(|name| {
+            fs::canonicalize(dir.join(name))
+                .ok()
+                .filter(|p| p.starts_with(root))
+                .and_then(|p| open_regular_file(&p).ok())
+                .and_then(|f| f.metadata().ok())
+                .is_some_and(|m| m.len() > 0)
+        });
+    complete &= tokenizer;
+    let quantized = config
+        .get("quantization_config")
+        .is_some_and(|v| !v.is_null() && v.as_object().is_none_or(|m| !m.is_empty()));
+    let status = if !complete {
+        "incomplete"
+    } else {
+        "needs_compatibility_check"
+    };
+    let reason = if quantized {
+        "Quantized checkpoint: AWQ/GPTQ conversion is not established."
+    } else if !complete {
+        "Missing weights or tokenizer files."
+    } else {
+        "Safetensors checkpoint detected. Verify architecture support with your llama.cpp converter before converting to GGUF."
+    };
+    Ok(
+        json!({"name":dir.file_name().unwrap_or_default().to_string_lossy(),"path":dir.to_string_lossy(),"source":source,"size_bytes":size,"format":"safetensors","status":status,"architecture":architecture,"reason":reason,"identity_status":"unverified","read_only":true}),
+    )
+}
 fn scan(roots: &[(PathBuf, &str)]) -> Value {
     let mut rows = vec![];
     let mut seen_files = HashSet::new();
@@ -161,6 +247,15 @@ fn scan(roots: &[(PathBuf, &str)]) -> Value {
                     continue;
                 }
             };
+            if dir.join("config.json").exists()
+                && (dir.join("model.safetensors").exists()
+                    || dir.join("model.safetensors.index.json").exists())
+            {
+                match checkpoint_row(&dir, &root, source) {
+                    Ok(row) => rows.push(row),
+                    Err(_) => inaccessible += 1,
+                }
+            }
             for entry in entries {
                 visited += 1;
                 if visited > MAX_ENTRIES || rows.len() >= MAX_FILES {
@@ -209,7 +304,7 @@ fn scan(roots: &[(PathBuf, &str)]) -> Value {
                 let Ok(metadata) = file.metadata() else {
                     continue;
                 };
-                rows.push(json!({"name":path.file_name().unwrap_or_default().to_string_lossy(),"path":canonical.to_string_lossy(),"source":source,"size_bytes":metadata.len(),"identity_status":"unverified","read_only":true}));
+                rows.push(json!({"name":path.file_name().unwrap_or_default().to_string_lossy(),"path":canonical.to_string_lossy(),"source":source,"size_bytes":metadata.len(),"identity_status":"unverified","read_only":true,"format":"gguf","status":"gguf_detected"}));
             }
         }
     }
@@ -351,5 +446,45 @@ mod tests {
         assert!(save_folder(&settings, "/", false).is_err());
         fs::remove_dir_all(dir).unwrap();
         fs::remove_dir_all(folder).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::*;
+    #[test]
+    fn safetensors_are_classified_without_claiming_conversion_support() {
+        let dir = env::temp_dir().join(format!(
+            "ig-checkpoint-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("config.json"),
+            br#"{"architectures":["LlamaForCausalLM"]}"#,
+        )
+        .unwrap();
+        fs::write(dir.join("model.safetensors"), b"fixture").unwrap();
+        fs::write(dir.join("tokenizer.json"), b"{}").unwrap();
+        let root = fs::canonicalize(&dir).unwrap();
+        let row = checkpoint_row(&root, &root, "fixture").unwrap();
+        assert_eq!(row["status"], "needs_compatibility_check");
+        assert_eq!(row["format"], "safetensors");
+        fs::remove_file(dir.join("tokenizer.json")).unwrap();
+        assert_eq!(
+            checkpoint_row(&root, &root, "fixture").unwrap()["status"],
+            "incomplete"
+        );
+        fs::write(
+            dir.join("model.safetensors.index.json"),
+            br#"{"weight_map":{"x":"../escaped.safetensors"}}"#,
+        )
+        .unwrap();
+        assert!(checkpoint_row(&root, &root, "fixture").is_err());
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
