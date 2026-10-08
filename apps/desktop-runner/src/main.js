@@ -5,6 +5,7 @@ import { initModelDiscovery, selectableLocalModel } from './modelDiscovery.js';
 import {initHfCredentials} from './hfCredentials.js';
 import { initDesktopActivity, activityRunUrl } from './desktopActivity.js';
 import { activityResultUrl } from './activityResults.js';
+import { initHomeResults, listenerConnectionMatches } from './homeResults.js';
 import "./styles.css";
 import {devicePairingController} from "./devicePairing.js";
 import {initDesktopNavigation,showDesktopPage} from "./desktopNavigation.js";
@@ -189,6 +190,18 @@ let modelCachePage = 0;
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
 let desktopActivity = null;
+let homeResults = null;
+let desktopConnectionKey = "";
+function setDesktopConnectionKey(next) {
+  if (desktopConnectionKey !== next) {
+    desktopConnectionKey = next;
+    recentCompletion = null;
+    renderAssignmentIdle();
+  }
+  homeResults?.setConnectionKey(next);
+  desktopActivity?.setConnectionKey(next);
+  desktopMachineSettings?.setConnectionKey(next);
+}
 let desktopMachineSettings = null;
 let hubConnectionVerified = false;
 let lastFirstRunPayload = null;
@@ -545,6 +558,7 @@ function renderRecentCompletion() {
     return;
   }
   const completion = recentCompletion;
+  homeResults?.setRun(completion.runId);
   pendingRequiredRuntime = null;
   pendingManagedRuntimeRepair = false;
   assignmentPanel.dataset.state = "completed";
@@ -557,7 +571,7 @@ function renderRecentCompletion() {
   if (assignmentTitle) assignmentTitle.textContent = completion.title;
   if (assignmentDescription) {
     assignmentDescription.textContent = completion.resultId
-      ? "Your result is ready to inspect and share in Hub."
+      ? "The upload completed. Verify the accepted result below to open your data point or report."
       : "The run is complete in Hub. Open it to inspect publication and evidence status.";
   }
   if (assignmentProgressWrap) assignmentProgressWrap.hidden = false;
@@ -591,6 +605,7 @@ function renderAssignmentActive({
   const nextRunId = runId || currentAssignmentRunId;
   if (phase !== "Complete" && nextRunId && recentCompletion) {
     recentCompletion = null;
+    homeResults?.setRun('');
     currentAssignmentResultId = "";
   }
   const clock = assignmentClockTransition({
@@ -789,8 +804,7 @@ function applyPreviewStateFromUrl() {
   } else if (mockState === "unpaired") {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
-    desktopActivity?.setConnectionKey('');
-    desktopMachineSettings?.setConnectionKey('');
+    setDesktopConnectionKey('');
     childProcess = null;
     setRunnerButtonsDisabled("start", false);
     setRunnerButtonsDisabled("stop", true);
@@ -1597,6 +1611,7 @@ async function ensureRunnerListenerEvents() {
   await listen("runner-listener-event", (event) => {
     const payload = event?.payload || {};
     if (!listenerEventMatches(payload,childProcess)) return;
+    if (["assignment_update", "assignment_idle", "stdout", "stderr"].includes(payload.type) && !listenerConnectionMatches(childProcess,desktopConnectionKey)) return;
     if (payload.type === "assignment_update" || payload.type === "assignment_idle") {
       hubConnectionVerified = true;
       renderAssignmentFromListenerEvent(payload);
@@ -1696,8 +1711,7 @@ async function updateTokenState() {
         hubConnectionVerified = false;
       }
       const profile = status?.profile?.profile || {};
-      desktopActivity?.setConnectionKey(savedTokenAvailable && runnerProfileAvailable ? `${profile.runner_id}|${profile.api_url}` : '');
-      desktopMachineSettings?.setConnectionKey(savedTokenAvailable && runnerProfileAvailable ? `${profile.runner_id}|${profile.api_url}` : '');
+      setDesktopConnectionKey(savedTokenAvailable && runnerProfileAvailable ? `${profile.runner_id}|${profile.api_url}` : '');
       if (tokenState) {
         if (runnerProfileAvailable && hasToken) {
           tokenState.textContent = "Runner profile and OS token saved.";
@@ -1716,8 +1730,7 @@ async function updateTokenState() {
   } catch (error) {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
-    desktopActivity?.setConnectionKey('');
-    desktopMachineSettings?.setConnectionKey('');
+    setDesktopConnectionKey('');
     hubConnectionVerified = false;
     if (tokenState) {
       tokenState.textContent = userSafeTokenFailure(error.message || error);
@@ -1727,7 +1740,7 @@ async function updateTokenState() {
   }
   savedTokenAvailable = hasToken;
   runnerProfileAvailable = false;
-  desktopMachineSettings?.setConnectionKey('');
+  setDesktopConnectionKey('');
   if (isTauriRuntime()) {
     if (tokenState) {
       tokenState.textContent = hasToken
@@ -1922,6 +1935,7 @@ function renderAssignmentFromListenerEvent(payload = {}) {
       title: redactSecrets(payload.title || assignmentTitleFromRunId(runId)),
       lifecycleTiming: payload.lifecycle_timing || {},
     };
+    homeResults?.setRun(runId);
     currentAssignmentResultId = recentCompletion.resultId;
     if (assignmentOpenHubButton) assignmentOpenHubButton.textContent = recentCompletion.resultId ? "Open evidence" : "Open run";
     if (shouldClearCompletedHandoff({ phase, runId, handoffRunId: currentFirstRunUploadRunId() })) {
@@ -3082,6 +3096,7 @@ async function startRunner({ confirmStarted = false } = {}) {
   }
   await ensureRunnerListenerEvents();
   runnerStartupLines = [];
+  const listenerConnectionKey = desktopConnectionKey;
   const output = await invoke("start_runner_listener", {
     apiUrl,
     typedToken: null,
@@ -3092,7 +3107,7 @@ async function startRunner({ confirmStarted = false } = {}) {
   appendLog(
     `Runner start plan: ${plan.execution_mode || "default mode"} using ${credentialSourceLabel(plan.credential_source)}${runner}.`
   );
-  childProcess = { rustManaged: true, pid: output?.pid || null };
+  childProcess = { rustManaged: true, pid: output?.pid || null, connectionKey: listenerConnectionKey };
   setRunnerButtonsDisabled("stop", false);
   setStatus("Listening", "good");
   renderLocalReadinessChecklist();
@@ -3765,6 +3780,8 @@ initModelDiscovery({invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
 },useFile:path=>{
   if(firstRunModelPathInput){discoveredModelPath=path;firstRunModelPathInput.value=path;firstRunModelPathInput.dispatchEvent(new Event('input'));firstRunModelPathInput.focus();firstRunModelPathInput.scrollIntoView({block:'center'});}
 }});
+
+homeResults=initHomeResults({invoke:loadTauriInvoke,openResult:async (result,apiUrl)=>{await openExternalUrl(activityResultUrl(apiUrl,result.result_id,result.kind));}});
 
 desktopActivity=initDesktopActivity({invoke:loadTauriInvoke,openResult:async (result,apiUrl)=>{await openExternalUrl(activityResultUrl(apiUrl,result.result_id,result.kind));},openRun:async (id,apiUrl)=>{
  await openExternalUrl(activityRunUrl(apiUrl,id));
