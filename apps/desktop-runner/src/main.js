@@ -1,3 +1,4 @@
+import {initMachineSettings} from './machineSettings.js';
 import {initBackgroundSettings,listenerEventMatches} from './backgroundSettings.js';
 import { initModelDiscovery, selectableLocalModel } from './modelDiscovery.js';
 import {initHfCredentials} from './hfCredentials.js';
@@ -186,6 +187,7 @@ let modelCachePage = 0;
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
 let desktopActivity = null;
+let desktopMachineSettings = null;
 let hubConnectionVerified = false;
 let lastFirstRunPayload = null;
 let lastReadinessCheckAt = null;
@@ -784,6 +786,7 @@ function applyPreviewStateFromUrl() {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
     desktopActivity?.setConnectionKey('');
+    desktopMachineSettings?.setConnectionKey('');
     childProcess = null;
     setRunnerButtonsDisabled("start", false);
     setRunnerButtonsDisabled("stop", true);
@@ -1690,11 +1693,12 @@ async function updateTokenState() {
       }
       const profile = status?.profile?.profile || {};
       desktopActivity?.setConnectionKey(savedTokenAvailable && runnerProfileAvailable ? `${profile.runner_id}|${profile.api_url}` : '');
+      desktopMachineSettings?.setConnectionKey(savedTokenAvailable && runnerProfileAvailable ? `${profile.runner_id}|${profile.api_url}` : '');
       if (tokenState) {
         if (runnerProfileAvailable && hasToken) {
-          tokenState.textContent = `Runner profile and OS token saved${profile.label ? ` for ${profile.label}` : ""}.`;
+          tokenState.textContent = "Runner profile and OS token saved.";
         } else if (runnerProfileAvailable) {
-          tokenState.textContent = `Runner profile saved${profile.label ? ` for ${profile.label}` : ""}, but the OS token is unavailable.`;
+          tokenState.textContent = "Runner profile saved, but the OS token is unavailable.";
         } else if (hasToken) {
           tokenState.textContent = "Runner token is saved in the OS credential store, but no runner profile is saved.";
         } else {
@@ -1709,6 +1713,7 @@ async function updateTokenState() {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
     desktopActivity?.setConnectionKey('');
+    desktopMachineSettings?.setConnectionKey('');
     hubConnectionVerified = false;
     if (tokenState) {
       tokenState.textContent = userSafeTokenFailure(error.message || error);
@@ -1718,6 +1723,7 @@ async function updateTokenState() {
   }
   savedTokenAvailable = hasToken;
   runnerProfileAvailable = false;
+  desktopMachineSettings?.setConnectionKey('');
   if (isTauriRuntime()) {
     if (tokenState) {
       tokenState.textContent = hasToken
@@ -3766,3 +3772,5 @@ initBackgroundSettings({invoke:loadTauriInvoke,listen:async callback=>{
  const {listen}=await import('@tauri-apps/api/event');
  return listen('infergrade-background-exit-blocked',callback);
 },onBlocked:()=>showDesktopPage('settings')});
+
+ desktopMachineSettings=initMachineSettings({invoke:loadTauriInvoke});
