@@ -1,3 +1,4 @@
+import {initMachineSettings} from './machineSettings.js';
 import {initBackgroundSettings,listenerEventMatches} from './backgroundSettings.js';
 import { initModelDiscovery, selectableLocalModel } from './modelDiscovery.js';
 import {initHfCredentials} from './hfCredentials.js';
@@ -186,6 +187,7 @@ let modelCachePage = 0;
 let savedTokenAvailable = false;
 let runnerProfileAvailable = false;
 let desktopActivity = null;
+let desktopMachineSettings = null;
 let hubConnectionVerified = false;
 let lastFirstRunPayload = null;
 let lastReadinessCheckAt = null;
@@ -784,6 +786,7 @@ function applyPreviewStateFromUrl() {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
     desktopActivity?.setConnectionKey('');
+    desktopMachineSettings?.setConnectionKey('');
     childProcess = null;
     setRunnerButtonsDisabled("start", false);
     setRunnerButtonsDisabled("stop", true);
@@ -1083,7 +1086,30 @@ function renderModelCache(payload = null) {
     name.textContent = displayCacheArtifactName(artifact.name);
     const size = document.createElement("em");
     size.textContent = formatBytes(artifact.size_bytes);
-    item.append(name, size);
+    const ownership = document.createElement("span");
+    ownership.className = "cache-ownership";
+    ownership.textContent = artifact.managed ? "Runner download" : "Legacy or unowned file · preserved";
+    item.append(name, size, ownership);
+    if (artifact.managed && artifact.artifact_id) {
+      const label = document.createElement("label");
+      const keep = document.createElement("input");
+      keep.type = "checkbox"; keep.checked = artifact.keep === true;
+      keep.setAttribute("aria-label", `Keep ${displayCacheArtifactName(artifact.name)} when clearing space`);
+      label.append(keep, document.createTextNode(" Keep when clearing space"));
+      keep.addEventListener("change", async () => {
+        const wanted = keep.checked; keep.disabled = true;
+        try { const invoke = await loadTauriInvoke(); if (!invoke) throw new Error("Open the desktop app to update Keep."); const updated = await invoke("set_desktop_model_keep", { artifactId: artifact.artifact_id, keep: wanted }); renderModelCache(updated); }
+        catch (error) { keep.checked = !wanted; keep.disabled = false; if (modelCacheStatus) modelCacheStatus.textContent = `Could not update Keep: ${error.message || error}`; appendLog(`Could not update Keep: ${error.message || error}`); }
+      });
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "button-secondary compact-button"; remove.textContent = "Delete download"; remove.disabled = artifact.keep === true;
+      remove.addEventListener("click", async () => {
+        if (!window.confirm(`Delete ${displayCacheArtifactName(artifact.name)}? It can be downloaded again.`)) return;
+        remove.disabled = true;
+        try { const invoke = await loadTauriInvoke(); if (!invoke) throw new Error("Open the desktop app to delete downloads."); const updated = await invoke("clear_desktop_model_cache", { artifactId: artifact.artifact_id }); renderModelCache(updated.status); }
+        catch (error) { remove.disabled = false; if (modelCacheStatus) modelCacheStatus.textContent = `Could not delete download: ${error.message || error}`; appendLog(`Could not delete download: ${error.message || error}`); }
+      });
+      item.append(label, remove);
+    }
     modelCacheList.append(item);
   });
   if (modelCachePagination && modelCachePageLabel && modelCachePreviousButton && modelCacheNextButton) {
@@ -1112,7 +1138,7 @@ async function refreshModelCache() {
 }
 
 async function clearModelCache() {
-  if (!window.confirm("Clear cached model artifacts downloaded by InferGrade? Active downloads are left alone.")) {
+  if (!window.confirm("Clear managed Runner downloads without Keep? Legacy and external files are preserved. Finish active work and stop listening first.")) {
     return null;
   }
   if (clearModelCacheButton) {
@@ -1667,11 +1693,12 @@ async function updateTokenState() {
       }
       const profile = status?.profile?.profile || {};
       desktopActivity?.setConnectionKey(savedTokenAvailable && runnerProfileAvailable ? `${profile.runner_id}|${profile.api_url}` : '');
+      desktopMachineSettings?.setConnectionKey(savedTokenAvailable && runnerProfileAvailable ? `${profile.runner_id}|${profile.api_url}` : '');
       if (tokenState) {
         if (runnerProfileAvailable && hasToken) {
-          tokenState.textContent = `Runner profile and OS token saved${profile.label ? ` for ${profile.label}` : ""}.`;
+          tokenState.textContent = "Runner profile and OS token saved.";
         } else if (runnerProfileAvailable) {
-          tokenState.textContent = `Runner profile saved${profile.label ? ` for ${profile.label}` : ""}, but the OS token is unavailable.`;
+          tokenState.textContent = "Runner profile saved, but the OS token is unavailable.";
         } else if (hasToken) {
           tokenState.textContent = "Runner token is saved in the OS credential store, but no runner profile is saved.";
         } else {
@@ -1686,6 +1713,7 @@ async function updateTokenState() {
     savedTokenAvailable = false;
     runnerProfileAvailable = false;
     desktopActivity?.setConnectionKey('');
+    desktopMachineSettings?.setConnectionKey('');
     hubConnectionVerified = false;
     if (tokenState) {
       tokenState.textContent = userSafeTokenFailure(error.message || error);
@@ -1695,6 +1723,7 @@ async function updateTokenState() {
   }
   savedTokenAvailable = hasToken;
   runnerProfileAvailable = false;
+  desktopMachineSettings?.setConnectionKey('');
   if (isTauriRuntime()) {
     if (tokenState) {
       tokenState.textContent = hasToken
@@ -3568,7 +3597,7 @@ modelCacheNextButton?.addEventListener("click", () => {
 clearModelCacheButton?.addEventListener("click", () => {
   clearModelCache().catch((error) => {
     if (modelCacheStatus) {
-      modelCacheStatus.textContent = "Could not clear cached models.";
+      modelCacheStatus.textContent = `Could not clear cached models: ${error.message || error}`;
     }
     appendLog(`Could not clear model cache: ${error.message || error}`);
   });
@@ -3743,3 +3772,5 @@ initBackgroundSettings({invoke:loadTauriInvoke,listen:async callback=>{
  const {listen}=await import('@tauri-apps/api/event');
  return listen('infergrade-background-exit-blocked',callback);
 },onBlocked:()=>showDesktopPage('settings')});
+
+ desktopMachineSettings=initMachineSettings({invoke:loadTauriInvoke});
