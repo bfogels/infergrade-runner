@@ -5,7 +5,7 @@ import re
 import subprocess
 import textwrap
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from infergrade import __version__
@@ -481,7 +481,7 @@ def _case_benchmark_protocol_identity(
         return None
     if spec.execution_mode == "container" and not container_identity:
         return None
-    if spec.execution_mode == "native" and not scoring_policy:
+    if spec.execution_mode in {"native", "native_evaluator"} and not scoring_policy:
         return None
     scorer_identity = {
         "score_policy_id": score_policy_id,
@@ -489,8 +489,13 @@ def _case_benchmark_protocol_identity(
         "execution_mode": spec.execution_mode,
         "container_image_id": container_runtime.get("container_image_id"),
         "container_repo_digests": sorted(container_runtime.get("container_repo_digests") or []),
-        "runner_version": __version__ if spec.execution_mode == "native" else None,
+        "runner_version": __version__ if spec.execution_mode in {"native", "native_evaluator"} else None,
     }
+    if spec.execution_mode == "native_evaluator":
+        identity = summary.get("native_evaluator")
+        if not isinstance(identity, dict) or not identity.get("bundle_receipt_sha256"):
+            return None
+        scorer_identity["native_evaluator"] = dict(identity)
     output_shape_policy_id = _output_shape_policy_id(spec)
     if output_shape_policy_id:
         scorer_identity["output_shape_policy_id"] = output_shape_policy_id
@@ -755,13 +760,20 @@ def summarize_capability_execution(
     }
 
 
+def _benchmark_spec_for_request(request: RunRequest, benchmark_id: str) -> CapabilityBenchmarkSpec:
+    spec = CAPABILITY_BENCHMARKS[benchmark_id]
+    if benchmark_id == "ifeval" and request.execution_mode == "local_native":
+        return replace(spec, execution_mode="native_evaluator", container_image="")
+    return spec
+
+
 def capability_images_for_request(request: RunRequest) -> List[Dict[str, str]]:
     benchmark_ids = capability_benchmark_ids_for_request(request)
     if request.capability == "none" or not benchmark_ids:
         return []
     images = []
     for benchmark_id in benchmark_ids:
-        spec = CAPABILITY_BENCHMARKS[benchmark_id]
+        spec = _benchmark_spec_for_request(request, benchmark_id)
         if spec.execution_mode != "container":
             continue
         images.append(
@@ -1342,7 +1354,7 @@ def execute_capability_suite(
     hard_failed = 0
 
     for benchmark_id in benchmark_ids:
-        spec = CAPABILITY_BENCHMARKS[benchmark_id]
+        spec = _benchmark_spec_for_request(request, benchmark_id)
         benchmark_dir = os.path.join(benchmark_root, benchmark_id)
         ensure_dir(benchmark_dir)
         benchmark_started = time.perf_counter()
@@ -1481,7 +1493,9 @@ def execute_capability_suite(
             _attach_primary_metric_uncertainty(spec, summary)
             write_json(os.path.join(benchmark_dir, "summary.json"), summary)
             capability_run_path = None
-            if spec.execution_mode == "native":
+            if spec.execution_mode == "native_evaluator":
+                capability_run_path = _write_ifeval_capability_run_artifact(request, spec, benchmark_dir, cases, predictions, summary)
+            elif spec.execution_mode == "native":
                 capability_run_path = _write_native_capability_run_artifact(
                     request=request,
                     spec=spec,
@@ -2034,6 +2048,93 @@ def _generation_failure_severity(total_cases: int, failure_count: int) -> str:
     if (failure_count / float(total_cases)) >= _DOMINANT_GENERATION_FAILURE_RATE:
         return "dominant"
     return "partial"
+
+
+def _write_ifeval_capability_run_artifact(request, spec, benchmark_dir, cases, predictions, summary):
+    """Map exact official prompt-level strict results; never substitute loose scores."""
+    from infergrade.native_ifeval import PROTOCOL_ID
+    metadata = read_json(os.path.join(benchmark_dir, "benchmark_metadata.json"))
+    strict = _read_jsonl(os.path.join(benchmark_dir, "strict_results.jsonl"))
+    loose = _read_jsonl(os.path.join(benchmark_dir, "loose_results.jsonl"))
+    if len(strict) != len(cases) or len(loose) != len(cases):
+        raise ValueError("IFEval result denominator differs from selected cases")
+    predictions_by_id = {str(item.get("case_id")): item for item in predictions}
+    tasks = []
+    for case, strict_row, loose_row in zip(cases, strict, loose):
+        if strict_row.get("prompt") != case.get("prompt") or loose_row.get("prompt") != case.get("prompt"):
+            raise ValueError("IFEval result order or prompt differs from selected cases")
+        for row in (strict_row, loose_row):
+            flags = row.get("follow_instruction_list")
+            if (row.get("instruction_id_list") != case.get("instruction_id_list")
+                    or not isinstance(flags, list) or len(flags) != len(case.get("instruction_id_list") or [])
+                    or any(type(flag) is not bool for flag in flags)
+                    or type(row.get("follow_all_instructions")) is not bool
+                    or row["follow_all_instructions"] != all(flags)):
+                raise ValueError("IFEval strict or loose result is malformed")
+        case_id = str(case["case_id"])
+        prediction = predictions_by_id.get(case_id, {})
+        if any(row.get("response") != prediction.get("response", "") for row in (strict_row, loose_row)):
+            raise ValueError("IFEval scoring outputs do not bind to generated response")
+        completed = prediction.get("generation_status") == "completed"
+        quarantined = completed and (summary.get("output_shape_gate") or {}).get("status") == "blocked"
+        qualified = completed and not quarantined
+        # The official raw denominator includes every selected case. Preserve
+        # generation failures separately in task states; never make them passes.
+        tasks.append({"task_id": case_id, "task_family": spec.benchmark_kind,
+                      "state": "not_comparable" if quarantined else ("scored" if completed else "failed"),
+                      "score": float(strict_row["follow_all_instructions"]) if qualified else None,
+                      "score_dimension": spec.benchmark_kind, "scorer_type": "metric_only" if qualified else None,
+                      "scoring_policy": PROTOCOL_ID if qualified else None,
+                      "output_artifact": "predictions.jsonl#" + case_id,
+                      "error_class": "systemic_output_protocol_mismatch" if quarantined else (None if completed else (prediction.get("generation_failure_kind") or "generation_failed")),
+                      "strict_raw_prompt_score": float(strict_row["follow_all_instructions"]),
+                      "strict_instruction_results": strict_row["follow_instruction_list"],
+                      "loose_instruction_results": loose_row["follow_instruction_list"],
+                      "loose_prompt_score": float(loose_row["follow_all_instructions"]),
+                      "task_revision": prediction.get("task_revision"),
+                      **_task_performance_fields(prediction)})
+    raw_correct = sum(row["follow_all_instructions"] for row in strict)
+    metrics = summary.get("metrics") or {}
+    if metrics.get("prompt_strict_correct_count") != raw_correct or metrics.get("total_count") != len(cases):
+        raise ValueError("IFEval summary differs from exact strict result counts")
+    score = _benchmark_primary_metric_value(summary)
+    state = _capability_artifact_state(summary.get("status"), score, summary.get("generation_failure_severity"))
+    artifact = {
+        "artifact_spec_version": CAPABILITY_RUN_ARTIFACT_SPEC_VERSION,
+        "artifact_kind": "capability_run",
+        "capability_run_id": "caprun_ifeval_" + stable_hash({"model": request.model, "summary": summary}, length=10),
+        "created_at": utcnow_iso(),
+        "runner": {"name": "infergrade-runner", "version": __version__, "contract_version": _CONTRACT_VERSION},
+        "evidence": {"lane": "decision", "surface": "local_assistant_capability", "grade": "thin_local_sample", "experimental": True, "confidence_label": "thin_local_sample"},
+        "subject": {"model": {"model": request.model, "quant_artifact": request.quant_artifact, "quant_artifact_sha256": request.quant_artifact_sha256},
+                    "runtime": {"backend": request.backend, "execution_mode": request.execution_mode},
+                    "hardware": {"source": "run_bundle_environment"},
+                    "generation_preset": {"generation_preset_id": request.generation_preset, "max_tokens": spec.generation_max_tokens}},
+        "protocol": {"task_family": spec.benchmark_kind, "fixture_revision": "ifeval_google_ceea2f13_" + metadata["selection_sha256"],
+                     "source_fixture_revision": "google_source_fa55fe4af97c6756b6fe5b0639464f6b72f37c5a",
+                     "dataset_revision": "google_data_ceea2f13fd823c3493d6e6f232f334d083671c94_sha256_67ffeee0fcb87c317c5b08a2de85557b4a7e96ada6178aa645b4954fe4b53d49",
+                     "selection_digest_algorithm": SORTED_UTF8_NEWLINE_SHA256_V1, "selection_sha256": metadata["selection_sha256"],
+                     "case_count": len(cases), "benchmark_tier": request.tier, "scorer_type": "metric_only", "scoring_policy": PROTOCOL_ID,
+                     "repetitions": 1, "native_evaluator": dict(summary["native_evaluator"])},
+        "summary": {"state": state, "score": score if state in ("scored", "partial") else None,
+                    "score_dimension": spec.benchmark_kind, **_native_artifact_task_counts(tasks),
+                    "strict_raw_correct_count": raw_correct, "strict_raw_total_count": len(cases),
+                    "strict_loose_metrics": dict(metrics), "output_shape_gate": dict(summary.get("output_shape_gate") or {}),
+                    **_artifact_summary_performance(summary.get("task_performance")),
+                    **({"score_uncertainty": summary["primary_metric_uncertainty"]} if summary.get("primary_metric_uncertainty") else {})},
+        "tasks": tasks,
+        "artifacts": {"manifest": "capability_run.json", "raw_outputs": ["predictions.jsonl"],
+                      "scoring_outputs": ["strict_results.jsonl", "loose_results.jsonl", "summary.json"],
+                      "supporting_files": ["cases.jsonl", "input_data.jsonl", "benchmark_metadata.json", "native_evaluator_receipt.json"]},
+        "claim_boundary": {"supported_claims": ["Exact selected IFEval strict instruction-following outcomes on this observed setup."],
+                           "unsupported_claims": ["Container/platform scorer equivalence, broad model ranking or untested hardware.",
+                                                "Loose accuracy replacing strict scores or unqualified generation becoming comparable."]}}
+    errors = validate_current_capability_run_artifact(artifact)
+    if errors:
+        raise ValueError("Invalid native IFEval capability artifact: " + "; ".join(errors))
+    path = os.path.join(benchmark_dir, "capability_run.json")
+    write_json(path, artifact)
+    return path
 
 
 def _write_native_capability_run_artifact(
@@ -3750,6 +3851,12 @@ def _planned_benchmark_ids(execution: CapabilityExecution, suite: Optional[Dict[
 
 
 def _prepare_benchmark_cases(spec: CapabilityBenchmarkSpec, benchmark_dir: str, tier: str) -> None:
+    if spec.execution_mode == "native_evaluator":
+        from infergrade.native_ifeval import preflight, run_evaluator
+        preflight()
+        identity = run_evaluator("prepare", benchmark_dir, spec.case_limits.get(tier))
+        write_json(os.path.join(benchmark_dir, "native_evaluator_receipt.json"), identity)
+        return
     if spec.execution_mode == "native":
         _prepare_native_benchmark_cases(spec, benchmark_dir, tier)
         return
@@ -3788,6 +3895,16 @@ def _evaluate_benchmark(
     benchmark_dir: str,
     expected_count: Optional[int],
 ) -> Dict[str, Any]:
+    if spec.execution_mode == "native_evaluator":
+        from infergrade.native_ifeval import PROTOCOL_ID, run_evaluator
+        identity = run_evaluator("evaluate", benchmark_dir)
+        prepared = read_json(os.path.join(benchmark_dir, "native_evaluator_receipt.json"))
+        if identity != prepared:
+            raise ValueError("native IFEval evaluator changed after case preparation")
+        summary = read_json(os.path.join(benchmark_dir, "summary.json"))
+        summary["scoring_policy"] = PROTOCOL_ID
+        summary["native_evaluator"] = identity
+        return summary
     if spec.execution_mode == "native":
         return _evaluate_native_benchmark(spec, benchmark_dir)
     command = ["evaluate", "--output-dir", "/work"]

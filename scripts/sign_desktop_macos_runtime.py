@@ -37,7 +37,7 @@ def discover_macho_files(runtime: Path, runner=subprocess.run):
     return discovered
 
 
-def sign_runtime(runtime: Path, identity: str, keychain: Path = None, runner=subprocess.run):
+def sign_runtime(runtime: Path, identity: str, keychain: Path = None, runner=subprocess.run, evaluator=False):
     """Sign and verify all embedded code, then reseal the runtime receipt."""
     runtime = runtime.resolve()
     if not runtime.is_dir():
@@ -65,7 +65,8 @@ def sign_runtime(runtime: Path, identity: str, keychain: Path = None, runner=sub
             check=True,
         )
 
-    refresh_runtime_receipt(runtime, TRANSFORM)
+    if not evaluator:
+        refresh_runtime_receipt(runtime, TRANSFORM)
 
     for path in macho_files:
         runner(
@@ -80,6 +81,7 @@ def main(argv=None):
     parser.add_argument("--runtime", required=True)
     parser.add_argument("--identity", required=True)
     parser.add_argument("--keychain")
+    parser.add_argument("--evaluator", action="store_true")
     args = parser.parse_args(argv)
     if sys.platform != "darwin":
         parser.error("macOS embedded-runtime signing must run on macOS")
@@ -88,6 +90,7 @@ def main(argv=None):
             Path(args.runtime),
             args.identity,
             keychain=Path(args.keychain) if args.keychain else None,
+            evaluator=args.evaluator,
         )
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         parser.error(str(exc))
