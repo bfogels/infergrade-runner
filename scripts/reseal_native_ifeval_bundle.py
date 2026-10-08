@@ -57,7 +57,7 @@ def reseal(bundle, identity_output, transform):
             binary = original_kind == required_kind and transform_binary_kind(path, name) == required_kind
             runtime_receipt = name == 'python-runtime/infergrade-python-runtime-receipt.json'
             if not (runtime_receipt or binary):
-                raise ValueError('packaging transform changed non-code evaluator assets')
+                raise ValueError('packaging transform changed non-code evaluator assets: ' + name)
         refreshed[name] = sha
     old['files'] = refreshed
     old['packaging_transform'] = {'id': transform, 'previous_receipt_sha256': previous_sha}

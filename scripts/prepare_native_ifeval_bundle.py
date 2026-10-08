@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import shutil
 import stat
@@ -128,7 +129,8 @@ def transform_binary_kind(path, relative):
     relative = PurePosixPath(relative)
     if relative.suffix.lower() in ('.py', '.pyc', '.json', '.jsonl', '.txt', '.pickle', '.tab', '.pem'):
         return None
-    eligible_name = relative.suffix.lower() in ('.exe', '.dll', '.pyd', '.so', '.dylib') or (
+    eligible_name = (relative.suffix.lower() in ('.exe', '.dll', '.pyd', '.so', '.dylib')
+                     or re.fullmatch(r'.+\.so(?:\.[0-9]+)+', relative.name) is not None) or (
         relative.parts[:2] == ('python-runtime', 'bin') and relative.name.startswith('python'))
     if not eligible_name:
         return None
