@@ -1,0 +1,414 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infergrade.com/schemas/native_cuda_job_choices.schema.json",
+  "title": "Native CUDA per-job choice offers and binding",
+  "description": "Intent binding only, not physical attestation or memory fit. Raw hardware identifiers stay local. Reference consistency and exact fresh inventory are checked by Runner.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/offers"
+    },
+    {
+      "$ref": "#/$defs/jobBinding"
+    }
+  ],
+  "$defs": {
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "vram_gb"
+      ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+        },
+        "vram_gb": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 4096
+        }
+      }
+    },
+    "descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "revision",
+        "selection_fingerprint",
+        "device_count",
+        "devices"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "infergrade.cuda_device_policy.v1"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "selection_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "device_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "devices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/device"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 1
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 1,
+                "maxItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 2
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 3
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 4
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 4,
+                "maxItems": 4
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 5
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 5,
+                "maxItems": 5
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 6
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 6,
+                "maxItems": 6
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 7
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 7,
+                "maxItems": 7
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 8
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 8,
+                "maxItems": 8
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 9
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 9,
+                "maxItems": 9
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 10
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 10,
+                "maxItems": 10
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 11
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 11,
+                "maxItems": 11
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 12
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 12,
+                "maxItems": 12
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 13
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 13,
+                "maxItems": 13
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 14
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 14,
+                "maxItems": 14
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 15
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 15,
+                "maxItems": 15
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "device_count": {
+                "const": 16
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "devices": {
+                "minItems": 16,
+                "maxItems": 16
+              }
+            }
+          }
+        }
+      ]
+    },
+    "offers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "inventory_revision",
+        "preferred_single_revision",
+        "all_revision",
+        "choices"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "infergrade.cuda_job_choices.v1"
+        },
+        "inventory_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "preferred_single_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "all_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 18,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/descriptor"
+          }
+        }
+      }
+    },
+    "jobBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "native_device_policy_revision",
+        "native_device_inventory_revision",
+        "native_device_choice"
+      ],
+      "properties": {
+        "native_device_policy_revision": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "native_device_inventory_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "native_device_choice": {
+          "$ref": "#/$defs/descriptor"
+        }
+      }
+    }
+  }
+}

@@ -63,6 +63,7 @@ from infergrade.worker import run_worker_loop, run_worker_once
 
 ADVANCED_COMMANDS = {
     "run",
+    "private-history",
     "run-job",
     "worker",
     "init-request",
@@ -81,7 +82,7 @@ ADVANCED_COMMANDS = {
     "show-capabilities",
     "observe-runtime",
 }
-DEFAULT_COMMANDS = ("doctor", "discover-runtimes", "cache", "install-runtime", "pair", "unpair", "start")
+DEFAULT_COMMANDS = ("benchmark-local", "doctor", "discover-runtimes", "cache", "install-runtime", "pair", "unpair", "start")
 
 
 class _InferGradeHelpFormatter(argparse.HelpFormatter):
@@ -133,6 +134,7 @@ def _add_run_request_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--upload", action="store_true")
     parser.add_argument("--backend-flags", action="append")
+    parser.add_argument("--cuda-device", dest="cuda_device_uuids", action="append", help="Select a physical NVIDIA GPU UUID for native execution; repeat for a split selection.")
     parser.add_argument("--generation-preset")
     parser.add_argument("--cloud-provider")
     parser.add_argument("--cloud-instance-type")
@@ -167,6 +169,18 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser("run", help=_command_help("run", "Run or simulate an InferGrade bundle.", show_advanced))
     _add_run_request_arguments(run_parser)
+
+    history_parser = subparsers.add_parser("private-history", help=_command_help("private-history", "Read local private benchmark metadata.", show_advanced))
+    history_parser.add_argument("--json", action="store_true")
+
+    local_parser = subparsers.add_parser("benchmark-local", help="Score a local GGUF privately; keep the report on this machine.")
+    local_parser.add_argument("--model-file", required=True)
+    local_parser.add_argument("--use-case", choices=("general_assistant", "agentic_coding", "reasoning"), default="general_assistant")
+    local_parser.add_argument("--tier", choices=("canary", "standard"), default="canary")
+    local_parser.add_argument("--llama-cpp-cli-path", required=True)
+    local_parser.add_argument("--llama-cpp-server-path", required=True)
+    local_parser.add_argument("--cuda-device", dest="cuda_device_uuids", action="append", help="Physical NVIDIA GPU UUID; repeat to split across selected GPUs.")
+    local_parser.add_argument("--json", action="store_true")
 
     doctor_parser = subparsers.add_parser("doctor", help="Check whether this machine is ready to benchmark.")
     doctor_actions = set(doctor_parser._actions)
@@ -241,6 +255,14 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     cache_parser.add_argument("--prune-partials", action="store_true", help="Remove interrupted artifact downloads.")
     cache_parser.add_argument("--dry-run", action="store_true", help="Report what would be removed without deleting files.")
     cache_parser.add_argument("--partial-min-age-seconds", type=int, default=3600, help="Only prune partial downloads at least this old.")
+    cache_parser.add_argument("--download-starter", action="store_true", help=argparse.SUPPRESS)
+    cache_parser.add_argument("--managed-status", action="store_true")
+    cache_parser.add_argument("--clear-unkept", action="store_true")
+    cache_parser.add_argument("--artifact-id")
+    cache_parser.add_argument("--keep", choices=("yes", "no"))
+    cache_parser.add_argument("--limit-gb", choices=("25", "50", "100", "200", "none"))
+    cache_parser.add_argument("--trim-oldest", action="store_true", help="Trim unkept owned downloads when setting a limit; active cache readers block deletion.")
+    cache_parser.add_argument("--budget-status", action="store_true")
     cache_parser.add_argument("--json", action="store_true", help="Print the complete machine-readable result.")
 
     runtime_parser = subparsers.add_parser("install-runtime", help="Inspect, install, or select an explicit managed runtime.")
@@ -332,6 +354,15 @@ def build_parser(show_advanced: bool = False) -> argparse.ArgumentParser:
     )
     _add_api_token_argument(run_job_parser)
     _add_run_token_argument(run_job_parser)
+
+    gpu_parser = subparsers.add_parser("gpu-choice", help="Select physical NVIDIA GPUs for this machine's native benchmarks.")
+    gpu_parser.add_argument("action", choices=("status", "select", "reset"))
+    gpu_parser.add_argument("--cuda-device", dest="cuda_device_uuids", action="append")
+    gpu_parser.add_argument("--json", action="store_true")
+
+    admission_parser = subparsers.add_parser("admission", help="Pause or resume new machine benchmark claims without interrupting active work.")
+    admission_parser.add_argument("action", choices=("status", "pause", "resume"))
+    admission_parser.add_argument("--json", action="store_true")
 
     start_parser = subparsers.add_parser("start", help="Start a long-lived local runner that listens for Hub-backed local jobs.")
     start_parser.add_argument("--api-url")
@@ -642,6 +673,61 @@ def main(argv: Optional[list] = None) -> int:
     parser = build_parser(show_advanced="--all" in raw_argv)
     args = parser.parse_args(argv)
 
+    if args.command == "private-history":
+        from infergrade.private_benchmark import private_benchmark_history
+        try:
+            result = private_benchmark_history()
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise SystemExit("Private history unavailable: %s" % exc) from exc
+        print(json.dumps(result, sort_keys=True) if args.json else
+              "Private benchmarks on this machine: %s" % len(result["results"]))
+        return 0
+
+    if args.command == "benchmark-local":
+        from infergrade.private_benchmark import run_private_benchmark
+        try:
+            result = run_private_benchmark(
+                args.model_file, args.use_case, args.tier,
+                args.llama_cpp_cli_path, args.llama_cpp_server_path,
+                emit_progress=lambda message: print(message, file=sys.stderr, flush=True),
+                **({"cuda_device_uuids": args.cuda_device_uuids} if args.cuda_device_uuids else {}),
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise SystemExit("Private benchmark could not finish: %s" % exc) from exc
+        print(json.dumps(result, sort_keys=True) if args.json else
+              "Private benchmark finished. The result stayed on this machine.\nLocal report: %s" % result["report_path"])
+        return 0
+
+    if args.command == "gpu-choice":
+        from infergrade.cuda_device_policy import policy_status, set_policy
+        try:
+            if args.action == "select":
+                if not args.cuda_device_uuids:
+                    raise ValueError("Select at least one full GPU UUID, or explicitly reset the preference.")
+                set_policy(args.cuda_device_uuids)
+            elif args.cuda_device_uuids:
+                raise ValueError("--cuda-device is only valid with select.")
+            elif args.action == "reset":
+                set_policy([])
+            result = policy_status()
+        except (OSError, ValueError, RuntimeError, RecursionError) as exc:
+            raise SystemExit("GPU choice unavailable: %s" % exc) from exc
+        print(json.dumps(result, sort_keys=True) if args.json else
+              "GPU choice: %s" % ("%s selected device(s)" % result["policy"]["device_count"]
+                                  if result["policy"] else "runtime default"))
+        return 0
+
+    if args.command == "admission":
+        from infergrade.admission import admission_status, set_admission_paused
+        try:
+            state = admission_status() if args.action == "status" else set_admission_paused(args.action == "pause")
+        except (RuntimeError, OSError) as exc:
+            raise SystemExit(str(exc)) from exc
+        print(json.dumps(state, sort_keys=True) if args.json else
+              "New benchmarks paused; active work continues." if state["paused"] else
+              "New benchmarks enabled.")
+        return 0
+
     if args.command == "show-profiles":
         payload = {
             key: {
@@ -822,6 +908,35 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     if args.command == "cache":
+        from infergrade.cache_control import managed_status, clear_unkept, set_keep, download_starter
+        if args.limit_gb is not None or args.budget_status or args.trim_oldest:
+            from infergrade.cache_budget import budget_status, set_limit
+            try:
+                if args.managed_status or args.clear_unkept or args.keep or args.download_starter or args.prune_partials or args.artifact_id:
+                    raise ValueError("Choose one cache action; budget options cannot be combined with other cache actions.")
+                if args.trim_oldest and args.limit_gb is None:
+                    raise ValueError("Choose a limit when trimming oldest downloads.")
+                if args.dry_run and args.limit_gb is not None:
+                    raise ValueError("Budget updates do not support dry-run; no limit was changed.")
+                payload = set_limit(None if args.limit_gb == "none" else int(args.limit_gb), args.artifact_cache_dir, args.trim_oldest) if args.limit_gb is not None else budget_status(args.artifact_cache_dir)
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise SystemExit("Cache action failed: %s" % exc)
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
+        if args.managed_status or args.clear_unkept or args.keep or args.download_starter:
+            try:
+                if args.download_starter:
+                    payload = download_starter()
+                elif args.keep:
+                    payload = set_keep(args.artifact_id, args.keep == "yes", args.artifact_cache_dir)
+                elif args.clear_unkept:
+                    payload = clear_unkept(args.artifact_cache_dir, args.artifact_id, args.dry_run)
+                else:
+                    payload = managed_status(args.artifact_cache_dir)
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise SystemExit("Cache action failed: %s" % exc)
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
         if args.prune_partials:
             payload = prune_partial_artifacts(
                 cache_dir=args.artifact_cache_dir,
@@ -974,6 +1089,8 @@ def main(argv: Optional[list] = None) -> int:
     if args.command == "publish-run-config":
         api_url = _require_secure_hub_api_url(args.api_url)
         request = _request_from_args(args)
+        if request.cuda_device_uuids:
+            raise SystemExit("Physical CUDA selections are machine-local and cannot be published as reusable run configs.")
         request_payload = {
             "spec_version": "0.1-draft",
             "run": {
@@ -1149,7 +1266,7 @@ def main(argv: Optional[list] = None) -> int:
         if args.json:
             print(json.dumps(result, indent=2, sort_keys=True))
         elif args.once:
-            print("Benchmark completed." if result.get("completed") else "No benchmark is queued for this runner.")
+            print("New benchmarks are paused; queued jobs keep their place." if result.get("admission_paused") else "Benchmark completed." if result.get("completed") else "No benchmark is queued for this runner.")
         elif args.autopilot:
             print("Benchmark plan finished · %s job%s processed." % (
                 result.get("processed_jobs", 0),

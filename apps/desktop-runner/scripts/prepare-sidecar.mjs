@@ -57,7 +57,13 @@ function preparePythonRuntime(target) {
       ? ["-3", script, "--target", target]
       : [script, "--target", target];
     const result = spawnSync(command, args, { stdio: "inherit" });
-    if (!result.error && result.status === 0) return;
+    if (!result.error && result.status === 0) {
+      const evaluatorScript = resolve(rootDir, "scripts/prepare_native_ifeval_bundle.py");
+      const evaluatorArgs = [evaluatorScript, "--target", target, "--output", resolve(rootDir, "apps/desktop-runner/src-tauri/native-ifeval"), "--replace", "--identity-output", resolve(rootDir, "python/runner-core/src/infergrade/_native_ifeval_identity.py")];
+      if (command === "py") evaluatorArgs.unshift("-3");
+      run(command, evaluatorArgs, "prepare the pinned offline IFEval evaluator");
+      return;
+    }
     if (result.error?.code !== "ENOENT") {
       console.error(`Could not prepare the pinned Desktop Python runtime with ${command}.`);
       process.exit(result.status || 1);
