@@ -1502,7 +1502,9 @@ class LlamaCppAdapterTests(unittest.TestCase):
             adapter._capability_server_session = {"process": child, "log_path": ""}
             raise KeyboardInterrupt
         try:
-            with mock.patch.object(adapter, "_ensure_backend_model_compatibility"), mock.patch(
+            with mock.patch.object(adapter, "_ensure_backend_model_compatibility"), mock.patch.object(
+                adapter, "_native_server_path", return_value=sys.executable
+            ), mock.patch(
                 "infergrade.adapters.base.BaseAdapter.run_capability", side_effect=interrupted
             ):
                 with self.assertRaises(KeyboardInterrupt):
