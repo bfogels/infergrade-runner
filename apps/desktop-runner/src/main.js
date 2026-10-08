@@ -1,4 +1,6 @@
+import {initBackgroundSettings,listenerEventMatches} from './backgroundSettings.js';
 import { initModelDiscovery, selectableLocalModel } from './modelDiscovery.js';
+import {initHfCredentials} from './hfCredentials.js';
 import { initDesktopActivity, activityRunUrl } from './desktopActivity.js';
 import "./styles.css";
 import {devicePairingController} from "./devicePairing.js";
@@ -1564,6 +1566,7 @@ async function ensureRunnerListenerEvents() {
   runnerListenerEventsReady = true;
   await listen("runner-listener-event", (event) => {
     const payload = event?.payload || {};
+    if (!listenerEventMatches(payload,childProcess)) return;
     if (payload.type === "assignment_update" || payload.type === "assignment_idle") {
       hubConnectionVerified = true;
       renderAssignmentFromListenerEvent(payload);
@@ -1593,12 +1596,11 @@ async function ensureRunnerListenerEvents() {
     if (payload.type === "error") {
       const detail = payload.detail || "Runner process error.";
       appendLog(`Runner process error: ${detail}`);
-      childProcess = null;
       if (currentFirstRunUploadRunId()) {
         renderAssignmentFromHandoff({ force: true });
       }
-      setRunnerButtonsDisabled("start", false);
-      setRunnerButtonsDisabled("stop", true);
+      setRunnerButtonsDisabled("start", true);
+      setRunnerButtonsDisabled("stop", false);
       setStatus("Failed", "error");
       renderLocalReadinessChecklist();
       resolveRunnerStartupWaiters(new Error(String(detail)));
@@ -3052,6 +3054,7 @@ async function startRunner({ confirmStarted = false } = {}) {
     typedToken: null,
   });
   const plan = output?.plan || {};
+  if(output?.credential_warning)appendLog(output.credential_warning);
   const runner = plan.runner_id ? ` for ${plan.runner_id}` : "";
   appendLog(
     `Runner start plan: ${plan.execution_mode || "default mode"} using ${credentialSourceLabel(plan.credential_source)}${runner}.`
@@ -3185,7 +3188,7 @@ async function resetPairing() {
   if(browserPairing?.isActive())await browserPairing.cancel();
   const wasListening = Boolean(childProcess);
   if (wasListening) {
-    await stopRunner();
+    if (await stopRunner() === false) return;
     childProcess = null;
     setRunnerButtonsDisabled("start", false);
     setRunnerButtonsDisabled("stop", true);
@@ -3329,6 +3332,7 @@ async function stopRunner() {
     return;
   }
 
+  if (!window.confirm("Stop listening? An active benchmark will be interrupted. Partial results may be resumable.")) return false;
   const invoke = await loadTauriInvoke();
   if (invoke && childProcess.rustManaged) {
     await invoke("stop_runner_listener");
@@ -3732,3 +3736,10 @@ initModelDiscovery({invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
 desktopActivity=initDesktopActivity({invoke:loadTauriInvoke,openRun:async (id,apiUrl)=>{
  await openExternalUrl(activityRunUrl(apiUrl,id));
 }});
+initHfCredentials({invoke:loadTauriInvoke,openExternal:openExternalUrl});
+
+initBackgroundSettings({invoke:loadTauriInvoke,listen:async callback=>{
+ if(!await loadTauriInvoke())return;
+ const {listen}=await import('@tauri-apps/api/event');
+ return listen('infergrade-background-exit-blocked',callback);
+},onBlocked:()=>showDesktopPage('settings')});

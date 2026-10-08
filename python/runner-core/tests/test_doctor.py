@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from unittest import mock
 from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 sys.path.insert(0, "python/runner-core/src")
 
@@ -15,8 +16,12 @@ from infergrade.models import RunRequest
 class DoctorTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory(prefix="infergrade-doctor-")
-        self.env_patch = mock.patch.dict(os.environ, {"INFERGRADE_RUNTIME_CACHE_DIR": self.tempdir.name})
+        self.env_patch = mock.patch.dict(os.environ, {"INFERGRADE_RUNTIME_CACHE_DIR": self.tempdir.name, "HF_TOKEN_PATH":os.path.join(self.tempdir.name,"no-hf-token")})
         self.env_patch.start()
+        # Readiness transport is mocked here; redirect policy has separate tests.
+        self.artifact_transport = mock.patch("infergrade.doctor.open_artifact_request", side_effect=lambda *args, **kwargs: urllib_request.urlopen(*args, **kwargs))
+        self.artifact_transport.start()
+        self.addCleanup(self.artifact_transport.stop)
 
     def tearDown(self):
         self.env_patch.stop()
