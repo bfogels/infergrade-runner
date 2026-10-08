@@ -46,6 +46,11 @@ class EnvironmentTests(unittest.TestCase):
         with mock.patch("infergrade.environment.subprocess.run", side_effect=OSError("unavailable")):
             self.assertIsNone(_windows_model("Win32_Processor", "Name"))
 
+    def test_windows_unreadable_output_preserves_missing_identity(self):
+        failure = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid OEM output")
+        with mock.patch("infergrade.environment.subprocess.run", side_effect=failure):
+            self.assertIsNone(_windows_model("Win32_ComputerSystem", "Model"))
+
     def test_hardware_labels_reject_placeholders_controls_and_excessive_length(self):
         for label in [None, "unknown", "Default string", "System Product Name", "Bad\nName", "Bad\u0085Name", "x" * 257]:
             self.assertIsNone(_hardware_label(label))

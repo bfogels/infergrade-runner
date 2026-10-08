@@ -340,7 +340,7 @@ def _windows_model(class_name, property_name):
     script = "(Get-CimInstance -ClassName %s -ErrorAction Stop | Select-Object -First 1).%s" % (class_name, property_name)
     try:
         result = subprocess.run(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], check=True, capture_output=True, text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, UnicodeError):
         return None
     return _hardware_label(result.stdout)
 
