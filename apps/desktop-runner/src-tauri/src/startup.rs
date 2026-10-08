@@ -38,6 +38,7 @@ fn executable(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .env()
         .appimage
         .clone()
+        .map(PathBuf::from)
         .unwrap_or(std::env::current_exe().map_err(|_| "Cannot locate the installed app")?);
     #[cfg(not(target_os = "linux"))]
     let path = {
