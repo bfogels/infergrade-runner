@@ -13,6 +13,8 @@ from infergrade.artifacts import (
     _download_remote_artifact,
     _download_with_bounded_curl,
     _install_cache_file_without_overwrite,
+    _huggingface_token,
+    CredentialSafeRedirect,
     artifact_cache_status,
     artifact_to_download_url,
     canonicalize_hf_artifact_reference,
@@ -25,8 +27,59 @@ from infergrade.models import RunRequest
 
 
 class ArtifactResolutionTests(unittest.TestCase):
+    def test_redirect_credentials_only_remain_on_exact_hf_https_origin(self):
+        from urllib.request import Request
+        policy = CredentialSafeRedirect()
+        request = Request("https://huggingface.co/model/resolve/main/model.gguf", headers={"Authorization":"Bearer synthetic-private-value","Range":"bytes=0-0"})
+        for target in ["https://cdn.example/model", "https://huggingface.co:8443/model", "https://huggingface.co.evil.test/model"]:
+            redirected = policy.redirect_request(request,None,302,"Found",{},target)
+            self.assertIsNone(redirected.get_header("Authorization"))
+            self.assertEqual(redirected.get_header("Range"),"bytes=0-0")
+        redirected = policy.redirect_request(request,None,302,"Found",{},"https://huggingface.co:443/next")
+        self.assertEqual(redirected.get_header("Authorization"),"Bearer synthetic-private-value")
+        with self.assertRaises(urllib_error.HTTPError):
+            policy.redirect_request(request,None,302,"Found",{},"http://cdn.example/model")
+
+    def test_hf_login_token_file_is_origin_scoped_and_env_takes_precedence(self):
+        with tempfile.TemporaryDirectory() as root:
+            token = "hf_" + "a" * 30
+            path = os.path.join(root, "token")
+            with open(path, "w") as handle:
+                handle.write(token + "\n")
+            with mock.patch.dict(os.environ, {"HF_HOME":root}, clear=True):
+                self.assertEqual(_huggingface_token("https://huggingface.co/repo"),token)
+                self.assertIsNone(_huggingface_token("https://api.infergrade.com"))
+                self.assertIsNone(_huggingface_token("http://huggingface.co/repo"))
+                self.assertIsNone(_huggingface_token("https://huggingface.co:8443/repo"))
+                self.assertIsNone(_huggingface_token("https://user@huggingface.co/repo"))
+                with mock.patch.dict(os.environ, {"HF_TOKEN":"environment-priority"}):
+                    self.assertEqual(_huggingface_token("https://huggingface.co/repo"),"environment-priority")
+                with open(path, "w") as handle:
+                    handle.write("hf_" + "a" * 5000)
+                self.assertIsNone(_huggingface_token("https://huggingface.co/repo"))
+
+    def test_explicit_hf_token_path_and_nonregular_file_rejection(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root,"credential")
+            token = "hf_" + "b" * 30
+            with open(path,"w") as handle:
+                handle.write(token)
+            with mock.patch.dict(os.environ,{"HF_TOKEN_PATH":path,"HF_HOME":"/unavailable"},clear=True):
+                self.assertEqual(_huggingface_token("https://huggingface.co/repo"),token)
+            if hasattr(os,"mkfifo"):
+                fifo=os.path.join(root,"fifo")
+                os.mkfifo(fifo)
+                with mock.patch.dict(os.environ,{"HF_TOKEN_PATH":fifo},clear=True):
+                    self.assertIsNone(_huggingface_token("https://huggingface.co/repo"))
+
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory(prefix="infergrade-artifacts-")
+        # Mocked downloads must never consume the developer's active HF login.
+        self.credential_env = mock.patch.dict(os.environ, {
+            "HF_TOKEN_PATH": os.path.join(self.tempdir.name, "no-active-hf-token"),
+        })
+        self.credential_env.start()
+        self.addCleanup(self.credential_env.stop)
         self.cache_dir = os.path.join(self.tempdir.name, "cache")
         self.local_model = os.path.join(self.tempdir.name, "model.gguf")
         with open(self.local_model, "wb") as handle:
@@ -123,7 +176,7 @@ class ArtifactResolutionTests(unittest.TestCase):
             resolve_quant_artifact(request)
         self.assertFalse(any(name.endswith("model.gguf") for name in os.listdir(self.cache_dir)))
 
-    @mock.patch("infergrade.artifacts.urllib_request.urlopen")
+    @mock.patch("infergrade.artifacts.open_artifact_request")
     def test_remote_transport_rejects_oversize_content_length_before_copy(self, urlopen_mock):
         response = mock.MagicMock()
         response.__enter__.return_value = response
@@ -183,7 +236,7 @@ class ArtifactResolutionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "size mismatch"):
             resolve_quant_artifact(request)
 
-    @mock.patch("infergrade.artifacts.urllib_request.urlopen")
+    @mock.patch("infergrade.artifacts.open_artifact_request")
     def test_remote_artifact_resolution_downloads_to_cache(self, urlopen_mock):
         payload = b"remote-gguf"
         response_handle = tempfile.NamedTemporaryFile(delete=False)
@@ -206,7 +259,7 @@ class ArtifactResolutionTests(unittest.TestCase):
         self.assertEqual(resolved.sha256, compute_file_sha256(resolved.resolved_path))
         self.assertTrue(resolved.resolved_path.startswith(self.cache_dir))
 
-    @mock.patch("infergrade.artifacts.urllib_request.urlopen")
+    @mock.patch("infergrade.artifacts.open_artifact_request")
     def test_remote_artifact_resolution_expands_user_cache_dir(self, urlopen_mock):
         payload = b"remote-gguf"
         response_handle = tempfile.NamedTemporaryFile(delete=False)
@@ -229,7 +282,7 @@ class ArtifactResolutionTests(unittest.TestCase):
             os.unlink(response_handle.name)
         self.assertTrue(resolved.resolved_path.startswith(os.path.join(home_dir, ".cache", "infergrade", "artifacts")))
 
-    @mock.patch("infergrade.artifacts.urllib_request.urlopen")
+    @mock.patch("infergrade.artifacts.open_artifact_request")
     def test_remote_artifact_resolution_uses_huggingface_token_env(self, urlopen_mock):
         payload = b"gated-remote-gguf"
         response_handle = tempfile.NamedTemporaryFile(delete=False)
@@ -309,12 +362,13 @@ class ArtifactResolutionTests(unittest.TestCase):
 
     @mock.patch("infergrade.artifacts.subprocess.run")
     @mock.patch("infergrade.artifacts.shutil.which", return_value="/usr/bin/curl")
-    @mock.patch("infergrade.artifacts.urllib_request.urlopen", side_effect=urllib_error.URLError("ssl"))
+    @mock.patch("infergrade.artifacts.open_artifact_request", side_effect=urllib_error.URLError("ssl"))
     def test_remote_artifact_resolution_falls_back_to_curl(self, _urlopen_mock, _which_mock, run_mock):
         def fake_run(command, capture_output, text, input=None):
             destination_path = command[command.index("-o") + 1]
             # Verify the hardened curl invocation pins protocols to https so
             # a 30x redirect cannot downgrade the transfer to cleartext.
+            self.assertEqual(command[1], "--disable")
             self.assertEqual(command[command.index("--proto") + 1], "=https")
             self.assertEqual(command[command.index("--proto-redir") + 1], "=https")
             self.assertIsNone(input)
@@ -336,7 +390,7 @@ class ArtifactResolutionTests(unittest.TestCase):
 
     @mock.patch("infergrade.artifacts.subprocess.run")
     @mock.patch("infergrade.artifacts.shutil.which", return_value="/usr/bin/curl")
-    @mock.patch("infergrade.artifacts.urllib_request.urlopen", side_effect=urllib_error.URLError("ssl"))
+    @mock.patch("infergrade.artifacts.open_artifact_request", side_effect=urllib_error.URLError("ssl"))
     def test_remote_artifact_curl_fallback_keeps_hf_token_out_of_argv(self, _urlopen_mock, _which_mock, run_mock):
         def fake_run(command, capture_output, text, input=None):
             joined = " ".join(command)
@@ -717,7 +771,7 @@ class ArtifactSecurityHardeningTests(unittest.TestCase):
     def tearDown(self):
         self.tempdir.cleanup()
 
-    @mock.patch("infergrade.artifacts.urllib_request.urlopen")
+    @mock.patch("infergrade.artifacts.open_artifact_request")
     def test_traversal_filename_is_rejected(self, urlopen_mock):
         # If a malicious hub supplies ../../../etc/passwd as the filename,
         # the runner must not write downloaded bytes outside the cache dir.
@@ -735,7 +789,7 @@ class ArtifactSecurityHardeningTests(unittest.TestCase):
         self.assertIn("quant_artifact_filename", str(caught.exception))
         urlopen_mock.assert_not_called()
 
-    @mock.patch("infergrade.artifacts.urllib_request.urlopen")
+    @mock.patch("infergrade.artifacts.open_artifact_request")
     def test_windows_separator_filename_is_rejected(self, urlopen_mock):
         urlopen_mock.return_value = mock.MagicMock()
         request = RunRequest(
@@ -752,7 +806,7 @@ class ArtifactSecurityHardeningTests(unittest.TestCase):
 
     def test_plain_filename_is_preserved(self):
         # Positive control: a clean filename still flows through to disk.
-        with mock.patch("infergrade.artifacts.urllib_request.urlopen") as urlopen_mock:
+        with mock.patch("infergrade.artifacts.open_artifact_request") as urlopen_mock:
             payload = b"clean-gguf"
             handle = tempfile.NamedTemporaryFile(delete=False)
             handle.write(payload)
@@ -773,7 +827,7 @@ class ArtifactSecurityHardeningTests(unittest.TestCase):
             self.assertTrue(resolved.resolved_path.startswith(self.cache_dir))
             self.assertTrue(resolved.resolved_path.endswith("qwen2.5-7b-instruct-q4_k_m.gguf"))
 
-    @mock.patch("infergrade.artifacts.urllib_request.urlopen")
+    @mock.patch("infergrade.artifacts.open_artifact_request")
     def test_cleartext_http_artifact_without_sha_is_rejected(self, urlopen_mock):
         # MITM on unpinned http:// downloads is the exact scenario we close.
         urlopen_mock.return_value = mock.MagicMock()
@@ -789,7 +843,7 @@ class ArtifactSecurityHardeningTests(unittest.TestCase):
         self.assertIn("http://", str(caught.exception))
         urlopen_mock.assert_not_called()
 
-    @mock.patch("infergrade.artifacts.urllib_request.urlopen")
+    @mock.patch("infergrade.artifacts.open_artifact_request")
     def test_cleartext_http_artifact_with_pinned_sha_is_allowed(self, urlopen_mock):
         # A pinned SHA256 is a sufficient integrity check even over cleartext.
         payload = b"pinned-gguf-bytes"

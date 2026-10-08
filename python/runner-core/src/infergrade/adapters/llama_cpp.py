@@ -847,7 +847,7 @@ class LlamaCppAdapter(BaseAdapter):
             )
             placement = record_runtime_placement(request, command, _read_log_file(log_path), "capability_server")
             _require_native_cuda_offload(request, _read_log_file(log_path))
-        except Exception:
+        except BaseException:
             _stop_process(process)
             try:
                 os.unlink(log_path)
