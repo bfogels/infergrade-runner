@@ -97,6 +97,19 @@ class PrivateHistoryTests(unittest.TestCase):
         self.receipt_path.write_text('[' * 2000 + '0' + ']' * 2000)
         self.assertEqual(private_benchmark_history()['unreadable_count'], 1)
 
+    def test_not_comparable_preserves_report_without_promoting_scores(self):
+        self.fixture()
+        self.record['capability']['capability_status'] = 'not_comparable'
+        self.record['capability']['capability_score_details']['score_ready'] = True
+        self.record_path.write_text(json.dumps(self.record))
+        result = private_benchmark_history()
+        self.assertEqual(result['unreadable_count'], 0)
+        row = result['results'][0]
+        self.assertTrue(row['report_available'])
+        self.assertEqual(row['capability_status'], 'not_comparable')
+        self.assertIsNone(row['score'])
+        self.assertEqual(row['component_scores'], {})
+
     def test_scan_bound_counts_unrecognized_entries(self):
         from contextlib import nullcontext
         from types import SimpleNamespace

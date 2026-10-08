@@ -245,9 +245,11 @@ def _history_capability(row, bundle, bundle_id):
         raise ValueError('Private result identity mismatch.')
     capability = record.get('capability', {})
     state = capability.get('capability_status')
-    if state is not None and state not in ('completed', 'partial', 'failed', 'skipped', 'simulated', 'unavailable'):
+    if state is not None and state not in ('completed', 'partial', 'failed', 'skipped', 'simulated', 'unavailable', 'not_comparable'):
         raise ValueError('Invalid capability state.')
     row['capability_status'] = state
+    if state == 'not_comparable':
+        return
     details = capability.get('capability_score_details', {})
     score = capability.get('capability_score')
     if details.get('score_ready') is True and type(score) in (int, float) and math.isfinite(score) and 0 <= score <= 1:
