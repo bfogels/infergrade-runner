@@ -888,7 +888,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("releases/latest/download/$asset_name", workflow)
         self.assertIn("curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2", workflow)
         self.assertIn('test "$actual_sha" = "$expected_sha"', workflow)
-        self.assertIn("needs: [release-metadata, macos-preview, windows-package-smoke, linux-package-smoke]", workflow)
+        self.assertIn("needs: [release-metadata, macos-preview, windows-package-smoke, linux-package-smoke, headless-package]", workflow)
         self.assertIn("merge-multiple: true", workflow)
         self.assertLess(workflow.index("Install and launch Windows packages"), workflow.index("Publish immutable versioned desktop release"))
         self.assertLess(workflow.index("Install and launch Linux packages"), workflow.index("Publish immutable versioned desktop release"))
@@ -954,7 +954,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("libwebkit2gtk-4.1-dev", workflow)
         self.assertIn("libayatana-appindicator3-dev", workflow)
         self.assertIn("actions/upload-artifact@", workflow)
-        self.assertEqual(workflow.count("retention-days: 7"), 3)
+        self.assertEqual(workflow.count("retention-days: 7"), 4)
         self.assertIn("infergrade-runner-desktop-windows-${{ github.sha }}", workflow)
         self.assertIn("infergrade-runner-desktop-linux-${{ github.sha }}", workflow)
         self.assertIn("smoke_desktop_windows_packages.ps1", workflow)
@@ -1017,7 +1017,7 @@ class ReleaseCiTests(unittest.TestCase):
         self.assertIn("verify_public_attestation", workflow)
         self.assertIn("gh release download \"$RELEASE_TAG\" --dir \"$published_dir\"", workflow)
         self.assertIn("Sigstore-backed GitHub build provenance", workflow)
-        self.assertEqual(workflow.count("overwrite: true"), 3)
+        self.assertEqual(workflow.count("overwrite: true"), 5)
         self.assertLess(workflow.index("Assemble exact public asset set"), workflow.index("Attest exact public release assets"))
         self.assertLess(workflow.index("Attest exact public release assets"), workflow.index("Create or resume versioned draft release"))
 
@@ -1412,6 +1412,25 @@ class ReleaseCiTests(unittest.TestCase):
                 self.assertIn("Missing checksummed artifact", str(raised.exception))
             finally:
                 sys.argv = old_argv
+
+    def test_release_verifier_requires_installer_and_exact_headless_version(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            assets = [root / 'install.sh', root / 'infergrade-runner-0.3.65-linux-x86_64.tar.gz']
+            for artifact in assets:
+                artifact.write_bytes(b'checksummed release fixture')
+            with patch.object(sys, 'argv', ['checksums', '--output', str(root / 'SHA256SUMS'), *(str(item) for item in assets)]):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    write_desktop_release_checksums()
+            for version, succeeds in [('0.3.65', True), ('0.3.64', False)]:
+                args = ['verify', '--directory', str(root), '--required-headless-version', version, '--reject-unexpected']
+                with patch.object(sys, 'argv', args):
+                    if succeeds:
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            self.assertEqual(verify_desktop_release_artifacts(), 0)
+                    else:
+                        with self.assertRaisesRegex(SystemExit, 'Required headless release asset'):
+                            verify_desktop_release_artifacts()
 
     def test_desktop_release_artifact_verifier_rejects_bad_checksums_and_missing_signatures(self):
         with TemporaryDirectory() as tmp:

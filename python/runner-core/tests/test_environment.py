@@ -207,3 +207,30 @@ class EnvironmentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MultiGpuInventoryTests(unittest.TestCase):
+    def test_dual_4090_inventory_keeps_total_and_largest_card_distinct(self):
+        with mock.patch('infergrade.environment._run_command', side_effect=[
+            'RTX 4090, 24576, 580.178.04\nRTX 4090, 24576, 580.178.04', None
+        ]):
+            gpu = _detect_nvidia_gpu()
+        self.assertEqual(gpu['accelerator_count'], 2)
+        self.assertEqual(gpu['accelerator_vram_gb'], 24)
+        self.assertEqual(gpu['accelerator_vram_total_gb'], 48)
+        self.assertEqual([device['vram_gb'] for device in gpu['accelerator_devices']], [24, 24])
+
+    def test_mixed_cards_sum_observed_capacity(self):
+        with mock.patch('infergrade.environment._run_command', side_effect=[
+            'RTX 4090, 24576, 580\nRTX 3060, 12288, 580', None
+        ]):
+            gpu = _detect_nvidia_gpu()
+        self.assertEqual(gpu['accelerator_vram_total_gb'], 36)
+        self.assertEqual(gpu['accelerator_vram_gb'], 24)
+
+    def test_missing_card_memory_does_not_invent_total(self):
+        with mock.patch('infergrade.environment._run_command', side_effect=[
+            'RTX 4090, 24576, 580\nRTX 4090, N/A, 580', None
+        ]):
+            gpu = _detect_nvidia_gpu()
+        self.assertIsNone(gpu['accelerator_vram_total_gb'])

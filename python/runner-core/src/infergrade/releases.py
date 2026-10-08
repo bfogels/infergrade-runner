@@ -155,6 +155,15 @@ def export_release_bundle(
         "runtime_images": runtime_images,
         "capability_images": capability_images,
         "golden_paths": {
+            "linux_headless_local_native": {
+                "supported": True,
+                "execution_mode": "local_native",
+                "platform": "debian_ubuntu_x86_64",
+                "installer_url": "https://github.com/bfogels/infergrade-runner/releases/download/v%s/install.sh" % resolved_release_version,
+                "pair_and_start_supported": True,
+                "requires_repo_checkout": False,
+                "notes": "Install includes distribution prerequisites and managed llama.cpp; pair --start then listens.",
+            },
             "local_listener_container": {
                 "supported": True,
                 "execution_mode": "local_container",

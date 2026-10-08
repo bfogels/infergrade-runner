@@ -39,7 +39,7 @@ The clearest first path is:
 
 The broader Runner architecture remains available, but the default path is intentionally narrower than a general benchmark platform.
 
-The Desktop Runner has a native first-run lane for macOS Apple Silicon with a local GGUF model and a Runner-pinned managed fallback, a reviewed build selected from signed runtime-catalog metadata, or an explicit local `llama-cli`. Docker will not be required for the first local benchmark. Runtime install is intentional: the app does not silently download, upgrade, or switch runtimes. Runtime archives are checksum-verified; the signed catalog authenticates InferGrade's assertions but does not represent an upstream artifact signature. Managed packages are stored as immutable content-addressed builds; evidence-producing native runner-core benchmarks lock one exact build for the attempt and emit a path-free runtime receipt. The separate Rust CLI native-first-run preview remains experimental and explicitly reports that it does not yet record this receipt. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
+The Desktop Runner has a native first-run lane for macOS Apple Silicon with a local GGUF model and a Runner-pinned managed fallback, a reviewed build selected from signed runtime-catalog metadata, or an explicit local `llama-cli`. Docker will not be required for the first local benchmark. Starting a native listener prepares the default managed runtime when none is available. Existing explicit or selected runtimes are verified and preserved; setup does not silently upgrade or switch them. Runtime archives are checksum-verified; the signed catalog authenticates InferGrade's assertions but does not represent an upstream artifact signature. Managed packages are stored as immutable content-addressed builds; evidence-producing native runner-core benchmarks lock one exact build for the attempt and emit a path-free runtime receipt. The separate Rust CLI native-first-run preview remains experimental and explicitly reports that it does not yet record this receipt. Docker remains supported for advanced sandboxed benchmarks, code-execution checks, and container-friendly headless workers.
 
 ## Decision Suite vs Reference Suite
 
@@ -78,7 +78,7 @@ The older `canary / standard / gold` language exists internally as a compatibili
 InferGrade aims to benchmark the best realistic execution path on each platform, not to force every machine through the same runtime wrapper.
 
 - `macOS Apple Silicon`: run `llama.cpp` natively so Metal acceleration is actually exercised
-- `Linux + NVIDIA`: prefer containerized CUDA execution
+- `Linux + NVIDIA`: use native managed CUDA by default; containers remain an explicit option
 - `Linux + AMD`: prefer containerized ROCm execution
 - `CPU-only`: containerized or native CPU execution, clearly labeled as CPU-only
 
@@ -123,7 +123,11 @@ Development-only `:local` images exist as a clearly separate workflow.
 
 ## Quick Start
 
-### Apple Silicon Local Benchmarking
+### Linux Server Installation
+
+The per-user headless installer supplies the native Runner, Python bridge, distribution dependencies and managed llama.cpp. Then `~/.local/bin/infergrade pair --start` pairs and listens. See [Headless install and pair](docs/headless_quickstart.md) for release availability, the two commands and supported Ubuntu/Debian versions.
+
+### Apple Silicon Developer Checkout
 
 If you are benchmarking locally on Apple Silicon, use the native `llama.cpp` path:
 
@@ -159,14 +163,14 @@ The same values can be supplied through `runtime.llama_cpp_cli_path`, `runtime.l
 To inspect the pinned managed-runtime plan without changing the machine:
 
 ```bash
-infergrade install-runtime --runtime llama.cpp --list
-infergrade install-runtime --runtime llama.cpp
+infergrade install-runtime --list
+infergrade install-runtime
 ```
 
 To explicitly select already-installed binaries as the managed runtime:
 
 ```bash
-infergrade install-runtime --runtime llama.cpp --select-existing \
+infergrade install-runtime --select-existing \
   --llama-cpp-cli-path /opt/homebrew/bin/llama-cli \
   --llama-cpp-server-path /opt/homebrew/bin/llama-server
 ```
@@ -181,13 +185,13 @@ infergrade-runner runtime catalog-refresh
 infergrade-runner runtime catalog-use --target <catalog-target> --consent-build <sha256>
 ```
 
-`infergrade-runner runtime install` is the explicit fallback-lane install action: it downloads the pinned macOS Apple Silicon Metal `llama.cpp` archive, verifies SHA-256, extracts it into the InferGrade runtime cache, checks expected binaries, runs a version smoke, and writes the selected-runtime record. `runtime catalog-refresh` verifies the rollback-protected signed metadata, while `runtime catalog-use` requires explicit consent to one exact build ID before download. The Desktop app exposes all three choices under Runtime options.
+`infergrade-runner runtime install` is the explicit fallback-lane install action: it downloads the pinned `llama.cpp` archive for the detected operating system and accelerator, verifies SHA-256, extracts it into the InferGrade runtime cache, checks expected binaries, runs a version smoke, and writes the selected-runtime record. `runtime catalog-refresh` verifies the rollback-protected signed metadata, while `runtime catalog-use` requires explicit consent to one exact build ID before download. The Desktop app exposes all three choices under Runtime options.
 
-InferGrade never silently installs or upgrades `llama.cpp`. The legacy Python command requires `--execute` before any manifest install command is run; the Rust `runtime install` command and Desktop install button are the explicit user consent path. The current managed runtime is checksum-verified, not independently signed.
+Native install/start includes missing default runtime preparation. Existing runtime selections are preserved. The advanced Python `install-runtime` command previews the plan unless `--execute` is supplied; the Rust `runtime install` command and Desktop install button also provide explicit repair/install actions. The current managed runtime is checksum-verified, not independently signed.
 
 ### Containerized Local And Cloud Paths
 
-For Linux, cloud workers, and the common containerized development path:
+For explicit container execution, cloud workers, and containerized development:
 
 ```bash
 python3 -m pip install -e ./python/runner-core

@@ -3033,6 +3033,18 @@ async function startRunner({ confirmStarted = false } = {}) {
     return { started: false, disposition: startDisposition };
   }
 
+  const runtimePlan = await inspectRuntimePlan();
+  if (runtimePlan?.native_runtime_status !== "available") {
+    if (runtimePlan?.selected_runtime?.status !== "not_selected") {
+      throw new Error("The selected runtime needs repair before listening. Open Runtime options to repair it.");
+    }
+    setStatus("Preparing runtime", "warning");
+    try {
+      await installManagedRuntime();
+    } finally {
+      setRuntimeActionDisabled(false);
+    }
+  }
   await ensureRunnerListenerEvents();
   runnerStartupLines = [];
   const output = await invoke("start_runner_listener", {
