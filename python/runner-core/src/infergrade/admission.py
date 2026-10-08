@@ -84,3 +84,20 @@ def set_admission_paused(paused):
             if os.path.exists(temporary):
                 os.unlink(temporary)
         return value
+
+
+def admission_heartbeat_metadata(metadata=None):
+    """Best-effort atomic snapshot; never wait for admission or fail active work."""
+    result = dict(metadata or {})
+    try:
+        directory = Path(runner_config_dir())
+        if directory.is_symlink():
+            raise RuntimeError("linked config")
+        result["admission_paused"] = _read(directory)["paused"]
+    except (RuntimeError, OSError, ValueError):
+        result["admission_paused"] = None
+    if result["admission_paused"] is None:
+        result["admission_warning"] = "Admission preference is unavailable; new claims require repair."
+    else:
+        result.pop("admission_warning", None)
+    return result

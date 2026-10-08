@@ -781,6 +781,7 @@ def register_runner(
     environment: Dict[str, Any] = None,
     contract: Dict[str, Any] = None,
     diagnostics: Dict[str, Any] = None,
+    metadata: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """Register a long-lived runner with the Hub."""
     try:
@@ -802,6 +803,7 @@ def register_runner(
                 "environment": environment or {},
                 "contract": contract or {},
                 "diagnostics": diagnostics or {},
+                **({"metadata": metadata} if metadata is not None else {}),
             },
             api_token=api_token,
         )
