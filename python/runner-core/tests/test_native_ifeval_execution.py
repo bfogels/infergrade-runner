@@ -79,7 +79,7 @@ class NativeIFEvalExecutionTests(unittest.TestCase):
                    'output_shape_gate':{'status':'blocked'},'native_evaluator':{'protocol_id':native_ifeval.PROTOCOL_ID}}
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root/'benchmark_metadata.json').write_text(json.dumps({'selection_sha256':'0'*64}))
+            (root/'benchmark_metadata.json').write_text(json.dumps({'selection_sha256':hashlib.sha256('\n'.join(sorted(row['case_id'] for row in cases)).encode()).hexdigest()}))
             for name in ('strict_results.jsonl','loose_results.jsonl'):
                 (root/name).write_text(''.join(json.dumps(row)+'\n' for row in scored))
             path = _write_ifeval_capability_run_artifact(request,spec,str(root),cases,predictions,summary)
