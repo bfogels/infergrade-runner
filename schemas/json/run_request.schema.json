@@ -60,6 +60,10 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "cuda_device_uuids": {
+          "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^GPU-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$" }
+        },
         "generation_preset": { "type": "string" },
         "chat_template_id": { "type": "string" },
         "tokenizer_id": { "type": "string" },

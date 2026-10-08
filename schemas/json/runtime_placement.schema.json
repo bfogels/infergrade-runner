@@ -226,6 +226,10 @@
     "invocation_id": {
       "type": "string",
       "pattern": "^[a-f0-9]{32}$"
+    },
+    "native_device_policy_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     }
   },
   "additionalProperties": false
