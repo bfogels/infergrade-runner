@@ -5,7 +5,8 @@ import os
 import sys
 from typing import Iterable, List
 
-sys.path.insert(0, "/opt")
+_SOURCE_ROOT = globals().get("_INFERGRADE_NATIVE_SOURCE_ROOT", "/opt")
+sys.path.insert(0, _SOURCE_ROOT)
 
 import nltk
 from instruction_following_eval import evaluation_lib
@@ -107,7 +108,7 @@ def _selection_digest(inputs: List) -> str:
 
 def prepare(output_dir: str, limit: int = None) -> None:
     _ensure_nltk_tokenizers(output_dir)
-    input_path = "/opt/instruction_following_eval/data/input_data.jsonl"
+    input_path = os.path.join(_SOURCE_ROOT, "instruction_following_eval/data/input_data.jsonl")
     full_inputs = evaluation_lib.read_prompt_list(input_path)
     inputs = _sample_inputs(full_inputs, limit)
     all_instruction_types = {

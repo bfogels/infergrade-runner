@@ -1,0 +1,13 @@
+# Offline native IFEval packaging
+
+`python3 scripts/prepare_native_ifeval_bundle.py --output <new staging directory> --target <reviewed target>` builds a separate evaluator bundle. This first slice does not change execution defaults, remove Docker preflight, install a bundle or add it to a release package. Missing native assets therefore cannot silently select an unqualified scorer.
+
+The builder pins Python3.12.13, the vendored Google source, official dataset snapshot, every dependency archive and English tokenizer/attribution file in `runtime/native_ifeval_bundle.json`. It checks size/SHA before extraction, rejects traversal/links/overlap, preserves license and distribution metadata, and never executes dependency setup scripts or installs into the builder's Python. Langdetect's reviewed pure-Python source archive supplies its package and version metadata; its upstream py2 wheel is not used. The reviewed compiled regex wheel is selected for macOS ARM, Windows x64 or Linux x64. Linux ARM is not yet a reviewed target.
+
+The offline bootstrap requires the packaged interpreter invoked with `-I -B`. It uses bundle dependencies and tokenizer paths, refuses NLTK downloads, and gives the shared container adapter a trusted runpy global source root. Container defaults remain `/opt`. The receipt contains file/link hashes, target, Python/manifest identity and a distinct `ifeval_native_packaged_v1` protocol. That receipt is build evidence; runtime verification, sanitized subprocess environment, preflight, scoring identity/artifact integration and signed distribution remain required before activation.
+
+## Evidence
+
+The Mac ARM bundle materialized from the pinned archive and imports langdetect metadata version1.0.9. Offline selection prepares25,100 and541 cases. Mechanical stdlib tests cover archive traversal/symlinks, dependency overlap, metadata/notices preservation, cached digest/size verification, platform wheel selection and source/attribution pins. Synthetic-response differential checks against the local0.3.66 container are recorded separately; they are evaluator checks and are not benchmark/model evidence. Container parity remains explicitly unqualified across Python/platforms.
+
+Native dependency integration and actual no-Docker Linux/Mac benchmark acceptance are not proven by this packaging slice. No release tag, installed app or managed platform support promotion is implied.
