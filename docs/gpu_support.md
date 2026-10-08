@@ -29,10 +29,10 @@ Linux builds declare what they need in `platform`:
 | macOS Apple Silicon | upstream Metal | macOS (Apple Silicon) |
 | Windows x86_64 + NVIDIA | upstream CUDA 12.4 | Windows 10/11, current NVIDIA driver |
 | Windows x86_64 + AMD / Intel Arc | upstream Vulkan | Windows 10/11 with the vendor graphics driver |
-| Linux x86_64 + NVIDIA | upstream CUDA 12.8 (glibc 2.38, GLIBCXX 3.4.32) | Ubuntu 24.04+, Debian 13, Fedora 39+, Arch |
-| Linux x86_64 + NVIDIA, older distributions | **portable CUDA build (glibc 2.28)**, built by `portable-linux-runtime.yml`, pinned once published | Ubuntu 20.04+, Debian 10+, RHEL/Rocky/Alma 8+, Amazon Linux 2023 |
+| Linux x86_64 + NVIDIA | **portable CUDA 12.8 build (glibc 2.28)**, release `managed-llama-cpp-b11429-glibc228-20261007`; listed before upstream so every Linux NVIDIA host runs the same binary | Ubuntu 20.04+, Debian 10+, RHEL/Rocky/Alma 8+, Amazon Linux 2023, Fedora, Arch |
+| Linux x86_64 + NVIDIA (fallback) | upstream CUDA 12.8 (glibc 2.38, GLIBCXX 3.4.32) | Ubuntu 24.04+, Debian 13 |
 | Linux x86_64 + AMD / Intel Arc | upstream Vulkan (glibc 2.34, GLIBCXX 3.4.30) | Ubuntu 22.04+, Debian 12+, Fedora 36+, Arch. Needs `mesa-vulkan-drivers` + `libvulkan1` (or the vendor Vulkan driver). Not RHEL 9. |
-| Linux x86_64, CPU | Ubuntu 22 build (glibc 2.35), then upstream | most distributions |
+| Linux x86_64, CPU | Ubuntu 22 build (glibc 2.35), then portable glibc 2.28 build, then upstream | all of the above, including RHEL 8 and Ubuntu 20.04 |
 | Linux aarch64, CPU | upstream | — GPU builds (DGX Spark, Jetson) are not managed yet |
 
 NVIDIA's CUDA 12.x runtime needs a driver from the R525 series or newer; the R570+ series is recommended for CUDA 12.8 builds. `infergrade doctor` reports the installed driver.

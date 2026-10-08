@@ -343,6 +343,71 @@
       "provenance": "Official upstream release asset with pinned GitHub SHA-256; no independent signature."
     },
     {
+      "runtime_id": "llama-cpp-b11429-glibc228-x86_64-cpu",
+      "channel": "reviewed_candidate",
+      "backend": "llama.cpp",
+      "accelerator": "cpu",
+      "version_label": "llama.cpp v0.6.0 \u00b7 portable Linux x86_64 (glibc 2.28) \u00b7 CPU",
+      "upstream": {
+        "project": "ggml-org/llama.cpp",
+        "tag": "b11429",
+        "semantic_version": "v0.6.0",
+        "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0"
+      },
+      "platform": {
+        "system": "linux",
+        "arch": "x86_64",
+        "human": "Linux x86_64 / CPU (glibc 2.28 ABI)",
+        "minimum_glibc": "2.28",
+        "minimum_glibcxx": "3.4.25"
+      },
+      "archive": {
+        "url": "https://github.com/bfogels/infergrade-runner/releases/download/managed-llama-cpp-b11429-glibc228-20261007/llama-b11429-bin-glibc228-cpu-x64.tar.gz",
+        "sha256": "bd4a71d77f038432c67034c7cbdf177678a6c6d2688bb1530d45801f470b7def",
+        "size_bytes": 10199599,
+        "format": "tar.gz",
+        "checksum_source": "infergrade_ci_archive_and_github_release_digest"
+      },
+      "dependencies": [],
+      "verification": {
+        "sha256": true,
+        "expected_binaries": true,
+        "version_smoke": true,
+        "independent_signature": false
+      },
+      "download": {
+        "enabled": true,
+        "requires_explicit_user_action": true
+      },
+      "expected_binaries": [
+        "llama-cli",
+        "llama-server",
+        "llama-perplexity",
+        "llama-completion"
+      ],
+      "binary_names": {
+        "cli": "llama-cli",
+        "server": "llama-server",
+        "perplexity": "llama-perplexity"
+      },
+      "rollback_runtime_id": "llama-cpp-b11429-glibc228-x86_64-cpu",
+      "compatibility_notes": [
+        "InferGrade build from pinned upstream source on Rocky Linux 8 (glibc 2.28, gcc-toolset-12); every packaged ELF stays within glibc 2.28 and GLIBCXX_3.4.25.",
+        "Runs on Ubuntu 20.04+, Debian 10+, RHEL/Rocky/Alma 8+, Amazon Linux 2023, Fedora and Arch; loaded on Ubuntu 22.04/24.04, Debian 12, Rocky 9 and Amazon Linux 2023 in CI.",
+        "Bundles libgomp so minimal servers and containers need no OpenMP package.",
+        "Exact model generation and benchmark qualification are separate checks."
+      ],
+      "provenance": "InferGrade CI build from checksum-pinned upstream source; archive SHA-256 and size pinned to the GitHub release digest. No independent signature.",
+      "build_origin": {
+        "publisher": "infergrade",
+        "upstream_commit": "d81235049384534c167caea52b85a694f6103d14",
+        "source_archive_sha256": "6b58785f0a82898f4c3442417ff962e2d4b231b1bee5d033902ad90b27901e14",
+        "build_workflow": "https://github.com/bfogels/infergrade-runner/actions/runs/37705180980",
+        "minimum_glibc": "2.28",
+        "gpu_execution_verified": false
+      }
+    },
+    {
       "runtime_id": "llama-cpp-b11429-linux-x86_64-cpu",
       "channel": "upstream_release",
       "backend": "llama.cpp",
@@ -397,6 +462,84 @@
         "Built by upstream on Ubuntu 22.04, so it links GLIBC_2.34 symbols and cannot load on older glibc."
       ],
       "provenance": "Official upstream release assets with pinned GitHub SHA-256; no independent signature."
+    },
+    {
+      "runtime_id": "llama-cpp-b11429-glibc228-x86_64-cuda",
+      "channel": "reviewed_candidate",
+      "backend": "llama.cpp",
+      "accelerator": "cuda",
+      "version_label": "llama.cpp v0.6.0 \u00b7 portable Linux x86_64 (glibc 2.28) \u00b7 CUDA",
+      "upstream": {
+        "project": "ggml-org/llama.cpp",
+        "tag": "b11429",
+        "semantic_version": "v0.6.0",
+        "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0"
+      },
+      "platform": {
+        "system": "linux",
+        "arch": "x86_64",
+        "human": "Linux x86_64 / CUDA (glibc 2.28 ABI)",
+        "minimum_glibc": "2.28",
+        "minimum_glibcxx": "3.4.25"
+      },
+      "archive": {
+        "url": "https://github.com/bfogels/infergrade-runner/releases/download/managed-llama-cpp-b11429-glibc228-20261007/llama-b11429-bin-glibc228-cuda-x64.tar.gz",
+        "sha256": "8e4d00a2c43e8bd0a86f790c3bd6f1f8d1fcd87d1c1258294720e5e1022d5a0e",
+        "size_bytes": 758379537,
+        "format": "tar.gz",
+        "checksum_source": "infergrade_ci_archive_and_github_release_digest"
+      },
+      "dependencies": [],
+      "verification": {
+        "sha256": true,
+        "expected_binaries": true,
+        "version_smoke": true,
+        "independent_signature": false
+      },
+      "download": {
+        "enabled": true,
+        "requires_explicit_user_action": true
+      },
+      "expected_binaries": [
+        "llama-cli",
+        "llama-server",
+        "llama-perplexity",
+        "llama-completion"
+      ],
+      "binary_names": {
+        "cli": "llama-cli",
+        "server": "llama-server",
+        "perplexity": "llama-perplexity"
+      },
+      "rollback_runtime_id": "llama-cpp-b11429-glibc228-x86_64-cuda",
+      "compatibility_notes": [
+        "InferGrade build from pinned upstream source on Rocky Linux 8 (glibc 2.28, gcc-toolset-12); every packaged ELF stays within glibc 2.28 and GLIBCXX_3.4.25.",
+        "Runs on Ubuntu 20.04+, Debian 10+, RHEL/Rocky/Alma 8+, Amazon Linux 2023, Fedora and Arch; loaded on Ubuntu 22.04/24.04, Debian 12, Rocky 9 and Amazon Linux 2023 in CI.",
+        "Bundles cuBLAS and cudart 12.8 plus the CUDA EULA; NCCL is disabled as in upstream release builds. Needs an NVIDIA driver from the R525+ series (R570+ recommended).",
+        "CUDA requires a compatible NVIDIA driver; no CPU fallback is claimed as CUDA.",
+        "Exact model generation and benchmark qualification are separate checks."
+      ],
+      "provenance": "InferGrade CI build from checksum-pinned upstream source; archive SHA-256 and size pinned to the GitHub release digest. No independent signature.",
+      "build_origin": {
+        "publisher": "infergrade",
+        "upstream_commit": "d81235049384534c167caea52b85a694f6103d14",
+        "source_archive_sha256": "6b58785f0a82898f4c3442417ff962e2d4b231b1bee5d033902ad90b27901e14",
+        "build_workflow": "https://github.com/bfogels/infergrade-runner/actions/runs/37705180980",
+        "minimum_glibc": "2.28",
+        "gpu_execution_verified": false,
+        "cuda": "12.8.1",
+        "cuda_architectures": [
+          50,
+          61,
+          70,
+          75,
+          80,
+          86,
+          89,
+          90,
+          120
+        ]
+      }
     },
     {
       "runtime_id": "llama-cpp-b11429-linux-x86_64-cuda",

@@ -3149,17 +3149,20 @@ mod tests {
             vulkan_loader: Some(false),
         };
         let cpu = recommended_runtime_for_host("linux", "x86_64", "cpu", &rhel8);
-        assert_ne!(cpu["runtime_id"], "llama-cpp-b11429-ubuntu22-x86_64-cpu");
-        // The upstream CPU build is linked on Ubuntu 22.04 too, so nothing fits
-        // glibc 2.28 until the portable build is pinned: refuse before download.
-        if cpu.get("archive").is_none() {
-            assert_eq!(cpu["supported_on_this_platform"], false);
-            let message = cpu["message"].as_str().unwrap();
-            assert!(message.contains("glibc 2.34"), "{message}");
-            assert!(!message.contains("INFERGRADE_ACCELERATOR=cpu"), "{message}");
-        } else {
-            assert!(host_compat::entry_host_incompatibility(&cpu, &rhel8).is_none());
-        }
+        assert_eq!(cpu["runtime_id"], "llama-cpp-b11429-glibc228-x86_64-cpu");
+        assert!(verify_runtime_download_manifest(&cpu).is_ok());
+
+        // Older than any published build: refuse before download, no CPU hint for a CPU request.
+        let centos7 = HostFacts {
+            glibc: Some("2.17".into()),
+            glibcxx_minor: Some(19),
+            vulkan_loader: Some(false),
+        };
+        let cpu = recommended_runtime_for_host("linux", "x86_64", "cpu", &centos7);
+        assert_eq!(cpu["supported_on_this_platform"], false);
+        let message = cpu["message"].as_str().unwrap();
+        assert!(message.contains("glibc 2.28"), "{message}");
+        assert!(!message.contains("INFERGRADE_ACCELERATOR=cpu"), "{message}");
     }
 
     #[test]
@@ -3170,17 +3173,34 @@ mod tests {
             glibcxx_minor: Some(30),
             vulkan_loader: Some(true),
         };
-        let cuda = recommended_runtime_for_host("linux", "x86_64", "cuda", &ubuntu22);
-        if cuda.get("archive").is_none() {
-            assert_eq!(cuda["supported_on_this_platform"], false);
-            let message = cuda["message"].as_str().unwrap();
-            assert!(message.contains("glibc 2.38"), "{message}");
-            assert!(message.contains("INFERGRADE_ACCELERATOR=cpu"), "{message}");
-            assert_eq!(cuda["accelerator"], "cuda");
-        } else {
-            // A portable CUDA build, once pinned, must be the one Ubuntu 22 receives.
-            assert!(host_compat::entry_host_incompatibility(&cuda, &ubuntu22).is_none());
+        // Every Linux NVIDIA host, old or new, gets the same portable CUDA build.
+        for facts in [
+            ubuntu22.clone(),
+            HostFacts {
+                glibc: Some("2.39".into()),
+                glibcxx_minor: Some(33),
+                vulkan_loader: None,
+            },
+        ] {
+            let cuda = recommended_runtime_for_host("linux", "x86_64", "cuda", &facts);
+            assert_eq!(cuda["runtime_id"], "llama-cpp-b11429-glibc228-x86_64-cuda");
+            assert!(verify_runtime_download_manifest(&cuda).is_ok());
         }
+        // Too old for every CUDA build: report reasons and the explicit CPU opt-in.
+        let centos7 = HostFacts {
+            glibc: Some("2.17".into()),
+            glibcxx_minor: Some(19),
+            vulkan_loader: Some(false),
+        };
+        let cuda = recommended_runtime_for_host("linux", "x86_64", "cuda", &centos7);
+        assert_eq!(cuda["supported_on_this_platform"], false);
+        assert_eq!(cuda["accelerator"], "cuda");
+        let message = cuda["message"].as_str().unwrap();
+        assert!(
+            message.contains("glibc 2.28") && message.contains("glibc 2.38"),
+            "{message}"
+        );
+        assert!(message.contains("INFERGRADE_ACCELERATOR=cpu"), "{message}");
         let no_loader = HostFacts {
             vulkan_loader: Some(false),
             ..ubuntu22
