@@ -1,4 +1,3 @@
-import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -18,7 +17,8 @@ RESEAL=sys.modules['reseal_native_ifeval_bundle']
 
 class NativeIFEvalResealTests(unittest.TestCase):
     def fixture(self, root):
-        bundle=root/'bundle';bundle.mkdir()
+        bundle=root/'bundle'
+        bundle.mkdir()
         (bundle/'python-runtime/bin').mkdir(parents=True)
         (bundle/'dependencies').mkdir()
         (bundle/'dependencies/module.py').write_text('original Python source')
@@ -28,7 +28,8 @@ class NativeIFEvalResealTests(unittest.TestCase):
         receipt={'target':'x86_64-unknown-linux-gnu','manifest_sha256':BUILDER.digest(BUILDER.MANIFEST),
                  'files':files,'links':{},'transformable_binaries':{'python-runtime/bin/python3.12':'elf'}}
         (bundle/BUILDER.RECEIPT).write_text(json.dumps(receipt))
-        identity=root/'identity.py';BUILDER.write_trusted_identity(bundle,identity)
+        identity=root/'identity.py'
+        BUILDER.write_trusted_identity(bundle,identity)
         return bundle,identity
 
     def test_explicit_binary_transform_reanchors_final_receipt(self):
@@ -58,17 +59,22 @@ class NativeIFEvalResealTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'added or removed'):
                 RESEAL.reseal(bundle,identity,'linuxdeploy_appimage_v1')
             (bundle/'injected.py').unlink()
-            receipt=json.loads((bundle/BUILDER.RECEIPT).read_text());receipt['fake']='new inventory'
+            receipt=json.loads((bundle/BUILDER.RECEIPT).read_text())
+            receipt['fake']='new inventory'
             (bundle/BUILDER.RECEIPT).write_text(json.dumps(receipt))
             with self.assertRaisesRegex(ValueError,'trusted package anchor'):
                 RESEAL.reseal(bundle,identity,'linuxdeploy_appimage_v1')
 
     def test_identity_is_parsed_without_executing_packager_code(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root=Path(temporary);path=root/'identity.py';marker=root/'marker'
+            root=Path(temporary)
+            path=root/'identity.py'
+            marker=root/'marker'
             path.write_text('IDENTITY = {}\nopen('+repr(str(marker))+',"w").write("unsafe")')
-            with self.assertRaises(ValueError):RESEAL._trusted_identity(path)
+            with self.assertRaises(ValueError):
+                RESEAL._trusted_identity(path)
             self.assertFalse(marker.exists())
 
 
-if __name__=='__main__':unittest.main()
+if __name__=='__main__':
+    unittest.main()
