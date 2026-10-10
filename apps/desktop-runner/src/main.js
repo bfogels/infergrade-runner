@@ -213,6 +213,7 @@ function setDesktopConnectionKey(next) {
 let desktopMachineSettings = null;
 let hubConnectionVerified = false;
 let lastFirstRunPayload = null;
+let localFirstRunAttempted = false;
 let lastReadinessCheckAt = null;
 let assignmentStartedAt = null;
 let assignmentClockTimer = null;
@@ -689,15 +690,20 @@ function renderAssignmentPreflightOutcome(result = null, { staleRuntimeCleared =
   } else {
     modelPreflightReadiness = "Waiting for a claimable Hub assignment. No model compatibility evidence exists yet.";
   }
-  renderAssignmentActive({
-    title: runId ? assignmentTitleFromRunId(runId) : "First benchmark preflight",
-    phase: presentation.phase,
-    description: presentation.description,
-    progress: presentation.progress,
-    checkName: presentation.checkName,
-    runId,
-    waitingForListener: presentation.waitingForListener,
-  });
+  if (runId) {
+    renderAssignmentActive({
+      title: assignmentTitleFromRunId(runId),
+      phase: presentation.phase,
+      description: presentation.description,
+      progress: presentation.progress,
+      checkName: presentation.checkName,
+      runId,
+      waitingForListener: presentation.waitingForListener,
+    });
+  } else if (!lastFirstRunPayload && !localFirstRunAttempted) {
+    // Empty setup belongs in the hero; retain an attempted local check and its recovery.
+    renderAssignmentIdle();
+  }
   const canStartListener = ["assignment_ready_to_start", "queue_unconfirmed", "queue_empty"].includes(presentation.kind);
   if (assignmentStartListeningButton) {
     assignmentStartListeningButton.hidden = !canStartListener;
@@ -2901,6 +2907,7 @@ function updateFirstRunSupportActions() {
 
 function clearFirstRunLocalState({ clearModel = false } = {}) {
   lastFirstRunPayload = null;
+  localFirstRunAttempted = false;
   if (clearModel && firstRunModelPathInput) {
     firstRunModelPathInput.value = "";
   }
@@ -3228,6 +3235,7 @@ async function runNativeFirstRun() {
 
   await ensureFirstRunEvents();
   nativeFirstRunBusy = true;
+  localFirstRunAttempted = true;
   firstRunStartButton.disabled = true;
   setStatus("First benchmark running", "warning");
   firstRunStatus.textContent = "Starting assigned local work...";
