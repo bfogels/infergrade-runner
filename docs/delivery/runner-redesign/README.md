@@ -59,17 +59,17 @@ The single offline-use-case control uses **Chat & reasoning / Coding / Reasoning
 
 ## Validation and evidence boundaries
 
-- `npm run check`: all 116 desktop JavaScript tests pass, including render tests for every page and private/token views; production Vite build passes.
+- `npm run check`: all 117 desktop JavaScript tests pass, including render tests for every page and private/token views; production Vite build passes.
 - Full stdlib suite: see `test-results.json` after validation from a clean commit. Static acceptance checks now inspect rendered page templates rather than deleted legacy HTML.
 - [Browser receipts](browser-receipts.json): nine Home states, all four pages in light/dark, and expanded Advanced/offline controls report zero WCAG 2 A/AA or 2.1 AA violations; no console errors/page errors in the recorded fixture flows.
 - Keyboard exercises Space on autosaving switches and Keep, Tab/blur on machine-name save, Enter on disclosures, pause/resume and use-case segments. Polling preserves the focused run's identity, its handler, open disclosures and draft text. Private work/failure route to their own current panel and completion clears the failure state.
-- System follows operating-system light/dark changes; reduced motion disables animation. [Accessibility tree](accessibility-tree.txt) records named controls, navigation, headings and saved states. Status announcements exclude the ticking elapsed clock. **Native spoken VoiceOver/NVDA acceptance remains outstanding.** After unlocking, the isolated macOS build opened and native keyboard navigation and accessibility roles were inspected across all four pages. VoiceOver was enabled, but computer use could not capture its spoken phrase; audible verification has been requested. See [native evidence](native/README.md). Browser semantic and automated checks are separate.
+- System follows operating-system light/dark changes; reduced motion disables animation. [Accessibility tree](accessibility-tree.txt) records named controls, navigation, headings and saved states. Status announcements exclude the ticking elapsed clock. The user confirmed that the native Runner window is visible and VoiceOver announces focused control labels and roles clearly. The user was unsure about broader page coverage, so a full native screen-reader pass remains unverified; later automation snapshots inconsistently omit visible Activity/Settings bodies. Native keyboard navigation and browser semantic checks are recorded separately. See [native evidence](native/README.md). Browser semantic and automated checks are separate.
 - At 1000×700, common page content heights are Home 700px, Models 883px, Activity 700px and Settings 974px (1.39 screens maximum); no horizontal overflow. Expanded diagnostic/check panels and long histories may be taller.
 - Independent source review found no remaining actionable findings after correcting recovery visibility, execution-source routing, terminal-state flags, catalog hydration and polling reconciliation.
 
 Two requested data fields cannot be supplied faithfully by the unchanged backends: the existing readiness response exposes hardware class but no RAM/model-fit estimate; the native activity projection omits use case for historical jobs. Home says fit is checked before benchmarking, and Activity says “Use case unavailable” when it is absent. Library quant/last-used fields similarly show unavailable when native data does not provide them; managed last-used timestamps use the backend’s Unix-second format. No hardware capacity or completed score is invented.
 
-The screenshots use fixed synthetic numbers only within the test harness. Acceptance of real account/OS actions, native screen readers and physical execution is separate from this develop PR.
+The screenshots use fixed synthetic numbers only within the test harness. Acceptance of real account/OS actions and physical execution is separate from this develop PR; native audible verification is recorded in its own receipt.
 
 ## Reproduce the UI receipts
 
