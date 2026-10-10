@@ -8,7 +8,7 @@ export function machineNameController({read,save,apply}) {
     try {
       const result=label===undefined?await read():await save(label);
       if(own!==generation||owner!==key)return;
-      if(result?.runner_id!==owner.split('|')[0]||typeof result.label!=='string'||!result.label.trim()||[...result.label].length>120||/[\u0000-\u001f\u007f-\u009f]/.test(result.label))throw new Error('The Hub response belongs to a different machine. Refresh.');
+      if(result?.runner_id!==owner.split('|')[0]||typeof result.label!=='string'||!result.label.trim()||[...result.label].length>120||/[\u0000-\u001f\u007f-\u009f]/.test(result.label))throw new Error('A different machine answered; retry this machine’s connection.');
       name=result.label;
     } catch(failure) { if(own===generation&&owner===key)error=typeof failure==='string'?failure:failure.message||'Could not read or save the machine name.'; }
     finally {if(own===generation&&owner===key){busy=false;emit();}}

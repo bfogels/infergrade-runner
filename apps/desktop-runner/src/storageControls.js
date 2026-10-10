@@ -27,7 +27,7 @@ export function storageController({read,write,confirmTrim,render,confirmed=()=>{
    if(change&&value.limit_gb!==limit)throw Error();
    saved=value;
    if(change)confirmed();
-  }catch{if(own===generation)error='Could not confirm storage. Refresh before changing the limit. Stop listening and finish active work before trimming.';}
+  }catch{if(own===generation)error='Could not confirm storage; finish active work and retry before trimming downloads.';}
   finally{if(own===generation){busy=false;emit();}}
  };
  return {refresh:()=>run(),setLimit:limit=>run(limit,true),clear:()=>{generation++;busy=false;saved=null;error='';emit();}};

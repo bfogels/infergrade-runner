@@ -9,7 +9,7 @@ export function gpuSettingsController({read,write,render}){
   if(own!==generation)return;
   if(value?.schema_version!==schema||typeof value.available!=='boolean'||typeof value.selection_ready!=='boolean'||!Array.isArray(value.devices))throw Error();
   saved=value;
- }catch{if(own===generation)error='Could not confirm GPU choice. Refresh or reset the saved preference.';}
+ }catch{if(own===generation)error='Could not confirm GPU choice; retry or choose Default to reset it.';}
  finally{if(own===generation){busy=false;emit();}}};
  return{refresh:()=>run(),select:uuids=>run([...uuids]),reset:()=>run([]),clear:()=>{generation++;busy=false;saved=null;error='';emit();}};
 }

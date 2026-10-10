@@ -3727,6 +3727,7 @@ setupRuntimeButton?.addEventListener("click", () => runtimeInstallManagedButton?
 document.querySelector('[data-home-primary]').onclick=()=>{
  const action=document.querySelector('[data-home-primary]').dataset.action;
  if(action==='connect'){showDesktopPage('settings');document.querySelector('[data-browser-pair-runner]').click();}
+ else if(action==='pause-retry')document.querySelector('[data-slot="admission"] [data-retry]')?.click();
  else if(action==='resume')document.querySelector('[data-slot="admission"] input')?.click();
  else if(action==='hub')openHub('build').catch(error=>appendLog(error.message));
  else if(action==='listen')startButtons[0]?.click();
@@ -3770,6 +3771,7 @@ initStartupSettings({invoke:loadTauriInvoke});
 initGpuSettings({invoke:loadTauriInvoke});
 initStorageControls({invoke:loadTauriInvoke,confirmed:()=>refreshModelCache().catch(()=>{})});
 initAdmissionSettings({invoke:loadTauriInvoke,onState:state=>{
+ setPageState('home',{admissionError:!!state.error});
  document.documentElement.dataset.admissionPaused=state.error?'unknown':state.paused===true?'true':state.paused===false?'false':'unknown';
  renderLocalReadinessChecklist();
 

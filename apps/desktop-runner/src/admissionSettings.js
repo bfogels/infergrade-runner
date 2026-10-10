@@ -2,7 +2,7 @@ import {renderPageComponent} from './desktopNavigation.js';
 import {renderAdmission} from './settingViews.js';
 export function createAdmissionController({read,write,render}) {
  let generation=0,busy=false,confirmed=null;
- const run=async target=>{if(busy){render({paused:confirmed,pending:true,error:null});return;}const own=++generation;busy=true;render({paused:confirmed,pending:true,error:null});try{const state=await (target===null?read():write(target));if(own!==generation)return;if(state?.schema_version!=='infergrade.admission.v1'||typeof state.paused!=='boolean')throw new Error('Invalid admission response');confirmed=state.paused;render({paused:confirmed,pending:false,error:null});}catch{if(own===generation)render({paused:confirmed,pending:false,error:'Could not confirm saved admission state. Refresh before trying again.'});}finally{if(own===generation)busy=false;}};
+ const run=async target=>{if(busy){render({paused:confirmed,pending:true,error:null});return;}const own=++generation;busy=true;render({paused:confirmed,pending:true,error:null});try{const state=await (target===null?read():write(target));if(own!==generation)return;if(state?.schema_version!=='infergrade.admission.v1'||typeof state.paused!=='boolean')throw new Error('Invalid admission response');confirmed=state.paused;render({paused:confirmed,pending:false,error:null});}catch{if(own===generation)render({paused:confirmed,pending:false,error:'Could not confirm the pause setting; retry before changing it.'});}finally{if(own===generation)busy=false;}};
  return{refresh:()=>run(null),setPaused:value=>run(value),clear:()=>{generation++;busy=false;confirmed=null;render({paused:null,pending:false,error:null});}};
 }
 export function initAdmissionSettings({invoke,onState}){

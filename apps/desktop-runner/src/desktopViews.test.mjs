@@ -20,6 +20,10 @@ const ready = {
 };
 test("Home represents every execution source and prioritizes connection recovery over pause", () => {
   assert.equal(homePresentation(ready).title, "Ready");
+  assert.equal(
+    homePresentation({ ...ready, admissionError: true }).target,
+    "pause-retry",
+  );
   for (const patch of [{ running: true }, { privateRunning: true }])
     assert.equal(homePresentation({ ...ready, ...patch }).title, "Running");
   assert.equal(homePresentation({ ...ready, paused: true }).target, "resume");

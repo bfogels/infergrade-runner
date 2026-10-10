@@ -16,7 +16,7 @@ export function createFinishNotificationController({read,write,notify,render}){
  const run=async target=>{
   if(busy)return;busy=true;settingError=null;show();
   try{const state=await(target===null?read():write(target));if(state?.schema_version!=='infergrade.desktop_notifications.v1'||typeof state.enabled!=='boolean'||typeof state.available!=='boolean'||!(state.warning===null||typeof state.warning==='string'))throw new Error();confirmed=state;}
-  catch{settingError='Could not confirm the saved notification setting. Refresh, or turn notifications off to reset it.';}
+  catch{settingError='Could not confirm notifications; Retry or turn them off to reset the setting.';}
   finally{busy=false;show();const waiting=deferred.splice(0);for(const item of waiting)if(item.generation===generation)void completed(item.runId);}
  };
  return{refresh:()=>run(null),setEnabled:value=>run(Boolean(value)),setConnectionKey:key=>{if(connection!==key){connection=key;generation++;deferred.length=0;noticeError=null;show();}},completed};

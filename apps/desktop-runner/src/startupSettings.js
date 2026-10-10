@@ -9,7 +9,7 @@ export function createStartupController({read,write,render}) {
    const state=await(target===null?read():write(target));
    if(state?.schema_version!=='infergrade.startup.v1'||typeof state.enabled!=='boolean'||typeof state.available!=='boolean'||!(state.warning===null||typeof state.warning==='string'))throw new Error('Invalid startup response');
    confirmed=state;render({state:confirmed,pending:false,error:null});
-  }catch(error){const detail=typeof error==='string'?error:error instanceof Error?error.message:'';const safe=detail.length>0&&detail.length<=512&&!/[\x00-\x1f\x7f-\x9f]/.test(detail)&&detail!=='Invalid startup response';render({state:confirmed,pending:false,error:safe?detail:'Could not confirm the OS login setting. Refresh before trying again.'});}
+  }catch(error){const detail=typeof error==='string'?error:error instanceof Error?error.message:'';const safe=detail.length>0&&detail.length<=512&&!/[\x00-\x1f\x7f-\x9f]/.test(detail)&&detail!=='Invalid startup response';render({state:confirmed,pending:false,error:safe?detail:'Could not confirm open at login; retry before changing it.'});}
   finally{busy=false;}
  };
  return{refresh:()=>run(null),setEnabled:enabled=>run(Boolean(enabled))};

@@ -51,6 +51,13 @@ export function homePresentation(state = {}) {
       action: "Check connection",
       target: "ready",
     };
+  if (state.admissionError)
+    return {
+      title: "Needs attention",
+      sentence: "Could not confirm whether new benchmarks are paused.",
+      action: "Check pause setting",
+      target: "pause-retry",
+    };
   if (state.paused)
     return {
       title: "Paused",
