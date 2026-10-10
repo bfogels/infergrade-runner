@@ -1,6 +1,6 @@
 # Runner desktop redesign — develop review
 
-The desktop shell now renders four pages from UI snapshots instead of moving legacy panels. Home leads with the machine state and next action; Models combines discovered and downloaded files; Activity groups queue/history; Settings uses grouped rows with saved-state controls. The sidebar owns pause. Light, dark and system themes use the Claude prototype's tokens.
+The desktop shell now renders four pages from UI snapshots instead of moving legacy panels. Home leads with the machine state and next action; Models combines discovered and downloaded files; Activity groups queue/history; Settings uses grouped rows with saved-state controls. The sidebar owns pause. Empty preflight stays out of Home; an attempted offline check retains its result and recovery controls. Light, dark and system themes use the Claude prototype's tokens.
 
 This is a frontend change based on Runner 0.3.70, commit `9b39145`, targeting **develop only**. No Rust source, Tauri command registration, command permissions, backend, contract, version, tag or release changes. The Tauri configuration changes only the minimum window size to 1000×700. No merge or promotion is authorized.
 
@@ -73,4 +73,4 @@ The screenshots use fixed synthetic numbers only within the test harness. Accept
 
 ## Reproduce the UI receipts
 
-Start the changed desktop frontend on `127.0.0.1:1420`, the archived baseline on `1422`, and the shared prototype folder on `4189`. Run `capture-before.cjs`, `capture-after.cjs`, `check-reconciliation.cjs`, `check-private.cjs`, `check-browser.cjs`, `check-system.cjs`, `check-pause-recovery.cjs`, `check-endpoint-shortcut.cjs` and `capture-mockup.cjs` with the Playwright CLI `run-code --filename` command in that order. The scripts use a fake Tauri bridge and a temporary axe-core install; they do not modify accounts or native preferences. The capture output paths are explicit to this workspace. The gallery contains the original, unedited screenshots.
+Start the changed desktop frontend on `127.0.0.1:1420`, the archived baseline on `1422`, and the shared prototype folder on `4189`. Run `capture-before.cjs`, `capture-after.cjs`, `check-reconciliation.cjs`, `check-private.cjs`, `check-browser.cjs`, `check-system.cjs`, `check-pause-recovery.cjs`, `check-endpoint-shortcut.cjs`, `check-idle-home.cjs` and `capture-mockup.cjs` with the Playwright CLI `run-code --filename` command in that order. The scripts use a fake Tauri bridge and a temporary axe-core install; they do not modify accounts or native preferences. The capture output paths are explicit to this workspace. The gallery contains the original, unedited screenshots.

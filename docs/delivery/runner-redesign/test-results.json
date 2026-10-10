@@ -13,12 +13,12 @@
     "status": "pass",
     "production_build": "pass"
   },
-  "source_commit": "d130d2e2168689ceec6f9acd3589cf40892cfec4",
-  "independent_review": "No actionable findings on final Advanced endpoint shortcut and Unix-second timestamp fix; 8 focused render tests passed.",
+  "source_commit": "98ccc0a01256f82ea5b644e77d38d3338b7cd360",
+  "independent_review": "No actionable findings after preserving attempted offline outcomes across Make ready while hiding empty preflight; completed and failed local recovery checked in browser.",
   "backend_diff": "Only Tauri minimum window dimensions change; Rust source, commands, permissions, backend source, version and release identity unchanged.",
   "native_screen_reader": "blocked by locked Mac; user unlock requested",
   "physical_and_live_account_acceptance": "not claimed",
-  "source_note": "Final frontend-only endpoint shortcut and Unix-second date display changes separately passed npm run check; no whole-suite rerun claimed.",
+  "source_note": "Final frontend source passed 116 desktop tests, production build and refreshed browser receipts; full stdlib receipt remains scoped to the earlier stated commit.",
   "ci": {
     "commit": "d130d2e2168689ceec6f9acd3589cf40892cfec4",
     "status": "all checks passed",

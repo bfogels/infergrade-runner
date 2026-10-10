@@ -170,5 +170,21 @@
     "offlineDisclosureOpen": true,
     "endpointHeadingFocused": true,
     "violations": []
-  }
+  },
+  "idleHome": {
+    "emptySetupHidden": true,
+    "outcomes": [
+      {
+        "failure": false,
+        "localOutcomePreserved": true,
+        "artifactRecovery": true
+      },
+      {
+        "failure": true,
+        "localOutcomePreserved": true,
+        "artifactRecovery": "not applicable"
+      }
+    ]
+  },
+  "validated_source_commit": "98ccc0a01256f82ea5b644e77d38d3338b7cd360"
 }

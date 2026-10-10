@@ -1,4 +1,5 @@
 async page=>{
+ await page.setViewportSize({width:1000,height:700});
  const out='/Users/brianfogelson/Desktop/Code/infergrade/docs/delivery/runner-redesign';
  const errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
  await page.goto('http://127.0.0.1:1420/?scenario=paired-idle');

@@ -65,6 +65,10 @@ async (page)=>{
     await page.evaluate(s=>window.fixtureEvent('runner-listener-event',{type:'assignment_update',listener_pid:42,run_id:'run_fixture_qwen',title:'Qwen3.5 4B · Chat & reasoning',phase:s==='finished'?'Complete':['failed','low-disk','needs-hf-token'].includes(s)?'Needs attention':'Running',progress:s==='running'?48:100,result_id:s==='finished'?'result_fixture':'',description:s==='low-disk'?'Disk space is low.':s==='needs-hf-token'?'Hugging Face token required.':s==='failed'?'The model could not load.':'Benchmark tasks are running on this machine.'}),scenario);
    }
   }
+  if(['first-launch','ready','paired-idle'].includes(scenario)) {
+   if(await page.locator('[data-assignment-panel]').isVisible())throw Error('No-run Home exposed a preflight card: '+scenario);
+   if(!await page.locator('[data-home-recent]').isVisible())throw Error('Recent results missing: '+scenario);
+  }
   await page.screenshot({path:out+'/after-'+scenario+'.png'});
   await page.addScriptTag({path:'/tmp/runner-redesign-a11y/node_modules/axe-core/axe.min.js'});
   const accessibility=await page.evaluate(()=>axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}}));
