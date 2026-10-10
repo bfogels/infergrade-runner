@@ -46,12 +46,10 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
 
     def test_desktop_runner_surfaces_release_and_update_gates(self):
         root = self._repo_root()
-        html_path = os.path.join(root, "apps/desktop-runner/index.html")
         js_path = os.path.join(root, "apps/desktop-runner/src/main.js")
         css_path = os.path.join(root, "apps/desktop-runner/src/styles.css")
         tauri_config_path = os.path.join(root, "apps/desktop-runner/src-tauri/tauri.conf.json")
-        with open(html_path, "r", encoding="utf-8") as handle:
-            html = self._rendered_pages()
+        html = self._rendered_pages()
         with open(js_path, "r", encoding="utf-8") as handle:
             js = handle.read()
         with open(css_path, "r", encoding="utf-8") as handle:
@@ -84,12 +82,10 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
 
     def test_desktop_runner_validates_hub_url_like_sidecar_permissions(self):
         root = self._repo_root()
-        html_path = os.path.join(root, "apps/desktop-runner/index.html")
         js_path = os.path.join(root, "apps/desktop-runner/src/main.js")
         helper_path = os.path.join(root, "apps/desktop-runner/src/desktopHelpers.js")
 
-        with open(html_path, "r", encoding="utf-8") as handle:
-            html = self._rendered_pages()
+        html = self._rendered_pages()
         with open(js_path, "r", encoding="utf-8") as handle:
             js = handle.read()
         with open(helper_path, "r", encoding="utf-8") as handle:
@@ -108,7 +104,6 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
 
     def test_desktop_runner_has_explicit_system_theme_mode(self):
         root = self._repo_root()
-        html_path = os.path.join(root, "apps/desktop-runner/index.html")
         js_path = os.path.join(root, "apps/desktop-runner/src/main.js")
         css_path = os.path.join(root, "apps/desktop-runner/src/styles.css")
 
