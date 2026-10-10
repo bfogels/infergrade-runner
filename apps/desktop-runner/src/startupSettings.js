@@ -1,3 +1,5 @@
+import {renderPageComponent} from './desktopNavigation.js';
+import {renderStartup} from './settingViews.js';
 export function createStartupController({read,write,render}) {
  let busy=false,confirmed=null;
  const run=async target=>{
@@ -13,17 +15,13 @@ export function createStartupController({read,write,render}) {
  return{refresh:()=>run(null),setEnabled:enabled=>run(Boolean(enabled))};
 }
 export function initStartupSettings({invoke}){
- const page=document.querySelector('[data-desktop-view="settings"]');if(!page)return;
- const panel=document.createElement('section');panel.className='drawer-panel desktop-startup';
- panel.innerHTML='<h2>Open at login</h2><label class="background-toggle"><input type="checkbox" aria-label="Open Runner at login" disabled> Open Runner when I sign in</label><p role="status">Checking OS login settings…</p><p class="desktop-sub">This opens the app. Listening still uses your saved pairing and requires an awake machine.</p><button type="button" class="button-secondary">Refresh login setting</button>';
- page.insertBefore(panel,page.querySelector('.desktop-background'));
- const toggle=panel.querySelector('input'),message=panel.querySelector('[role="status"]'),refresh=panel.querySelector('button');
- const call=async(command,args)=>{const transport=await invoke();if(!transport)throw new Error('Desktop only');return transport(command,args);};
- const controller=createStartupController({read:()=>call('desktop_startup_status'),write:enabled=>call('set_desktop_startup',{enabled}),render:({state,pending,error})=>{
-  toggle.checked=state?.enabled===true;toggle.disabled=pending||Boolean(error)||state?.available!==true;refresh.disabled=pending;
-  panel.setAttribute('aria-busy',String(pending));
-  message.textContent=pending?'Confirming OS login settings…':error||state?.warning||(state?.enabled?'Runner will open when you sign in.':'Open at login is off.');
-  if(error&&document.activeElement===toggle)refresh.focus();
- }});
- toggle.onchange=()=>controller.setEnabled(toggle.checked);refresh.onclick=()=>controller.refresh();controller.refresh();return controller;
+ const panel=document.querySelector('[data-slot="startup"]');if(!panel)return null;
+ panel.className='setting-row desktop-startup';
+ const emit=state=>renderPageComponent('settings','startup',state,renderStartup);
+ const call=async(command,args)=>{const native=await invoke();if(!native)throw new Error('Open the desktop app to change this setting.');return native(command,args);};
+ const controller=createStartupController({read:()=>call('desktop_startup_status'),write:enabled=>call('set_desktop_startup',{enabled}),render:emit});
+ panel.onchange=event=>{if(event.target.type==='checkbox')controller.setEnabled(event.target.checked);};
+ panel.onclick=event=>{if(event.target.matches('[data-retry]'))controller.refresh();};
+ window.addEventListener('focus',()=>controller.refresh());
+ controller.refresh();return controller;
 }

@@ -1,0 +1,163 @@
+{
+  "before": {
+    "errors": []
+  },
+  "states": {
+    "errors": [],
+    "scenarios": [
+      {
+        "scenario": "first-launch",
+        "heading": "Connect this machine",
+        "violations": []
+      },
+      {
+        "scenario": "ready",
+        "heading": "Ready",
+        "violations": []
+      },
+      {
+        "scenario": "running",
+        "heading": "Running",
+        "violations": []
+      },
+      {
+        "scenario": "finished",
+        "heading": "Ready",
+        "violations": []
+      },
+      {
+        "scenario": "failed",
+        "heading": "Needs attention",
+        "violations": []
+      },
+      {
+        "scenario": "offline",
+        "heading": "Needs attention",
+        "violations": []
+      },
+      {
+        "scenario": "low-disk",
+        "heading": "Needs attention",
+        "violations": []
+      },
+      {
+        "scenario": "needs-hf-token",
+        "heading": "Needs attention",
+        "violations": []
+      },
+      {
+        "scenario": "paired-idle",
+        "heading": "Ready",
+        "violations": []
+      }
+    ]
+  },
+  "pages": {
+    "errors": [],
+    "results": [
+      {
+        "page": "Home",
+        "theme": "light",
+        "layout": {
+          "scrollHeight": 700,
+          "clientHeight": 700,
+          "overflow": false
+        },
+        "violations": []
+      },
+      {
+        "page": "Models",
+        "theme": "light",
+        "layout": {
+          "scrollHeight": 883,
+          "clientHeight": 700,
+          "overflow": false
+        },
+        "violations": []
+      },
+      {
+        "page": "Activity",
+        "theme": "light",
+        "layout": {
+          "scrollHeight": 700,
+          "clientHeight": 700,
+          "overflow": false
+        },
+        "violations": []
+      },
+      {
+        "page": "Settings",
+        "theme": "light",
+        "layout": {
+          "scrollHeight": 974,
+          "clientHeight": 700,
+          "overflow": false
+        },
+        "violations": []
+      },
+      {
+        "page": "Home",
+        "theme": "dark",
+        "layout": {
+          "scrollHeight": 700,
+          "clientHeight": 700,
+          "overflow": false
+        },
+        "violations": []
+      },
+      {
+        "page": "Models",
+        "theme": "dark",
+        "layout": {
+          "scrollHeight": 883,
+          "clientHeight": 700,
+          "overflow": false
+        },
+        "violations": []
+      },
+      {
+        "page": "Activity",
+        "theme": "dark",
+        "layout": {
+          "scrollHeight": 700,
+          "clientHeight": 700,
+          "overflow": false
+        },
+        "violations": []
+      },
+      {
+        "page": "Settings",
+        "theme": "dark",
+        "layout": {
+          "scrollHeight": 974,
+          "clientHeight": 700,
+          "overflow": false
+        },
+        "violations": []
+      }
+    ]
+  },
+  "reconciliation": {
+    "focusedRunIdentity": true,
+    "eventHandlerPreserved": true,
+    "openDisclosurePreserved": true,
+    "draftPreserved": true,
+    "confirmedCheckbox": true
+  },
+  "privateRun": {
+    "errors": [],
+    "privateRunningFocus": true,
+    "privateFailureHero": true,
+    "privateFailureFocus": true,
+    "terminalRecovery": true
+  },
+  "system": {
+    "systemTracksOperatingSystem": true,
+    "keyboardDisclosure": true,
+    "reducedMotion": true,
+    "advancedViolations": [],
+    "offlineViolations": []
+  },
+  "baseline": "9b39145",
+  "evidence": "Synthetic Tauri command responses in Chromium at 1000\u00d7700; no OS, physical benchmark, live account, or publication acceptance claim."
+}
