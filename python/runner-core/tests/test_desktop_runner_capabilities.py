@@ -129,7 +129,7 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn("document.documentElement.dataset.themeMode", js)
         self.assertIn("addEventListener(\"change\", refreshSystemTheme)", js)
         self.assertIn(".seg", css)
-        self.assertIn('[aria-pressed=true]', css)
+        self.assertRegex(css, r'\[aria-pressed\s*=\s*(?:"true"|true)\]')
 
     def test_desktop_runner_can_read_sidecar_version(self):
         root = self._repo_root()
