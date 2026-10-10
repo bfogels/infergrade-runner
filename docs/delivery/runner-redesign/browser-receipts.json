@@ -159,5 +159,10 @@
     "offlineViolations": []
   },
   "baseline": "9b39145",
-  "evidence": "Synthetic Tauri command responses in Chromium at 1000\u00d7700; no OS, physical benchmark, live account, or publication acceptance claim."
+  "evidence": "Synthetic Tauri command responses in Chromium at 1000\u00d7700; no OS, physical benchmark, live account, or publication acceptance claim.",
+  "pauseRecovery": {
+    "unknownPauseRequiresAttention": true,
+    "unknownPauseCannotWrite": true,
+    "retryReadsConfirmedState": true
+  }
 }

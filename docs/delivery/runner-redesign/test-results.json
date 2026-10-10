@@ -1,0 +1,21 @@
+{
+  "stdlib": {
+    "command": "./scripts/test_all.sh",
+    "tests": 1358,
+    "status": "pass",
+    "duration_seconds": 134.997,
+    "python_test_commit": "15dea9f",
+    "note": "Started from a clean commit; final frontend copy/pause patch separately passed desktop and browser checks."
+  },
+  "desktop": {
+    "command": "npm run check",
+    "tests": 115,
+    "status": "pass",
+    "production_build": "pass"
+  },
+  "source_commit": "9cc974d5b940ba602f623eac7a22f54eaa03b923",
+  "independent_review": "No remaining actionable source findings; latest pause/render review passed 10 focused tests.",
+  "backend_diff": "Only Tauri minimum window dimensions change; Rust source, commands, permissions, backend source, version and release identity unchanged.",
+  "native_screen_reader": "not run",
+  "physical_and_live_account_acceptance": "not claimed"
+}
