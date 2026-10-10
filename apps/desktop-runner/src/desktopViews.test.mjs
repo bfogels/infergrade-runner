@@ -18,6 +18,15 @@ const ready = {
   verified: true,
   listening: true,
 };
+test("Models keeps download read failure and retry in page state", () => {
+  const failed = renderModels({cacheError:true,cacheStatus:"Could not read downloads. Try again."});
+  assert.match(failed, /Could not read downloads\. Try again\./);
+  assert.doesNotMatch(failed, /data-refresh-model-cache[^>]*hidden/);
+  const loaded = renderModels({cacheError:false,cacheStatus:"No downloaded models."});
+  assert.match(loaded, /data-refresh-model-cache[^>]*hidden/);
+  assert.match(loaded, /No downloaded models\./);
+  assert.doesNotMatch(loaded, /Checking downloads/);
+});
 test("Home represents every execution source and prioritizes connection recovery over pause", () => {
   assert.equal(homePresentation(ready).title, "Ready");
   assert.equal(

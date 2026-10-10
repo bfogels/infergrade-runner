@@ -124,6 +124,11 @@ export function initDesktopNavigation() {
     }[id];
     const template = document.createElement("template");
     template.innerHTML = render(state);
+    if (id === "models") {
+      const page = pages.get(id);
+      page.querySelector('[data-model-cache-status]').textContent = template.content.querySelector('[data-model-cache-status]').textContent;
+      page.querySelector('[data-refresh-model-cache]').hidden = !state.cacheError;
+    }
     if (id === "home") {
       patchView(
         pages.get(id).querySelector(".hero"),

@@ -1062,12 +1062,13 @@ function renderModelCache(payload = null) {
       ? `${count} cached model${count === 1 ? "" : "s"} using ${formatBytes(bytes)}.`
       : "No cached model artifacts.";
   }
-  setPageState('models',{library:{...pageState('models').library,downloads:artifacts}});
+  setPageState('models',{library:{...pageState('models').library,downloads:artifacts},cacheError:false,cacheStatus:count ? `${count} downloaded model${count === 1 ? "" : "s"} using ${formatBytes(bytes)}.` : "No downloaded models."});
   setPageState('home',{downloadedModels:artifacts.map(model=>displayCacheArtifactName(model.name))});
 
 }
 
 async function refreshModelCache() {
+  setPageState('models',{cacheError:false,cacheStatus:"Checking downloads…"});
   if (modelCacheStatus) {
     modelCacheStatus.textContent = "Checking local model cache...";
   }
@@ -1081,7 +1082,7 @@ async function refreshModelCache() {
   }
   let payload;
   try {payload = await invoke("desktop_model_cache_status");}
-  catch(error){refreshModelCacheButton.hidden=false;throw error;}
+  catch(error){setPageState('models',{cacheError:true,cacheStatus:"Could not read downloads. Try again."});throw error;}
   renderModelCache(payload);
   return payload;
 }

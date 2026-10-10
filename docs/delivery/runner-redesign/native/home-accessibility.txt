@@ -1,0 +1,43 @@
+Window: "InferGrade Runner", App: InferGrade Runner Review.
+0 standard window InferGrade Runner, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: InferGrade Runner, URL: tauri://localhost
+			3 container
+				4 link IG InferGrade Runner, Value: tauri://localhost#home
+				5 container Runner
+					6 button Home
+					7 button Models
+					8 button Activity
+					9 button Settings
+				10 text This machine Connect this machine Pause new jobs
+				11 checkbox Pause new benchmarks, Value: 0
+			12 container
+				13 text THIS MACHINE
+				14 heading Connect this machine, Value: 1
+					15 text Connect this machine
+				16 text Approve this machine in your browser to receive benchmarks from Hub.
+				17 button Connect in browser
+				18 button Check a model offline
+				19 heading Recent results, Value: 2
+					20 text Recent results
+				21 text Your accepted results appear here after a benchmark.
+				22 heading This machine, Value: 2
+					23 text This machine
+				24 text Apple Silicon Model fit is checked before each benchmark. Qwen3.5-9B-Q4_K_M.gguf tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf Qwen3-4B-Q5_K_M.gguf
+				25 heading Already on this machine, Value: 2
+					26 text Already on this machine
+				27 text safety_checker text_encoder
+				28 button View model library
+	29 close button
+	30 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	31 minimize button
+	32 text InferGrade Runner
+33 menu bar
+	34 InferGrade Runner Review
+	35 File
+	36 Edit
+	37 View
+	38 Window
+	39 Help
+
+The focused UI element is 17 button Connect in browser

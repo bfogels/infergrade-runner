@@ -150,7 +150,7 @@ export function renderHome(state = {}) {
  }</div>${button("data-go-models", "View model library", 'class="ghost"')}</section></div>`;
 }
 export function renderModels(state = {}) {
-  return `<h1 tabindex="-1">Models</h1><p class="sub">Your local model library.</p><div class="library card"><h2>Model library</h2><div data-library>${renderLibrary(state.library || {})}</div><div data-slot="discovery"></div><p class="meta" data-model-cache-status role="status">Checking downloads…</p><div class="actions">${button("data-refresh-model-cache", "Retry downloads", "hidden")}${button("data-clear-model-cache", "Clear unkept downloads", 'class="ghost"')}</div></div><div data-slot="storage">${slot(state, "storage")}</div>
+  return `<h1 tabindex="-1">Models</h1><p class="sub">Your local model library.</p><div class="library card"><h2>Model library</h2><div data-library>${renderLibrary(state.library || {})}</div><div data-slot="discovery"></div><p class="meta" data-model-cache-status role="status">${escapeHtml(state.cacheStatus || "Checking downloads…")}</p><div class="actions">${button("data-refresh-model-cache", "Retry downloads", state.cacheError ? "" : "hidden")}${button("data-clear-model-cache", "Clear unkept downloads", 'class="ghost"')}</div></div><div data-slot="storage">${slot(state, "storage")}</div>
  <details class="card check-panel" data-check-panel><summary>Check a model offline</summary><p class="meta">Local reports stay on this machine; endpoint checks follow the Hub handoff.</p><div class="seg" role="group" aria-label="Use case">${[
    ["general_assistant", "Chat & reasoning"],
    ["agentic_coding", "Coding"],
