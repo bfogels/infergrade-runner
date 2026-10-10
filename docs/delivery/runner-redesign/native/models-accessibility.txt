@@ -1,0 +1,75 @@
+Window: "InferGrade Runner", App: InferGrade Runner Review.
+0 standard window InferGrade Runner, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: InferGrade Runner, URL: tauri://localhost
+			3 container
+				4 link IG InferGrade Runner, Value: tauri://localhost#home
+				5 container Runner
+					6 button Home
+					7 button Models
+					8 button Activity
+					9 button Settings
+				10 text This machine Connect this machine Pause new jobs
+				11 checkbox Pause new benchmarks, Value: 0
+			12 container
+				13 heading Models, Value: 1
+					14 text Models
+				15 text Your local model library.
+				16 heading Model library, Value: 2
+					17 text Model library
+				18 text safety_checker Quant unverified · 1.1 GB · Hugging Face cache · Last used unavailable
+				19 button (disabled) Check
+				20 text External file
+				21 summary Details for safety_checker, Value: off
+					22 text Details
+				23 text text_encoder Quant unverified · 0.5 GB · Hugging Face cache · Last used unavailable
+				24 button (disabled) Check
+				25 text External file
+				26 summary Details for text_encoder, Value: off
+					27 text Details
+				28 text 03b74727a860a563-Qwen3.5-9B-Q4_K_M.gguf Quant unverified · 5.3 GB · InferGrade · Last used 10/9/2026 Keep
+				29 checkbox Keep 03b74727a860a563-Qwen3.5-9B-Q4_K_M.gguf, Value: 0
+				30 button Delete
+				31 summary Details for 03b74727a860a563-Qwen3.5-9B-Q4_K_M.gguf, Value: off
+					32 text Details
+				33 text 9fecc3b3cd76bba8-tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf Quant unverified · 0.6 GB · InferGrade · Last used unavailable
+				34 button Check
+				35 text External file
+				36 summary Details for 9fecc3b3cd76bba8-tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf, Value: off
+					37 text Details
+				38 text aca596860e8cb40a-Qwen3-4B-Q5_K_M.gguf Quant unverified · 2.7 GB · InferGrade · Last used 10/9/2026 Keep
+				39 checkbox Keep aca596860e8cb40a-Qwen3-4B-Q5_K_M.gguf, Value: 0
+				40 button Delete
+				41 summary Details for aca596860e8cb40a-Qwen3-4B-Q5_K_M.gguf, Value: off
+					42 text Details
+				43 button (disabled) Previous
+				44 text Page 1 of 2
+				45 button Next
+				46 heading Local model folders, Value: 2
+					47 text Local model folders
+				48 text 2 local models found.
+				49 button Add a folder…
+				50 text 4 downloaded models using 9.1 GB.
+				51 button Clear unkept downloads
+				52 heading Storage, Value: 2
+					53 text Storage
+				54 text 8 GiB in InferGrade downloads 50.2 GiB free on disk Download cap
+				55 pop up button Download size limit, Value: No limit
+				56 container Lowering the cap asks before removing the oldest unkept InferGrade downloads; external files are preserved.
+					57 text 0 GiB kept · 0 GiB reserved
+				58 summary Check a model offline, Value: off
+					59 text Check a model offline
+		60 scroll bar (settable, float) 0
+	61 close button
+	62 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	63 minimize button
+	64 text InferGrade Runner
+65 menu bar
+	66 InferGrade Runner Review
+	67 File
+	68 Edit
+	69 View
+	70 Window
+	71 Help
+
+The focused UI element is 21 summary Details for safety_checker, Value: off

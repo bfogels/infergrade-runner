@@ -1,3 +1,5 @@
+import {renderPageComponent} from './desktopNavigation.js';
+import {escapeHtml as e} from './desktopViews.js';
 export function listenerConnectionMatches(child,key){return Boolean(key)&&child?.connectionKey===key;}
 import {createResultLoader} from './activityResults.js';
 export function createHomeResultController({fetchResults,render}){
@@ -8,18 +10,30 @@ export function createHomeResultController({fetchResults,render}){
  return {setConnectionKey(next){if(connection===next)return;connection=next||'';runId='';reset();},setRun(next){if(next===runId)return;runId=/^[-a-zA-Z0-9_]+$/.test(next||'')?next:'';reset();},
  async refresh(){if(!connection||!runId||busy)return;const own=generation,id=runId;busy=true;render(snapshot());await loader.load(id);if(generation===own&&runId===id){busy=false;render(snapshot());}},isCurrent(id){return Boolean(connection)&&runId===id;}};
 }
+
+export function renderHomeResults(state={}){
+ if(!state.runId||!state.connected)return '<p class="meta">Your accepted results appear here after a benchmark.</p>';
+ const rows=state.data?.results||[];
+ return `<p class="meta" role="status">${state.error?'Could not read accepted results.':state.busy?'Checking accepted results…':rows.length?'Accepted by Hub.':state.data?'No accepted result is linked yet.':'Checking the result in Hub.'}</p>${rows.map(result=>`<div class="home-result" data-result-id="${e(result.result_id)}"><strong>${e(result.title)} · ${e(result.deployment_profile)}</strong><p>${result.kind==='report'?'Compare qualification unavailable.':`${(result.score*100).toFixed(1)} / 100 · ${result.seconds_per_task.toFixed(2)} s/task`}${result.kind==='compare_context'?` · Context only: ${e(result.qualified_count)}/${e(result.attempted_count)} naturally completed tasks; score keeps the full denominator.`:''}</p><button type="button" data-home-result-action="${e(result.result_id)}">${result.kind==='report'?'Open report':'View in Hub'}</button></div>`).join('')}<button type="button" data-home-result-action="retry" ${state.error?'':'hidden'} ${state.busy?'disabled':''}>Retry results</button>`;
+}
 export function initHomeResults({invoke,openResult}){
- const assignment=document.querySelector('[data-assignment-panel]');if(!assignment)return null;
- const panel=document.createElement('section');panel.className='home-accepted-results';panel.hidden=true;panel.setAttribute('aria-label','Accepted results');assignment.append(panel);
- const controller=createHomeResultController({fetchResults:async runId=>{const call=await invoke();if(!call)throw new Error('Desktop only');return call('desktop_run_results',{runId});},render:state=>{
-  const focused=document.activeElement?.dataset.homeResultAction;panel.replaceChildren();panel.hidden=!state.runId||!state.connected;if(panel.hidden)return;
-  const status=document.createElement('p');status.setAttribute('role','status');status.textContent=state.error?'Could not verify accepted results. Refresh to try again.':state.data?(state.data.results.length?'Hub has accepted the results below.':'No accepted result is linked yet. Open the job to check its status.'):'Check the Hub result before opening your data point.';panel.append(status);
-  for(const result of state.data?.results||[]){const row=document.createElement('div');const title=document.createElement('strong');title.textContent=result.title+' · '+result.deployment_profile;row.append(title);
-   const detail=document.createElement('p');detail.textContent=result.kind==='report'?'Compare qualification unavailable.':`${(result.score*100).toFixed(1)} / 100 · ${result.seconds_per_task.toFixed(2)} seconds per naturally completed task`;
-   row.append(detail);if(result.kind==='compare_context'){const context=document.createElement('p');context.textContent=`${result.qualified_count}/${result.attempted_count} naturally completed tasks. Score keeps the full denominator. This is a context point.`;row.append(context);}
-   const action=document.createElement('button');action.type='button';action.className='button-secondary';action.textContent=result.kind==='report'?'Open report':'Show my data point';action.dataset.homeResultAction=result.result_id;action.onclick=()=>{if(!controller.isCurrent(state.runId))return;Promise.resolve(openResult(result,state.data.api_url)).catch(()=>{status.textContent='Could not open the paired Hub. Try again.';});};row.append(action);panel.append(row);
-  }
-  const refresh=document.createElement('button');refresh.type='button';refresh.className='button-secondary';refresh.textContent=state.error?'Retry results':state.data?'Refresh results':'View results';refresh.dataset.homeResultAction='refresh';refresh.setAttribute('aria-busy',String(state.busy));refresh.onclick=()=>controller.refresh();panel.append(refresh);
-  if(focused){const replacement=[...panel.querySelectorAll('button')].find(el=>el.dataset.homeResultAction===focused);(replacement||refresh).focus({preventScroll:true});}
- }});return controller;
+ const panel=document.querySelector('[data-slot="home-results"]');if(!panel)return null;
+ panel.className='home-accepted-results';let state={},connection='',generation=0;
+ const call=async(command,args)=>{const native=await invoke();if(!native)throw Error();return native(command,args);};
+ const controller=createHomeResultController({fetchResults:runId=>call('desktop_run_results',{runId}),render:next=>{state=next;renderPageComponent('home','home-results',state,renderHomeResults);}});
+ panel.onclick=async event=>{
+  const action=event.target.closest('[data-home-result-action]')?.dataset.homeResultAction;if(!action)return;
+  if(action==='retry'){controller.refresh();return;}
+  const result=state.data?.results.find(result=>result.result_id===action);
+  if(result&&controller.isCurrent(state.runId))try{await openResult(result,state.data.api_url);}catch{renderPageComponent('home','home-results',{...state,error:true},renderHomeResults);}
+ };
+ renderPageComponent('home','home-results',{connected:false},renderHomeResults);
+ return {...controller,setConnectionKey:next=>{
+  if(next===connection)return;connection=next;const own=++generation;controller.setConnectionKey(next);
+  if(!next)return;
+  call('desktop_machine_activity').then(activity=>{
+   if(own!==generation||connection!==next||state.runId)return;
+   const latest=activity?.runs?.find(run=>run.status==='completed');if(latest){controller.setRun(latest.run_id);controller.refresh();}
+  }).catch(()=>{});
+ }};
 }

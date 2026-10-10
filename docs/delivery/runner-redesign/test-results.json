@@ -1,0 +1,39 @@
+{
+  "stdlib": {
+    "command": "./scripts/test_all.sh",
+    "tests": 1358,
+    "status": "pass",
+    "duration_seconds": 134.997,
+    "python_test_commit": "15dea9f",
+    "note": "Started from a clean commit; final frontend copy/pause patch separately passed desktop and browser checks."
+  },
+  "desktop": {
+    "command": "npm run check",
+    "tests": 117,
+    "status": "pass",
+    "production_build": "pass"
+  },
+  "source_commit": "98ccc0a01256f82ea5b644e77d38d3338b7cd360",
+  "independent_review": "No actionable findings after preserving attempted offline outcomes across Make ready while hiding empty preflight; completed and failed local recovery checked in browser.",
+  "backend_diff": "Only Tauri minimum window dimensions change; Rust source, commands, permissions, backend source, version and release identity unchanged.",
+  "native_screen_reader": "Mac unlocked; native keyboard and AX inspected; spoken VoiceOver output unverified",
+  "physical_and_live_account_acceptance": "not claimed",
+  "source_note": "Prior source receipt is scoped to 98ccc0a; latest cache read recovery changes separately passed 117 desktop tests, production build and browser integration.",
+  "ci": {
+    "commit": "d130d2e2168689ceec6f9acd3589cf40892cfec4",
+    "status": "all checks passed",
+    "includes": [
+      "Python",
+      "Rust Ubuntu/macOS/Windows",
+      "Linux and Windows install/launch smoke",
+      "CodeQL",
+      "Gitleaks",
+      "cargo audit/deny"
+    ]
+  },
+  "cache_read_recovery": {
+    "error_persists_across_navigation": true,
+    "retry_handler_preserved": true,
+    "successful_read_clears_error": true
+  }
+}

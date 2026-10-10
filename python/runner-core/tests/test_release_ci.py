@@ -652,12 +652,12 @@ class ReleaseCiTests(unittest.TestCase):
 
     def test_desktop_app_uses_package_metadata_for_browser_version_fallback(self):
         js = (ROOT / "apps" / "desktop-runner" / "src" / "main.js").read_text(encoding="utf-8")
-        html = (ROOT / "apps" / "desktop-runner" / "index.html").read_text(encoding="utf-8")
+        html = (ROOT / "apps" / "desktop-runner" / "src" / "desktopViews.js").read_text(encoding="utf-8")
 
         self.assertIn('import packageInfo from "../package.json"', js)
         self.assertIn("const APP_VERSION_FALLBACK = packageInfo.version;", js)
         self.assertNotIn('APP_VERSION_FALLBACK = "0.1.', js)
-        self.assertIn("<span class=\"version-chip\" data-app-version>checking...</span>", html)
+        self.assertIn("data-app-version", html)
         self.assertNotIn("data-app-version>0.1.", html)
 
     def test_sync_versions_updates_required_manifest_copies_from_version_file(self):
