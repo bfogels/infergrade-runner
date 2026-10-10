@@ -34,7 +34,7 @@ This maps every shipped capability in `REVIEW-runner-round-1.md` §1, plus the e
 | Private benchmark, use case and depth | Models → Check a model offline | 2 |
 | Stop/check private work | Home → Private benchmark card | 0 |
 | Private reports and partial-coverage detail | Activity → Private on this machine | 1 |
-| Local OpenAI-compatible endpoint check | Models → Check a model offline → Local model endpoint; existing Hub handoff still required | 2 |
+| Local OpenAI-compatible endpoint check | Models → Check a model offline → Local model endpoint; also Settings → Advanced → Check local endpoint; existing Hub handoff still required | 2 |
 | Combined discovered/downloaded library, paging, source, quant, size and last used | Models → Model library | 1 |
 | Keep/delete/clear unkept downloads | Models → Model library | 1 |
 | Add/remove discovered model folder; external-file ownership and safetensors guidance | Models → Model library / Folder list / File details | 1–2 |
@@ -59,18 +59,18 @@ The single offline-use-case control uses **Chat & reasoning / Coding / Reasoning
 
 ## Validation and evidence boundaries
 
-- `npm run check`: all 115 desktop JavaScript tests pass, including render tests for every page and private/token views; production Vite build passes.
+- `npm run check`: all 116 desktop JavaScript tests pass, including render tests for every page and private/token views; production Vite build passes.
 - Full stdlib suite: see `test-results.json` after validation from a clean commit. Static acceptance checks now inspect rendered page templates rather than deleted legacy HTML.
 - [Browser receipts](browser-receipts.json): nine Home states, all four pages in light/dark, and expanded Advanced/offline controls report zero WCAG 2 A/AA or 2.1 AA violations; no console errors/page errors in the recorded fixture flows.
 - Keyboard exercises Space on autosaving switches and Keep, Tab/blur on machine-name save, Enter on disclosures, pause/resume and use-case segments. Polling preserves the focused run's identity, its handler, open disclosures and draft text. Private work/failure route to their own current panel and completion clears the failure state.
-- System follows operating-system light/dark changes; reduced motion disables animation. [Accessibility tree](accessibility-tree.txt) records named controls, navigation, headings and saved states. Status announcements exclude the ticking elapsed clock. **Native VoiceOver/NVDA testing remains outstanding**; these are browser semantic and automated accessibility checks.
+- System follows operating-system light/dark changes; reduced motion disables animation. [Accessibility tree](accessibility-tree.txt) records named controls, navigation, headings and saved states. Status announcements exclude the ticking elapsed clock. **Native VoiceOver/NVDA testing remains outstanding**; computer use reported a locked Mac and automatic unlock failed. The user has been asked to unlock it. These are browser semantic and automated accessibility checks.
 - At 1000×700, common page content heights are Home 700px, Models 883px, Activity 700px and Settings 974px (1.39 screens maximum); no horizontal overflow. Expanded diagnostic/check panels and long histories may be taller.
 - Independent source review found no remaining actionable findings after correcting recovery visibility, execution-source routing, terminal-state flags, catalog hydration and polling reconciliation.
 
-Two requested data fields cannot be supplied faithfully by the unchanged backends: the existing readiness response exposes hardware class but no RAM/model-fit estimate; the native activity projection omits use case for historical jobs. Home says fit is checked before benchmarking, and Activity says “Use case unavailable” when it is absent. Library quant/last-used fields similarly show unavailable when native data does not provide them. No hardware capacity or completed score is invented.
+Two requested data fields cannot be supplied faithfully by the unchanged backends: the existing readiness response exposes hardware class but no RAM/model-fit estimate; the native activity projection omits use case for historical jobs. Home says fit is checked before benchmarking, and Activity says “Use case unavailable” when it is absent. Library quant/last-used fields similarly show unavailable when native data does not provide them; managed last-used timestamps use the backend’s Unix-second format. No hardware capacity or completed score is invented.
 
 The screenshots use fixed synthetic numbers only within the test harness. Acceptance of real account/OS actions, native screen readers and physical execution is separate from this develop PR.
 
 ## Reproduce the UI receipts
 
-Start the changed desktop frontend on `127.0.0.1:1420`, the archived baseline on `1422`, and the shared prototype folder on `4189`. Run `capture-before.cjs`, `capture-after.cjs`, `check-reconciliation.cjs`, `check-private.cjs`, `check-browser.cjs`, `check-system.cjs` and `capture-mockup.cjs` with the Playwright CLI `run-code --filename` command in that order. The scripts use a fake Tauri bridge and a temporary axe-core install; they do not modify accounts or native preferences. The capture output paths are explicit to this workspace. The gallery contains the original, unedited screenshots.
+Start the changed desktop frontend on `127.0.0.1:1420`, the archived baseline on `1422`, and the shared prototype folder on `4189`. Run `capture-before.cjs`, `capture-after.cjs`, `check-reconciliation.cjs`, `check-private.cjs`, `check-browser.cjs`, `check-system.cjs`, `check-pause-recovery.cjs`, `check-endpoint-shortcut.cjs` and `capture-mockup.cjs` with the Playwright CLI `run-code --filename` command in that order. The scripts use a fake Tauri bridge and a temporary axe-core install; they do not modify accounts or native preferences. The capture output paths are explicit to this workspace. The gallery contains the original, unedited screenshots.

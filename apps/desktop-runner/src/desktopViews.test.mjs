@@ -103,6 +103,7 @@ test("Settings composes confirmed controller state and keeps advanced commands w
     },
   });
   assert.match(html, /Open Runner at login" checked/);
+  assert.match(html, /data-settings-endpoint/);
   assert.match(html, /data-runtime-select-existing/);
   assert.match(html, /data-runner-self-test/);
   assert.match(html, /data-copy-support-summary/);
@@ -234,4 +235,12 @@ test("Token state renders failure retry and never serializes credentials", async
     renderHf({ state: { saved: true, token: "sensitive-value" } }),
     /sensitive-value/,
   );
+});
+
+test("Library renders native Unix-second timestamps and rejects malformed dates", () => {
+  const used = 1791637200;
+  const render = value => renderLibrary({downloads: [{name: "Managed", last_used_at: value}]});
+  assert.ok(render(used).includes("Last used " + new Date(used * 1000).toLocaleDateString()));
+  assert.match(render("invalid"), /Last used unavailable/);
+  assert.match(render(null), /Last used unavailable/);
 });

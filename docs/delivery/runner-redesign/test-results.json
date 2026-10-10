@@ -9,13 +9,26 @@
   },
   "desktop": {
     "command": "npm run check",
-    "tests": 115,
+    "tests": 116,
     "status": "pass",
     "production_build": "pass"
   },
-  "source_commit": "9cc974d5b940ba602f623eac7a22f54eaa03b923",
-  "independent_review": "No remaining actionable source findings; latest pause/render review passed 10 focused tests.",
+  "source_commit": "d130d2e2168689ceec6f9acd3589cf40892cfec4",
+  "independent_review": "No actionable findings on final Advanced endpoint shortcut and Unix-second timestamp fix; 8 focused render tests passed.",
   "backend_diff": "Only Tauri minimum window dimensions change; Rust source, commands, permissions, backend source, version and release identity unchanged.",
-  "native_screen_reader": "not run",
-  "physical_and_live_account_acceptance": "not claimed"
+  "native_screen_reader": "blocked by locked Mac; user unlock requested",
+  "physical_and_live_account_acceptance": "not claimed",
+  "source_note": "Final frontend-only endpoint shortcut and Unix-second date display changes separately passed npm run check; no whole-suite rerun claimed.",
+  "ci": {
+    "commit": "d130d2e2168689ceec6f9acd3589cf40892cfec4",
+    "status": "all checks passed",
+    "includes": [
+      "Python",
+      "Rust Ubuntu/macOS/Windows",
+      "Linux and Windows install/launch smoke",
+      "CodeQL",
+      "Gitleaks",
+      "cargo audit/deny"
+    ]
+  }
 }

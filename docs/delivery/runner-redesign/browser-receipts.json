@@ -164,5 +164,11 @@
     "unknownPauseRequiresAttention": true,
     "unknownPauseCannotWrite": true,
     "retryReadsConfirmedState": true
+  },
+  "endpointShortcut": {
+    "advancedEndpointShortcut": true,
+    "offlineDisclosureOpen": true,
+    "endpointHeadingFocused": true,
+    "violations": []
   }
 }

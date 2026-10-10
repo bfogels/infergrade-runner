@@ -87,6 +87,13 @@ export function initDesktopNavigation() {
   frame.querySelector("[data-open-check]").onclick = openModelCheck;
   frame.querySelector("[data-go-models]").onclick = () =>
     showDesktopPage("models");
+  frame.querySelector("[data-settings-endpoint]").onclick = () => {
+    openModelCheck();
+    const title = document.querySelector("[data-observed-runtime-panel] h2");
+    title.tabIndex = -1;
+    title.focus();
+    title.scrollIntoView({block:"nearest"});
+  };
   frame.querySelector("[data-settings-logs]").onclick = () => {
     showDesktopPage("activity");
     document.querySelector(".log-disclosure").open = true;
