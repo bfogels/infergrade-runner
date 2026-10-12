@@ -17,7 +17,7 @@ export function renderNotifications({
   return `<h2>Finish notifications</h2>${toggle("Notify when a benchmark finishes", state?.enabled, pending || !!error || !state?.available)}${errorText(error || noticeError || state?.warning)}${retry(error, pending)}<button type="button" data-off ${error ? "" : "hidden"} ${pending ? "disabled" : ""}>Turn off</button>`;
 }
 export function renderMachine({ key, name, busy, error } = {}) {
-  return `<h2>This machine</h2><form><input type="text" aria-label="Machine name" maxlength="120" autocomplete="off" value="${e(name)}" ${!key || busy || !name ? "disabled" : ""}><button type="submit" hidden>Save name</button>${retry(error, busy)}${errorText(error)}</form>`;
+  return `<h2>Machine name</h2><form><input type="text" aria-label="Machine name" placeholder="${!key ? "Connect this machine to name it" : "Loading machine name…"}" maxlength="120" autocomplete="off" value="${e(name)}" ${!key || busy || !name ? "disabled" : ""}><button type="submit" hidden>Save name</button>${retry(error, busy)}${errorText(error)}</form>`;
 }
 export function renderGpu({ saved, pending, error } = {}) {
   const disabled = pending || !saved?.available || !!error,

@@ -9,7 +9,7 @@ export function hfCredentialSummary(state) {
     : "No token saved by Runner.";
 }
 export function renderHf({ state, pending, error } = {}) {
-  return `<h2 tabindex="-1" class="sr-only">Hugging Face</h2><p data-hf-status role="status">${escapeHtml(error || hfCredentialSummary(state))}</p><button type="button" data-hf-retry ${error ? "" : "hidden"} ${pending ? "disabled" : ""}>Retry</button><details><summary>Add a token</summary><form data-hf-form><label>Read access token<input type="password" name="token" autocomplete="off" spellcheck="false" maxlength="256" placeholder="hf_…" required></label><div class="actions"><button type="submit" ${pending ? "disabled" : ""}>Verify and save</button><button type="button" data-hf-tokens>Create token</button></div></form></details><button type="button" data-hf-remove ${pending || !state?.saved ? "disabled" : ""}>Remove token</button>`;
+  return `<p data-hf-status role="status">${escapeHtml(error || hfCredentialSummary(state))}</p><button type="button" data-hf-retry ${error ? "" : "hidden"} ${pending ? "disabled" : ""}>Retry</button><details><summary>Add a token</summary><form data-hf-form><label>Read access token<input type="password" name="token" autocomplete="off" spellcheck="false" maxlength="256" placeholder="hf_…" required></label><div class="actions"><button type="submit" ${pending ? "disabled" : ""}>Verify and save</button><button type="button" data-hf-tokens>Create token</button></div></form></details><button type="button" data-hf-remove ${pending || !state?.saved ? "disabled" : ""}>Remove token</button>`;
 }
 export function initHfCredentials({ invoke, openExternal }) {
   const panel = document.querySelector('[data-slot="hf"]');

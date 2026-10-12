@@ -8,8 +8,9 @@ import {
   homePresentation,
   escapeHtml,
   renderLibrary,
+  modelDisplayName,
 } from "./desktopViews.js";
-import { renderStartup, renderGpu, renderAdmission } from "./settingViews.js";
+import { renderStartup, renderGpu, renderAdmission, renderMachine } from "./settingViews.js";
 import { renderActivityList } from "./activityView.js";
 import { renderHomeResults } from "./homeResults.js";
 const ready = {
@@ -252,4 +253,31 @@ test("Library renders native Unix-second timestamps and rejects malformed dates"
   assert.ok(render(used).includes("Last used " + new Date(used * 1000).toLocaleDateString()));
   assert.match(render("invalid"), /Last used unavailable/);
   assert.match(render(null), /Last used unavailable/);
+});
+
+test("Unconnected Home keeps connection action when pause read fails", () => {
+  assert.equal(homePresentation({ paired: false, admissionError: true }).target, "connect");
+  assert.equal(homePresentation({ ...ready, admissionError: true }).target, "pause-retry");
+  assert.equal(homePresentation({ paired: false, admissionError: true, privateRunning: true }).target, "run");
+  assert.equal(homePresentation({ paired: false, admissionError: true, privateFailed: true }).target, "run");
+});
+test("GGUF display formatting preserves exact names and unverified quantization", () => {
+  assert.equal(modelDisplayName("Llama-3.2-3B-Q4_K_M.gguf"), "Llama 3.2 3B · Q4_K_M");
+  assert.equal(modelDisplayName("Qwen3.5-4B-Q4_K_M.gguf"), "Qwen3.5 4B · Q4_K_M");
+  assert.equal(modelDisplayName("model.safetensors"), "model.safetensors");
+  const html = renderLibrary({ found: [{ name: "Llama-3.2-3B-Q4_K_M.gguf", path: "/local/a.gguf" }] });
+  assert.match(html, /Llama 3.2 3B · Q4_K_M/);
+  assert.match(html, /<p>Llama-3.2-3B-Q4_K_M\.gguf<\/p>/);
+  assert.match(html, /Quant unverified/);
+});
+test("Unconnected machine field explains why naming is unavailable", () => {
+  assert.match(renderMachine({}), /Connect this machine to name it/);
+  assert.match(renderMachine({}), /<h2>Machine name<\/h2>/);
+  assert.match(renderMachine({}), /<input[^>]*disabled/);
+  assert.match(renderMachine({ key: "runner|hub", name: "My Mac" }), /value="My Mac"/);
+});
+test("Settings has one Hugging Face heading after token hydration", async () => {
+  const { renderHf } = await import("./hfCredentials.js");
+  const html = renderSettings({ components: { hf: { state: {}, render: renderHf } } });
+  assert.equal((html.match(/<h2[^>]*>Hugging Face<\/h2>/g) || []).length, 1);
 });

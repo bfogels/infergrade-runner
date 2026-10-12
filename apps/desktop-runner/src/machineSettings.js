@@ -23,6 +23,7 @@ export function initMachineSettings({invoke}){
  const panel=document.querySelector('[data-slot="machine"]');if(!panel)return null;
  panel.className='setting-row desktop-machine';
  const emit=state=>renderPageComponent('settings','machine',state,renderMachine);
+ emit({key:'',name:'',busy:false,error:''});
  const call=async(command,args)=>{const native=await invoke();if(!native)throw new Error('Open the desktop app to change this setting.');return native(command,args);};
  const controller=machineNameController({read:()=>call('desktop_machine_name'),save:label=>call('set_desktop_machine_name',{label}),apply:state=>{emit(state);const input=panel.querySelector('input');if(!state.busy)input.value=state.name;document.querySelector('.desktop-machine>strong').textContent=state.name||'This machine';}});
  panel.onchange=event=>{if(event.target.matches('input'))controller.save(event.target.value);};

@@ -51,7 +51,7 @@ export function homePresentation(state = {}) {
       action: "Check connection",
       target: "ready",
     };
-  if (state.admissionError)
+  if (state.admissionError && state.paired)
     return {
       title: "Needs attention",
       sentence: "Could not confirm whether new benchmarks are paused.",
@@ -199,12 +199,19 @@ export function renderLibrary({ found = [], downloads = [], page = 0 } = {}) {
         .slice(page * 5, page * 5 + 5)
         .map(
           (file) =>
-            `<div class="model-row" data-model-id="${eModel(file.artifact_id || file.path || file.name)}"><div class="grow"><strong>${eModel(file.name)}</strong><p class="meta">${eModel(file.quantization || file.quant || "Quant unverified")} · ${bytes(file.size_bytes)} · ${eModel(file.origin === "download" ? "InferGrade" : file.source || "Local folder")} · ${libraryLastUsed(file.last_used_at)}</p></div>${file.origin === "download" && file.managed ? `<label>Keep <input type="checkbox" data-library-keep="${eModel(file.artifact_id)}" aria-label="Keep ${eModel(file.name)}" ${file.keep ? "checked" : ""}></label><button type="button" data-library-delete="${eModel(file.artifact_id)}" ${file.keep ? "disabled" : ""}>Delete</button>` : `<button type="button" data-library-check="${eModel(file.path)}" ${file.format === "safetensors" ? "disabled" : ""}>Check</button><span class="meta" title="Runner preserves files owned by other apps.">External file</span>`}<details><summary aria-label="Details for ${eModel(file.name)}">Details</summary><p>${eModel(file.path || file.name)}</p><p class="meta">${eModel(file.reason || "File names do not verify publisher, quantization or memory fit.")}</p>${file.format === "safetensors" ? '<p class="meta">Use infergrade models convert with a compatible llama.cpp converter to create a GGUF; source files stay unchanged.</p>' : ""}</details></div>`,
+            `<div class="model-row" data-model-id="${eModel(file.artifact_id || file.path || file.name)}"><div class="grow"><strong title="${eModel(file.name)}">${eModel(modelDisplayName(file.name))}</strong><p class="meta">${eModel(file.quantization || file.quant || "Quant unverified")} · ${bytes(file.size_bytes)} · ${eModel(file.origin === "download" ? "InferGrade" : file.source || "Local folder")} · ${libraryLastUsed(file.last_used_at)}</p></div>${file.origin === "download" && file.managed ? `<label>Keep <input type="checkbox" data-library-keep="${eModel(file.artifact_id)}" aria-label="Keep ${eModel(file.name)}" ${file.keep ? "checked" : ""}></label><button type="button" data-library-delete="${eModel(file.artifact_id)}" ${file.keep ? "disabled" : ""}>Delete</button>` : `<button type="button" data-library-check="${eModel(file.path)}" ${file.format === "safetensors" ? "disabled" : ""}>Check</button><span class="meta" title="Runner preserves files owned by other apps.">External file</span>`}<details><summary aria-label="Details for ${eModel(file.name)}">Details</summary><p>${eModel(file.name)}</p><p>${eModel(file.path || file.name)}</p><p class="meta">${eModel(file.reason || "File names do not verify publisher, quantization or memory fit.")}</p>${file.format === "safetensors" ? '<p class="meta">Use infergrade models convert with a compatible llama.cpp converter to create a GGUF; source files stay unchanged.</p>' : ""}</details></div>`,
         )
         .join(
           "",
         )}</div>${pages > 1 ? `<div class="actions"><button type="button" data-library-page="${page - 1}" ${page === 0 ? "disabled" : ""}>Previous</button><span>Page ${page + 1} of ${pages}</span><button type="button" data-library-page="${page + 1}" ${page + 1 === pages ? "disabled" : ""}>Next</button></div>` : ""}`
     : '<p class="meta">No models found yet.</p>';
+}
+// This is filename formatting only, never verified model identity or quantization.
+export function modelDisplayName(name) {
+  const raw = String(name ?? "");
+  if (!/\.gguf$/i.test(raw)) return raw;
+  return raw.replace(/\.gguf$/i, "").replace(/[-_](Q\d[\w]*|IQ\d[\w]*|F16|F32|BF16)$/i, " · $1")
+    .replaceAll("-", " ");
 }
 const eModel = escapeHtml;
 

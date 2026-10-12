@@ -74,3 +74,9 @@ The screenshots use fixed synthetic numbers only within the test harness. Accept
 ## Reproduce the UI receipts
 
 Start the changed desktop frontend on `127.0.0.1:1420`, the archived baseline on `1422`, and the shared prototype folder on `4189`. Run `capture-before.cjs`, `capture-after.cjs`, `check-reconciliation.cjs`, `check-private.cjs`, `check-browser.cjs`, `check-system.cjs`, `check-pause-recovery.cjs`, `check-endpoint-shortcut.cjs`, `check-idle-home.cjs`, `check-cache-recovery.cjs` and `capture-mockup.cjs` with the Playwright CLI `run-code --filename` command in that order. The scripts use a fake Tauri bridge and a temporary axe-core install; they do not modify accounts or native preferences. The capture output paths are explicit to this workspace. The gallery contains the original, unedited screenshots.
+
+## October 12 review follow-up
+
+Unconnected Home retains its Connect action when pause-status reading fails; paired machines retain pause recovery. GGUF library titles format filenames for readability, with exact filenames retained in the title and Details and no new verified identity or quantization claim. Settings has one Hugging Face heading and renders the initial unconnected machine-name row with an explanatory disabled field.
+
+Validation: 121 desktop JavaScript tests and production build pass. A browser fixture replay passed first-launch helper failure, initial unconnected naming, single Hugging Face heading, readable/exact library names and paired name saving, with zero page errors. Light/dark Settings screenshots were inspected locally; no new bitmap evidence was added to Git. This follow-up has not received a new independent review. The existing hardware-class-only response and 1000×700 minimum are unchanged.
