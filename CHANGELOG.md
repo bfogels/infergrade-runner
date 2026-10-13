@@ -5,6 +5,18 @@ user-visible changes; full evidence boundaries and validation details live in
 the release PRs and tags. Versions without an entry shipped internal or
 incremental changes only — see the git history.
 
+## 0.3.71 (contract 0.3.43)
+
+- Rebuilds Desktop around status-first Home, Models, Activity, and grouped
+  autosaving Settings, preserving existing execution and recovery controls.
+- Preserves focused controls, drafts, and open disclosures during polling;
+  retains download-library errors and Retry until recovery succeeds.
+- Clarifies connection and machine-name states, model titles, and exact
+  artifact filenames; raises the minimum desktop window to 1000×700.
+- Keeps execution, schemas, and contract 0.3.43 unchanged. Hosted platform
+  packaging and browser fixtures do not establish physical GPU execution,
+  clean-account contribution success, or complete native screen-reader coverage.
+
 ## 0.3.70 (contract 0.3.43)
 
 - Finds local Hugging Face/vLLM Safetensors checkpoints alongside GGUF files,
