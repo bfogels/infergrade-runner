@@ -1,0 +1,24 @@
+Window: "InferGrade Runner", App: InferGrade Runner Review.
+0 standard window InferGrade Runner, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: InferGrade Runner, URL: tauri://localhost
+			3 container
+				4 link IG InferGrade Runner, Value: tauri://localhost#home
+				5 container Runner
+					6 button Home
+					7 button Models
+					8 button Activity
+					9 button Settings
+				10 text This machine Connect this machine Pause new jobs
+				11 checkbox Pause new benchmarks, Value: 0
+	12 close button
+	13 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	14 minimize button
+	15 text InferGrade Runner
+16 menu bar
+	17 InferGrade Runner Review
+	18 File
+	19 Edit
+	20 View
+	21 Window
+	22 Help

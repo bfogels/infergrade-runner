@@ -1,0 +1,94 @@
+{
+  "stdlib": {
+    "command": "./scripts/test_all.sh",
+    "tests": 1358,
+    "status": "pass",
+    "duration_seconds": 134.997,
+    "python_test_commit": "15dea9f",
+    "note": "Started from a clean commit; final frontend copy/pause patch separately passed desktop and browser checks."
+  },
+  "desktop": {
+    "command": "npm run check",
+    "tests": 117,
+    "status": "pass",
+    "production_build": "pass"
+  },
+  "source_commit": "546860017e4cca084ad373c2d58f03e258120bb0",
+  "independent_review": "No actionable findings after preserving attempted offline outcomes across Make ready while hiding empty preflight; completed and failed local recovery checked in browser.",
+  "backend_diff": "Only Tauri minimum window dimensions change; Rust source, commands, permissions, backend source, version and release identity unchanged.",
+  "native_screen_reader": {
+    "focused_controls": "User confirmed: Yes, labels and roles are announced clearly",
+    "remaining_page_verification": "User was unsure about announcements on Models, Activity and Settings; broader native screen-reader pass remains unverified.",
+    "automation_limitation": "Native AX snapshots intermittently omit visible Activity/Settings bodies; not equivalent to audible failure",
+    "cleanup": "VoiceOver restored off; idle review build closed; installed Runner reopened."
+  },
+  "physical_and_live_account_acceptance": "not claimed",
+  "source_note": "Current frontend source passed 117 desktop tests, production build, forced-failure browser recovery check and all CI checks. Historical local full stdlib receipt remains scoped to its stated commit.",
+  "ci": {
+    "commit": "546860017e4cca084ad373c2d58f03e258120bb0",
+    "status": "all checks passed",
+    "checks": [
+      {
+        "name": "CodeQL",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "Rust workspace (build, test, clippy, fmt) (macos-latest)",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "Rust workspace (build, test, clippy, fmt) (ubuntu-latest)",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "cargo audit (advisory snapshot, non-blocking)",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "Gitleaks",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "Linux install and launch smoke",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "python",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "Rust workspace (build, test, clippy, fmt) (windows-latest)",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "Windows install and launch smoke",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "cargo deny (advisories + bans + licenses)",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "Analyze (python)",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "Analyze (rust)",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "Analyze (javascript-typescript)",
+        "state": "SUCCESS"
+      },
+      {
+        "name": "Analyze (actions)",
+        "state": "SUCCESS"
+      }
+    ]
+  },
+  "cache_read_recovery": {
+    "error_persists_across_navigation": true,
+    "retry_handler_preserved": true,
+    "successful_read_clears_error": true
+  }
+}
