@@ -12,8 +12,9 @@ import { initDesktopActivity, activityRunUrl } from './desktopActivity.js';
 import { activityResultUrl } from './activityResults.js';
 import { initHomeResults, listenerConnectionMatches } from './homeResults.js';
 import "./styles.css";
+import {pageState,setPageState} from "./desktopState.js";
 import {devicePairingController} from "./devicePairing.js";
-import {initDesktopNavigation,showDesktopPage} from "./desktopNavigation.js";
+import {initDesktopNavigation,showDesktopPage,updateHome,openModelCheck} from "./desktopNavigation.js";
 initDesktopNavigation();
 import packageInfo from "../package.json";
 import {
@@ -212,6 +213,7 @@ function setDesktopConnectionKey(next) {
 let desktopMachineSettings = null;
 let hubConnectionVerified = false;
 let lastFirstRunPayload = null;
+let localFirstRunAttempted = false;
 let lastReadinessCheckAt = null;
 let assignmentStartedAt = null;
 let assignmentClockTimer = null;
@@ -365,67 +367,13 @@ function renderLastCheckLabel() {
 function renderPrimaryReadiness() {
   const paired = pairedForUi();
   const listening = Boolean(childProcess);
-  const presentation = desktopReadinessPresentation({
-    paired,
-    listening,
-    runtimeAvailable: llamaRuntimeAvailable,
-    hubVerified: hubConnectionVerified,
-    authFailure: pairingAuthFailure,
-  });
   document.documentElement.dataset.paired = paired ? "true" : "false";
   document.documentElement.dataset.listening = listening ? "true" : "false";
-  document.documentElement.dataset.pairingRepair = pairingAuthFailure?.invalid ? "true" : "false";
   renderHubDisplay();
-  setReadinessFact("hub", presentation.hubFact, presentation.hubFactState);
-  setReadinessFact("runtime", llamaRuntimeAvailable ? "Runtime ready" : "Runtime check needed", llamaRuntimeAvailable ? "ready" : "warning");
-  setReadinessFact(
-    "token",
-    pairingAuthFailure?.invalid ? "Pair again" : savedTokenAvailable ? "Token secure" : "Token missing",
-    pairingAuthFailure?.invalid || !savedTokenAvailable ? "blocked" : "ready"
-  );
-  if (readyMark) {
-    readyMark.dataset.state = presentation.ready ? "ready" : currentStatusTone === "error" ? "error" : "warning";
-  }
-  if (primaryStateTitle) {
-    primaryStateTitle.textContent = presentation.title;
-  }
-  if (primaryStateMessage) {
-    primaryStateMessage.textContent = presentation.message;
-  }
-  if (listenerTitle) {
-    listenerTitle.textContent = pairingAuthFailure?.invalid ? "Pairing needed" : document.documentElement.dataset.admissionPaused === "unknown" ? "Admission state unconfirmed" : document.documentElement.dataset.admissionPaused === "true" ? "New benchmarks paused" : listening ? "Listening for Hub" : "Listener stopped";
-  }
-  if (listenerMessage) {
-    listenerMessage.textContent = pairingAuthFailure?.invalid
-      ? "Pair this machine again before it can accept Hub-assigned work."
-      : document.documentElement.dataset.admissionPaused === "unknown" ? "Refresh the saved admission state. Current work continues."
-      : document.documentElement.dataset.admissionPaused === "true" ? "New benchmarks are paused. Queued work keeps its place; any active benchmark continues."
-      : listening
-      ? "This machine can receive Hub-assigned runs. Keep the app open while work is active."
-      : "Pairing is saved. Start listening when this machine should accept Hub-assigned work.";
-  }
-  if (listenerStatusMark) {
-    listenerStatusMark.dataset.state = listening ? "listening" : "paused";
-  }
-  if (backendRuntimeStatus) {
-    backendRuntimeStatus.textContent = llamaRuntimeAvailable ? "ready" : "check";
-  }
-  if (backendTokenStatus) {
-    backendTokenStatus.textContent = pairingAuthFailure?.invalid ? "expired" : savedTokenAvailable ? "secure" : "missing";
-  }
-  if (backendTokenRow) {
-    backendTokenRow.dataset.state = pairingAuthFailure?.invalid ? "error" : savedTokenAvailable ? "ready" : "warning";
-  }
-  if (backendReconnectStatus) {
-    backendReconnectStatus.textContent = pairingAuthFailure?.invalid ? "blocked" : paired ? "ready" : "after pair";
-  }
-  if (backendReconnectRow) {
-    backendReconnectRow.dataset.state = pairingAuthFailure?.invalid ? "error" : "";
-  }
-  if (backendContainerStatus) {
-    const lowered = containerRuntimeReadiness.toLowerCase();
-    backendContainerStatus.textContent = lowered.includes("detected") || lowered.includes("found") ? "ready" : "optional";
-  }
+  updateHome({paired,listening,runtimeAvailable:llamaRuntimeAvailable,verified:hubConnectionVerified,
+    paused:document.documentElement.dataset.admissionPaused==='true',authFailure:pairingAuthFailure?.invalid,
+    hasRun:assignmentPanel&&!assignmentPanel.hidden,failed:currentStatusTone==='error'||currentAssignmentPhase==='Needs attention',
+    running:nativeFirstRunBusy||observedRuntimeCheckRunning||assignmentPanel?.dataset.state==='active'&&!['Complete','Ready to retry','Needs attention'].includes(currentAssignmentPhase)});
   renderLastCheckLabel();
 }
 
@@ -518,6 +466,8 @@ function renderAssignmentIdle() {
     renderRecentCompletion();
     return;
   }
+  setPageState('home',{assignment:null});
+  assignmentPanel.hidden = true;
   assignmentPanel.dataset.state = "idle";
   assignmentStartedAt = null;
   currentAssignmentRemaining = "";
@@ -568,6 +518,7 @@ function renderRecentCompletion() {
   homeResults?.setRun(completion.runId);
   pendingRequiredRuntime = null;
   pendingManagedRuntimeRepair = false;
+  assignmentPanel.hidden = false;
   assignmentPanel.dataset.state = "completed";
   currentAssignmentRunId = completion.runId;
   currentAssignmentResultId = completion.resultId;
@@ -593,6 +544,9 @@ function renderRecentCompletion() {
   if (assignmentStartListeningButton) assignmentStartListeningButton.hidden = true;
   if (assignmentInstallRuntimeButton) assignmentInstallRuntimeButton.hidden = true;
   if (assignmentOpenHubButton) assignmentOpenHubButton.textContent = completion.resultId ? "Open evidence" : "Open run";
+  homeResults?.refresh();
+  setPageState('home',{assignment:{state:'completed',title:completion.title,phase:'Complete',description:completion.resultId?'Upload complete; accepted results appear below.':'Open the job in Hub to check its results.',progress:100,time:completionDurationLabel(completion)}});
+  renderPrimaryReadiness();
 }
 
 function renderAssignmentActive({
@@ -623,13 +577,14 @@ function renderAssignmentActive({
     waitingForListener,
     startedAt,
   });
+  assignmentPanel.hidden = false;
   assignmentPanel.dataset.state = waitingForListener ? "waiting-for-listener" : "active";
   assignmentStartedAt = clock.startedAt;
   currentAssignmentRemaining = remaining;
   currentAssignmentRunId = nextRunId;
   currentAssignmentPhase = phase;
   if (assignmentKicker) {
-    assignmentKicker.textContent = waitingForListener ? "Action needed" : "Active assignment";
+    assignmentKicker.textContent = waitingForListener ? "Action needed" : "Current run";
   }
   if (assignmentTitle) {
     assignmentTitle.textContent = title;
@@ -654,6 +609,8 @@ function renderAssignmentActive({
     assignmentProgressBar.style.width = `${boundedProgress}%`;
   }
   renderAssignmentStages({ phase, checkName, progress, waitingForListener });
+  setPageState('home',{assignment:{state:waitingForListener?'waiting-for-listener':'active',title,phase,description,progress,checkName,waitingForListener,time:assignmentTime?.textContent||''}});
+  renderPrimaryReadiness();
   if (assignmentStartListeningButton) {
     assignmentStartListeningButton.hidden = !waitingForListener;
   }
@@ -733,15 +690,20 @@ function renderAssignmentPreflightOutcome(result = null, { staleRuntimeCleared =
   } else {
     modelPreflightReadiness = "Waiting for a claimable Hub assignment. No model compatibility evidence exists yet.";
   }
-  renderAssignmentActive({
-    title: runId ? assignmentTitleFromRunId(runId) : "First benchmark preflight",
-    phase: presentation.phase,
-    description: presentation.description,
-    progress: presentation.progress,
-    checkName: presentation.checkName,
-    runId,
-    waitingForListener: presentation.waitingForListener,
-  });
+  if (runId) {
+    renderAssignmentActive({
+      title: assignmentTitleFromRunId(runId),
+      phase: presentation.phase,
+      description: presentation.description,
+      progress: presentation.progress,
+      checkName: presentation.checkName,
+      runId,
+      waitingForListener: presentation.waitingForListener,
+    });
+  } else if (!lastFirstRunPayload && !localFirstRunAttempted) {
+    // Empty setup belongs in the hero; retain an attempted local check and its recovery.
+    renderAssignmentIdle();
+  }
   const canStartListener = ["assignment_ready_to_start", "queue_unconfirmed", "queue_empty"].includes(presentation.kind);
   if (assignmentStartListeningButton) {
     assignmentStartListeningButton.hidden = !canStartListener;
@@ -1073,7 +1035,8 @@ function renderLocalReadinessChecklist() {
     }
   }
   if (runtimeLlamaStatus) {
-    runtimeLlamaStatus.textContent = llamaRuntimeReadiness;
+    runtimeLlamaStatus.textContent = llamaRuntimeAvailable ? "Local runtime ready." : "Choose a managed build or a custom binary.";
+    runtimeLlamaStatus.title = llamaRuntimeReadiness;
   }
   if (containerRuntimeStatus) {
     containerRuntimeStatus.textContent = containerRuntimeReadiness;
@@ -1090,6 +1053,7 @@ function renderLocalReadinessChecklist() {
 
 function renderModelCache(payload = null) {
   modelCachePayload = payload;
+  if(refreshModelCacheButton)refreshModelCacheButton.hidden=true;
   const artifacts = Array.isArray(payload?.artifacts) ? payload.artifacts : [];
   const count = Number(payload?.artifact_count ?? artifacts.length) || 0;
   const bytes = Number(payload?.artifact_bytes) || 0;
@@ -1098,54 +1062,13 @@ function renderModelCache(payload = null) {
       ? `${count} cached model${count === 1 ? "" : "s"} using ${formatBytes(bytes)}.`
       : "No cached model artifacts.";
   }
-  if (!modelCacheList) {
-    return;
-  }
-  modelCacheList.replaceChildren();
-  const pageSize = 5;
-  const pageCount = Math.max(1, Math.ceil(artifacts.length / pageSize));
-  modelCachePage = Math.max(0, Math.min(modelCachePage, pageCount - 1));
-  artifacts.slice(modelCachePage * pageSize, (modelCachePage + 1) * pageSize).forEach((artifact) => {
-    const item = document.createElement("li");
-    const name = document.createElement("strong");
-    name.textContent = displayCacheArtifactName(artifact.name);
-    const size = document.createElement("em");
-    size.textContent = formatBytes(artifact.size_bytes);
-    const ownership = document.createElement("span");
-    ownership.className = "cache-ownership";
-    ownership.textContent = artifact.managed ? "Runner download" : "Legacy or unowned file · preserved";
-    item.append(name, size, ownership);
-    if (artifact.managed && artifact.artifact_id) {
-      const label = document.createElement("label");
-      const keep = document.createElement("input");
-      keep.type = "checkbox"; keep.checked = artifact.keep === true;
-      keep.setAttribute("aria-label", `Keep ${displayCacheArtifactName(artifact.name)} when clearing space`);
-      label.append(keep, document.createTextNode(" Keep when clearing space"));
-      keep.addEventListener("change", async () => {
-        const wanted = keep.checked; keep.disabled = true;
-        try { const invoke = await loadTauriInvoke(); if (!invoke) throw new Error("Open the desktop app to update Keep."); const updated = await invoke("set_desktop_model_keep", { artifactId: artifact.artifact_id, keep: wanted }); renderModelCache(updated); }
-        catch (error) { keep.checked = !wanted; keep.disabled = false; if (modelCacheStatus) modelCacheStatus.textContent = `Could not update Keep: ${error.message || error}`; appendLog(`Could not update Keep: ${error.message || error}`); }
-      });
-      const remove = document.createElement("button"); remove.type = "button"; remove.className = "button-secondary compact-button"; remove.textContent = "Delete download"; remove.disabled = artifact.keep === true;
-      remove.addEventListener("click", async () => {
-        if (!window.confirm(`Delete ${displayCacheArtifactName(artifact.name)}? It can be downloaded again.`)) return;
-        remove.disabled = true;
-        try { const invoke = await loadTauriInvoke(); if (!invoke) throw new Error("Open the desktop app to delete downloads."); const updated = await invoke("clear_desktop_model_cache", { artifactId: artifact.artifact_id }); renderModelCache(updated.status); }
-        catch (error) { remove.disabled = false; if (modelCacheStatus) modelCacheStatus.textContent = `Could not delete download: ${error.message || error}`; appendLog(`Could not delete download: ${error.message || error}`); }
-      });
-      item.append(label, remove);
-    }
-    modelCacheList.append(item);
-  });
-  if (modelCachePagination && modelCachePageLabel && modelCachePreviousButton && modelCacheNextButton) {
-    modelCachePagination.hidden = artifacts.length <= pageSize;
-    modelCachePageLabel.textContent = `Page ${modelCachePage + 1} of ${pageCount}`;
-    modelCachePreviousButton.disabled = modelCachePage === 0;
-    modelCacheNextButton.disabled = modelCachePage >= pageCount - 1;
-  }
+  setPageState('models',{library:{...pageState('models').library,downloads:artifacts},cacheError:false,cacheStatus:count ? `${count} downloaded model${count === 1 ? "" : "s"} using ${formatBytes(bytes)}.` : "No downloaded models."});
+  setPageState('home',{downloadedModels:artifacts.map(model=>displayCacheArtifactName(model.name))});
+
 }
 
 async function refreshModelCache() {
+  setPageState('models',{cacheError:false,cacheStatus:"Checking downloads…"});
   if (modelCacheStatus) {
     modelCacheStatus.textContent = "Checking local model cache...";
   }
@@ -1157,7 +1080,9 @@ async function refreshModelCache() {
     }
     return null;
   }
-  const payload = await invoke("desktop_model_cache_status");
+  let payload;
+  try {payload = await invoke("desktop_model_cache_status");}
+  catch(error){setPageState('models',{cacheError:true,cacheStatus:"Could not read downloads. Try again."});throw error;}
   renderModelCache(payload);
   return payload;
 }
@@ -1220,7 +1145,7 @@ function renderFirstRunChecklist() {
   const uploadSucceeded = lastFirstRunPayload?.upload?.uploaded === true;
   const uploadFailed = Boolean(lastFirstRunPayload?.upload?.error);
   const uploadReady = localRunComplete && Boolean(currentFirstRunUploadRunId()) && !uploadSucceeded;
-  const firstRunReady = paired && llamaRuntimeAvailable && modelSelected;
+  const firstRunReady = llamaRuntimeAvailable && modelSelected && (!currentFirstRunUploadRunId() || paired);
 
   if (firstRunStartButton) firstRunStartButton.disabled = nativeFirstRunBusy || !firstRunReady;
 
@@ -1260,6 +1185,10 @@ function renderFirstRunChecklist() {
 }
 
 function renderDesktopReadiness(payload = {}) {
+  const hardware=document.querySelector('[data-machine-hardware]');
+  if(payload.hardware_class)hardware.textContent=({apple_silicon:'Apple Silicon',nvidia_gpu:'NVIDIA GPU',amd_gpu:'AMD GPU',cpu_only:'CPU'})[payload.hardware_class]||payload.accelerator_api||'This machine';
+  else hardware.textContent='Hardware is available in the desktop app.';
+  setPageState('home',{hardware:hardware.textContent});
   if (!payload.status) {
     llamaRuntimeAvailable = false;
     nativeSuiteReadiness = "Open the desktop app to verify local execution readiness.";
@@ -1471,6 +1400,7 @@ async function runReadinessCheck() {
     }
   } catch (error) {
     const authFailure = applyHubAuthenticationFailure(error);
+    if(/unavailable|network|connect|fetch/i.test(String(error.message||error)))setPageState('home',{offline:true});
     setStatus(authFailure ? pairingAuthFailure?.title || "Pairing expired" : "Needs attention", "error");
     appendLog(`Readiness check failed: ${error.message || error}`);
     if (!authFailure) {
@@ -1506,6 +1436,7 @@ async function verifyHubConnection() {
     throw new Error("Hub did not confirm Runner registration and heartbeat.");
   }
   hubConnectionVerified = true;
+  setPageState('home',{offline:false});
   pairingAuthFailure = null;
   if (pairingReadinessStatus) {
     pairingReadinessStatus.textContent = "Pairing and authenticated Hub access verified.";
@@ -1531,6 +1462,7 @@ async function openHub(target = "home") {
 }
 
 function showLogs() {
+  showDesktopPage("activity");
   showDesktopPage("activity");
   if (supportDetails) {
     supportDetails.open = true;
@@ -1721,13 +1653,14 @@ async function updateTokenState() {
       setDesktopConnectionKey(savedTokenAvailable && runnerProfileAvailable ? `${profile.runner_id}|${profile.api_url}` : '');
       if (tokenState) {
         if (runnerProfileAvailable && hasToken) {
-          tokenState.textContent = "Runner profile and OS token saved.";
+          tokenState.textContent = "Connected to your Hub.";
+          pairState.textContent = profile.label || "Connected machine";
         } else if (runnerProfileAvailable) {
           tokenState.textContent = "Runner profile saved, but the OS token is unavailable.";
         } else if (hasToken) {
           tokenState.textContent = "Runner token is saved in the OS credential store, but no runner profile is saved.";
         } else {
-          tokenState.textContent = "No runner profile saved. Paste a Hub pairing code before listening for Hub runs.";
+          tokenState.textContent = "Approve this machine in your browser.";
         }
       }
       renderLocalReadinessChecklist();
@@ -1908,6 +1841,7 @@ function assignmentTimingSummary(timing = {}) {
 
 function renderAssignmentFromListenerEvent(payload = {}) {
   if (payload.type === "assignment_idle") {
+    setPageState('home',{lowDisk:false,needsHf:false});
     currentFirstRunUploadRunId() ? renderAssignmentFromHandoff() : renderAssignmentIdle();
     return;
   }
@@ -1918,6 +1852,8 @@ function renderAssignmentFromListenerEvent(payload = {}) {
   const runId = payload.run_id || payload.runId || "";
   renderModelPreflightFromAssignment(payload);
   const recovery = phase === "Needs attention" ? assignmentEventRecovery(payload) : null;
+  const error=String(payload.error_code||payload.description||'').toLowerCase();
+  setPageState('home',{lowDisk:/disk|no space/.test(error),needsHf:/hugging|hf.token|gated/.test(error)});
   if (recovery) {
     pendingRequiredRuntime = recovery.requiredRuntime;
     pendingManagedRuntimeRepair = ["repair_saved_runtime", "install_managed_runtime"].includes(recovery.kind);
@@ -2687,6 +2623,8 @@ function applyObservedRuntimeHandoff(incomingHandoff = null) {
   }
   setStatus("Local check ready", "good");
   if (observedRuntimeEndpointInput) {
+    openModelCheck();
+    document.querySelector("[data-check-panel]").open=true;
     observedRuntimeEndpointInput.focus();
   }
 }
@@ -2771,6 +2709,7 @@ async function runObservedRuntimeCheck() {
     throw new Error(message);
   } finally {
     observedRuntimeCheckRunning = false;
+    renderLocalReadinessChecklist();
     if (observedRuntimeStartButton) {
       observedRuntimeStartButton.disabled = false;
     }
@@ -2950,21 +2889,26 @@ function updateFirstRunSupportActions() {
   const hasArtifact = Boolean(firstRunArtifactText());
   if (firstRunAgainButton) {
     firstRunAgainButton.disabled = !lastFirstRunPayload;
+    firstRunAgainButton.hidden = !lastFirstRunPayload;
   }
   if (firstRunAnotherModelButton) {
     firstRunAnotherModelButton.disabled = !lastFirstRunPayload && !currentFirstRunModelPath();
+    firstRunAnotherModelButton.hidden = !lastFirstRunPayload;
   }
   if (copyArtifactPathButton) {
     copyArtifactPathButton.disabled = !hasArtifact;
+    copyArtifactPathButton.hidden = !hasArtifact;
   }
   if (retryFirstRunUploadButton) {
     const uploaded = lastFirstRunPayload?.upload?.uploaded === true;
-    retryFirstRunUploadButton.disabled = !lastFirstRunPayload || uploaded;
+    retryFirstRunUploadButton.disabled = !lastFirstRunPayload || uploaded || !currentFirstRunUploadRunId();
+    retryFirstRunUploadButton.hidden = !lastFirstRunPayload?.upload?.error;
   }
 }
 
 function clearFirstRunLocalState({ clearModel = false } = {}) {
   lastFirstRunPayload = null;
+  localFirstRunAttempted = false;
   if (clearModel && firstRunModelPathInput) {
     firstRunModelPathInput.value = "";
   }
@@ -3292,6 +3236,7 @@ async function runNativeFirstRun() {
 
   await ensureFirstRunEvents();
   nativeFirstRunBusy = true;
+  localFirstRunAttempted = true;
   firstRunStartButton.disabled = true;
   setStatus("First benchmark running", "warning");
   firstRunStatus.textContent = "Starting assigned local work...";
@@ -3368,6 +3313,7 @@ async function runNativeFirstRun() {
     appendLog(`Native first-run failed: ${message}`);
   } finally {
     nativeFirstRunBusy = false;
+    renderLocalReadinessChecklist();
     renderFirstRunChecklist();
     updateFirstRunSupportActions();
   }
@@ -3469,10 +3415,11 @@ runtimePlanButton?.addEventListener("click", () => {
   });
 });
 
-runtimeTools?.addEventListener("toggle", () => {
-  if (runtimeTools.open && !runtimeCatalogPayload) {
+supportDetails?.addEventListener("toggle", () => {
+  if (supportDetails.open && !runtimeCatalogPayload) {
     refreshRuntimeCatalog().catch((error) => {
-      if (runtimeCatalogStatus) runtimeCatalogStatus.textContent = "Could not load the signed runtime catalog. The managed fallback and custom binary options remain available.";
+      if (runtimeCatalogStatus) runtimeCatalogStatus.textContent = "Could not load the runtime catalog; retry or choose a managed or custom build.";
+      if(runtimeCatalogRefreshButton)runtimeCatalogRefreshButton.hidden=false;
       appendLog(`Could not refresh signed runtime catalog: ${error.message || error}`);
     });
   }
@@ -3480,7 +3427,8 @@ runtimeTools?.addEventListener("toggle", () => {
 
 runtimeCatalogRefreshButton?.addEventListener("click", () => {
   refreshRuntimeCatalog().catch((error) => {
-    if (runtimeCatalogStatus) runtimeCatalogStatus.textContent = "Could not refresh the signed runtime catalog. Check your connection and retry.";
+    if (runtimeCatalogStatus) runtimeCatalogStatus.textContent = "Could not load the runtime catalog; check your connection and retry.";
+    if(runtimeCatalogRefreshButton)runtimeCatalogRefreshButton.hidden=false;
     appendLog(`Could not refresh signed runtime catalog: ${error.message || error}`);
   });
 });
@@ -3689,6 +3637,8 @@ observedRuntimeStartButton?.addEventListener("click", () => {
 });
 
 firstRunAgainButton?.addEventListener("click", () => {
+  openModelCheck();
+  document.querySelector("[data-check-panel]").open=true;
   clearFirstRunLocalState();
   runNativeFirstRun().catch((error) => {
     const message = error.message || String(error);
@@ -3701,6 +3651,8 @@ firstRunAgainButton?.addEventListener("click", () => {
 });
 
 firstRunAnotherModelButton?.addEventListener("click", () => {
+  openModelCheck();
+  document.querySelector("[data-check-panel]").open=true;
   clearFirstRunLocalState({ clearModel: true });
   setStatus("Choose another model", "idle");
   appendLog("Cleared local first-run result state; choose another GGUF model to run.");
@@ -3781,14 +3733,29 @@ window.setTimeout(applyPreviewStateFromUrl, 50);
 // First-run setup shares the managed installer with Runtime options.
 setupRuntimeButton?.addEventListener("click", () => runtimeInstallManagedButton?.click());
 
+document.querySelector('[data-home-primary]').onclick=()=>{
+ const action=document.querySelector('[data-home-primary]').dataset.action;
+ if(action==='connect'){showDesktopPage('settings');document.querySelector('[data-browser-pair-runner]').click();}
+ else if(action==='pause-retry')document.querySelector('[data-slot="admission"] [data-retry]')?.click();
+ else if(action==='resume')document.querySelector('[data-slot="admission"] input')?.click();
+ else if(action==='hub')openHub('build').catch(error=>appendLog(error.message));
+ else if(action==='listen')startButtons[0]?.click();
+ else if(action==='models')showDesktopPage('models');
+ else if(action==='token'){showDesktopPage('settings');document.querySelector('[data-slot="hf"] details').open=true;}
+ else if(action==='settings'){showDesktopPage('settings');supportDetails.open=true;}
+ else if(action==='ready')readinessCheckButton?.click();
+ else if(pageState('home').privateRunning||pageState('home').privateFailed){const panel=document.querySelector('[data-slot="private-running"]');panel.scrollIntoView({block:'nearest'});const title=panel.querySelector('h2');title.tabIndex=-1;title.focus();}
+ else if(observedRuntimeCheckRunning){openModelCheck();const title=document.querySelector('[data-observed-runtime-panel] h2');title.tabIndex=-1;title.focus();title.scrollIntoView({block:'nearest'});}
+ else {assignmentPanel?.scrollIntoView({block:'nearest'});assignmentTitle?.focus();}
+};
 const privateBenchmark=initPrivateBenchmark({invoke:loadTauriInvoke,onRun:()=>showDesktopPage('home')});
 
-initModelDiscovery({benchmarkFile:path=>privateBenchmark?.chooseFile(path),invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
+initModelDiscovery({benchmarkFile:path=>{openModelCheck();privateBenchmark?.chooseFile(path);},invoke:loadTauriInvoke,formatBytes,chooseFolder:async()=>{
   if(!await loadTauriInvoke())throw new Error('Desktop only');
   const {open}=await import('@tauri-apps/plugin-dialog');
   return open({directory:true,multiple:false,title:'Choose a local model folder'});
 },useFile:path=>{
-  if(firstRunModelPathInput){discoveredModelPath=path;firstRunModelPathInput.value=path;firstRunModelPathInput.dispatchEvent(new Event('input'));firstRunModelPathInput.focus();firstRunModelPathInput.scrollIntoView({block:'center'});}
+  if(firstRunModelPathInput){openModelCheck();document.querySelector("[data-check-panel]").open=true;discoveredModelPath=path;firstRunModelPathInput.value=path;firstRunModelPathInput.dispatchEvent(new Event('input'));firstRunModelPathInput.focus();firstRunModelPathInput.scrollIntoView({block:'center'});}
 }});
 
 homeResults=initHomeResults({invoke:loadTauriInvoke,openResult:async (result,apiUrl)=>{await openExternalUrl(activityResultUrl(apiUrl,result.result_id,result.kind));}});
@@ -3813,8 +3780,34 @@ initStartupSettings({invoke:loadTauriInvoke});
 initGpuSettings({invoke:loadTauriInvoke});
 initStorageControls({invoke:loadTauriInvoke,confirmed:()=>refreshModelCache().catch(()=>{})});
 initAdmissionSettings({invoke:loadTauriInvoke,onState:state=>{
+ setPageState('home',{admissionError:!!state.error});
  document.documentElement.dataset.admissionPaused=state.error?'unknown':state.paused===true?'true':state.paused===false?'false':'unknown';
  renderLocalReadinessChecklist();
- if(listenerTitle && state.error&&!pairingAuthFailure?.invalid)listenerTitle.textContent='Admission state unconfirmed';
- if(listenerMessage && state.error&&!pairingAuthFailure?.invalid)listenerMessage.textContent='Refresh the saved admission state. Current work continues.';
+
+
 }});
+
+window.addEventListener('focus',()=>{
+ if(nativeFirstRunBusy||appUpdateBusy)return;
+ updateTokenState().catch(error=>appendLog(error.message));
+ refreshModelCache().catch(error=>appendLog(error.message));
+ checkDesktopReadiness().catch(error=>appendLog(error.message));
+});
+
+const library=document.querySelector('[data-library]');
+library.addEventListener('change',async event=>{
+ const id=event.target.dataset.libraryKeep;if(!id)return;
+ const toggle=event.target,wanted=toggle.checked;toggle.disabled=true;
+ try{const invoke=await loadTauriInvoke();renderModelCache(await invoke('set_desktop_model_keep',{artifactId:id,keep:wanted}));}
+ catch(error){toggle.checked=!wanted;toggle.disabled=false;modelCacheStatus.textContent='Could not save Keep. Try again.';appendLog(error.message||error);}
+});
+library.addEventListener('click',async event=>{
+ const target=event.target.closest('button');if(!target||target.disabled)return;
+ if(target.dataset.libraryPage){setPageState('models',{library:{...pageState('models').library,page:Number(target.dataset.libraryPage)}});library.querySelector('button:not(:disabled)')?.focus();return;}
+ if(target.dataset.libraryCheck){openModelCheck();privateBenchmark.chooseFile(target.dataset.libraryCheck);return;}
+ const id=target.dataset.libraryDelete;if(!id)return;
+ if(!window.confirm('Delete this InferGrade download? It can be downloaded again.'))return;
+ target.disabled=true;
+ try{const invoke=await loadTauriInvoke();const updated=await invoke('clear_desktop_model_cache',{artifactId:id});renderModelCache(updated.status);setPageState('home',{lowDisk:false});}
+ catch(error){target.disabled=false;modelCacheStatus.textContent='Could not delete the download. Try again.';appendLog(error.message||error);}
+});

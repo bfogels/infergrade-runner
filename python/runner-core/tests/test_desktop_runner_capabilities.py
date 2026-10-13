@@ -1,12 +1,18 @@
 import json
 import os
 import re
+import subprocess
 import unittest
 
 
 class DesktopRunnerCapabilityTests(unittest.TestCase):
     def _repo_root(self):
         return os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+
+    def _rendered_pages(self):
+        return subprocess.check_output(["node", "--input-type=module", "-e",
+            "import {renderHome,renderModels,renderActivity,renderSettings} from './apps/desktop-runner/src/desktopViews.js'; console.log([renderHome,renderModels,renderActivity,renderSettings].map(render=>render({})).join(''));"],
+            cwd=self._repo_root(), text=True)
 
     def _api_url_validators(self):
         root = self._repo_root()
@@ -40,12 +46,10 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
 
     def test_desktop_runner_surfaces_release_and_update_gates(self):
         root = self._repo_root()
-        html_path = os.path.join(root, "apps/desktop-runner/index.html")
         js_path = os.path.join(root, "apps/desktop-runner/src/main.js")
         css_path = os.path.join(root, "apps/desktop-runner/src/styles.css")
         tauri_config_path = os.path.join(root, "apps/desktop-runner/src-tauri/tauri.conf.json")
-        with open(html_path, "r", encoding="utf-8") as handle:
-            html = handle.read()
+        html = self._rendered_pages()
         with open(js_path, "r", encoding="utf-8") as handle:
             js = handle.read()
         with open(css_path, "r", encoding="utf-8") as handle:
@@ -60,10 +64,8 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn("data-runtime-runner-version", html)
         self.assertIn("Update status unknown", html)
         self.assertNotIn("<span data-update-channel>Current release</span>", html)
-        self.assertIn("Pair with Hub before this Runner accepts assigned work.", html)
-        self.assertIn("Runtime options", html)
-        self.assertIn("Windows installers and Linux AppImage can use signed in-app updates when an update is published.", html)
-        self.assertIn("Linux .deb installations use the system package installer.", html)
+        self.assertIn("Approve this machine in your browser", html)
+        self.assertIn("Runtime", html)
         self.assertNotIn("Installers are planned after the macOS lane is verified.", html)
         self.assertIn("Local companion app for InferGrade Hub runs", tauri_config)
         self.assertIn('"../../../schemas": "schemas"', tauri_config)
@@ -75,17 +77,15 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn("function renderReleaseStatus()", js)
         self.assertIn("function refreshRunnerCliVersion()", js)
         self.assertIn('runDesktopSidecarDiagnostic(["--version"])', js)
-        self.assertIn(".version-chip", css)
-        self.assertIn(".status-list", css)
+        self.assertIn(".setting-row", css)
+        self.assertIn(".settings-list", css)
 
     def test_desktop_runner_validates_hub_url_like_sidecar_permissions(self):
         root = self._repo_root()
-        html_path = os.path.join(root, "apps/desktop-runner/index.html")
         js_path = os.path.join(root, "apps/desktop-runner/src/main.js")
         helper_path = os.path.join(root, "apps/desktop-runner/src/desktopHelpers.js")
 
-        with open(html_path, "r", encoding="utf-8") as handle:
-            html = handle.read()
+        html = self._rendered_pages()
         with open(js_path, "r", encoding="utf-8") as handle:
             js = handle.read()
         with open(helper_path, "r", encoding="utf-8") as handle:
@@ -104,7 +104,6 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
 
     def test_desktop_runner_has_explicit_system_theme_mode(self):
         root = self._repo_root()
-        html_path = os.path.join(root, "apps/desktop-runner/index.html")
         js_path = os.path.join(root, "apps/desktop-runner/src/main.js")
         css_path = os.path.join(root, "apps/desktop-runner/src/styles.css")
 
@@ -112,7 +111,7 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
             with open(path, "r", encoding="utf-8") as handle:
                 return handle.read()
 
-        html = read(html_path)
+        html = self._rendered_pages()
         js = read(js_path)
         css = read(css_path)
 
@@ -124,8 +123,8 @@ class DesktopRunnerCapabilityTests(unittest.TestCase):
         self.assertIn("function applyThemeMode(mode)", js)
         self.assertIn("document.documentElement.dataset.themeMode", js)
         self.assertIn("addEventListener(\"change\", refreshSystemTheme)", js)
-        self.assertIn(".theme-control", css)
-        self.assertIn('[aria-pressed="true"]', css)
+        self.assertIn(".seg", css)
+        self.assertRegex(css, r'\[aria-pressed\s*=\s*(?:"true"|true)\]')
 
     def test_desktop_runner_can_read_sidecar_version(self):
         root = self._repo_root()

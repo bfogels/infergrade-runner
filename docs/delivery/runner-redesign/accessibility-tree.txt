@@ -1,0 +1,82 @@
+### Page
+- Page URL: http://127.0.0.1:1420/?scenario=paired-idle
+- Page Title: InferGrade Runner
+### Snapshot
+```yaml
+- generic [ref=f106e2]:
+  - complementary [ref=f106e3]:
+    - link "IG InferGrade Runner" [ref=f106e4] [cursor=pointer]:
+      - /url: "#home"
+      - generic [ref=f106e5]: IG
+      - text: InferGrade Runner
+    - navigation "Runner" [ref=f106e6]:
+      - button "Home" [ref=f106e7] [cursor=pointer]
+      - button "Models" [ref=f106e11] [cursor=pointer]
+      - button "Activity" [ref=f106e15] [cursor=pointer]
+      - button "Settings" [ref=f106e19] [cursor=pointer]
+    - generic [ref=f106e25]:
+      - strong [ref=f106e26]: Quiet Mac
+      - generic [ref=f106e27]: Needs attention
+      - generic [ref=f106e31]:
+        - text: Pause new jobs
+        - checkbox "Pause new benchmarks" [ref=f106e33] [cursor=pointer]
+  - main [ref=f106e34]:
+    - generic [ref=f106e35]:
+      - heading "Settings" [active] [level=1] [ref=f106e36]
+      - paragraph [ref=f106e37]: Changes save automatically.
+      - generic [ref=f106e38]:
+        - heading "General" [level=2] [ref=f106e39]
+        - generic [ref=f106e40]:
+          - generic [ref=f106e41]:
+            - heading "Open at login" [level=2] [ref=f106e42]
+            - checkbox "Open Runner at login" [ref=f106e44] [cursor=pointer]
+          - generic [ref=f106e45]:
+            - heading "Keep running in background" [level=2] [ref=f106e46]
+            - checkbox "Keep running in background" [checked] [ref=f106e48] [cursor=pointer]
+          - generic [ref=f106e49]:
+            - heading "Finish notifications" [level=2] [ref=f106e50]
+            - checkbox "Notify when a benchmark finishes" [checked] [ref=f106e52] [cursor=pointer]
+          - generic [ref=f106e53]:
+            - strong [ref=f106e54]: Theme
+            - group "Color theme" [ref=f106e55]:
+              - button "System" [ref=f106e56] [cursor=pointer]
+              - button "Light" [ref=f106e57] [cursor=pointer]
+              - button "Dark" [pressed] [ref=f106e58] [cursor=pointer]
+      - generic [ref=f106e59]:
+        - heading "This machine" [level=2] [ref=f106e60]
+        - generic [ref=f106e61]:
+          - generic [ref=f106e62]:
+            - heading "This machine" [level=2] [ref=f106e63]
+            - textbox "Machine name" [ref=f106e65]: Quiet Mac
+          - generic [ref=f106e66]:
+            - heading "GPUs" [level=2] [ref=f106e67]
+            - group "GPUs" [ref=f106e68]:
+              - button "Default" [pressed] [ref=f106e69] [cursor=pointer]
+            - paragraph [ref=f106e70]: GPU choice is available on machines with NVIDIA GPUs.
+      - generic [ref=f106e71]:
+        - heading "Account" [level=2] [ref=f106e72]
+        - generic [ref=f106e74]:
+          - generic [ref=f106e75]:
+            - generic [ref=f106e76]:
+              - strong [ref=f106e77]: This Mac
+              - paragraph [ref=f106e78]: Connected to your Hub.
+            - generic [ref=f106e79]:
+              - button "Connect in browser" [ref=f106e80] [cursor=pointer]
+              - button "Start listening" [ref=f106e81] [cursor=pointer]
+              - button "Stop listening" [disabled] [ref=f106e82]
+              - button "Disconnect" [ref=f106e83] [cursor=pointer]
+          - group [ref=f106e84]:
+            - generic "Use a pasted code" [ref=f106e85] [cursor=pointer]
+      - generic [ref=f106e86]:
+        - heading "Hugging Face" [level=2] [ref=f106e87]
+        - generic [ref=f106e88]:
+          - heading "Hugging Face" [level=2] [ref=f106e89]
+          - status [ref=f106e90]: A Hugging Face token is saved in this machine’s OS credential store.
+          - group [ref=f106e91]:
+            - generic "Add a token" [ref=f106e92] [cursor=pointer]
+          - button "Remove token" [ref=f106e93] [cursor=pointer]
+      - group [ref=f106e94]:
+        - generic "Advanced" [ref=f106e95] [cursor=pointer]
+        - option "Runner-pinned default" [selected]
+        - option "Load catalog first" [selected]
+```

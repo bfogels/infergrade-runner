@@ -13,11 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE_INVARIANTS = [
     {
         "name": "automatic_runtime_readiness",
-        "path": "apps/desktop-runner/index.html",
+        "path": "apps/desktop-runner/src/desktopViews.js",
         "needles": [
-            "Automatic (recommended)",
+            "data-runtime-install-managed",
             "Make ready",
-            'class="runtime-power-options"',
+            "data-runtime-tools",
             "Use selected build",
         ],
     },
