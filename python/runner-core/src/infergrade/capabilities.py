@@ -27,6 +27,7 @@ from infergrade.longbench_selection import (
     BENCHMARK_ID as LONGBENCH_SELECTION_BENCHMARK_ID,
     verify_longbench_selection_receipt,
 )
+from infergrade.native_memory import NativeMemoryExhausted
 from infergrade.models import CapabilityExecution, FidelityExecution, RunRequest
 from infergrade.progress import request_fingerprint
 from infergrade.reasoning_constraint_stress import (
@@ -1582,6 +1583,8 @@ def execute_capability_suite(
                 degraded += 1
             elif unscored_failure_severity == "all_failed":
                 hard_failed += 1
+        except NativeMemoryExhausted:
+            raise
         except Exception as exc:
             phase_timings["total_wall_seconds"] = round(time.perf_counter() - benchmark_started, 6)
             failure_summary = {
@@ -4371,6 +4374,8 @@ def _generate_predictions(
                 error = "Model produced no visible response."
                 generation_failure_kind = "model_output"
             performance = _task_performance_fields(generated)
+        except NativeMemoryExhausted:
+            raise
         except Exception as exc:
             text = ""
             status = "failed"
@@ -4484,6 +4489,8 @@ def _generate_stateful_tool_loop_prediction(
                 prompt=prompt,
                 max_tokens=spec.generation_max_tokens,
             )
+        except NativeMemoryExhausted:
+            raise
         except Exception as exc:
             generation_status = "failed"
             generation_error = str(exc)

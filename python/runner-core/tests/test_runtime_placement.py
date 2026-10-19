@@ -49,6 +49,24 @@ class RuntimePlacementTests(unittest.TestCase):
         self.assertTrue(any(item["device"] == "CPU_Mapped" for item in receipt["allocations"]))
         self.assertIn("does not prove zero CPU/RAM", receipt["claim_boundary"])
 
+    def test_record_uses_final_serving_load_not_fitter_trial_allocations(self):
+        request = SimpleNamespace(output_dir=None, runtime_selector={})
+        first = "load_tensors: loading model tensors\nload_tensors: offloaded 33/33 layers\nload_tensors: MTL0 model buffer size = 14 GiB\n"
+        actual = "load_tensors: loading model tensors\nload_tensors: offloaded 12/33 layers\nload_tensors: MTL0 model buffer size = 8 GiB\nllama_context: n_ctx = 4096\n"
+        a = record_runtime_placement(request, ["llama-server", "-c", "4096"], first + actual, "deployment_server")
+        b = record_runtime_placement(request, ["llama-server", "-c", "4096"], actual, "deployment_server")
+        self.assertEqual(a["offloaded_layers"], 12)
+        self.assertEqual(a["placement_fingerprint"], b["placement_fingerprint"])
+        self.assertEqual(a["allocations"], [{"device": "MTL0", "kind": "model", "bytes": 8 * 1024**3}])
+
+    def test_cpu_repacked_experts_are_preserved_as_cpu_allocations(self):
+        receipt = parse_runtime_placement(
+            "load_tensors: CPU_REPACK model buffer size = 3154.50 MiB\n"
+            "load_tensors: MTL0 model buffer size = 10690.45 MiB\n", [],
+        )
+        self.assertTrue(any(item["device"] == "CPU" and item["bytes"] > 0 for item in receipt["allocations"]))
+        self.assertEqual(receipt["gpu_devices_with_positive_model_buffers"], ["MTL0"])
+
     def test_unknown_zero_and_contradictory_evidence(self):
         self.assertEqual(parse_runtime_placement("", [])["layer_placement"], "unknown")
         zero = parse_runtime_placement("load_tensors: offloaded 0/33 layers to GPU", [])

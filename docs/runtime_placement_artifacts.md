@@ -76,3 +76,77 @@ This digest establishes content binding, not independent hardware attestation.
 Existing unknown/context/conflict/layer/mapped-Metal caveats remain in force.
 Old .40 uploads remain unbound. Hub's pin and qualification remain a separate
 integration step; source export does not deliver a new desktop release.
+
+## Native memory recovery
+
+Native llama-server runs use the normal automatic fitter first. A real, unscored
+8-token generation follows health readiness before capability scoring. Each new
+capability context/server also probes the first workload prompt and its actual
+chat-template/generation-policy path. This proves compute readiness, not scorer
+acceptance or that every later workload will fit. Probes never enter task timing
+or deployment measurements; normal warmup and measured iterations remain intact.
+
+On specific allocation/OOM evidence, Runner stops the failed server and retries
+with automatic fitting plus `--no-mmap`. One further attempt can increase
+`--fit-target` to 4096 MiB. Capability probes retain their context; supported
+runtimes receive a matching `--fit-ctx` floor, and recovery rejects missing or
+changed observed context. Requested device selection, model, quant, generation
+policy and token budgets stay unchanged. Explicit placement/mmap/fit-margin
+settings block automatic overrides. The ladder has at most three configurations
+and never silently falls back from required CUDA to CPU-only execution.
+
+A generic HTTP 500, timeout, unsupported graph or malformed completion is not
+OOM evidence. For serving processes, only diagnostics appended by the failing
+request can trigger recovery; old fitting diagnostics cannot reclassify a later
+unrelated failure. Exhausted recovery is a terminal infrastructure error rather
+than hundreds of failed scored cases.
+
+Deployment iterations launch separate servers, so both a memory recovery and a
+change in successful observed placement restart the whole profile, including
+warmups. Prior attempts are excluded from timing aggregates and retained as
+`discarded_memory_attempts`. Placement churn has two restarts before failing
+closed. Failure progress explicitly says `failed iteration`, not `completed`.
+
+Local path-free receipts in `artifacts/runtime-memory/<invocation_id>.json`
+bind effective memory controls, requested context, recovery step, status and
+confirmed OOM to the existing placement invocation. They contain no raw prompts,
+logs, credentials or model paths. Positive CPU_REPACK model buffers are preserved
+as CPU allocations in the existing strict placement shape. Buffer evidence
+still does not establish physical residency or zero system-RAM use.
+
+The existing extensible result contract carries effective fallback controls in
+`configuration.native_memory_policy`, and bounded successful observations in
+`provenance.native_memory_observations`. Effective settings change configuration
+and runtime-binding identity; cumulative observation history does not. Requested
+`configuration.backend_flags` stay intact. Progress and the report show
+**Memory fallback** with a possible performance impact. This uses existing
+contract extension points; it does not change the strict placement schema or
+require an incompatible receipt shape.
+
+Hardware validation (never uploads or publishes):
+
+```sh
+PYTHONPATH=python/runner-core/src python3 scripts/validate_native_memory_recovery.py \
+  --real-run --model <model-id> --model-path <local.gguf> \
+  --server-path <locked-llama-server> --output-dir <new-output-directory> \
+  --expect fast # or fallback for an oversized model
+```
+
+The default validates preflight plus two warmups and five measurements of the
+actual interactive profile. Its receipt distinguishes local deployment evidence
+from capability scoring, upload, publication and cross-platform acceptance.
+
+When late recovery changes a binding, each result embeds its effective ontology.
+The shared `artifacts/ontology.json` represents the first result. Bundle summaries
+list `benchmark_subject_ids`; their singular subject is null for multiple
+bindings. Learned memory controls also follow native completion/perplexity tools
+only when those executables advertise the required flags. They never silently
+revert to the configuration that already failed.
+
+Use `--probe-only` for a bounded unscored generation check on a machine under
+memory pressure. A successful probe is not a complete deployment benchmark.
+
+When a runtime emits explicit tensor-load boundaries, recorded invocation
+receipts use the final serving load. Earlier fitting trial allocations are not
+observed placement for the model that served the request. Logs without a known
+boundary retain the existing conservative conflict/unknown handling.

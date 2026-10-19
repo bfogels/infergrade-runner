@@ -5,6 +5,7 @@ from datetime import datetime
 import os
 from typing import Any, Callable, Dict, List, Optional
 
+from infergrade.native_memory import policy_summary, memory_label, effective_configuration
 from infergrade import __version__
 from infergrade.adapters import get_adapter
 from infergrade.adapters.llama_cpp import native_cuda_required
@@ -197,6 +198,11 @@ def _build_result_record(
     device_layout = native_cuda_devices.logical_layout(request)
     if device_layout is not None:
         config_payload["cuda_device_layout"] = device_layout
+    memory_policy = effective_configuration(request)
+    if memory_policy:
+        config_payload["native_memory_policy"] = memory_policy
+        # Recovery may have advanced after the initial ontology preflight.
+        ontology = build_ontology(request, adapter_version)
     configuration_id = "cfg_%s" % stable_hash(config_payload)
     verification_level = _verification_level(request, environment, adapter_version)
     has_capability = capability.status in ("completed", "partial")
@@ -302,6 +308,13 @@ def _build_result_record(
             "run_config_source": request.run_config_source,
         },
     }
+    memory_observations = policy_summary(request)
+    if memory_observations:
+        record["provenance"]["native_memory_observations"] = memory_observations
+    if memory_policy:
+        record["configuration"]["native_memory_policy"] = memory_policy
+        if memory_label(memory_policy):
+            record["provenance"]["notes"] = " ".join(filter(None, [request.notes, "Memory fallback: automatic CPU/GPU fitting; performance may be lower."]))
     if request.evidence_source:
         record["provenance"]["evidence_source"] = request.evidence_source
     if runtime_selector:
@@ -762,6 +775,7 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
         preflight_model = getattr(adapter, "preflight_model", None)
         if callable(preflight_model):
             _emit_progress(emit_progress, "Checking model/runtime compatibility...")
+            request._native_memory_progress = lambda message: _emit_progress(emit_progress, message)
             preflight_model(request)
             if request.execution_mode == "local_native" and not request.simulate:
                 _emit_progress(
@@ -928,6 +942,11 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
                 record["verification"]["backend_version_pinned"] = True
                 write_json(os.path.join(output_dir, relative_path), record)
 
+        # The shared ontology is explicitly representative. Each result embeds
+        # its own effective binding when later profiles required different flags.
+        subject_ids = sorted({record["ontology"]["benchmark_subject"]["subject_id"] for record in result_records})
+        if result_records:
+            ontology = deepcopy(result_records[0]["ontology"])
         _emit_progress(emit_progress, "Writing bundle artifacts...")
         write_json(os.path.join(output_dir, "artifacts", "environment.json"), environment)
         write_json(os.path.join(output_dir, "artifacts", "ontology.json"), ontology)
@@ -1054,7 +1073,9 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             "benchmark_selection": selection_metadata,
             "benchmark_scope": dict(selection_metadata.get("benchmark_scope") or {}),
             "benchmark_check_ids": list(selection_metadata.get("benchmark_check_ids") or []),
-            "benchmark_subject_id": ontology["benchmark_subject"]["subject_id"],
+            "benchmark_subject_id": subject_ids[0] if len(subject_ids) == 1 else None,
+            "benchmark_subject_ids": subject_ids,
+            "ontology_scope": "representative_first_result; each result embeds its effective ontology",
             "checkpoint_name": ontology["checkpoint"]["checkpoint_name"],
             "model_family": ontology["model_family"]["family_name"],
             "artifact_uri": request.quant_artifact,

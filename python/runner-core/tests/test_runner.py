@@ -203,6 +203,33 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(progress["status"], "completed")
         self.assertEqual(progress["deployment_profiles"]["interactive_chat_v1"]["status"], "completed")
 
+    def test_late_memory_fallback_preserves_effective_result_and_bundle_ontologies(self):
+        from infergrade.adapters.llama_cpp import LlamaCppAdapter
+        original = LlamaCppAdapter.run_deployment_profile
+        def late_fallback(adapter, request, profile_id, progress_callback=None):
+            if profile_id == "batch_generation_v1":
+                request._native_memory_step = 1
+                request._native_memory_flags = ["--fit", "on", "--no-mmap"]
+            return original(adapter, request, profile_id, progress_callback=progress_callback)
+        request = RunRequest(model="fixture/model", backend="llama.cpp", tier="canary", capability="none",
+                             deployment_profiles=["interactive_chat_v1", "batch_generation_v1"],
+                             output_dir=self.tempdir, simulate=True)
+        with mock.patch.object(LlamaCppAdapter, "run_deployment_profile", late_fallback):
+            run_infergrade(request)
+        def read(path):
+            with open(os.path.join(self.tempdir, path)) as handle:
+                return json.load(handle)
+        first = read("results/interactive_chat_v1.json")
+        second = read("results/batch_generation_v1.json")
+        summary = read("summary.json")
+        self.assertNotEqual(first["configuration"]["configuration_id"], second["configuration"]["configuration_id"])
+        self.assertNotEqual(first["ontology"]["runtime_binding"]["runtime_binding_id"], second["ontology"]["runtime_binding"]["runtime_binding_id"])
+        self.assertEqual(read("artifacts/ontology.json"), first["ontology"])
+        self.assertIsNone(summary["benchmark_subject_id"])
+        self.assertEqual(set(summary["benchmark_subject_ids"]), {row["ontology"]["benchmark_subject"]["subject_id"] for row in (first, second)})
+        self.assertIn("Memory fallback", second["provenance"]["notes"])
+        self.assertTrue(read("validation.json")["valid"])
+
     def test_generation_policy_changes_normalized_configuration_identity(self):
         ids = []
         for index, preset in enumerate(("deterministic_v1", "deterministic_direct_answer_v1")):
