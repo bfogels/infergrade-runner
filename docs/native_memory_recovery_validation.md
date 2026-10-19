@@ -50,3 +50,10 @@ load; comparisons use the actual serving allocation. Raw parser conflicts withou
 that explicit serving-load boundary remain unknown. Focused coverage verifies
 that differing fit trials cannot split identical serving placements or obscure
 a real difference.
+
+Final validation: `scripts/test_all.sh` passed all **1,379 Python tests** plus the
+benchmark-tier audit from a clean worktree. The focused recovery suite passed
+18 tests, placement 14, adapter 82, CUDA guards 20, and orchestration 26.
+Independent review found no remaining blockers after the bounded recovery,
+placement-group, identity, ontology and sibling-capability fixes. No Rust or
+frontend source changed; platform-specific hardware acceptance remains separate.
