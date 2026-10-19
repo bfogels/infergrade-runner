@@ -36,3 +36,17 @@ succeeds. Regression coverage includes OOM-only classification, stale-log
 rejection, bounded attempts, explicit settings, context preservation, propagation
 out of scoring, stable identity, late effective ontology binding, and complete
 measurement-group restart on fallback or successful placement changes.
+
+The separate `native-memory-recovery-20261019-fallback-probe/validation.json`
+subsequently passed with automatic OOM → no-mmap recovery, requested 4096-token
+context intact, positive generation, and confirmed process cleanup. It took
+302.131 seconds under the current system-memory pressure. This is deliberately
+recorded as **unscored 8-token generation readiness only**, with no deployment
+timing, capability score, upload or publication claim. The earlier interrupted
+full-profile failure remains preserved alongside it.
+
+Placement receipts now exclude fitter trial allocations before the final tensor
+load; comparisons use the actual serving allocation. Raw parser conflicts without
+that explicit serving-load boundary remain unknown. Focused coverage verifies
+that differing fit trials cannot split identical serving placements or obscure
+a real difference.

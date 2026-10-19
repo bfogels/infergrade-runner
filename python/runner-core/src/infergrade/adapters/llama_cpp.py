@@ -41,7 +41,7 @@ from infergrade.native_memory import (
 )
 from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
 from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cpp_runtime
-from infergrade.runtime_placement import parse_runtime_placement, record_runtime_placement
+from infergrade.runtime_placement import parse_runtime_placement, record_runtime_placement, serving_runtime_logs
 from infergrade.utils import env_value, stable_hash, utcnow_iso
 
 
@@ -303,6 +303,7 @@ def _native_backend_flags(request: RunRequest) -> List[str]:
 def _require_native_cuda_offload(request: RunRequest, logs: str) -> None:
     if request.simulate or not native_cuda_required(request):
         return
+    logs = serving_runtime_logs(logs)
     device = re.search(r"using device CUDA\d*\b|CUDA\d+ model buffer", logs)
     offload = re.search(r"offloaded\s+([0-9]+)/([0-9]+)\s+layers", logs)
     if not device or not offload or int(offload.group(1)) <= 0:
@@ -1521,7 +1522,7 @@ class LlamaCppAdapter(BaseAdapter):
             parsed = _parse_llama_timings(logs_text)
             peak_vram_mb = _stop_gpu_monitor(monitor)
             peak_memory_mb = _stop_process_rss_monitor(memory_monitor)
-            memory_allocations = _parse_llama_memory_allocations(logs_text)
+            memory_allocations = _parse_llama_memory_allocations(serving_runtime_logs(logs_text))
             metrics = _metrics_from_server_completion(
                 completion=completion,
                 parsed_timings=parsed,

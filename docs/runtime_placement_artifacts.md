@@ -145,3 +145,8 @@ revert to the configuration that already failed.
 
 Use `--probe-only` for a bounded unscored generation check on a machine under
 memory pressure. A successful probe is not a complete deployment benchmark.
+
+When a runtime emits explicit tensor-load boundaries, recorded invocation
+receipts use the final serving load. Earlier fitting trial allocations are not
+observed placement for the model that served the request. Logs without a known
+boundary retain the existing conservative conflict/unknown handling.

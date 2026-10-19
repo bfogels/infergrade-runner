@@ -162,9 +162,16 @@ def parse_runtime_placement(logs, command):
     }
 
 
+def serving_runtime_logs(logs):
+    """Fit dry-runs precede the final tensor load; observe the serving allocation."""
+    logs = str(logs or "")
+    markers = list(re.finditer(r"(?:load_tensors|llama_model_load[^ :]*):[^\n]*loading model tensors", logs))
+    return logs[markers[-1].start():] if markers else logs
+
+
 def record_runtime_placement(request, command, logs, role):
     """Persist a separate receipt for each invocation, including unknown evidence."""
-    receipt = parse_runtime_placement(logs, command)
+    receipt = parse_runtime_placement(serving_runtime_logs(logs), command)
     receipt["role"] = role
     accelerator = (request.runtime_selector or {}).get("accelerator") or {}
     receipt["requested_accelerator_api"] = accelerator.get("api") if accelerator.get("api") in (
