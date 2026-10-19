@@ -167,6 +167,9 @@ class NativeMemoryServerTests(unittest.TestCase):
             with mock.patch(MODULE + "_supported_memory_flags", return_value=frozenset()):
                 with self.assertRaisesRegex(NativeMemoryExhausted, "cannot honor"):
                     self.adapter._backend_flags(self.req, "completion")
+            with mock.patch(MODULE + "_supports_automatic_fit", return_value=False):
+                with self.assertRaisesRegex(NativeMemoryExhausted, "cannot honor"):
+                    self.adapter._backend_flags(self.req, "perplexity")
 
     def test_cleanup_must_finish_before_a_recovery_process_is_started(self):
         with mock.patch(MODULE + "subprocess.Popen", return_value=self.children[0]) as popen, \

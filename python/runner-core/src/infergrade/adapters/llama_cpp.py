@@ -360,7 +360,7 @@ class LlamaCppAdapter(BaseAdapter):
             if tool != "server":
                 binary = {"completion": self._native_completion_path, "perplexity": self._native_perplexity_path}[tool](request)
                 needed = {name for name in ("--no-mmap", "--fit-target") if name in recovered}
-                if not needed.issubset(_supported_memory_flags(binary)):
+                if not _supports_automatic_fit(binary) or not needed.issubset(_supported_memory_flags(binary)):
                     raise NativeMemoryExhausted("Selected native tool cannot honor the recovered memory configuration.")
             return recovered
         return flags
