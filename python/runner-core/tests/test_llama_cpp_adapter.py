@@ -95,6 +95,9 @@ class LlamaCppAdapterTests(unittest.TestCase):
         fit_probe = mock.patch("infergrade.adapters.llama_cpp._supports_automatic_fit", return_value=False)
         fit_probe.start()
         self.addCleanup(fit_probe.stop)
+        compute_probe = mock.patch("infergrade.adapters.llama_cpp._probe_native_compute")
+        compute_probe.start()
+        self.addCleanup(compute_probe.stop)
         self.tempdir = tempfile.TemporaryDirectory(prefix="infergrade-llama-adapter-")
         self.env_patch = mock.patch.dict(os.environ, {"INFERGRADE_RUNTIME_CACHE_DIR": self.tempdir.name})
         self.env_patch.start()
@@ -282,7 +285,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
         command = popen_mock.call_args[0][0]
         self.assertEqual(command[0], "/opt/homebrew/bin/llama-server")
         self.assertIn(self.model_path, command)
-        self.assertIn("512", command)
+        self.assertIn("4096", command)
         wait_mock.assert_called_once()
         stop_mock.assert_called_once_with(process)
 
@@ -1436,6 +1439,7 @@ class LlamaCppAdapterTests(unittest.TestCase):
             "load_time_reported": False,
             "process": process,
             "runtime_placement": {"invocation_id": "raw-completion-invocation"},
+            "log_path": "",
         }
         request = RunRequest(
             model="Qwen/Qwen3-8B",

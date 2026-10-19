@@ -2,6 +2,7 @@ from typing import Callable, Dict, List, Optional
 
 from infergrade.benchmark_catalog import capability_benchmark_ids_for_request, selection_metadata_for_request
 from infergrade.capabilities import execute_capability_suite
+from infergrade.native_memory import NativeMemoryExhausted
 from infergrade.models import CapabilityExecution, DeploymentExecution, FidelityExecution, RunRequest
 from infergrade.utils import stable_hash, utcnow_iso
 
@@ -89,6 +90,8 @@ class BaseAdapter(object):
         if not request.simulate:
             try:
                 return execute_capability_suite(self, request, progress_callback=progress_callback)
+            except NativeMemoryExhausted:
+                raise
             except Exception as exc:
                 return CapabilityExecution(
                     use_case=request.use_case,

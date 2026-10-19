@@ -36,6 +36,9 @@ from infergrade.generation_policies import (
     resolve_generation_policy,
 )
 from infergrade.models import DeploymentExecution, FidelityExecution, RunRequest
+from infergrade.native_memory import (
+    NativeMemoryExhausted, is_memory_failure, policy_summary, record_attempt, recovery_flags,
+)
 from infergrade.profiles import DIRECT_ANSWER_GENERATION_PRESET
 from infergrade.runtimes import managed_llama_cpp_binary_path, selected_llama_cpp_runtime
 from infergrade.runtime_placement import parse_runtime_placement, record_runtime_placement
@@ -221,6 +224,69 @@ def _supports_automatic_fit(binary: str) -> bool:
     return _probe_automatic_fit(os.path.realpath(binary), stat.st_size, stat.st_mtime_ns)
 
 
+@lru_cache(maxsize=32)
+def _probe_memory_flags(binary, size, mtime_ns):
+    del size, mtime_ns
+    try:
+        result = subprocess.run([binary, "--help"], capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return frozenset()
+    output = _decode_utf8_lossy(result.stdout) + "\n" + _decode_utf8_lossy(result.stderr)
+    return frozenset(name for name in ("--no-mmap", "--fit-target", "--fit-ctx")
+                     if result.returncode == 0 and re.search(r"(?<![\w-])" + name + r"(?=[\s,=]|$)", output))
+
+
+def _supported_memory_flags(binary):
+    try:
+        stat = os.stat(binary)
+    except OSError:
+        return frozenset()
+    return _probe_memory_flags(os.path.realpath(binary), stat.st_size, stat.st_mtime_ns)
+
+
+def _require_recovery_context(request, command, logs):
+    if not getattr(request, "_native_memory_step", 0):
+        return
+    requested = parse_runtime_placement("", command)["requested_context_tokens"]
+    # The fitter logs dry-run contexts too. The last real context is the serving one.
+    values = re.findall(r"(?:llama_context|llama_new_context_with_model):[^\n]*?\bn_ctx\s*=\s*([0-9]+)\b", logs)
+    if not values or int(values[-1]) != requested:
+        raise NativeMemoryExhausted(
+            "Memory recovery could not preserve the requested context. No benchmark samples were accepted. "
+            "Choose a smaller model/quant or explicitly select a smaller context."
+        )
+
+
+def _log_checkpoint(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _read_log_after(path, offset):
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(offset)
+            return _decode_utf8_lossy(handle.read())
+    except OSError:
+        return ""
+
+
+def _probe_native_compute(base_url, request, prompt):
+    messages, transform = _prepare_llama_server_chat(request, prompt)
+    if messages is None:
+        completion = _stream_server_completion(base_url, prompt, 8)
+    else:
+        policy_id = str((transform or {}).get("policy_id") or "")
+        kwargs = {"generation_policy_id": policy_id} if policy_id in _REASONING_THINKING_POLICY_IDS else {}
+        completion = _stream_server_chat_completion(base_url, messages, 8, **kwargs)
+    final = completion.get("final_payload") or {}
+    count = final.get("tokens_predicted") or (final.get("usage") or {}).get("completion_tokens") or (final.get("timings") or {}).get("predicted_n")
+    if not _whole_token_count(count):
+        raise RuntimeError("Native generation probe produced no output tokens.")
+
+
 def _native_backend_flags(request: RunRequest) -> List[str]:
     flags = _llama_cpp_backend_flags(request.backend_flags)
     requested_native_cuda_devices(request)
@@ -288,7 +354,10 @@ class LlamaCppAdapter(BaseAdapter):
         return ["--n-gpu-layers", "99"] if shutil.which("nvidia-smi") is not None else []
 
     def _backend_flags(self, request: RunRequest, tool: str) -> List[str]:
-        return native_cuda_devices.placement_flags(request, self._backend_flags_base(request, tool))
+        flags = native_cuda_devices.placement_flags(request, self._backend_flags_base(request, tool))
+        if tool == "server" and request.execution_mode == "local_native":
+            return list(getattr(request, "_native_memory_flags", flags))
+        return flags
 
     def _backend_flags_base(self, request: RunRequest, tool: str) -> List[str]:
         # Explicit backend flags keep their existing precedence. The pinned
@@ -376,60 +445,95 @@ class LlamaCppAdapter(BaseAdapter):
         output = (stdout or stderr or "").strip()
         return _llama_cpp_version_label(output) or self._image_name(request)
 
-    def preflight_model(self, request: RunRequest) -> None:
-        """Prove a selected native llama-server can load the exact GGUF.
+    def _advance_native_memory(self, request, command, logs, confirmed_oom=False):
+        if not confirmed_oom and not is_memory_failure(logs):
+            return False
+        step = getattr(request, "_native_memory_step", 0)
+        supported = _supported_memory_flags(command[0])
+        flags = recovery_flags(request, self._backend_flags(request, "server"), step, supported)
+        if flags is None:
+            raise NativeMemoryExhausted(
+                "Insufficient memory for this model and workload. Automatic memory recovery "
+                "is exhausted or explicit placement settings prevent it. Choose a smaller "
+                "model/quant or change the explicit placement settings."
+            )
+        request._native_memory_flags = flags
+        request._native_memory_step = step + 1
+        callback = getattr(request, "_native_memory_progress", None)
+        if callback:
+            callback("Memory fallback: retrying with automatic CPU/GPU fitting and "
+                     "memory mapping disabled. Performance may be lower.")
+        return True
 
-        Capability scoring treats individual generation failures as case-level
-        evidence. Without this probe, a runtime that cannot load a newly released
-        architecture can waste an entire suite repeating the same startup failure
-        before deployment finally aborts. A short server health check makes that
-        incompatibility fatal before any benchmark case runs.
-        """
+    def _start_native_server(self, request, model_path, ctx_size, role, probe_prompt="Hello"):
+        """Health is followed by an unscored generation, never a benchmark sample."""
+        while True:
+            port = _find_free_local_port()
+            command = [self._native_server_path(request)] + self._build_llama_server_command(
+                model_path, ctx_size, request, host="127.0.0.1", port=port,
+            )
+            handle = tempfile.NamedTemporaryFile(prefix="infergrade-llama-probe-", suffix=".log", delete=False)
+            log_path = handle.name
+            handle.close()
+            process = None
+            started = time.perf_counter()
+            compute_offset = None
+            try:
+                with open(log_path, "wb") as log_file:
+                    process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT,
+                                               **native_cuda_devices.environment_kwargs(request))
+                base_url, load_ms = _wait_for_native_server_ready(process, port, started, log_path)
+                _require_native_cuda_offload(request, _read_log_file(log_path))
+                _require_recovery_context(request, command, _read_log_file(log_path))
+                compute_offset = _log_checkpoint(log_path)
+                _probe_native_compute(base_url, request, probe_prompt)
+                logs = _read_log_file(log_path)
+                _require_native_cuda_offload(request, logs)
+                placement = record_runtime_placement(request, command, logs, role)
+                record_attempt(request, command, placement, role, getattr(request, "_native_memory_step", 0), "ready")
+                return {"base_url": base_url, "ctx_size": ctx_size, "load_time_ms": load_ms,
+                        "load_time_reported": False, "log_path": log_path, "process": process,
+                        "command": command, "runtime_placement": placement}
+            except BaseException as exc:
+                logs = _read_log_file(log_path)
+                failed_logs = _read_log_after(log_path, compute_offset) if compute_offset is not None else logs
+                _stop_process(process)
+                placement = record_runtime_placement(request, command, logs, role)
+                record_attempt(request, command, placement, role, getattr(request, "_native_memory_step", 0),
+                               "failed", is_memory_failure(failed_logs))
+                try:
+                    os.unlink(log_path)
+                except OSError:
+                    pass
+                if not isinstance(exc, Exception) or isinstance(exc, NativeMemoryExhausted):
+                    raise
+                if self._advance_native_memory(request, command, failed_logs):
+                    continue
+                tail = "\n".join(logs.splitlines()[-40:])
+                raise RuntimeError("%s%s" % (exc, "\n" + tail if tail else "")) from exc
+
+    def preflight_model(self, request: RunRequest) -> None:
+        """Prove generation with the locked model before spending a scoring suite."""
         if request.simulate or request.execution_mode != "local_native":
             return None
         self._ensure_backend_model_compatibility(request)
         model_path = self._require_local_gguf_artifact(request)
-        published_port = _find_free_local_port()
-        command = [self._native_server_path(request)]
-        command.extend(
-            self._build_llama_server_command(
-                model_path=model_path,
-                ctx_size=512,
-                request=request,
-                host="127.0.0.1",
-                port=published_port,
-            )
-        )
-        log_handle = tempfile.NamedTemporaryFile(
-            prefix="infergrade-llama-preflight-",
-            suffix=".log",
-            delete=False,
-        )
-        log_path = log_handle.name
-        log_handle.close()
-        process = None
-        started = time.perf_counter()
         try:
-            with open(log_path, "wb") as log_file:
-                process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, **native_cuda_devices.environment_kwargs(request))
-            _wait_for_native_server_ready(process, published_port, started, log_path)
-            record_runtime_placement(request, command, _read_log_file(log_path), "preflight")
-            _require_native_cuda_offload(request, _read_log_file(log_path))
+            session = self._start_native_server(request, model_path, 4096, "preflight")
+        except NativeMemoryExhausted:
+            raise
         except Exception as exc:
-            logs = _read_log_file(log_path)
-            tail = "\n".join(logs.splitlines()[-40:]).strip()
-            detail = "%s%s" % (str(exc) or "unknown model-load failure", "\n" + tail if tail else "")
             raise RuntimeError(
-                "Native llama.cpp model compatibility preflight failed before capability execution. %s"
-                % detail
+                "Native llama.cpp model compatibility preflight failed before capability execution. %s" % exc
             ) from exc
+        try:
+            return None
         finally:
-            _stop_process(process)
+            _stop_process(session["process"])
             try:
-                os.unlink(log_path)
+                os.unlink(session["log_path"])
             except OSError:
                 pass
-        return None
 
     def run_deployment_profile(
         self,
@@ -475,7 +579,11 @@ class LlamaCppAdapter(BaseAdapter):
                 }
             )
 
-        for iteration in range(total_iterations):
+        discarded_runs = []
+        placement_fingerprint = None
+        placement_restarts = 0
+        iteration = 0
+        while iteration < total_iterations:
             is_warmup = iteration < warmup_runs
             if progress_callback:
                 phase = "warmup" if is_warmup else "measured"
@@ -505,6 +613,36 @@ class LlamaCppAdapter(BaseAdapter):
                 is_warmup=is_warmup,
                 iteration=iteration,
             )
+            if request.execution_mode == "local_native" and execution.get("confirmed_oom"):
+                if self._advance_native_memory(request, execution["command"], "", confirmed_oom=True):
+                    discarded_runs.extend(raw_runs + [execution])
+                    raw_runs, measurements, failures = [], [], []
+                    placement_fingerprint = None
+                    iteration = 0
+                    if progress_callback:
+                        progress_callback({"event": "profile_started", "profile_id": profile_id,
+                                           "warmup_runs": warmup_runs, "measured_runs": measured_runs,
+                                           "total_iterations": total_iterations, "completed_iterations": 0,
+                                           "message": "Memory fallback: restarting profile %s; previous measurements are excluded." % profile_id})
+                    continue
+            observed = (execution.get("runtime_placement") or {}).get("placement_fingerprint")
+            if request.execution_mode == "local_native" and execution["status"] == "completed" and observed:
+                if placement_fingerprint is not None and observed != placement_fingerprint:
+                    placement_restarts += 1
+                    discarded_runs.extend(raw_runs + [execution])
+                    if placement_restarts > 2:
+                        raise RuntimeError("Runtime memory placement kept changing between deployment iterations; "
+                                           "measurements were not combined. Retry when memory availability is stable.")
+                    raw_runs, measurements, failures = [], [], []
+                    placement_fingerprint = None
+                    iteration = 0
+                    if progress_callback:
+                        progress_callback({"event": "profile_started", "profile_id": profile_id,
+                                           "total_iterations": total_iterations, "completed_iterations": 0,
+                                           "warmup_runs": warmup_runs, "measured_runs": measured_runs,
+                                           "message": "Memory placement changed: restarting profile %s; previous measurements are excluded." % profile_id})
+                    continue
+                placement_fingerprint = observed
             raw_runs.append(execution)
             if execution["status"] != "completed":
                 failures.append(execution)
@@ -523,14 +661,17 @@ class LlamaCppAdapter(BaseAdapter):
                         "measured_runs": measured_runs,
                         "phase": phase,
                         "status": execution["status"],
-                        "message": "Deployment profile %s completed %s iteration %d/%d." % (
+                        "message": "Deployment profile %s %s %s iteration %d/%d." % (
                             profile_id,
+                            "completed" if execution["status"] == "completed" else "failed",
                             phase,
                             iteration + 1,
                             total_iterations,
                         ),
                     }
                 )
+
+            iteration += 1
 
         if not measurements:
             last_failure = failures[-1] if failures else None
@@ -591,6 +732,8 @@ class LlamaCppAdapter(BaseAdapter):
                 "model_path": model_path,
                 "profile_spec": profile_spec,
                 "runs": raw_runs,
+                "discarded_memory_attempts": discarded_runs,
+                "native_memory_policy": policy_summary(request),
             },
         )
 
@@ -615,7 +758,8 @@ class LlamaCppAdapter(BaseAdapter):
             return super().run_capability(request, progress_callback=progress_callback)
         self._capability_server_reuse_enabled = True
         try:
-            return super().run_capability(request, progress_callback=progress_callback)
+            result = super().run_capability(request, progress_callback=progress_callback)
+            return result
         finally:
             self._stop_capability_server_session()
             self._capability_server_reuse_enabled = False
@@ -757,6 +901,23 @@ class LlamaCppAdapter(BaseAdapter):
             "runtime_placement": placement,
         }
 
+    def _recover_capability_memory(self, request, session, log_offset):
+        logs = _read_log_after(str(session.get("log_path") or ""), log_offset)
+        if not is_memory_failure(logs):
+            return False
+        command = session["command"]
+        record_attempt(request, command, session["runtime_placement"], "capability_server",
+                       getattr(request, "_native_memory_step", 0), "failed", True)
+        if self._capability_server_session is session:
+            self._stop_capability_server_session()
+        else:
+            _stop_process(session.get("process"))
+            try:
+                os.unlink(session["log_path"])
+            except OSError:
+                pass
+        return self._advance_native_memory(request, command, logs)
+
     def _generate_native_server_text(
         self,
         request: RunRequest,
@@ -778,7 +939,8 @@ class LlamaCppAdapter(BaseAdapter):
             raise RuntimeError("Direct-answer generation requires structured chat messages")
         ctx_size = _capability_context_size(prompt)
         if self._capability_server_reuse_enabled:
-            session = self._ensure_capability_server_session(request, model_path, ctx_size)
+            session = self._ensure_capability_server_session(request, model_path, ctx_size, probe_prompt=prompt)
+            log_offset = _log_checkpoint(session["log_path"])
             try:
                 return self._complete_native_server_text(
                     session=session,
@@ -788,6 +950,8 @@ class LlamaCppAdapter(BaseAdapter):
                     reuse_session=True,
                 )
             except Exception:
+                if self._recover_capability_memory(request, session, log_offset):
+                    return self._generate_native_server_text(request, model_path, prompt, max_tokens)
                 # Invalid model output is a case-level benchmark failure, not a
                 # reason to reload the model. Discard only a server process that
                 # actually exited; a live stateless endpoint can serve the next
@@ -797,51 +961,21 @@ class LlamaCppAdapter(BaseAdapter):
                     self._stop_capability_server_session()
                 raise
 
-        published_port = _find_free_local_port()
-        command = [self._native_server_path(request)]
-        command.extend(
-            self._build_llama_server_command(
-                model_path=model_path,
-                ctx_size=ctx_size,
-                request=request,
-                host="127.0.0.1",
-                port=published_port,
-            )
-        )
-        log_handle = tempfile.NamedTemporaryFile(prefix="infergrade-llama-capability-", suffix=".log", delete=False)
-        log_path = log_handle.name
-        log_handle.close()
-        process = None
-        started = time.perf_counter()
+        session = self._start_native_server(request, model_path, ctx_size, "capability_server", prompt)
+        log_offset = _log_checkpoint(session["log_path"])
         try:
-            with open(log_path, "wb") as log_file:
-                process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, **native_cuda_devices.environment_kwargs(request))
-            base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
-            placement = record_runtime_placement(request, command, _read_log_file(log_path), "capability_server")
-            _require_native_cuda_offload(request, _read_log_file(log_path))
             return self._complete_native_server_text(
-                session={
-                    "base_url": base_url,
-                    "load_time_ms": load_time_ms,
-                    "load_time_reported": False,
-                    "log_path": log_path,
-                    "runtime_placement": placement,
-                },
-                messages=messages,
-                prompt_transform=prompt_transform,
-                max_tokens=max_tokens,
-                reuse_session=False,
+                session=session, messages=messages, prompt_transform=prompt_transform,
+                max_tokens=max_tokens, reuse_session=False,
             )
-        except Exception as exc:
-            logs_text = _read_log_file(log_path)
-            detail = str(exc)
-            if logs_text and not detail:
-                detail = logs_text.splitlines()[-1]
-            raise RuntimeError(detail or "llama.cpp Qwen3.5 chat generation failed") from exc
+        except Exception:
+            if self._recover_capability_memory(request, session, log_offset):
+                return self._generate_native_server_text(request, model_path, prompt, max_tokens)
+            raise
         finally:
-            _stop_process(process)
+            _stop_process(session["process"])
             try:
-                os.unlink(log_path)
+                os.unlink(session["log_path"])
             except OSError:
                 pass
 
@@ -850,6 +984,7 @@ class LlamaCppAdapter(BaseAdapter):
         request: RunRequest,
         model_path: str,
         ctx_size: int,
+        probe_prompt: str = "Hello",
     ) -> Dict[str, object]:
         # Bucket growth so a suite can restart at most twice after its initial
         # 4K server rather than once for every new prompt-length high water mark.
@@ -870,54 +1005,8 @@ class LlamaCppAdapter(BaseAdapter):
             return session
 
         self._stop_capability_server_session()
-        published_port = _find_free_local_port()
-        command = [request_key[1]]
-        command.extend(
-            self._build_llama_server_command(
-                model_path=model_path,
-                ctx_size=ctx_size,
-                request=request,
-                host="127.0.0.1",
-                port=published_port,
-            )
-        )
-        log_handle = tempfile.NamedTemporaryFile(
-            prefix="infergrade-llama-capability-suite-",
-            suffix=".log",
-            delete=False,
-        )
-        log_path = log_handle.name
-        log_handle.close()
-        process = None
-        started = time.perf_counter()
-        try:
-            with open(log_path, "wb") as log_file:
-                process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, **native_cuda_devices.environment_kwargs(request))
-            base_url, load_time_ms = _wait_for_native_server_ready(
-                process,
-                published_port,
-                started,
-                log_path,
-            )
-            placement = record_runtime_placement(request, command, _read_log_file(log_path), "capability_server")
-            _require_native_cuda_offload(request, _read_log_file(log_path))
-        except BaseException:
-            _stop_process(process)
-            try:
-                os.unlink(log_path)
-            except OSError:
-                pass
-            raise
-        session = {
-            "base_url": base_url,
-            "ctx_size": ctx_size,
-            "load_time_ms": load_time_ms,
-            "load_time_reported": False,
-            "log_path": log_path,
-            "process": process,
-            "request_key": request_key,
-            "runtime_placement": placement,
-        }
+        session = self._start_native_server(request, model_path, ctx_size, "capability_server", probe_prompt)
+        session["request_key"] = request_key
         self._capability_server_session = session
         return session
 
@@ -930,7 +1019,8 @@ class LlamaCppAdapter(BaseAdapter):
         max_tokens: int,
     ) -> Dict[str, object]:
         ctx_size = _capability_context_size(prompt)
-        session = self._ensure_capability_server_session(request, model_path, ctx_size)
+        session = self._ensure_capability_server_session(request, model_path, ctx_size, probe_prompt=prompt)
+        log_offset = _log_checkpoint(session["log_path"])
         try:
             completion = _stream_server_completion(
                 base_url=str(session["base_url"]),
@@ -979,6 +1069,8 @@ class LlamaCppAdapter(BaseAdapter):
                 "prompt_transform": prompt_transform,
             }
         except Exception:
+            if self._recover_capability_memory(request, session, log_offset):
+                return self._generate_native_completion_server_text(request, model_path, prompt, prompt_transform, max_tokens)
             process = session.get("process")
             if process is None or process.poll() is not None:
                 self._stop_capability_server_session()
@@ -1389,6 +1481,7 @@ class LlamaCppAdapter(BaseAdapter):
         process = None
         memory_monitor = None
         logs_text = ""
+        compute_offset = None
         try:
             with open(log_path, "wb") as log_file:
                 process = subprocess.Popen(
@@ -1400,6 +1493,8 @@ class LlamaCppAdapter(BaseAdapter):
             memory_monitor = _start_process_rss_monitor(process.pid)
             base_url, load_time_ms = _wait_for_native_server_ready(process, published_port, started, log_path)
             _require_native_cuda_offload(request, _read_log_file(log_path))
+            _require_recovery_context(request, command, _read_log_file(log_path))
+            compute_offset = _log_checkpoint(log_path)
             completion = (
                 _stream_server_chat_completion(
                     base_url=base_url,
@@ -1415,6 +1510,8 @@ class LlamaCppAdapter(BaseAdapter):
             )
             _validate_direct_answer_server_completion(completion, prompt_transform)
             logs_text = _read_log_file(log_path)
+            placement = record_runtime_placement(request, command, logs_text, "deployment_server")
+            record_attempt(request, command, placement, "deployment_server", getattr(request, "_native_memory_step", 0), "ready")
             parsed = _parse_llama_timings(logs_text)
             peak_vram_mb = _stop_gpu_monitor(monitor)
             peak_memory_mb = _stop_process_rss_monitor(memory_monitor)
@@ -1442,11 +1539,19 @@ class LlamaCppAdapter(BaseAdapter):
                 "parsed_timings": parsed,
                 "completion_summary": completion["final_payload"],
                 "prompt_transform": prompt_transform,
-                "runtime_placement": record_runtime_placement(request, command, logs_text, "deployment_server"),
+                "runtime_placement": placement,
                 "log_tail": logs_text.splitlines()[-40:],
             }
+        except NativeMemoryExhausted:
+            _stop_gpu_monitor(monitor)
+            _stop_process_rss_monitor(memory_monitor)
+            raise
         except Exception as exc:
             logs_text = logs_text or _read_log_file(log_path)
+            failed_logs = _read_log_after(log_path, compute_offset) if compute_offset is not None else logs_text
+            placement = record_runtime_placement(request, command, logs_text, "deployment_server")
+            record_attempt(request, command, placement, "deployment_server",
+                           getattr(request, "_native_memory_step", 0), "failed", is_memory_failure(failed_logs))
             return {
                 "iteration": iteration,
                 "warmup": is_warmup,
@@ -1456,8 +1561,9 @@ class LlamaCppAdapter(BaseAdapter):
                 "peak_vram_mb": _stop_gpu_monitor(monitor),
                 "peak_memory_mb": _stop_process_rss_monitor(memory_monitor),
                 "error": str(exc),
+                "confirmed_oom": is_memory_failure(failed_logs),
                 "prompt_transform": prompt_transform,
-                "runtime_placement": record_runtime_placement(request, command, logs_text, "deployment_server"),
+                "runtime_placement": placement,
                 "log_tail": logs_text.splitlines()[-40:],
             }
         finally:
@@ -1545,6 +1651,8 @@ class LlamaCppAdapter(BaseAdapter):
             "1",
         ]
         command.extend(self._backend_flags(request, "server"))
+        if getattr(request, "_native_memory_step", 0) and "--fit-ctx" in _supported_memory_flags(self._native_server_path(request)):
+            command.extend(["--fit-ctx", str(ctx_size)])
         return command
 
     def _profile_spec(self, profile_id: str, use_case: Optional[str]) -> Dict[str, object]:

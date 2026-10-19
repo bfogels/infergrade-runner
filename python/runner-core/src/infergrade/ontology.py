@@ -212,7 +212,7 @@ def build_ontology(request: RunRequest, adapter_version: str) -> Dict[str, Any]:
             "backend": request.backend,
             "backend_version": adapter_version,
             "execution_mode": request.execution_mode,
-            "backend_flags": list(request.backend_flags or []),
+            "backend_flags": list(getattr(request, "_native_memory_flags", request.backend_flags) or []),
             "generation_preset": request.generation_preset,
         },
     )
@@ -271,7 +271,7 @@ def build_ontology(request: RunRequest, adapter_version: str) -> Dict[str, Any]:
             "backend_version": adapter_version,
             "backend_wrapper": None,
             "execution_mode": request.execution_mode,
-            "backend_flags_hash": stable_hash(list(request.backend_flags or [])),
+            "backend_flags_hash": stable_hash(list(getattr(request, "_native_memory_flags", request.backend_flags) or [])),
             "generation_preset_id": request.generation_preset,
         },
         "benchmark_subject": {

@@ -14,7 +14,7 @@ from infergrade.native_cuda_devices import frozen
 from infergrade.utils import stable_hash, write_json
 
 
-_DEVICE = r"(?:CUDA[0-9]{1,3}(?:_Mapped)?|Vulkan[0-9]{1,3}|MTL[0-9]{1,3}(?:_Mapped)?|Metal[0-9]{0,3}(?:_Mapped)?|CPU_Mapped|CPU)"
+_DEVICE = r"(?:CUDA[0-9]{1,3}(?:_Mapped)?|Vulkan[0-9]{1,3}|MTL[0-9]{1,3}(?:_Mapped)?|Metal[0-9]{0,3}(?:_Mapped)?|CPU_Mapped|CPU_REPACK|CPU)"
 _BUFFER = re.compile(
     rf"(?:load_tensors|llama_model_load|llama_kv_cache[^ :]*):\s*(?P<device>{_DEVICE})\s+(?P<kind>model|KV)\s+buffer size\s*=\s*"
     r"(?P<size>[0-9.]+)\s*(?P<unit>[KMGT]i?B)\b", re.IGNORECASE,
@@ -89,6 +89,8 @@ def parse_runtime_placement(logs, command):
         raw_device = match.group("device")
         device = re.sub(r"(?i)^metal", "Metal", raw_device) if raw_device.lower().startswith("metal") else raw_device.upper()
         device = re.sub(r"(?i)_mapped$", "_Mapped", device)
+        if device == "CPU_REPACK":
+            device = "CPU"
         if device == "CPU_MAPPED":
             device = "CPU_Mapped"
         allocations.add((device, match.group("kind").lower(), int(round(size))))

@@ -5,6 +5,7 @@ import posixpath
 from typing import Any, Dict, List, Optional
 
 from infergrade.models import CapabilityExecution, RunRequest
+from infergrade.native_memory import memory_label, policy_summary
 from infergrade.reasoning_constraint_stress_v2_qualification import (
     BENCHMARK_ID as REASONING_V2_QUALIFICATION_BENCHMARK_ID,
     GENERATION_POLICY_ID as REASONING_V2_QUALIFICATION_GENERATION_POLICY_ID,
@@ -79,6 +80,7 @@ def write_failure_report(
         "- Bundle id: %s" % _dash(progress.get("bundle_id")),
         "- Progress status: %s" % _dash(progress.get("status")),
         "- Started at: %s" % _dash(progress.get("started_at")),
+        "- Memory placement: %s" % _dash(memory_label(policy_summary(request))),
         "",
         "This report is intentionally incomplete because the run did not reach bundle finalization.",
     ]
@@ -132,6 +134,7 @@ def render_bundle_report(
         "- VRAM: %s" % _format_gb(hardware.get("accelerator_vram_gb")),
         "- RAM: %s" % _format_gb(hardware.get("system_ram_gb")),
         "- CPU: %s" % _dash(hardware.get("cpu_model")),
+        "- Memory placement: %s" % _dash(memory_label(configuration.get("native_memory_policy")) or "No automatic memory fallback recorded"),
         "",
         "## Benchmark Scope",
         "",

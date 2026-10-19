@@ -16,6 +16,11 @@ from infergrade.runner import _enforce_runtime_selector_before_execution
 
 
 class NativeCudaGuardsTests(unittest.TestCase):
+    def setUp(self):
+        probe = mock.patch("infergrade.adapters.llama_cpp._probe_native_compute")
+        probe.start()
+        self.addCleanup(probe.stop)
+
     def request(self, api="unknown", system="linux"):
         return RunRequest(model="test/model", backend="llama.cpp", tier="canary",
                           execution_mode="local_native", simulate=False,
@@ -267,7 +272,7 @@ class NativeCudaGuardsTests(unittest.TestCase):
 
     @mock.patch("infergrade.adapters.llama_cpp._stop_process")
     @mock.patch("infergrade.adapters.llama_cpp._read_log_file", return_value="CPU model buffer\noffloaded 0/5 layers to GPU")
-    @mock.patch("infergrade.adapters.llama_cpp._wait_for_native_server_ready")
+    @mock.patch("infergrade.adapters.llama_cpp._wait_for_native_server_ready", return_value=("http://127.0.0.1:8123", 1.0))
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.Popen")
     @mock.patch.object(LlamaCppAdapter, "_native_server_path", return_value="/managed/llama-server")
     @mock.patch.object(LlamaCppAdapter, "_require_local_gguf_artifact", return_value="/public/model.gguf")
@@ -286,7 +291,7 @@ class NativeCudaGuardsTests(unittest.TestCase):
 
     @mock.patch("infergrade.adapters.llama_cpp._stop_process")
     @mock.patch("infergrade.adapters.llama_cpp._read_log_file", return_value="using device CUDA0\noffloaded 3/5 layers to GPU")
-    @mock.patch("infergrade.adapters.llama_cpp._wait_for_native_server_ready")
+    @mock.patch("infergrade.adapters.llama_cpp._wait_for_native_server_ready", return_value=("http://127.0.0.1:8123", 1.0))
     @mock.patch("infergrade.adapters.llama_cpp.subprocess.Popen")
     @mock.patch.object(LlamaCppAdapter, "_native_server_path", return_value="/managed/llama-server")
     @mock.patch.object(LlamaCppAdapter, "_require_local_gguf_artifact", return_value="/public/model.gguf")
