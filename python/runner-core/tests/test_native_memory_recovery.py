@@ -157,6 +157,35 @@ class NativeMemoryServerTests(unittest.TestCase):
         self.assertEqual([call.kwargs["iteration"] for call in run.call_args_list], [0, 1, 2, 0, 1, 2])
         self.assertTrue(any("previous measurements are excluded" in item.get("message", "") for item in events))
 
+    def test_recovered_controls_follow_native_completion_and_perplexity(self):
+        self.req._native_memory_step = 1
+        self.req._native_memory_flags = ["--fit", "on", "--no-mmap"]
+        with mock.patch.object(self.adapter, "_native_completion_path", return_value="/locked/llama-completion"), \
+             mock.patch.object(self.adapter, "_native_perplexity_path", return_value="/locked/llama-perplexity"):
+            for tool in ("completion", "perplexity"):
+                self.assertEqual(self.adapter._backend_flags(self.req, tool), self.req._native_memory_flags)
+            with mock.patch(MODULE + "_supported_memory_flags", return_value=frozenset()):
+                with self.assertRaisesRegex(NativeMemoryExhausted, "cannot honor"):
+                    self.adapter._backend_flags(self.req, "completion")
+
+    def test_cleanup_must_finish_before_a_recovery_process_is_started(self):
+        with mock.patch(MODULE + "subprocess.Popen", return_value=self.children[0]) as popen, \
+             mock.patch(MODULE + "_read_log_file", return_value=LOG), \
+             mock.patch(MODULE + "_read_log_after", return_value=OOM), \
+             mock.patch(MODULE + "_probe_native_compute", side_effect=RuntimeError("Compute error")), \
+             mock.patch(MODULE + "_stop_process", side_effect=RuntimeError("termination could not be confirmed")):
+            with self.assertRaisesRegex(RuntimeError, "termination could not be confirmed"):
+                self.adapter._start_native_server(self.req, "/model.gguf", 4096, "preflight")
+        self.assertEqual(popen.call_count, 1)
+        self.assertEqual(len(os.listdir(os.path.join(self.tmp.name, "artifacts", "runtime-memory"))), 1)
+
+    def test_exhausted_memory_propagates_out_of_capability_scoring(self):
+        from infergrade.adapters.base import BaseAdapter
+        req = request(use_case="general_assistant")
+        with mock.patch("infergrade.adapters.base.execute_capability_suite", side_effect=NativeMemoryExhausted("out of memory")):
+            with self.assertRaises(NativeMemoryExhausted):
+                BaseAdapter().run_capability(req)
+
     def test_stale_session_oom_does_not_retry_an_unrelated_later_error(self):
         path = os.path.join(self.tmp.name, "session.log")
         with open(path, "w") as handle:

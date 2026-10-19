@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--server-path", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--expect", choices=("fast", "fallback"), required=True)
+    parser.add_argument("--probe-only", action="store_true", help="Only unscored 8-token generation readiness; no deployment measurements")
     parser.add_argument("--measured-runs", type=int, default=5)
     parser.add_argument("--warmup-runs", type=int, default=2)
     args = parser.parse_args()
@@ -52,6 +53,11 @@ def main():
                "scope": "Real local preflight and interactive_chat_v1 deployment; no capability score, upload, or publication"}
     try:
         adapter.preflight_model(request)
+        if args.probe_only:
+            receipt.update(validation_status="passed", scope="Unscored 8-token generation readiness only; no deployment timings, capability score, upload or publication")
+            if (effective_configuration(request) is not None) != (args.expect == "fallback"):
+                raise RuntimeError("Unexpected recovery choice: expected %s" % args.expect)
+            return
         result = adapter.run_deployment_profile(request, "interactive_chat_v1", lambda event: progress(event.get("message", "")))
         receipt.update(status=result.status, metrics=result.metrics, artifacts=result.artifacts,
                        native_memory_policy=effective_configuration(request), observations=policy_summary(request))
@@ -64,11 +70,13 @@ def main():
             if validated_runtime_placement(sample.get("runtime_placement")) is None:
                 raise RuntimeError("Invalid placement receipt")
         receipt["validation_status"] = "passed"
-    except Exception as exc:
-        receipt["validation_status"] = "failed"
+    except BaseException as exc:
+        receipt["validation_status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
         receipt["error"] = str(exc)
         raise
     finally:
+        receipt["native_memory_policy"] = effective_configuration(request)
+        receipt["observations"] = policy_summary(request)
         receipt["wall_seconds"] = round(time.perf_counter() - started, 3)
         receipt["events"] = events
         write_json(str(args.output_dir / "validation.json"), receipt)

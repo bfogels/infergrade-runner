@@ -135,3 +135,13 @@ PYTHONPATH=python/runner-core/src python3 scripts/validate_native_memory_recover
 The default validates preflight plus two warmups and five measurements of the
 actual interactive profile. Its receipt distinguishes local deployment evidence
 from capability scoring, upload, publication and cross-platform acceptance.
+
+When late recovery changes a binding, each result embeds its effective ontology.
+The shared `artifacts/ontology.json` represents the first result. Bundle summaries
+list `benchmark_subject_ids`; their singular subject is null for multiple
+bindings. Learned memory controls also follow native completion/perplexity tools
+only when those executables advertise the required flags. They never silently
+revert to the configuration that already failed.
+
+Use `--probe-only` for a bounded unscored generation check on a machine under
+memory pressure. A successful probe is not a complete deployment benchmark.

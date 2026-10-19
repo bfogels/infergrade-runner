@@ -355,8 +355,14 @@ class LlamaCppAdapter(BaseAdapter):
 
     def _backend_flags(self, request: RunRequest, tool: str) -> List[str]:
         flags = native_cuda_devices.placement_flags(request, self._backend_flags_base(request, tool))
-        if tool == "server" and request.execution_mode == "local_native":
-            return list(getattr(request, "_native_memory_flags", flags))
+        if request.execution_mode == "local_native" and hasattr(request, "_native_memory_flags"):
+            recovered = list(request._native_memory_flags)
+            if tool != "server":
+                binary = {"completion": self._native_completion_path, "perplexity": self._native_perplexity_path}[tool](request)
+                needed = {name for name in ("--no-mmap", "--fit-target") if name in recovered}
+                if not needed.issubset(_supported_memory_flags(binary)):
+                    raise NativeMemoryExhausted("Selected native tool cannot honor the recovered memory configuration.")
+            return recovered
         return flags
 
     def _backend_flags_base(self, request: RunRequest, tool: str) -> List[str]:
@@ -497,10 +503,10 @@ class LlamaCppAdapter(BaseAdapter):
             except BaseException as exc:
                 logs = _read_log_file(log_path)
                 failed_logs = _read_log_after(log_path, compute_offset) if compute_offset is not None else logs
-                _stop_process(process)
                 placement = record_runtime_placement(request, command, logs, role)
                 record_attempt(request, command, placement, role, getattr(request, "_native_memory_step", 0),
                                "failed", is_memory_failure(failed_logs))
+                _stop_process(process)
                 try:
                     os.unlink(log_path)
                 except OSError:
@@ -1567,6 +1573,8 @@ class LlamaCppAdapter(BaseAdapter):
                 "log_tail": logs_text.splitlines()[-40:],
             }
         finally:
+            _stop_gpu_monitor(monitor)
+            _stop_process_rss_monitor(memory_monitor)
             _stop_process(process)
             try:
                 os.unlink(log_path)
@@ -2362,7 +2370,10 @@ def _stop_process(process: Optional[subprocess.Popen]) -> None:
         process.wait(timeout=5.0)
     except subprocess.TimeoutExpired:
         process.kill()
-        process.wait(timeout=2.0)
+        try:
+            process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("Native llama.cpp server termination could not be confirmed; no recovery server was started.") from exc
 
 
 def _find_free_local_port() -> int:

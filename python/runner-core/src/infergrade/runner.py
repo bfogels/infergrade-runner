@@ -942,6 +942,11 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
                 record["verification"]["backend_version_pinned"] = True
                 write_json(os.path.join(output_dir, relative_path), record)
 
+        # The shared ontology is explicitly representative. Each result embeds
+        # its own effective binding when later profiles required different flags.
+        subject_ids = sorted({record["ontology"]["benchmark_subject"]["subject_id"] for record in result_records})
+        if result_records:
+            ontology = deepcopy(result_records[0]["ontology"])
         _emit_progress(emit_progress, "Writing bundle artifacts...")
         write_json(os.path.join(output_dir, "artifacts", "environment.json"), environment)
         write_json(os.path.join(output_dir, "artifacts", "ontology.json"), ontology)
@@ -1068,7 +1073,9 @@ def run_infergrade(request: RunRequest, emit_progress: Optional[Callable[[str], 
             "benchmark_selection": selection_metadata,
             "benchmark_scope": dict(selection_metadata.get("benchmark_scope") or {}),
             "benchmark_check_ids": list(selection_metadata.get("benchmark_check_ids") or []),
-            "benchmark_subject_id": ontology["benchmark_subject"]["subject_id"],
+            "benchmark_subject_id": subject_ids[0] if len(subject_ids) == 1 else None,
+            "benchmark_subject_ids": subject_ids,
+            "ontology_scope": "representative_first_result; each result embeds its effective ontology",
             "checkpoint_name": ontology["checkpoint"]["checkpoint_name"],
             "model_family": ontology["model_family"]["family_name"],
             "artifact_uri": request.quant_artifact,
