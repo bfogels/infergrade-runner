@@ -34,7 +34,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
 
@@ -140,7 +140,7 @@ jobs:
           cat runtime-intake/report.md >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload intake report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: llama-cpp-runtime-intake-${{ github.run_id }}
           path: |
@@ -172,7 +172,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
 
@@ -181,7 +181,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Download inspected release metadata
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: llama-cpp-runtime-intake-${{ github.run_id }}
           path: runtime-intake/
@@ -219,7 +219,7 @@ jobs:
             "runtime-intake/${{ matrix.platform }}-materialization-receipt.json"
 
       - name: Upload candidate receipt
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: llama-cpp-candidate-${{ matrix.platform }}-${{ github.run_id }}
           path: runtime-intake/${{ matrix.platform }}-candidate-receipt.json
@@ -228,7 +228,7 @@ jobs:
 
       - name: Upload immutable materialization receipt
         if: matrix.platform != 'windows-cpu-x64'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: llama-cpp-materialization-${{ matrix.platform }}-${{ github.run_id }}
           path: |
@@ -249,25 +249,25 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
 
       - name: Download inspected release evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: llama-cpp-runtime-intake-${{ github.run_id }}
           path: runtime-intake/evidence
 
       - name: Download native archive receipts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: llama-cpp-candidate-*-${{ github.run_id }}
           path: runtime-intake/evidence
           merge-multiple: true
 
       - name: Download immutable package receipts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: llama-cpp-materialization-*-${{ github.run_id }}
           path: runtime-intake/evidence
@@ -312,7 +312,7 @@ jobs:
           cat runtime-intake/candidate-evidence-ladder.md >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload candidate evidence ladder
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: llama-cpp-candidate-evidence-${{ github.run_id }}
           path: |
