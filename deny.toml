@@ -13,29 +13,9 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
 ignore = [
-  # Upstream Tauri 2.x still pulls in GTK3 bindings on Linux. The gtk-rs
-  # GTK3 crates were marked unmaintained 2024-03-04. Linux desktop builds are
-  # currently preview/partial; revisit once Tauri ships GTK4 wry.
-  { id = "RUSTSEC-2024-0411", reason = "tauri -> wry -> gdkwayland-sys (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
-  { id = "RUSTSEC-2024-0412", reason = "tauri -> wry -> gdk (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
-  { id = "RUSTSEC-2024-0413", reason = "tauri -> wry -> atk (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
-  { id = "RUSTSEC-2024-0414", reason = "tauri -> wry -> gdkx11-sys (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
-  { id = "RUSTSEC-2024-0415", reason = "tauri -> wry -> gtk (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
-  { id = "RUSTSEC-2024-0416", reason = "tauri -> wry -> atk-sys (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
-  { id = "RUSTSEC-2024-0417", reason = "tauri -> wry -> gdkx11 (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
-  { id = "RUSTSEC-2024-0418", reason = "tauri -> wry -> gdk-sys (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
-  { id = "RUSTSEC-2024-0419", reason = "tauri -> wry -> gtk3-macros (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
-  { id = "RUSTSEC-2024-0420", reason = "tauri -> wry -> gtk-sys (GTK3 unmaintained); revisit after Tauri GTK4 migration" },
   # Transitive proc-macro-error 1.x is unmaintained. Replacement requires
   # upstream tauri-plugin-* updates.
   { id = "RUSTSEC-2024-0370", reason = "transitive via Tauri plugin macros; revisit after Tauri 2.x minor bumps" },
-  # `unic-*` crates are unmaintained, pulled in transitively via the Linux
-  # desktop graph (idna -> unic-*). Same Tauri/Linux situation as GTK3.
-  { id = "RUSTSEC-2025-0075", reason = "transitive unic-char-range via Linux desktop graph" },
-  { id = "RUSTSEC-2025-0080", reason = "transitive unic-common via Linux desktop graph" },
-  { id = "RUSTSEC-2025-0081", reason = "transitive unic-char-property via Linux desktop graph" },
-  { id = "RUSTSEC-2025-0098", reason = "transitive unic-ucd-version via Linux desktop graph" },
-  { id = "RUSTSEC-2025-0100", reason = "transitive unic-ucd-ident via Linux desktop graph" },
 ]
 
 [bans]
